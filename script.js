@@ -1,3 +1,3 @@
 "use strict";
 
-console.log("Curious? Go to https://www.github.com/AggressiveCombo/neobox");
+console.log("%cCurious? Go to https://www.github.com/AggressiveCombo/neobox", "color: hsl(0, 0%, 65%); background-color: hsl(0, 0%, 0%);");
