@@ -1,83 +1,13 @@
-<?xml version="1.0" encoding="UTF-8" standalone="no"?>
-<!-- Created with Inkscape (http://www.inkscape.org/) -->
-
-<svg
-   width="512"
-   height="512"
-   viewBox="0 0 512 512"
-   version="1.1"
-   id="svg1"
-   inkscape:version="1.3 (0e150ed6c4, 2023-07-21)"
-   sodipodi:docname="neobox.svg"
-   xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
-   xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
-   xmlns:xlink="http://www.w3.org/1999/xlink"
-   xmlns="http://www.w3.org/2000/svg"
-   xmlns:svg="http://www.w3.org/2000/svg">
-  <sodipodi:namedview
-     id="namedview1"
-     pagecolor="#ffffff"
-     bordercolor="#000000"
-     borderopacity="0.25"
-     inkscape:showpageshadow="2"
-     inkscape:pageopacity="0.0"
-     inkscape:pagecheckerboard="0"
-     inkscape:deskcolor="#d1d1d1"
-     inkscape:document-units="px"
-     inkscape:zoom="1.5702743"
-     inkscape:cx="250.59316"
-     inkscape:cy="256.32464"
-     inkscape:window-width="2560"
-     inkscape:window-height="1351"
-     inkscape:window-x="2391"
-     inkscape:window-y="-9"
-     inkscape:window-maximized="1"
-     inkscape:current-layer="layer1" />
-  <defs
-     id="defs1">
-    <linearGradient
-       id="linearGradient2"
-       inkscape:collect="always">
-      <stop
-         style="stop-color:#0095ff;stop-opacity:1;"
-         offset="0"
-         id="stop2" />
-      <stop
-         style="stop-color:#007eff;stop-opacity:1;"
-         offset="1"
-         id="stop3" />
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="512" height="512" version="1.1" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="svgTitle svgDesc">
+  <title id="svgTitle">Abstract Rotated Square</title>
+  <desc id="svgDesc">A blue, gradient-filled square rotated 30 degrees counter-clockwise on a black background.</desc>
+  <defs>
+    <linearGradient id="blue-gradient" x1="0" y1="0.5" x2="1" y2="0.5" gradientUnits="objectBoundingBox">
+      <stop stop-color="#0095ff" offset="0"/>
+      <stop stop-color="#0080ff" offset="1"/>
     </linearGradient>
-    <linearGradient
-       inkscape:collect="always"
-       xlink:href="#linearGradient2"
-       id="linearGradient3"
-       x1="-61.858295"
-       y1="349.7025"
-       x2="246.63678"
-       y2="336.4205"
-       gradientUnits="userSpaceOnUse"
-       gradientTransform="translate(2.8203322e-6)" />
   </defs>
-  <g
-     inkscape:label="neobox Logo"
-     inkscape:groupmode="layer"
-     id="layer1">
-    <rect
-       style="fill:#000000;fill-opacity:1"
-       id="rect2"
-       width="512"
-       height="512"
-       x="0"
-       y="0"
-       inkscape:label="Background" />
-    <rect
-       style="fill:url(#linearGradient3);fill-opacity:1;stroke-width:0.622243"
-       id="rect1"
-       width="311.12158"
-       height="311.12158"
-       x="-61.858292"
-       y="194.14171"
-       transform="rotate(-30.000001)"
-       inkscape:label="Main Square" />
-  </g>
+  <rect width="100%" height="100%" fill="#000000"/>
+  <rect transform="rotate(-30 256 256)" x="20%" y="20%" width="60%" height="60%" fill="url(#blue-gradient)"/>
 </svg>
