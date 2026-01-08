@@ -1,6 +1,8 @@
-# Neobox
+<h1>
+  <img src="assets/images/icons/neobox.svg" width="50" alt="neobox logo" style="vertical-align: middle;"> neobox
+</h1>
 
-Neobox is an experimental, fully open-source alternative to hitbox.io.
+neobox is an experimental, fully open-source alternative to hitbox.io.
 
 ## Why?
 
