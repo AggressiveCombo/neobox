@@ -1,0 +1,23 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+:root {
+  /* prefer light mode if preferred color scheme is not set or not dark */
+  --bg: #ffffff;
+  --txt: #000000;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #000000;
+    --txt: #ffffff;
+  }
+}
+
+body {
+  background-color: var(--bg);
+  color: var(--txt);
+}
