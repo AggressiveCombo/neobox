@@ -1,0 +1,6 @@
+# Caddy: HTTPS (automatic Let's Encrypt certificates) in front of neobox.
+# Copy to /etc/caddy/Caddyfile and run `systemctl reload caddy`.
+neobox.aggressivecombo.com {
+	encode zstd gzip
+	reverse_proxy 127.0.0.1:8080
+}

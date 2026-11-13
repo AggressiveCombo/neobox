@@ -1,0 +1,26 @@
+# systemd unit: copy to /etc/systemd/system/neobox.service
+[Unit]
+Description=neobox game server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=neobox
+WorkingDirectory=/opt/neobox
+ExecStart=/opt/neobox/neobox-server
+EnvironmentFile=/etc/neobox.env
+Environment=NEOBOX_BIND=127.0.0.1:8080
+Environment=NEOBOX_STATIC=/opt/neobox/client
+Environment=NEOBOX_MAPS=/opt/neobox/maps
+Environment=RUST_LOG=info
+Restart=always
+RestartSec=2
+LimitNOFILE=65536
+# hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
