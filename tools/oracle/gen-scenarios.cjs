@@ -71,5 +71,11 @@ const made = [
 		events: [[300, { join: [[2, 1]] }], [500, { join: [[3, 1]] }], [800, { remove: [1] }], [1000, { join: [[5, 1]] }]],
 		inputPlayers: [[0, 1], [1, 1], [2, 1], [3, 1], [5, 1]],
 	}),
+	scenario("gen-stamina", "force push held for long stretches until stamina runs out (empty pushes)", "../maps/arena.json", ffa4, 1200, 83, {
+		timeline: { abilities: [16], abilityRate: 0.97, maxHold: 45 },
+	}),
+	scenario("gen-extras", "body forces and torque, lifetime, invisible, ability-immune, z-order/parallax fields, source player, decorative no-physics shape, kinematic motion, latched motor joint, player-attached joint, capture-sequence spawns (endless teams)", "../maps/extras.json", teams4, 1500, 89, {
+		settings: { gameMode: 4 },
+	}),
 ];
 console.log(made.join("\n"));

@@ -46,7 +46,8 @@ async function enterMatch(page) {
 }
 
 (async () => {
-	const browser = await chromium.launch({ headless: true, executablePath: EXE });
+	// muted: the original plays menu music and sound effects
+	const browser = await chromium.launch({ headless: true, executablePath: EXE, args: ["--mute-audio"] });
 	const page = await browser.newPage({ viewport: { width: 1366, height: 768 } });
 	page.on("pageerror", (e) => console.log("pageerror", String(e).slice(0, 300)));
 	await enterMatch(page);
