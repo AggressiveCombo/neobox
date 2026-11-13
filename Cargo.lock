@@ -1193,6 +1193,7 @@ dependencies = [
  "neobox-net",
  "neobox-sim",
  "neobox-wasm",
+ "nu-ansi-term",
  "rand 0.9.5",
  "serde",
  "serde_json",

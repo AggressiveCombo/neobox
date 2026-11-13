@@ -38,10 +38,25 @@ async fn map_list(State(hub): State<Arc<Hub>>) -> impl IntoResponse {
     ([(header::CACHE_CONTROL, "public, max-age=300")], Json(maps))
 }
 
+/// Colored log lines only on a terminal that renders them: not when logs go to
+/// a file or journald, not with `NO_COLOR`, and on Windows only once the
+/// console accepts escape codes (a classic console window shows them raw).
+fn log_colors() -> bool {
+    use std::io::IsTerminal;
+    if std::env::var_os("NO_COLOR").is_some() || !std::io::stdout().is_terminal() {
+        return false;
+    }
+    #[cfg(windows)]
+    return nu_ansi_term::enable_ansi_support().is_ok();
+    #[cfg(not(windows))]
+    return true;
+}
+
 #[tokio::main]
 async fn main() {
     let filter = tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into());
-    tracing_subscriber::registry().with(filter).with(tracing_subscriber::fmt::layer()).with(logbuf::RingLayer).init();
+    let console = tracing_subscriber::fmt::layer().with_ansi(log_colors());
+    tracing_subscriber::registry().with(filter).with(console).with(logbuf::RingLayer).init();
 
     let cfg = Config::from_env();
     if cfg.admin_password.is_empty() {

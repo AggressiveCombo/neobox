@@ -21,3 +21,6 @@ base64 = "0.22"
 rand = "0.9"
 futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
 str0m = { version = "0.25", default-features = false, features = ["rust-crypto"] }
+
+[target.'cfg(windows)'.dependencies]
+nu-ansi-term = "0.50"
