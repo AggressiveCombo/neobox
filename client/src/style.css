@@ -1,0 +1,477 @@
+@import "./ui/screens/room.css";
+@import "./ui/screens/hud.css";
+
+:root {
+  color-scheme: dark;
+  --bg: #000000;
+  --surface: #0b0d10;
+  --surface-2: #14181d;
+  --surface-hover: #1b2128;
+  --border: #23292f;
+  --border-strong: #3a434c;
+  --text: #e8edf2;
+  --muted: #8a94a0;
+  --placeholder: #5b6570;
+  --accent: #0095ff;
+  --accent-strong: #0080ff;
+  --accent-text: #ffffff;
+  --danger: #ff5c5c;
+  --radius: 8px;
+  --panel-max: 420px;
+  --font: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+[hidden] {
+  display: none !important;
+}
+
+html,
+body {
+  margin: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font);
+  font-size: 16px;
+  line-height: 1.4;
+}
+
+h1,
+h2,
+p,
+ul {
+  margin: 0;
+}
+
+a {
+  color: var(--accent);
+  text-underline-offset: 3px;
+}
+
+/* Game surfaces: no text selection, no browser gestures on the canvas. */
+#gl-host,
+#overlay {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  user-select: none;
+  -webkit-user-select: none;
+  touch-action: none;
+}
+
+#gl-host {
+  z-index: 0;
+}
+
+#gl-host canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+#overlay {
+  z-index: 1;
+  pointer-events: none;
+}
+
+/* Screens: centred column; the container passes clicks through to the game
+   except where a screen element sits. */
+#ui {
+  position: fixed;
+  inset: 0;
+  z-index: 2;
+  display: flex;
+  overflow-y: auto;
+  padding: 24px 16px;
+  pointer-events: none;
+}
+
+#ui > * {
+  margin: auto;
+  pointer-events: auto;
+}
+
+.screen {
+  width: min(100%, var(--panel-max));
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.screen > .panel {
+  width: 100%;
+}
+
+.panel {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 28px;
+  border-radius: 12px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+}
+
+#toasts {
+  position: fixed;
+  left: 50%;
+  bottom: 24px;
+  z-index: 3;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  width: min(92vw, 420px);
+  pointer-events: none;
+}
+
+.toast {
+  max-width: 100%;
+  padding: 10px 14px;
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  border: 1px solid var(--border-strong);
+  color: var(--text);
+  font-size: 14px;
+  box-shadow: 0 8px 24px rgb(0 0 0 / 0.5);
+  overflow-wrap: anywhere;
+  animation: toast-in 180ms ease-out;
+}
+
+.toast-error {
+  border-color: var(--danger);
+  color: #ffd7d7;
+}
+
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+#boot {
+  position: fixed;
+  inset: 0;
+  z-index: 4;
+  display: grid;
+  place-items: center;
+  background: var(--bg);
+  color: var(--muted);
+  font-size: 14px;
+  letter-spacing: 0.04em;
+}
+
+/* Brand and typography */
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.wordmark {
+  font-size: 32px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+h2 {
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.credit,
+.status,
+.empty-hint,
+.links {
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.status {
+  min-height: 1.4em;
+}
+
+.links {
+  text-align: center;
+}
+
+.links-list {
+  padding-left: 18px;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+/* Forms */
+.menu-form,
+.create-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.field-label {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.check input {
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+input[type="text"],
+input[type="password"],
+input[type="number"] {
+  width: 100%;
+  min-height: 40px;
+  padding: 8px 12px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+}
+
+input::placeholder {
+  color: var(--placeholder);
+}
+
+input:focus {
+  border-color: var(--accent);
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.menu-form .actions > button {
+  flex: 1 1 0;
+}
+
+/* Buttons */
+button {
+  min-height: 40px;
+  padding: 8px 16px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+  transition: background-color 120ms ease, border-color 120ms ease, filter 120ms ease;
+}
+
+button:hover:not(:disabled) {
+  border-color: var(--border-strong);
+  background: var(--surface-hover);
+}
+
+button.primary {
+  border-color: var(--accent-strong);
+  background: linear-gradient(180deg, var(--accent), var(--accent-strong));
+  color: var(--accent-text);
+  font-weight: 600;
+}
+
+button.primary:hover:not(:disabled) {
+  filter: brightness(1.08);
+}
+
+input:disabled,
+button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* Browser */
+.browser {
+  --panel-max: 680px;
+}
+
+.browser-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.server-name {
+  font-size: 22px;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.room-list {
+  list-style: none;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.room-item {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.room-row {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  text-align: left;
+}
+
+.room-name {
+  flex: 1;
+  min-width: 0;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.room-map {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.room-count {
+  color: var(--muted);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+.lock {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  fill: currentColor;
+  color: var(--muted);
+}
+
+.badge {
+  flex: none;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid rgb(0 149 255 / 0.4);
+  background: rgb(0 149 255 / 0.15);
+  color: #7cc4ff;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.room-password {
+  display: flex;
+  gap: 8px;
+  padding-left: 14px;
+}
+
+.room-password input {
+  flex: 1;
+  min-width: 0;
+}
+
+.room-password button {
+  flex: none;
+}
+
+/* Small screens: full-width panels, larger tap targets */
+@media (max-width: 600px) {
+  #ui {
+    padding: 0;
+  }
+
+  #ui > * {
+    margin-inline: 0;
+  }
+
+  .screen,
+  .screen > .panel {
+    width: 100%;
+  }
+
+  .panel {
+    padding: 20px;
+    border-radius: 0;
+    border-left: 0;
+    border-right: 0;
+  }
+
+  .wordmark {
+    font-size: 28px;
+  }
+
+  button,
+  input[type="text"],
+  input[type="password"],
+  input[type="number"] {
+    min-height: 44px;
+  }
+
+  .check input {
+    width: 22px;
+    height: 22px;
+  }
+
+  .room-row {
+    min-height: 44px;
+  }
+
+  .room-password {
+    flex-direction: column;
+    padding-left: 0;
+  }
+
+  #toasts {
+    bottom: 16px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}
