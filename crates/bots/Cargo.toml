@@ -1,0 +1,16 @@
+[package]
+name = "neobox-bots"
+description = "Headless neobox clients for load and soak testing a server"
+license = "AGPL-3.0-or-later"
+edition.workspace = true
+version.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+neobox-net = { path = "../net" }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "sync", "net"] }
+tokio-tungstenite = "0.29"
+futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
+serde_json = "1"
+base64 = "0.22"
