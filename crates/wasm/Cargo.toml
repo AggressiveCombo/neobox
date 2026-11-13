@@ -1,0 +1,16 @@
+[package]
+name = "neobox-wasm"
+description = "neobox browser module: simulation, rollback netcode and frame building"
+license = "AGPL-3.0-or-later"
+edition.workspace = true
+version.workspace = true
+repository.workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+neobox-sim = { path = "../sim" }
+neobox-net = { path = "../net" }
+neobox-box2d = { path = "../box2d" }
+serde_json = "1"
