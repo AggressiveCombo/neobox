@@ -1,0 +1,17 @@
+[package]
+name = "neobox-sim"
+description = "Neobox deterministic game simulation (Hitbox.io-compatible rules and map format)"
+license = "AGPL-3.0-or-later"
+edition.workspace = true
+version.workspace = true
+repository.workspace = true
+
+[dependencies]
+neobox-box2d = { path = "../box2d" }
+serde_json = { version = "1", features = ["float_roundtrip", "preserve_order"] }
+serde = { version = "1", features = ["derive", "rc"] }
+miniz_oxide = "0.8"
+libm = "0.2"
+
+[dev-dependencies]
+flate2 = "1"
