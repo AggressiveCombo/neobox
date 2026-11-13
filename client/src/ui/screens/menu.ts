@@ -5,7 +5,7 @@ import type { ScreenFactory } from "../../ctx";
 import { MAX_NAME_LEN, NAME_RE } from "../../protocol";
 import { NAME_STORAGE_KEY, type AppState } from "../../state";
 import { h } from "../dom";
-import { logoSvg } from "../logo";
+import { logoImg } from "../logo";
 import { CREDIT_LINE, LICENSE_URL, REPO_URL } from "./about";
 
 /** Keep only allowed characters, cut to the server limit, trim. */
@@ -90,7 +90,7 @@ export const menuScreen: ScreenFactory = (ctx) => {
     h(
       "section",
       { class: "panel" },
-      h("header", { class: "brand" }, logoSvg(64), h("h1", { class: "wordmark" }, "neobox")),
+      h("header", { class: "brand" }, logoImg(64), h("h1", { class: "wordmark" }, "neobox")),
       form,
       status,
       h("p", { class: "credit" }, CREDIT_LINE),

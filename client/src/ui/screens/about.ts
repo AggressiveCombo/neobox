@@ -2,7 +2,7 @@
 
 import type { ScreenFactory } from "../../ctx";
 import { h } from "../dom";
-import { logoSvg } from "../logo";
+import { logoImg } from "../logo";
 
 export const CREDIT_LINE = "neobox is a fan-made spiritual successor to Hitbox.io, created by Chaz. Not affiliated.";
 export const REPO_URL = "https://github.com/AggressiveCombo/neobox";
@@ -15,7 +15,7 @@ export const aboutScreen: ScreenFactory = (ctx) => {
     h(
       "section",
       { class: "panel" },
-      h("header", { class: "brand" }, logoSvg(64), h("h1", { class: "wordmark" }, "About neobox")),
+      h("header", { class: "brand" }, logoImg(64), h("h1", { class: "wordmark" }, "About neobox")),
       h("p", { class: "credit" }, CREDIT_LINE),
       h(
         "p",

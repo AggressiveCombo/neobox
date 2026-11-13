@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>neobox admin</title>
+<link rel="icon" type="image/svg+xml" href="/logo.svg">
 <style>
 :root { color-scheme: dark; --bg:#0b0d12; --panel:#151922; --line:#262c38; --fg:#e6e9ef; --muted:#8b93a5; --accent:#2f8bff; --bad:#ff5d5d; --ok:#5ddc8a; }
 * { box-sizing: border-box; }
@@ -43,7 +44,7 @@ canvas { width:100%; aspect-ratio: 16/10; background:#05070a; border-radius:6px;
 <body>
 <div id="login" hidden>
   <section>
-    <h2>neobox admin</h2>
+    <h2 style="text-transform:none;font-size:16px;color:var(--fg);letter-spacing:0"><img src="/logo.svg" width="28" height="28" alt="" style="vertical-align:middle;margin-right:8px">neobox admin</h2>
     <form id="loginform" class="row">
       <input id="pw" type="password" placeholder="Admin password" autocomplete="current-password" required style="flex:1">
       <button>Log in</button>
@@ -53,7 +54,7 @@ canvas { width:100%; aspect-ratio: 16/10; background:#05070a; border-radius:6px;
 </div>
 <div id="app" hidden>
 <header>
-  <h1>neobox admin</h1>
+  <img src="/logo.svg" width="24" height="24" alt=""><h1>neobox admin</h1>
   <div class="stats" id="srv"></div>
   <div class="spacer"></div>
   <input id="sayall" placeholder="Message to all rooms" style="width:220px">
