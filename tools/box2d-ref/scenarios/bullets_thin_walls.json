@@ -1,0 +1,1691 @@
+{
+ "name": "bullets_thin_walls",
+ "mode": "persistent",
+ "gravity": [
+  0,
+  15
+ ],
+ "doSleep": false,
+ "warmStarting": true,
+ "continuousPhysics": true,
+ "listener": {
+  "events": true,
+  "disable": []
+ },
+ "bodies": [
+  {
+   "name": "ground",
+   "def": {
+    "type": "static",
+    "position": [
+     0,
+     10
+    ],
+    "angle": 0
+   },
+   "fixtures": [
+    {
+     "name": "ground_f",
+     "shape": {
+      "type": "box",
+      "hx": 30,
+      "hy": 1
+     },
+     "density": 1,
+     "friction": 0.5,
+     "restitution": 0.2,
+     "isSensor": false
+    }
+   ]
+  },
+  {
+   "name": "wallA",
+   "def": {
+    "type": "static",
+    "position": [
+     0,
+     0
+    ],
+    "angle": 0
+   },
+   "fixtures": [
+    {
+     "name": "wallA_f",
+     "shape": {
+      "type": "box",
+      "hx": 0.05,
+      "hy": 5
+     },
+     "density": 1,
+     "friction": 0.3,
+     "restitution": 0.2,
+     "isSensor": false
+    }
+   ]
+  },
+  {
+   "name": "wallB",
+   "def": {
+    "type": "static",
+    "position": [
+     12,
+     0
+    ],
+    "angle": 0
+   },
+   "fixtures": [
+    {
+     "name": "wallB_f",
+     "shape": {
+      "type": "box",
+      "hx": 0.05,
+      "hy": 5
+     },
+     "density": 1,
+     "friction": 0.3,
+     "restitution": 0.2,
+     "isSensor": false
+    }
+   ]
+  },
+  {
+   "name": "wallC",
+   "def": {
+    "type": "static",
+    "position": [
+     6,
+     3
+    ],
+    "angle": 0
+   },
+   "fixtures": [
+    {
+     "name": "wallC_f",
+     "shape": {
+      "type": "orientedBox",
+      "hx": 0.05,
+      "hy": 4,
+      "center": [
+       0,
+       0
+      ],
+      "angle": 0.7
+     },
+     "density": 1,
+     "friction": 0.3,
+     "restitution": 0.2,
+     "isSensor": false
+    }
+   ]
+  },
+  {
+   "name": "bulletA",
+   "def": {
+    "type": "dynamic",
+    "position": [
+     -10,
+     0
+    ],
+    "angle": 0,
+    "bullet": true,
+    "linearVelocity": [
+     100,
+     0
+    ]
+   },
+   "fixtures": [
+    {
+     "name": "bulletA_f",
+     "shape": {
+      "type": "box",
+      "hx": 0.1,
+      "hy": 0.1
+     },
+     "density": 2,
+     "friction": 0.2,
+     "restitution": 0.2,
+     "isSensor": false
+    }
+   ]
+  },
+  {
+   "name": "bulletB",
+   "def": {
+    "type": "dynamic",
+    "position": [
+     20,
+     -3
+    ],
+    "angle": 0,
+    "bullet": true,
+    "linearVelocity": [
+     -100,
+     5
+    ]
+   },
+   "fixtures": [
+    {
+     "name": "bulletB_f",
+     "shape": {
+      "type": "box",
+      "hx": 0.1,
+      "hy": 0.1
+     },
+     "density": 2,
+     "friction": 0.2,
+     "restitution": 0.2,
+     "isSensor": false
+    }
+   ]
+  },
+  {
+   "name": "bulletC",
+   "def": {
+    "type": "dynamic",
+    "position": [
+     -3,
+     -3
+    ],
+    "angle": 0,
+    "bullet": true,
+    "linearVelocity": [
+     110,
+     10
+    ]
+   },
+   "fixtures": [
+    {
+     "name": "bulletC_f",
+     "shape": {
+      "type": "box",
+      "hx": 0.1,
+      "hy": 0.1
+     },
+     "density": 2,
+     "friction": 0.2,
+     "restitution": 0.2,
+     "isSensor": false
+    }
+   ]
+  },
+  {
+   "name": "bulletD",
+   "def": {
+    "type": "dynamic",
+    "position": [
+     -6,
+     8
+    ],
+    "angle": 0,
+    "bullet": true,
+    "linearVelocity": [
+     100,
+     0
+    ]
+   },
+   "fixtures": [
+    {
+     "name": "bulletD_f",
+     "shape": {
+      "type": "box",
+      "hx": 0.1,
+      "hy": 0.1
+     },
+     "density": 2,
+     "friction": 0.2,
+     "restitution": 0.2,
+     "isSensor": false
+    }
+   ]
+  },
+  {
+   "name": "target",
+   "def": {
+    "type": "dynamic",
+    "position": [
+     4,
+     8
+    ],
+    "angle": 0
+   },
+   "fixtures": [
+    {
+     "name": "target_f",
+     "shape": {
+      "type": "box",
+      "hx": 0.5,
+      "hy": 0.5
+     },
+     "density": 1,
+     "friction": 0.4,
+     "restitution": 0.1,
+     "isSensor": false
+    }
+   ]
+  }
+ ],
+ "steps": [
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [
+    {
+     "op": "setLinearVelocity",
+     "body": "bulletB",
+     "v": [
+      -80,
+      0
+     ]
+    }
+   ],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [
+    {
+     "op": "applyImpulse",
+     "body": "target",
+     "impulse": [
+      0,
+      -1
+     ],
+     "point": [
+      4,
+      8
+     ]
+    }
+   ],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  }
+ ]
+}

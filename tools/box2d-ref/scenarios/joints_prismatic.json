@@ -1,0 +1,2301 @@
+{
+ "name": "joints_prismatic",
+ "mode": "persistent",
+ "gravity": [
+  0,
+  15
+ ],
+ "doSleep": false,
+ "warmStarting": true,
+ "continuousPhysics": true,
+ "bodies": [
+  {
+   "name": "ground",
+   "def": {
+    "type": "static",
+    "position": [
+     0,
+     10
+    ],
+    "angle": 0
+   },
+   "fixtures": [
+    {
+     "name": "ground_f",
+     "shape": {
+      "type": "box",
+      "hx": 20,
+      "hy": 1
+     },
+     "density": 1,
+     "friction": 0.5,
+     "restitution": 0.2,
+     "isSensor": false
+    }
+   ]
+  },
+  {
+   "name": "rail",
+   "def": {
+    "type": "static",
+    "position": [
+     0,
+     4
+    ],
+    "angle": 0
+   },
+   "fixtures": []
+  },
+  {
+   "name": "slider",
+   "def": {
+    "type": "dynamic",
+    "position": [
+     0,
+     4
+    ],
+    "angle": 0
+   },
+   "fixtures": [
+    {
+     "name": "slider_f",
+     "shape": {
+      "type": "box",
+      "hx": 0.5,
+      "hy": 0.5
+     },
+     "density": 1,
+     "friction": 0.3,
+     "restitution": 0.2,
+     "isSensor": false
+    }
+   ]
+  },
+  {
+   "name": "rail2",
+   "def": {
+    "type": "static",
+    "position": [
+     -6,
+     6
+    ],
+    "angle": 0
+   },
+   "fixtures": []
+  },
+  {
+   "name": "slider2",
+   "def": {
+    "type": "dynamic",
+    "position": [
+     -6,
+     6
+    ],
+    "angle": 0
+   },
+   "fixtures": [
+    {
+     "name": "slider2_f",
+     "shape": {
+      "type": "box",
+      "hx": 0.4,
+      "hy": 0.6
+     },
+     "density": 1,
+     "friction": 0.3,
+     "restitution": 0.2,
+     "isSensor": false
+    }
+   ]
+  },
+  {
+   "name": "drop",
+   "def": {
+    "type": "dynamic",
+    "position": [
+     3,
+     6
+    ],
+    "angle": 0
+   },
+   "fixtures": [
+    {
+     "name": "drop_f",
+     "shape": {
+      "type": "box",
+      "hx": 0.5,
+      "hy": 0.5
+     },
+     "density": 1,
+     "friction": 0.5,
+     "restitution": 0.2,
+     "isSensor": false
+    }
+   ]
+  }
+ ],
+ "joints": [
+  {
+   "type": "prismatic",
+   "name": "rail1",
+   "bodyA": "rail",
+   "bodyB": "slider",
+   "anchor": [
+    0,
+    4
+   ],
+   "axis": [
+    1,
+    0
+   ],
+   "enableLimit": true,
+   "lowerTranslation": -3,
+   "upperTranslation": 3,
+   "enableMotor": true,
+   "motorSpeed": 2,
+   "maxMotorForce": 30,
+   "collideConnected": false
+  },
+  {
+   "type": "prismatic",
+   "name": "rail2",
+   "bodyA": "rail2",
+   "bodyB": "slider2",
+   "anchor": [
+    -6,
+    6
+   ],
+   "axis": [
+    0.8,
+    0.6
+   ],
+   "enableLimit": true,
+   "lowerTranslation": 0,
+   "upperTranslation": 4,
+   "enableMotor": false,
+   "motorSpeed": 0,
+   "maxMotorForce": 0,
+   "collideConnected": false
+  }
+ ],
+ "steps": [
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [
+    {
+     "op": "jointSetMotorSpeed",
+     "joint": "rail1",
+     "speed": -2
+    }
+   ],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [
+    {
+     "op": "jointSetMaxMotorForce",
+     "joint": "rail1",
+     "value": 10
+    }
+   ],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [
+    {
+     "op": "jointSetMotorSpeed",
+     "joint": "rail1",
+     "speed": 3
+    }
+   ],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  },
+  {
+   "dt": 0.03333333333333333,
+   "velIterations": 6,
+   "posIterations": 12,
+   "before": [],
+   "after": []
+  }
+ ]
+}

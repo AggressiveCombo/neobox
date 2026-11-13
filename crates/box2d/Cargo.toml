@@ -1,0 +1,17 @@
+[package]
+name = "neobox-box2d"
+version.workspace = true
+edition.workspace = true
+repository.workspace = true
+license = "Zlib"
+description = "Bit-exact Rust port of the Box2DFlash 2.1a / box2dweb physics library used by Hitbox.io"
+
+[lib]
+name = "neobox_box2d"
+
+[dependencies]
+libm = "0.2"
+
+[dev-dependencies]
+flate2 = "1"
+serde_json = "1"
