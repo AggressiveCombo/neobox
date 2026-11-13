@@ -1,0 +1,25 @@
+[workspace]
+resolver = "3"
+members = ["crates/*"]
+
+[workspace.package]
+edition = "2024"
+version = "0.1.0"
+repository = "https://github.com/AggressiveCombo/neobox"
+
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+
+# Client build: `cargo build --profile wasm --target wasm32-unknown-unknown -p neobox-wasm`
+[profile.wasm]
+inherits = "release"
+opt-level = 3
+panic = "abort"
+
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 3
