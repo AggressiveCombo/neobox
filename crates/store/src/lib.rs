@@ -7,17 +7,21 @@
 //! applied in order through `PRAGMA user_version`.
 
 mod account;
+mod clips;
 mod friends;
 mod library;
 mod session;
+mod xp;
 
 pub use account::{Account, MAX_PREFS_BYTES};
+pub use clips::{ClipSummary, MAX_CLIPS, MAX_CLIP_BYTES};
 pub use friends::{Friend, FriendState, MAX_FRIENDS, MAX_INCOMING_REQUESTS, MAX_OUTGOING_REQUESTS};
 pub use library::{
-    Listing, MapDetail, MapSummary, Sort, Status, Verdict, Visibility, MAX_CODE_BYTES, MAX_FAVOURITES,
+    Listing, MapDetail, MapSummary, RoomMap, Sort, Status, Verdict, Visibility, MAX_CODE_BYTES, MAX_FAVOURITES,
     MAX_MAPS_PER_ACCOUNT, MAX_MAP_NAME_CHARS,
 };
 pub use session::{MAX_SESSIONS_PER_ACCOUNT, SESSION_TTL};
+pub use xp::{XP_PER_DAY, XP_PER_HOUR, XpGrant, XpLimit};
 
 use rusqlite::{Connection, ErrorCode};
 use std::path::Path;
@@ -138,6 +142,37 @@ CREATE TABLE prefs (
     account_id INTEGER PRIMARY KEY REFERENCES accounts (id) ON DELETE CASCADE,
     json TEXT NOT NULL
 );
+"#, r#"
+-- Experience: the account total, and recent grants for the farming limits.
+ALTER TABLE accounts ADD COLUMN xp INTEGER NOT NULL DEFAULT 0;
+CREATE TABLE xp_grants (
+    account_id INTEGER NOT NULL REFERENCES accounts (id) ON DELETE CASCADE,
+    amount INTEGER NOT NULL,
+    at INTEGER NOT NULL
+);
+CREATE INDEX xp_grants_account ON xp_grants (account_id, at);
+
+-- Library: descriptions, staff picks (time picked, 0 = not picked), vote
+-- times and a play log for the "hot" listing and the weekly top makers.
+ALTER TABLE maps ADD COLUMN description TEXT NOT NULL DEFAULT '';
+ALTER TABLE maps ADD COLUMN pick INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE map_votes ADD COLUMN at INTEGER NOT NULL DEFAULT 0;
+CREATE TABLE map_plays (
+    map_id INTEGER NOT NULL REFERENCES maps (id) ON DELETE CASCADE,
+    at INTEGER NOT NULL
+);
+CREATE INDEX map_plays_at ON map_plays (at);
+
+-- Clips recorded with /record, played behind the main menu.
+CREATE TABLE clips (
+    id INTEGER PRIMARY KEY,
+    account_id INTEGER REFERENCES accounts (id) ON DELETE SET NULL,
+    recorder TEXT NOT NULL,
+    map_name TEXT NOT NULL,
+    data BLOB NOT NULL,
+    created INTEGER NOT NULL
+);
+CREATE INDEX clips_created ON clips (created);
 "#];
 
 impl Store {

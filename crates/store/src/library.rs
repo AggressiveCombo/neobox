@@ -1,5 +1,6 @@
 //! The map library: maps players upload, with visibility, a review queue for
-//! public maps, votes, favourites and play counts.
+//! public maps, votes, favourites, play counts, staff picks and a short-term
+//! activity log for the "hot" listing and the weekly top makers.
 //!
 //! Who may open a map: its owner and admins always; anyone else only when it is
 //! approved and not private. A map hidden from a viewer looks missing to them.
@@ -10,6 +11,8 @@ use std::collections::HashMap;
 
 pub const MAX_CODE_BYTES: usize = 2 * 1024 * 1024;
 pub const MAX_MAP_NAME_CHARS: usize = 40;
+/// Longest map description, in characters.
+pub const MAX_DESCRIPTION_CHARS: usize = 300;
 /// Maps per account, counting every visibility.
 pub const MAX_MAPS_PER_ACCOUNT: i64 = 100;
 /// Favourites per account.
@@ -18,6 +21,13 @@ const MAX_PAGE_SIZE: usize = 50;
 const MAX_SEARCH_CHARS: usize = 40;
 /// Largest review queue returned at once.
 const PENDING_LIMIT: i64 = 200;
+
+const DAY: i64 = 24 * 60 * 60;
+/// Votes cast and plays logged this long ago or later count towards "hot" and
+/// the top makers.
+const ACTIVITY_WINDOW: i64 = 7 * DAY;
+/// Play log rows older than this are pruned as new plays arrive.
+const PLAY_LOG_KEEP: i64 = 30 * DAY;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Visibility {
@@ -83,6 +93,10 @@ pub enum Sort {
     New,
     Top,
     Plays,
+    /// Votes cast and plays in the last week, most first.
+    Hot,
+    /// Staff picks, newest pick first.
+    Picks,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -105,6 +119,9 @@ pub struct MapSummary {
     pub score: i64,
     pub created: i64,
     pub updated: i64,
+    pub description: String,
+    /// When an admin picked the map (unix seconds); 0 when it is not picked.
+    pub pick: i64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -116,6 +133,20 @@ pub struct MapDetail {
     pub favourite: bool,
 }
 
+/// What a room needs to play a map.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RoomMap {
+    pub id: i64,
+    pub name: String,
+    pub author: String,
+    pub description: String,
+    pub created: i64,
+    /// Upvotes and downvotes.
+    pub up: i64,
+    pub down: i64,
+    pub code: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Listing {
     pub maps: Vec<MapSummary>,
@@ -125,7 +156,8 @@ pub struct Listing {
 
 /// Columns read by `summary_row`, for a query over `MAP_FROM` aliased `m`/`a`.
 const SUMMARY: &str = "m.id, m.name, a.id, a.name, m.visibility, m.status, m.size, m.plays, \
-     (SELECT COALESCE(SUM(v.value), 0) FROM map_votes v WHERE v.map_id = m.id), m.created, m.updated";
+     (SELECT COALESCE(SUM(v.value), 0) FROM map_votes v WHERE v.map_id = m.id), m.created, m.updated, \
+     m.description, m.pick";
 const MAP_FROM: &str = "maps m JOIN accounts a ON a.id = m.owner_id";
 const SCORE: &str = "(SELECT COALESCE(SUM(v.value), 0) FROM map_votes v WHERE v.map_id = m.id)";
 /// Public, approved maps: the ones anyone may list.
@@ -143,6 +175,8 @@ fn summary_row(r: &Row<'_>) -> rusqlite::Result<MapSummary> {
         score: r.get(8)?,
         created: r.get(9)?,
         updated: r.get(10)?,
+        description: r.get(11)?,
+        pick: r.get(12)?,
     })
 }
 
@@ -204,6 +238,18 @@ fn check_map_name(name: &str) -> Result<String> {
     Ok(name.to_owned())
 }
 
+/// Descriptions may be empty and are kept to one line.
+fn check_description(text: &str) -> Result<String> {
+    let text = text.trim();
+    if text.chars().count() > MAX_DESCRIPTION_CHARS {
+        return Err(Error::Invalid("Descriptions are at most 300 characters"));
+    }
+    if text.chars().any(char::is_control) {
+        return Err(Error::Invalid("Descriptions cannot contain control characters"));
+    }
+    Ok(text.to_owned())
+}
+
 fn check_code(code: &str) -> Result<()> {
     if code.is_empty() {
         Err(Error::Invalid("The map is empty"))
@@ -256,8 +302,9 @@ fn listing(db: &Connection, filter: &str, order: &str, search: &str, page: u32, 
 impl Store {
     /// Add a map and return its id. Public maps wait for review; the others
     /// are live at once.
-    pub fn upload(&self, owner: i64, name: &str, code: &str, visibility: Visibility) -> Result<i64> {
+    pub fn upload(&self, owner: i64, name: &str, code: &str, visibility: Visibility, description: &str) -> Result<i64> {
         let name = check_map_name(name)?;
+        let description = check_description(description)?;
         check_code(code)?;
         let status = if visibility == Visibility::Public { Status::Pending } else { Status::Approved };
         let now = now();
@@ -268,9 +315,9 @@ impl Store {
             return Err(Error::Limit("You have too many maps; delete one first"));
         }
         tx.execute(
-            "INSERT INTO maps (owner_id, name, code, size, visibility, status, plays, created, updated) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, 0, ?7, ?7)",
-            params![owner, name, code, code.len() as i64, visibility.as_str(), status.as_str(), now],
+            "INSERT INTO maps (owner_id, name, code, size, visibility, status, plays, created, updated, description) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, 0, ?7, ?7, ?8)",
+            params![owner, name, code, code.len() as i64, visibility.as_str(), status.as_str(), now, description],
         )
         .map_err(|e| if is_constraint(&e) { Error::NotFound } else { e.into() })?;
         let id = tx.last_insert_rowid();
@@ -278,16 +325,29 @@ impl Store {
         Ok(id)
     }
 
-    /// Public, approved maps, newest, best voted or most played first. `search`
-    /// matches the map name or its author's, ignoring case. `page` starts at 0;
-    /// `page_size` is clamped to 1..=50.
+    /// Public, approved maps in the order of `sort`. `search` matches the map
+    /// name or its author's, ignoring case. `page` starts at 0; `page_size` is
+    /// clamped to 1..=50.
     pub fn list(&self, sort: Sort, search: &str, page: u32, page_size: usize) -> Result<Listing> {
-        let order = match sort {
-            Sort::New => "m.created DESC, m.id DESC".to_owned(),
-            Sort::Top => format!("{SCORE} DESC, m.created DESC, m.id DESC"),
-            Sort::Plays => "m.plays DESC, m.created DESC, m.id DESC".to_owned(),
+        let (filter, order) = match sort {
+            Sort::New => (LISTED.to_owned(), "m.created DESC, m.id DESC".to_owned()),
+            Sort::Top => (LISTED.to_owned(), format!("{SCORE} DESC, m.created DESC, m.id DESC")),
+            Sort::Plays => (LISTED.to_owned(), "m.plays DESC, m.created DESC, m.id DESC".to_owned()),
+            Sort::Hot => {
+                // the window start is a clock value, so writing it inline is safe
+                let since = now() - ACTIVITY_WINDOW;
+                (
+                    LISTED.to_owned(),
+                    format!(
+                        "((SELECT COUNT(*) FROM map_votes v WHERE v.map_id = m.id AND v.at > {since}) \
+                         + (SELECT COUNT(*) FROM map_plays p WHERE p.map_id = m.id AND p.at > {since})) \
+                         DESC, m.created DESC, m.id DESC"
+                    ),
+                )
+            }
+            Sort::Picks => (format!("{LISTED} AND m.pick > 0"), "m.pick DESC, m.id DESC".to_owned()),
         };
-        listing(&self.db(), LISTED, &order, search, page, page_size)
+        listing(&self.db(), &filter, &order, search, page, page_size)
     }
 
     /// Every map, whatever its status or visibility, newest first. `search`
@@ -345,11 +405,51 @@ impl Store {
         Ok(MapDetail { map, code, vote, favourite })
     }
 
+    /// What a room needs to play a map, under the same visibility rules as
+    /// `get` but without the admin override. Rooms use it for their own
+    /// private maps too.
+    pub fn map_meta(&self, id: i64, viewer: Option<i64>) -> Result<RoomMap> {
+        let db = self.db();
+        let (owner, status, visibility) = meta(&db, id)?;
+        if !viewable(owner, status, visibility, viewer, false) {
+            return Err(Error::NotFound);
+        }
+        Ok(db.query_row(
+            "SELECT m.id, m.name, a.name, m.description, m.created, m.code, \
+             (SELECT COUNT(*) FROM map_votes v WHERE v.map_id = m.id AND v.value = 1), \
+             (SELECT COUNT(*) FROM map_votes v WHERE v.map_id = m.id AND v.value = -1) \
+             FROM maps m JOIN accounts a ON a.id = m.owner_id WHERE m.id = ?1",
+            [id],
+            |r| {
+                Ok(RoomMap {
+                    id: r.get(0)?,
+                    name: r.get(1)?,
+                    author: r.get(2)?,
+                    description: r.get(3)?,
+                    created: r.get(4)?,
+                    code: r.get(5)?,
+                    up: r.get(6)?,
+                    down: r.get(7)?,
+                })
+            },
+        )?)
+    }
+
     /// Change a map its owner made. `code` of `None` keeps the code. Changing
     /// the name or code of a public map, or making a map public, sends it back
-    /// to review. Rejected maps stay rejected unless they go public again.
-    pub fn update(&self, owner: i64, id: i64, name: &str, code: Option<&str>, visibility: Visibility) -> Result<()> {
+    /// to review. A description change alone does not. Rejected maps stay
+    /// rejected unless they go public again.
+    pub fn update(
+        &self,
+        owner: i64,
+        id: i64,
+        name: &str,
+        code: Option<&str>,
+        visibility: Visibility,
+        description: &str,
+    ) -> Result<()> {
         let name = check_map_name(name)?;
+        let description = check_description(description)?;
         if let Some(code) = code {
             check_code(code)?;
         }
@@ -369,14 +469,16 @@ impl Store {
             Status::Approved
         };
         tx.execute(
-            "UPDATE maps SET name = ?1, code = ?2, size = ?3, visibility = ?4, status = ?5, updated = ?6 WHERE id = ?7",
-            params![name, code, code.len() as i64, visibility.as_str(), status.as_str(), now(), id],
+            "UPDATE maps SET name = ?1, code = ?2, size = ?3, visibility = ?4, status = ?5, updated = ?6, description = ?7 \
+             WHERE id = ?8",
+            params![name, code, code.len() as i64, visibility.as_str(), status.as_str(), now(), description, id],
         )?;
         tx.commit()?;
         Ok(())
     }
 
-    /// Hard-delete a map with its votes and favourites. Owners and admins only.
+    /// Hard-delete a map with its votes, favourites and play log. Owners and
+    /// admins only.
     pub fn delete_map(&self, by: i64, id: i64, admin: bool) -> Result<()> {
         let db = self.db();
         let (owner, status, visibility) = meta(&db, id)?;
@@ -399,10 +501,11 @@ impl Store {
         if value == 0 {
             db.execute("DELETE FROM map_votes WHERE map_id = ?1 AND account_id = ?2", params![id, account])?;
         } else {
+            // `at` is the time of the latest vote, which the hot listing counts
             db.execute(
-                "INSERT INTO map_votes (map_id, account_id, value) VALUES (?1, ?2, ?3) \
-                 ON CONFLICT (map_id, account_id) DO UPDATE SET value = excluded.value",
-                params![id, account, value],
+                "INSERT INTO map_votes (map_id, account_id, value, at) VALUES (?1, ?2, ?3, ?4) \
+                 ON CONFLICT (map_id, account_id) DO UPDATE SET value = excluded.value, at = excluded.at",
+                params![id, account, value, now()],
             )?;
         }
         Ok(())
@@ -470,13 +573,58 @@ impl Store {
         Ok(marks)
     }
 
-    /// Count a play. Only maps anyone may open count; for any other id this does nothing.
+    /// Count a play and log it for the hot listing. Only maps anyone may open
+    /// count; for any other id this does nothing.
     pub fn record_play(&self, id: i64) -> Result<()> {
-        self.db().execute(
+        let at = now();
+        let mut db = self.db();
+        let tx = db.transaction()?;
+        let counted = tx.execute(
             "UPDATE maps SET plays = plays + 1 WHERE id = ?1 AND status = 'approved' AND visibility <> 'private'",
             [id],
         )?;
+        if counted > 0 {
+            tx.execute("DELETE FROM map_plays WHERE at <= ?1", [at - PLAY_LOG_KEEP])?;
+            tx.execute("INSERT INTO map_plays (map_id, at) VALUES (?1, ?2)", params![id, at])?;
+        }
+        tx.commit()?;
         Ok(())
+    }
+
+    /// Admin staff pick or unpick, on any map. A map keeps the time it was
+    /// first picked until it is unpicked.
+    pub fn set_pick(&self, id: i64, on: bool) -> Result<()> {
+        let n = self.db().execute(
+            "UPDATE maps SET pick = CASE WHEN ?2 = 0 THEN 0 WHEN pick > 0 THEN pick ELSE ?3 END WHERE id = ?1",
+            params![id, i64::from(on), now()],
+        )?;
+        if n == 0 { Err(Error::NotFound) } else { Ok(()) }
+    }
+
+    /// The makers with the most upvotes received and plays on their listed
+    /// maps since `since`, best first, at most `limit`. Ties go to the lower
+    /// account id.
+    pub fn top_makers(&self, since: i64, limit: usize) -> Result<Vec<(String, i64)>> {
+        let db = self.db();
+        let mut stmt = db.prepare(&format!(
+            "SELECT a.name, COUNT(*) AS score FROM ( \
+                 SELECT m.owner_id AS owner FROM map_votes v JOIN maps m ON m.id = v.map_id \
+                 WHERE {LISTED} AND v.value = 1 AND v.at > ?1 \
+                 UNION ALL \
+                 SELECT m.owner_id FROM map_plays p JOIN maps m ON m.id = p.map_id \
+                 WHERE {LISTED} AND p.at > ?1 \
+             ) e JOIN accounts a ON a.id = e.owner \
+             GROUP BY a.id ORDER BY score DESC, a.id ASC LIMIT ?2"
+        ))?;
+        let rows = stmt
+            .query_map(params![since, limit as i64], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?)))?
+            .collect::<rusqlite::Result<Vec<(String, i64)>>>()?;
+        Ok(rows)
+    }
+
+    /// Start of the activity window the hot listing and top makers use.
+    pub fn activity_since() -> i64 {
+        now() - ACTIVITY_WINDOW
     }
 
     /// Admin decision on a map.
@@ -496,7 +644,7 @@ mod tests {
     use crate::test_support::{raw_account, store};
 
     fn live_public(s: &Store, owner: i64, name: &str) -> i64 {
-        let id = s.upload(owner, name, "code", Visibility::Public).unwrap();
+        let id = s.upload(owner, name, "code", Visibility::Public, "").unwrap();
         s.moderate(id, Verdict::Approve).unwrap();
         id
     }
@@ -513,27 +661,42 @@ mod tests {
     fn upload_checks_name_code_and_owner() {
         let s = store();
         let o = raw_account(&s, "Owner");
-        assert!(matches!(s.upload(o, "  ", "c", Visibility::Unlisted), Err(Error::Invalid(_))));
+        assert!(matches!(s.upload(o, "  ", "c", Visibility::Unlisted, ""), Err(Error::Invalid(_))));
         let long = "n".repeat(MAX_MAP_NAME_CHARS + 1);
-        assert!(matches!(s.upload(o, &long, "c", Visibility::Unlisted), Err(Error::Invalid(_))));
-        assert!(matches!(s.upload(o, "bad\u{7}name", "c", Visibility::Unlisted), Err(Error::Invalid(_))));
-        s.upload(o, &"n".repeat(MAX_MAP_NAME_CHARS), "c", Visibility::Unlisted).unwrap();
-        assert!(matches!(s.upload(o, "x", "", Visibility::Unlisted), Err(Error::Invalid(_))));
+        assert!(matches!(s.upload(o, &long, "c", Visibility::Unlisted, ""), Err(Error::Invalid(_))));
+        assert!(matches!(s.upload(o, "bad\u{7}name", "c", Visibility::Unlisted, ""), Err(Error::Invalid(_))));
+        s.upload(o, &"n".repeat(MAX_MAP_NAME_CHARS), "c", Visibility::Unlisted, "").unwrap();
+        assert!(matches!(s.upload(o, "x", "", Visibility::Unlisted, ""), Err(Error::Invalid(_))));
         assert!(matches!(
-            s.upload(o, "x", &"c".repeat(MAX_CODE_BYTES + 1), Visibility::Unlisted),
+            s.upload(o, "x", &"c".repeat(MAX_CODE_BYTES + 1), Visibility::Unlisted, ""),
             Err(Error::Invalid(_))
         ));
-        s.upload(o, "x", &"c".repeat(MAX_CODE_BYTES), Visibility::Unlisted).unwrap();
-        assert!(matches!(s.upload(999, "x", "c", Visibility::Unlisted), Err(Error::NotFound)));
+        s.upload(o, "x", &"c".repeat(MAX_CODE_BYTES), Visibility::Unlisted, "").unwrap();
+        assert!(matches!(s.upload(999, "x", "c", Visibility::Unlisted, ""), Err(Error::NotFound)));
+    }
+
+    #[test]
+    fn descriptions_are_short_single_line_and_editable() {
+        let s = store();
+        let o = raw_account(&s, "Owner");
+        let long = "d".repeat(MAX_DESCRIPTION_CHARS + 1);
+        assert!(matches!(s.upload(o, "x", "c", Visibility::Unlisted, &long), Err(Error::Invalid(_))));
+        assert!(matches!(s.upload(o, "x", "c", Visibility::Unlisted, "two\nlines"), Err(Error::Invalid(_))));
+        let m = s.upload(o, "x", "c", Visibility::Unlisted, "  a race  ").unwrap();
+        assert_eq!(s.get(m, Some(o), false).unwrap().map.description, "a race", "trimmed and kept");
+        s.update(o, m, "x", None, Visibility::Unlisted, "a new description").unwrap();
+        assert_eq!(s.get(m, Some(o), false).unwrap().map.description, "a new description");
+        assert!(matches!(s.update(o, m, "x", None, Visibility::Unlisted, &long), Err(Error::Invalid(_))));
+        assert_eq!(s.get(m, Some(o), false).unwrap().map.description, "a new description", "a failed edit changes nothing");
     }
 
     #[test]
     fn public_maps_start_pending_and_others_are_live() {
         let s = store();
         let o = raw_account(&s, "Owner");
-        let p = s.upload(o, "Pub", "code", Visibility::Public).unwrap();
-        let u = s.upload(o, "Unl", "code", Visibility::Unlisted).unwrap();
-        let v = s.upload(o, "Priv", "code", Visibility::Private).unwrap();
+        let p = s.upload(o, "Pub", "code", Visibility::Public, "").unwrap();
+        let u = s.upload(o, "Unl", "code", Visibility::Unlisted, "").unwrap();
+        let v = s.upload(o, "Priv", "code", Visibility::Private, "").unwrap();
         assert_eq!(status_of(&s, p), Status::Pending);
         assert_eq!(status_of(&s, u), Status::Approved);
         assert_eq!(status_of(&s, v), Status::Approved);
@@ -544,11 +707,11 @@ mod tests {
         let s = store();
         let o = raw_account(&s, "Owner");
         let other = raw_account(&s, "Other");
-        let pending = s.upload(o, "Pending", "code", Visibility::Public).unwrap();
-        let unlisted = s.upload(o, "Link", "code", Visibility::Unlisted).unwrap();
-        let private = s.upload(o, "Mine", "code", Visibility::Private).unwrap();
+        let pending = s.upload(o, "Pending", "code", Visibility::Public, "").unwrap();
+        let unlisted = s.upload(o, "Link", "code", Visibility::Unlisted, "").unwrap();
+        let private = s.upload(o, "Mine", "code", Visibility::Private, "").unwrap();
         let public = live_public(&s, o, "Live");
-        let rejected = s.upload(o, "Bad", "code", Visibility::Public).unwrap();
+        let rejected = s.upload(o, "Bad", "code", Visibility::Public, "").unwrap();
         s.moderate(rejected, Verdict::Reject).unwrap();
 
         for hidden in [pending, private, rejected] {
@@ -583,13 +746,40 @@ mod tests {
     }
 
     #[test]
+    fn map_meta_follows_the_viewing_rules_and_counts_votes() {
+        let s = store();
+        let o = raw_account(&s, "Owner");
+        let other = raw_account(&s, "Other");
+        let fan = raw_account(&s, "Fan");
+        let fan2 = raw_account(&s, "Fan2");
+        let public = s.upload(o, "Live", "code", Visibility::Public, "Nice").unwrap();
+        s.moderate(public, Verdict::Approve).unwrap();
+        s.vote(fan, public, 1).unwrap();
+        s.vote(fan2, public, -1).unwrap();
+        let meta = s.map_meta(public, None).unwrap();
+        assert_eq!((meta.name.as_str(), meta.author.as_str()), ("Live", "Owner"));
+        assert_eq!((meta.description.as_str(), meta.code.as_str()), ("Nice", "code"));
+        assert_eq!((meta.up, meta.down), (1, 1));
+
+        let private = s.upload(o, "Mine", "secret", Visibility::Private, "").unwrap();
+        assert_eq!(s.map_meta(private, Some(o)).unwrap().code, "secret");
+        assert!(matches!(s.map_meta(private, Some(other)), Err(Error::NotFound)));
+        assert!(matches!(s.map_meta(private, None), Err(Error::NotFound)));
+        let pending = s.upload(o, "Waiting", "c", Visibility::Public, "").unwrap();
+        assert!(matches!(s.map_meta(pending, Some(other)), Err(Error::NotFound)));
+        assert!(s.map_meta(pending, Some(o)).is_ok());
+        // unlike `get`, an admin override does not exist here
+        assert!(matches!(s.map_meta(999, None), Err(Error::NotFound)));
+    }
+
+    #[test]
     fn listing_shows_only_public_approved_maps() {
         let s = store();
         let o = raw_account(&s, "Owner");
         let live = live_public(&s, o, "Live");
-        s.upload(o, "Pending", "c", Visibility::Public).unwrap();
-        s.upload(o, "Unlisted", "c", Visibility::Unlisted).unwrap();
-        s.upload(o, "Private", "c", Visibility::Private).unwrap();
+        s.upload(o, "Pending", "c", Visibility::Public, "").unwrap();
+        s.upload(o, "Unlisted", "c", Visibility::Unlisted, "").unwrap();
+        s.upload(o, "Private", "c", Visibility::Private, "").unwrap();
         let listing = s.list(Sort::New, "", 0, 20).unwrap();
         assert_eq!(listing.total, 1);
         assert_eq!(listing.maps[0].id, live);
@@ -599,12 +789,12 @@ mod tests {
     fn admin_listing_shows_every_map_newest_first() {
         let s = store();
         let ann = raw_account(&s, "Ann");
-        let a = s.upload(ann, "Pending", "c", Visibility::Public).unwrap();
-        let b = s.upload(ann, "Private", "c", Visibility::Private).unwrap();
-        let c = s.upload(ann, "Rejected", "c", Visibility::Public).unwrap();
+        let a = s.upload(ann, "Pending", "c", Visibility::Public, "").unwrap();
+        let b = s.upload(ann, "Private", "c", Visibility::Private, "").unwrap();
+        let c = s.upload(ann, "Rejected", "c", Visibility::Public, "").unwrap();
         s.moderate(c, Verdict::Reject).unwrap();
         let bo = raw_account(&s, "Bo");
-        let d = s.upload(bo, "Other", "c", Visibility::Unlisted).unwrap();
+        let d = s.upload(bo, "Other", "c", Visibility::Unlisted, "").unwrap();
         let all = s.admin_list("", 0, 50).unwrap();
         assert_eq!(all.total, 4);
         assert_eq!(all.maps.iter().map(|m| m.id).collect::<Vec<_>>(), vec![d, c, b, a]);
@@ -665,13 +855,109 @@ mod tests {
     }
 
     #[test]
+    fn hot_counts_recent_votes_and_plays_only() {
+        let s = store();
+        let o = raw_account(&s, "Owner");
+        let fan = raw_account(&s, "Fan");
+        let fan2 = raw_account(&s, "Fan2");
+        let fan3 = raw_account(&s, "Fan3");
+        let quiet = live_public(&s, o, "Quiet");
+        let voted = live_public(&s, o, "Voted");
+        let stale = live_public(&s, o, "Stale");
+        let played = live_public(&s, o, "Played");
+        s.vote(fan, voted, 1).unwrap();
+        s.vote(fan2, voted, -1).unwrap();
+        s.vote(fan3, stale, 1).unwrap();
+        for _ in 0..3 {
+            s.record_play(played).unwrap();
+        }
+        let old = now() - 8 * DAY;
+        s.db()
+            .execute("UPDATE map_votes SET at = ?1 WHERE map_id = ?2 AND account_id = ?3", params![old, stale, fan3])
+            .unwrap();
+        for _ in 0..5 {
+            s.db()
+                .execute("INSERT INTO map_plays (map_id, at) VALUES (?1, ?2)", params![stale, old])
+                .unwrap();
+        }
+        let ids = s.list(Sort::Hot, "", 0, 50).unwrap().maps.iter().map(|m| m.id).collect::<Vec<_>>();
+        assert_eq!(ids, vec![played, voted, stale, quiet], "stale votes and plays do not count; ties go to the newer map");
+    }
+
+    #[test]
+    fn plays_are_logged_and_old_log_rows_are_pruned() {
+        let s = store();
+        let o = raw_account(&s, "Owner");
+        let m = live_public(&s, o, "Map");
+        let old = now() - PLAY_LOG_KEEP - DAY;
+        s.db().execute("INSERT INTO map_plays (map_id, at) VALUES (?1, ?2)", params![m, old]).unwrap();
+        s.record_play(m).unwrap();
+        let rows: i64 = s.db().query_row("SELECT COUNT(*) FROM map_plays", [], |r| r.get(0)).unwrap();
+        assert_eq!(rows, 1, "the play is logged and the old row is gone");
+        assert_eq!(s.get(m, None, true).unwrap().map.plays, 1);
+        s.record_play(999).unwrap();
+        let rows: i64 = s.db().query_row("SELECT COUNT(*) FROM map_plays", [], |r| r.get(0)).unwrap();
+        assert_eq!(rows, 1, "plays that do not count are not logged");
+    }
+
+    #[test]
+    fn picks_list_newest_pick_first_and_only_listed_maps() {
+        let s = store();
+        let o = raw_account(&s, "Owner");
+        let a = live_public(&s, o, "A");
+        let b = live_public(&s, o, "B");
+        let pending = s.upload(o, "P", "c", Visibility::Public, "").unwrap();
+        s.set_pick(a, true).unwrap();
+        s.set_pick(b, true).unwrap();
+        s.set_pick(pending, true).unwrap();
+        s.db().execute("UPDATE maps SET pick = 100 WHERE id = ?1", [a]).unwrap();
+        s.db().execute("UPDATE maps SET pick = 200 WHERE id = ?1", [b]).unwrap();
+        let picks = |s: &Store| s.list(Sort::Picks, "", 0, 50).unwrap().maps.iter().map(|m| m.id).collect::<Vec<_>>();
+        assert_eq!(picks(&s), vec![b, a], "pending picks wait for approval");
+        assert_eq!(s.get(b, None, false).unwrap().map.pick, 200);
+
+        s.set_pick(a, true).unwrap();
+        assert_eq!(s.get(a, None, false).unwrap().map.pick, 100, "a re-pick keeps the first pick time");
+        s.set_pick(a, false).unwrap();
+        assert_eq!(picks(&s), vec![b]);
+        assert_eq!(s.get(a, None, false).unwrap().map.pick, 0);
+        assert!(matches!(s.set_pick(999, true), Err(Error::NotFound)));
+    }
+
+    #[test]
+    fn top_makers_rank_recent_upvotes_and_plays() {
+        let s = store();
+        let ann = raw_account(&s, "Ann");
+        let bo = raw_account(&s, "Bo");
+        let cy = raw_account(&s, "Cy");
+        let fan = raw_account(&s, "Fan");
+        let fan2 = raw_account(&s, "Fan2");
+        let a = live_public(&s, ann, "A");
+        let b = live_public(&s, bo, "B");
+        let c = live_public(&s, cy, "C");
+        s.vote(fan, a, 1).unwrap();
+        s.vote(fan2, a, 1).unwrap();
+        s.record_play(a).unwrap();
+        s.record_play(a).unwrap();
+        s.vote(fan, b, 1).unwrap();
+        let old = now() - 8 * DAY;
+        s.db().execute("INSERT INTO map_plays (map_id, at) VALUES (?1, ?2)", params![b, old]).unwrap();
+        s.db().execute("UPDATE map_votes SET at = ?1 WHERE map_id = ?2 AND account_id = ?3", params![old, a, fan2]).unwrap();
+        s.vote(fan2, c, 1).unwrap();
+        let since = now() - ACTIVITY_WINDOW;
+        assert_eq!(s.top_makers(since, 5).unwrap(), vec![("Ann".to_owned(), 3), ("Bo".to_owned(), 1), ("Cy".to_owned(), 1)]);
+        assert_eq!(s.top_makers(since, 1).unwrap(), vec![("Ann".to_owned(), 3)]);
+        assert_eq!(Store::activity_since(), now() - ACTIVITY_WINDOW);
+    }
+
+    #[test]
     fn mine_lists_every_visibility_of_the_owners_maps() {
         let s = store();
         let o = raw_account(&s, "Owner");
         let other = raw_account(&s, "Other");
-        s.upload(o, "A", "c", Visibility::Public).unwrap();
-        s.upload(o, "B", "c", Visibility::Private).unwrap();
-        s.upload(other, "C", "c", Visibility::Unlisted).unwrap();
+        s.upload(o, "A", "c", Visibility::Public, "").unwrap();
+        s.upload(o, "B", "c", Visibility::Private, "").unwrap();
+        s.upload(other, "C", "c", Visibility::Unlisted, "").unwrap();
         assert_eq!(s.mine(o).unwrap().len(), 2);
     }
 
@@ -680,17 +966,19 @@ mod tests {
         let s = store();
         let o = raw_account(&s, "Owner");
         let m = live_public(&s, o, "Map");
-        s.update(o, m, "Map", Some("code"), Visibility::Public).unwrap();
+        s.update(o, m, "Map", Some("code"), Visibility::Public, "").unwrap();
         assert_eq!(status_of(&s, m), Status::Approved, "an unchanged save keeps the approval");
-        s.update(o, m, "Map", Some("changed"), Visibility::Public).unwrap();
+        s.update(o, m, "Map", Some("changed"), Visibility::Public, "").unwrap();
         assert_eq!(status_of(&s, m), Status::Pending);
         s.moderate(m, Verdict::Approve).unwrap();
-        s.update(o, m, "Renamed", None, Visibility::Public).unwrap();
+        s.update(o, m, "Renamed", None, Visibility::Public, "").unwrap();
         assert_eq!(status_of(&s, m), Status::Pending, "a rename is an edit too");
         s.moderate(m, Verdict::Approve).unwrap();
-        s.update(o, m, "Renamed", None, Visibility::Unlisted).unwrap();
+        s.update(o, m, "Renamed", None, Visibility::Public, "a new blurb").unwrap();
+        assert_eq!(status_of(&s, m), Status::Approved, "a description alone is not an edit to review");
+        s.update(o, m, "Renamed", None, Visibility::Unlisted, "").unwrap();
         assert_eq!(status_of(&s, m), Status::Approved);
-        s.update(o, m, "Renamed", None, Visibility::Public).unwrap();
+        s.update(o, m, "Renamed", None, Visibility::Public, "").unwrap();
         assert_eq!(status_of(&s, m), Status::Pending, "going public again is a review");
     }
 
@@ -698,14 +986,14 @@ mod tests {
     fn rejected_maps_stay_rejected_until_they_go_public_again() {
         let s = store();
         let o = raw_account(&s, "Owner");
-        let m = s.upload(o, "Map", "c", Visibility::Public).unwrap();
+        let m = s.upload(o, "Map", "c", Visibility::Public, "").unwrap();
         s.moderate(m, Verdict::Reject).unwrap();
-        s.update(o, m, "Map", None, Visibility::Public).unwrap();
+        s.update(o, m, "Map", None, Visibility::Public, "").unwrap();
         assert_eq!(status_of(&s, m), Status::Rejected);
-        s.update(o, m, "Map", Some("fixed"), Visibility::Unlisted).unwrap();
+        s.update(o, m, "Map", Some("fixed"), Visibility::Unlisted, "").unwrap();
         assert_eq!(status_of(&s, m), Status::Rejected, "hiding it and editing does not clear the rejection");
         assert!(matches!(s.get(m, None, false), Err(Error::NotFound)));
-        s.update(o, m, "Map", Some("fixed again"), Visibility::Public).unwrap();
+        s.update(o, m, "Map", Some("fixed again"), Visibility::Public, "").unwrap();
         assert_eq!(status_of(&s, m), Status::Pending);
     }
 
@@ -715,10 +1003,10 @@ mod tests {
         let o = raw_account(&s, "Owner");
         let other = raw_account(&s, "Other");
         let public = live_public(&s, o, "Map");
-        let private = s.upload(o, "Hidden", "c", Visibility::Private).unwrap();
-        assert!(matches!(s.update(other, public, "Map", None, Visibility::Unlisted), Err(Error::Forbidden(_))));
-        assert!(matches!(s.update(other, private, "Hidden", None, Visibility::Unlisted), Err(Error::NotFound)));
-        assert!(matches!(s.update(o, 999, "Map", None, Visibility::Unlisted), Err(Error::NotFound)));
+        let private = s.upload(o, "Hidden", "c", Visibility::Private, "").unwrap();
+        assert!(matches!(s.update(other, public, "Map", None, Visibility::Unlisted, ""), Err(Error::Forbidden(_))));
+        assert!(matches!(s.update(other, private, "Hidden", None, Visibility::Unlisted, ""), Err(Error::NotFound)));
+        assert!(matches!(s.update(o, 999, "Map", None, Visibility::Unlisted, ""), Err(Error::NotFound)));
         assert!(matches!(s.delete_map(other, public, false), Err(Error::Forbidden(_))));
         assert!(matches!(s.delete_map(other, private, false), Err(Error::NotFound)));
         s.delete_map(0, public, true).unwrap();
@@ -726,15 +1014,16 @@ mod tests {
     }
 
     #[test]
-    fn delete_removes_votes_and_favourites_too() {
+    fn delete_removes_votes_favourites_and_plays_too() {
         let s = store();
         let o = raw_account(&s, "Owner");
         let fan = raw_account(&s, "Fan");
         let m = live_public(&s, o, "Map");
         s.vote(fan, m, 1).unwrap();
         s.favourite(fan, m, true).unwrap();
+        s.record_play(m).unwrap();
         s.delete_map(o, m, false).unwrap();
-        for table in ["maps", "map_votes", "favourites"] {
+        for table in ["maps", "map_votes", "favourites", "map_plays"] {
             let n: i64 = s.db().query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |r| r.get(0)).unwrap();
             assert_eq!(n, 0, "{table}");
         }
@@ -756,8 +1045,13 @@ mod tests {
         assert_eq!(score(&s, m), 0, "a changes its vote rather than adding one");
         s.vote(a, m, 0).unwrap();
         assert_eq!(score(&s, m), 1);
-        let pending = s.upload(o, "P", "c", Visibility::Public).unwrap();
-        let private = s.upload(o, "H", "c", Visibility::Private).unwrap();
+        let at: i64 = s
+            .db()
+            .query_row("SELECT at FROM map_votes WHERE map_id = ?1 AND account_id = ?2", params![m, b], |r| r.get(0))
+            .unwrap();
+        assert!(at > 0, "votes are timestamped");
+        let pending = s.upload(o, "P", "c", Visibility::Public, "").unwrap();
+        let private = s.upload(o, "H", "c", Visibility::Private, "").unwrap();
         assert!(matches!(s.vote(a, pending, 1), Err(Error::NotFound)));
         assert!(matches!(s.vote(a, private, 1), Err(Error::NotFound)));
     }
@@ -791,7 +1085,7 @@ mod tests {
         s.favourite(fan, m, true).unwrap();
         s.favourite(fan, m, true).unwrap();
         assert_eq!(s.favourites(fan).unwrap().len(), 1);
-        s.update(o, m, "Map", None, Visibility::Private).unwrap();
+        s.update(o, m, "Map", None, Visibility::Private, "").unwrap();
         assert!(s.favourites(fan).unwrap().is_empty(), "hidden maps drop out of favourites");
         assert!(matches!(s.favourite(fan, m, true), Err(Error::NotFound)));
         s.favourite(fan, m, false).unwrap();
@@ -822,9 +1116,9 @@ mod tests {
         let s = store();
         let o = raw_account(&s, "Owner");
         let live = live_public(&s, o, "Live");
-        let pending = s.upload(o, "P", "c", Visibility::Public).unwrap();
-        let private = s.upload(o, "H", "c", Visibility::Private).unwrap();
-        let unlisted = s.upload(o, "U", "c", Visibility::Unlisted).unwrap();
+        let pending = s.upload(o, "P", "c", Visibility::Public, "").unwrap();
+        let private = s.upload(o, "H", "c", Visibility::Private, "").unwrap();
+        let unlisted = s.upload(o, "U", "c", Visibility::Unlisted, "").unwrap();
         for id in [live, pending, private, unlisted, 999] {
             s.record_play(id).unwrap();
         }
@@ -839,8 +1133,8 @@ mod tests {
     fn moderators_work_the_review_queue() {
         let s = store();
         let o = raw_account(&s, "Owner");
-        let a = s.upload(o, "A", "c", Visibility::Public).unwrap();
-        let b = s.upload(o, "B", "c", Visibility::Public).unwrap();
+        let a = s.upload(o, "A", "c", Visibility::Public, "").unwrap();
+        let b = s.upload(o, "B", "c", Visibility::Public, "").unwrap();
         assert_eq!(s.pending().unwrap().iter().map(|m| m.id).collect::<Vec<_>>(), vec![a, b]);
         s.moderate(a, Verdict::Approve).unwrap();
         s.moderate(b, Verdict::Reject).unwrap();
@@ -856,10 +1150,10 @@ mod tests {
         let s = store();
         let o = raw_account(&s, "Owner");
         for i in 0..MAX_MAPS_PER_ACCOUNT {
-            s.upload(o, &format!("Map {i}"), "c", Visibility::Unlisted).unwrap();
+            s.upload(o, &format!("Map {i}"), "c", Visibility::Unlisted, "").unwrap();
         }
-        assert!(matches!(s.upload(o, "one more", "c", Visibility::Unlisted), Err(Error::Limit(_))));
+        assert!(matches!(s.upload(o, "one more", "c", Visibility::Unlisted, ""), Err(Error::Limit(_))));
         let other = raw_account(&s, "Other");
-        s.upload(other, "fine", "c", Visibility::Unlisted).unwrap();
+        s.upload(other, "fine", "c", Visibility::Unlisted, "").unwrap();
     }
 }
