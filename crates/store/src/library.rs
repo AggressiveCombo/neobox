@@ -6,6 +6,7 @@
 
 use crate::{Account, Error, Result, Store, is_constraint, now};
 use rusqlite::{Connection, OptionalExtension, Row, params};
+use std::collections::HashMap;
 
 pub const MAX_CODE_BYTES: usize = 2 * 1024 * 1024;
 pub const MAX_MAP_NAME_CHARS: usize = 40;
@@ -447,6 +448,28 @@ impl Store {
         Ok(stmt.query_map([account], summary_row)?.collect::<rusqlite::Result<Vec<MapSummary>>>()?)
     }
 
+    /// The account's vote (-1, 0 or 1) and favourite flag on each of `ids`, for
+    /// showing them in map lists. Maps the account never marked are left out.
+    pub fn marks(&self, account: i64, ids: &[i64]) -> Result<HashMap<i64, (i64, bool)>> {
+        let mut marks = HashMap::new();
+        if ids.is_empty() {
+            return Ok(marks);
+        }
+        // ids are integers, so listing them inline cannot inject SQL
+        let list = ids.iter().map(i64::to_string).collect::<Vec<_>>().join(",");
+        let db = self.db();
+        let mut votes = db.prepare(&format!("SELECT map_id, value FROM map_votes WHERE account_id = ?1 AND map_id IN ({list})"))?;
+        for row in votes.query_map([account], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?)))? {
+            let (id, vote) = row?;
+            marks.entry(id).or_insert((0, false)).0 = vote;
+        }
+        let mut favs = db.prepare(&format!("SELECT map_id FROM favourites WHERE account_id = ?1 AND map_id IN ({list})"))?;
+        for row in favs.query_map([account], |r| r.get::<_, i64>(0))? {
+            marks.entry(row?).or_insert((0, false)).1 = true;
+        }
+        Ok(marks)
+    }
+
     /// Count a play. Only maps anyone may open count; for any other id this does nothing.
     pub fn record_play(&self, id: i64) -> Result<()> {
         self.db().execute(
@@ -737,6 +760,26 @@ mod tests {
         let private = s.upload(o, "H", "c", Visibility::Private).unwrap();
         assert!(matches!(s.vote(a, pending, 1), Err(Error::NotFound)));
         assert!(matches!(s.vote(a, private, 1), Err(Error::NotFound)));
+    }
+
+    #[test]
+    fn marks_report_only_this_accounts_votes_and_favourites() {
+        let s = store();
+        let o = raw_account(&s, "Owner");
+        let fan = raw_account(&s, "Fan");
+        let other = raw_account(&s, "Other");
+        let a = live_public(&s, o, "A");
+        let b = live_public(&s, o, "B");
+        let c = live_public(&s, o, "C");
+        s.vote(fan, a, -1).unwrap();
+        s.favourite(fan, b, true).unwrap();
+        s.vote(other, c, 1).unwrap();
+        s.favourite(other, c, true).unwrap();
+        let marks = s.marks(fan, &[a, b, c]).unwrap();
+        assert_eq!(marks.get(&a), Some(&(-1, false)));
+        assert_eq!(marks.get(&b), Some(&(0, true)));
+        assert_eq!(marks.get(&c), None, "another account's marks are not the fan's");
+        assert!(s.marks(fan, &[]).unwrap().is_empty());
     }
 
     #[test]

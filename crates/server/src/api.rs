@@ -312,7 +312,7 @@ async fn friend_remove(State(hub): State<Arc<Hub>>, headers: HeaderMap, Json(b):
 
 // Library
 
-/// A map as the library lists it.
+/// A map as the library lists it; `my_vote` and `favourite` only for signed-in viewers.
 #[derive(Serialize)]
 pub struct MapJson {
     pub id: i64,
@@ -323,6 +323,10 @@ pub struct MapJson {
     pub created: String,
     pub visibility: &'static str,
     pub status: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub my_vote: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub favourite: Option<bool>,
 }
 
 impl MapJson {
@@ -336,26 +340,45 @@ impl MapJson {
             created: iso_time(m.created),
             visibility: visibility_name(m.visibility),
             status: status_name(m.status),
+            my_vote: None,
+            favourite: None,
         }
     }
 }
 
-/// A map with its code; `my_vote` and `favourite` are for signed-in viewers.
+/// A map with its code.
 #[derive(Serialize)]
 pub struct MapDetailJson {
     #[serde(flatten)]
     pub map: MapJson,
     pub code: String,
-    pub my_vote: Option<i64>,
-    pub favourite: bool,
 }
 
 impl MapDetailJson {
-    /// `signed_in`: whether the viewer has an account, which decides if their vote is shown.
+    /// `signed_in`: whether the viewer has an account, which decides if their vote and star are shown.
     pub fn of(d: MapDetail, signed_in: bool) -> MapDetailJson {
-        let my_vote = signed_in.then_some(d.vote);
-        MapDetailJson { map: MapJson::of(&d.map), code: d.code, my_vote, favourite: d.favourite }
+        let mut map = MapJson::of(&d.map);
+        if signed_in {
+            map.my_vote = Some(d.vote);
+            map.favourite = Some(d.favourite);
+        }
+        MapDetailJson { map, code: d.code }
     }
+}
+
+/// Library maps as JSON, with the viewer's vote and star on each when signed in.
+async fn maps_json(hub: &Hub, viewer: Option<i64>, maps: Vec<MapSummary>) -> Result<Vec<MapJson>, Fail> {
+    let mut out: Vec<MapJson> = maps.iter().map(MapJson::of).collect();
+    if let Some(me) = viewer {
+        let ids: Vec<i64> = maps.iter().map(|m| m.id).collect();
+        let marks = db(hub, move |s| s.marks(me, &ids)).await?;
+        for m in &mut out {
+            let (vote, favourite) = marks.get(&m.id).copied().unwrap_or((0, false));
+            m.my_vote = Some(vote);
+            m.favourite = Some(favourite);
+        }
+    }
+    Ok(out)
 }
 
 fn visibility_name(v: Visibility) -> &'static str {
@@ -415,24 +438,25 @@ struct ListQuery {
     page: Option<u32>,
 }
 
-async fn library_list(State(hub): State<Arc<Hub>>, Query(q): Query<ListQuery>) -> Result<Json<Vec<MapJson>>, Fail> {
+async fn library_list(State(hub): State<Arc<Hub>>, headers: HeaderMap, Query(q): Query<ListQuery>) -> Result<Json<Vec<MapJson>>, Fail> {
     let sort = parse_sort(q.sort.as_deref())?;
     let search = q.q.unwrap_or_default();
     let page = q.page.unwrap_or(0);
     let listing = db(&hub, move |s| s.list(sort, &search, page, PAGE_SIZE)).await?;
-    Ok(Json(listing.maps.iter().map(MapJson::of).collect()))
+    let me = viewer(&hub, &headers).await;
+    Ok(Json(maps_json(&hub, me, listing.maps).await?))
 }
 
 async fn library_mine(State(hub): State<Arc<Hub>>, headers: HeaderMap) -> Result<Json<Vec<MapJson>>, Fail> {
     let me = signed_in(&hub, &headers).await?.id;
     let maps = db(&hub, move |s| s.mine(me)).await?;
-    Ok(Json(maps.iter().map(MapJson::of).collect()))
+    Ok(Json(maps_json(&hub, Some(me), maps).await?))
 }
 
 async fn library_favourites(State(hub): State<Arc<Hub>>, headers: HeaderMap) -> Result<Json<Vec<MapJson>>, Fail> {
     let me = signed_in(&hub, &headers).await?.id;
     let maps = db(&hub, move |s| s.favourites(me)).await?;
-    Ok(Json(maps.iter().map(MapJson::of).collect()))
+    Ok(Json(maps_json(&hub, Some(me), maps).await?))
 }
 
 #[derive(Deserialize)]
