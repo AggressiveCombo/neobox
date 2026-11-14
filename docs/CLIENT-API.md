@@ -137,3 +137,38 @@ width `W`, height follows the aspect. Portrait canvases keep height
 centre when spectating), clamped per axis to `[view/2, arena - view/2]`;
 when the arena is smaller than the view on an axis, centre the arena on
 that axis.
+
+## Replays and clips
+
+`nb_replay_export(names, len)` takes a JSON array of `[player id, name]` pairs
+and returns the whole recording as replay JSON text. `nb_replay_clip(names,
+len, max_secs, min_secs)` cuts the last `max_secs` of the recording the same
+way; it returns null when less than `min_secs` of play is recorded. The server
+stores the replay JSON text it is given, after checking it with the same
+parser the replay viewer uses.
+
+`nb_replay_load(json, len)` parses replay JSON (rejects unknown versions),
+`nb_replay_frame(tick, follow)` builds the frame buffer for a tick and
+`nb_replay_close()` releases the replay. The replay viewer loads files
+(gunzipped first when needed) and clips (plain text) through the same path.
+
+Clips are uploaded with `POST /api/clips` `{replay, map_name}` and listed with
+`GET /api/clips?before=<id>` (newest first, 10 per page). `GET /api/clips/<id>`
+returns the replay JSON text. The main menu hands a clip to the replay screen
+with `queueReplay(name, text)`; the screen opens it as soon as it mounts.
+
+## Local games
+
+`nb_local_start(json, len, player)` starts an offline match. The JSON is a
+match start (seed, start tick, tick rate, players as `[id, team]`, settings,
+maps, intro, rotation) plus an optional `dummies` array of `{id, mode}` where
+`mode` is `"idle"` or `"left_even"`. Dummies are ordinary players that take no
+input. `nb_local_frame(dt_ms, mask)` advances the game and `nb_local_end()`
+stops it.
+
+## Training hall
+
+The training hall loads `/training.json`, a map document in the same
+`{name, map}` shape the editor saves, and encodes it with `nb_map_encode`. It
+plays with two dummies and a fixed set of lesson texts. Finishing the lessons
+sets `localStorage["neobox.trainingDone"]`.

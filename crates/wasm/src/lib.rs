@@ -10,6 +10,7 @@ use frame::{FrameBuilder, Meta, SoundOut};
 use neobox_net::{ClientFrame, ClientSession, InputFrame, MatchStart, Replay, ReplayPlayer, ReplayRecorder, ServerFrame, ServerMatch, TickClock};
 use neobox_sim::start::Outcome;
 use neobox_sim::{GameSettings, MapData, State};
+use neobox_sim::input::LEFT;
 use std::cell::RefCell;
 
 /// Most unacknowledged input changes sent per packet (the rest follow in
@@ -62,6 +63,58 @@ struct LocalGame {
     latch: u8,
     last_mask: u8,
     applied: u8,
+    dummies: Vec<Dummy>,
+}
+
+/// A scripted player in an offline game (a training dummy): its input comes
+/// from `mode` each tick instead of from the local player.
+struct Dummy {
+    id: u32,
+    mode: DummyMode,
+    /// the mask last submitted for it
+    applied: u8,
+}
+
+#[derive(Clone, Copy)]
+enum DummyMode {
+    /// Stands still.
+    Idle,
+    /// Holds Left on even ticks and lets go on odd ones.
+    LeftEven,
+}
+
+impl DummyMode {
+    fn mask(self, tick: u32) -> u8 {
+        match self {
+            DummyMode::Idle => 0,
+            DummyMode::LeftEven => {
+                if tick % 2 == 0 {
+                    LEFT
+                } else {
+                    0
+                }
+            }
+        }
+    }
+}
+
+/// The scripted players of a start JSON: `dummies: [{id, mode}]`, `mode`
+/// being "idle" or "left_even". Absent: none.
+fn parse_dummies(text: &[u8]) -> Result<Vec<Dummy>, String> {
+    let v: serde_json::Value = serde_json::from_slice(text).map_err(|e| e.to_string())?;
+    let Some(list) = v.get("dummies") else { return Ok(Vec::new()) };
+    let list = list.as_array().ok_or("dummies must be a list")?;
+    list.iter()
+        .map(|d| {
+            let id = d["id"].as_u64().ok_or("dummy id must be a number")? as u32;
+            let mode = match d["mode"].as_str() {
+                Some("idle") => DummyMode::Idle,
+                Some("left_even") => DummyMode::LeftEven,
+                _ => return Err("dummy mode must be idle or left_even".to_string()),
+            };
+            Ok(Dummy { id, mode, applied: 0 })
+        })
+        .collect()
 }
 
 thread_local! {
@@ -437,6 +490,37 @@ pub unsafe extern "C" fn nb_replay_export(names: u32, len: u32) -> i32 {
 }
 
 /// # Safety
+/// `names`/`len` must describe readable memory.
+///
+/// The last `max_secs` (at least `min_secs`) of the recording of the current
+/// or last online match, as a clip: replay JSON that starts from a state
+/// snapshot, at `nb_out_ptr()`. Returns its length, or 0 when the recording
+/// is too short or empty. `names`: as in [`nb_replay_export`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn nb_replay_clip(names: u32, len: u32, max_secs: f64, min_secs: f64) -> i32 {
+    let text = unsafe { bytes(names, len) };
+    with(|a| {
+        let names: Vec<(u32, String)> = match serde_json::from_slice(text) {
+            Ok(n) => n,
+            Err(e) => return fail(a, e),
+        };
+        let Some(r) = a.recorder.as_ref() else { return 0 };
+        let hz = r.start().tick_hz;
+        if r.is_empty() || (r.len() as f64) < min_secs * hz {
+            return 0;
+        }
+        let max_ticks = (max_secs * hz).round() as u32;
+        match neobox_net::clip(&r.finish(names), max_ticks) {
+            Ok(c) => {
+                a.out = c.to_json().into_bytes();
+                a.out.len() as i32
+            }
+            Err(e) => fail(a, e),
+        }
+    })
+}
+
+/// # Safety
 /// `json`/`len` must describe readable memory.
 ///
 /// Load a replay (its JSON, already decompressed) for watching. Summary JSON
@@ -510,13 +594,17 @@ pub extern "C" fn nb_replay_close() {
 pub unsafe extern "C" fn nb_local_start(json: u32, len: u32, player: u32) -> i32 {
     let text = unsafe { bytes(json, len) };
     with(|a| {
+        let dummies = match parse_dummies(text) {
+            Ok(d) => d,
+            Err(e) => return fail(a, e),
+        };
         let start: MatchStart = match serde_json::from_slice(text) {
             Ok(s) => s,
             Err(e) => return fail(a, e),
         };
         match ServerMatch::new(start) {
             Ok(m) => {
-                a.local = Some(LocalGame { prev: m.state.clone(), m, player, acc: 0.0, seq: 0, latch: 0, last_mask: 0, applied: 0 });
+                a.local = Some(LocalGame { prev: m.state.clone(), m, player, acc: 0.0, seq: 0, latch: 0, last_mask: 0, applied: 0, dummies });
                 0
             }
             Err(e) => fail(a, e),
@@ -542,6 +630,15 @@ pub extern "C" fn nb_local_frame(dt_ms: f64, mask: u32) -> i32 {
             // a key tapped between two ticks still counts for one tick
             let effective = mask | g.latch;
             g.latch = 0;
+            let at = g.m.tick;
+            for d in g.dummies.iter_mut() {
+                let mask = d.mode.mask(at);
+                if mask != d.applied {
+                    let seq = g.m.input_ack(d.id) + 1;
+                    g.m.submit(d.id, &InputFrame { ack: 0, now: at, changes: vec![(seq, at, mask)] });
+                    d.applied = mask;
+                }
+            }
             if effective != g.applied {
                 g.seq += 1;
                 let tick = g.m.tick;
