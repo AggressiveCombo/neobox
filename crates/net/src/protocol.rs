@@ -37,8 +37,19 @@ pub enum ClientMsg {
     Hello { version: u16, name: String },
     ListRooms,
     CreateRoom { name: String, password: Option<String>, max_players: u8, public: bool },
-    JoinRoom { room: String, password: Option<String> },
+    /// Join a room by code. `resume` is the token from an earlier `joined`:
+    /// within the reconnect grace period it gives back the same player slot.
+    JoinRoom {
+        room: String,
+        password: Option<String>,
+        #[serde(default)]
+        resume: Option<String>,
+    },
+    /// Join the fullest public, open, password-less room with space, or
+    /// create one.
+    QuickPlay,
     LeaveRoom,
+    /// Chat line. Lines starting with `/` are commands (`/help` lists them).
     Chat { text: String },
     SetTeam { team: u8 },
     /// Host: load a map (Hitbox map code).
@@ -47,11 +58,21 @@ pub enum ClientMsg {
     SetSetting { key: String, value: String },
     /// Host: reset settings to defaults (keeps the game mode).
     ResetSettings,
-    /// Host: game mode, objective limit, team lock.
+    /// Host: game mode.
     SetMode { mode: i32 },
     Start,
+    /// Host: stop the running match (back to the lobby).
+    EndMatch,
     /// Host: kick or ban a player.
     Kick { player: u32, ban: bool },
+    /// Host: lift a ban (by the banned player's name as listed in `RoomState::bans`).
+    Unban { name: String },
+    /// Host: hand the host role to another player.
+    GiveHost { player: u32 },
+    /// Host: move another player to a team.
+    MovePlayer { player: u32, team: u8 },
+    /// Host: lock teams (players can no longer change their own team).
+    SetLock { locked: bool },
     /// Ask for a full state snapshot (desync recovery).
     Resync,
     /// WebRTC offer (SDP) for the unreliable game data channel.
@@ -67,6 +88,8 @@ pub struct RoomInfo {
     pub password: bool,
     pub in_match: bool,
     pub map: String,
+    /// Game mode (see `GameSettings::game_mode`).
+    pub mode: i32,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
@@ -76,6 +99,11 @@ pub struct PlayerInfo {
     pub team: u8,
     pub ping_ms: u32,
     pub host: bool,
+    /// Signed in: `name` is the account name.
+    pub account: bool,
+    /// False while the player's connection is lost and its slot is held for
+    /// a reconnect.
+    pub connected: bool,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
@@ -89,6 +117,10 @@ pub struct RoomState {
     pub map_name: String,
     pub in_match: bool,
     pub tick_hz: f64,
+    /// Teams locked by the host.
+    pub locked: bool,
+    /// Names of banned players (the host can lift bans).
+    pub bans: Vec<String>,
 }
 
 /// Everything a client needs to reproduce a match deterministically.
@@ -112,8 +144,9 @@ pub struct MatchStart {
 pub enum ServerMsg {
     /// `rtc`: the server accepts WebRTC data channels (`rtc_offer`).
     Welcome { version: u16, server: String, rtc: bool },
-    /// Sent to a player entering a room: its player id there.
-    Joined { you: u32 },
+    /// Sent to a player entering a room: its player id there and the token
+    /// that resumes this slot after a lost connection (`join_room.resume`).
+    Joined { you: u32, token: String },
     Error { code: String, message: String },
     Rooms { rooms: Vec<RoomInfo> },
     Room { room: RoomState },
@@ -122,7 +155,9 @@ pub enum ServerMsg {
     MatchStart { start: MatchStart, you: Option<u32> },
     /// Full state at `tick` (postcard + zlib, base64) for late joiners and
     /// desync recovery. Batches continue from `tick`.
-    Snapshot { start: MatchStart, tick: u32, state: String, you: Option<u32> },
+    /// `held`: input masks players hold at that point (the state does not
+    /// record them; see `ServerMatch::held_masks`).
+    Snapshot { start: MatchStart, tick: u32, state: String, you: Option<u32>, held: Vec<(u32, u8)> },
     MatchEnd { reason: String },
     Kicked { reason: String },
     TickRate { tick_hz: f64 },

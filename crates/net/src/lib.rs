@@ -3,7 +3,9 @@
 //! authority + client prediction/rollback).
 
 pub mod protocol;
+pub mod replay;
 pub mod timeline;
 
 pub use protocol::*;
+pub use replay::*;
 pub use timeline::*;

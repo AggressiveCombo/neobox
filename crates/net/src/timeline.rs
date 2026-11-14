@@ -90,9 +90,20 @@ impl InputLog {
             *o = self.mask_at(p as u32, tick);
         }
     }
+    /// Drop `player`'s changes after `tick`.
+    pub fn cut_after(&mut self, player: u32, tick: u32) {
+        if let Some(c) = self.players.get_mut(player as usize) {
+            let keep = c.partition_point(|e| e.0 <= tick);
+            c.truncate(keep);
+        }
+    }
+    /// Non-zero masks in effect at `tick` (player, mask).
+    pub fn held_at(&self, tick: u32) -> Vec<(u32, u8)> {
+        (0..self.players.len() as u32).map(|p| (p, self.mask_at(p, tick))).filter(|e| e.1 != 0).collect()
+    }
 }
 
-fn to_events(evs: &[TickEvent]) -> Option<Events> {
+pub(crate) fn to_events(evs: &[TickEvent]) -> Option<Events> {
     if evs.is_empty() {
         return None;
     }
@@ -224,7 +235,22 @@ impl ServerMatch {
     /// A player leaves at the current tick.
     pub fn leave(&mut self, player: u32) {
         self.current.events.push(TickEvent::Leave(player));
+        self.neutralize(player);
+    }
+
+    /// From the current tick on, `player` presses nothing (a lost connection
+    /// whose slot is held for a reconnect); inputs already stamped for later
+    /// ticks are dropped.
+    pub fn neutralize(&mut self, player: u32) {
         self.inputs.record(player, self.tick, 0);
+        self.inputs.cut_after(player, self.tick);
+    }
+
+    /// A player's new connection numbers its input changes from scratch.
+    pub fn reset_input_seq(&mut self, player: u32) {
+        if let Some(s) = self.input_seqs.get_mut(player as usize) {
+            *s = 0;
+        }
     }
 
     /// Simulate the current tick. Returns the confirmed data of that tick.
@@ -258,8 +284,16 @@ impl ServerMatch {
         checksum(&self.state)
     }
 
+    /// Compressed state at `self.tick`. Send it with [`ServerMatch::held_masks`]:
+    /// the state does not say which keys players are holding.
     pub fn snapshot(&self) -> Vec<u8> {
         encode_state(&self.state)
+    }
+
+    /// Input masks in effect just before the current tick (player, mask);
+    /// changes from the current tick on travel in batches.
+    pub fn held_masks(&self) -> Vec<(u32, u8)> {
+        if self.tick == 0 { Vec::new() } else { self.inputs.held_at(self.tick - 1) }
     }
 
     /// Current input mask of every player (for the admin view).
@@ -315,12 +349,17 @@ impl ClientSession {
         Ok(Self::with_state(start, local, maps, gs, state, tick))
     }
 
-    /// Join a running match from a snapshot of the state at `tick`.
-    pub fn from_snapshot(start: MatchStart, local: Option<u32>, tick: u32, snapshot: &[u8]) -> Result<ClientSession, MatchError> {
+    /// Join a running match from a snapshot of the state at `tick` and the
+    /// masks players held then ([`ServerMatch::held_masks`]).
+    pub fn from_snapshot(start: MatchStart, local: Option<u32>, tick: u32, snapshot: &[u8], held: &[(u32, u8)]) -> Result<ClientSession, MatchError> {
         let maps = load_maps(&start)?;
         let gs = start.settings.clone();
         let state = decode_state(snapshot)?;
-        Ok(Self::with_state(start, local, maps, gs, state, tick))
+        let mut s = Self::with_state(start, local, maps, gs, state, tick);
+        for &(p, m) in held {
+            s.inputs.record(p, tick.saturating_sub(1), m);
+        }
+        Ok(s)
     }
 
     fn with_state(start: MatchStart, local: Option<u32>, maps: Vec<State>, gs: GameSettings, state: State, tick: u32) -> ClientSession {
