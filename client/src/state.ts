@@ -3,7 +3,7 @@
 import type { RoomInfo, RoomState } from "./protocol";
 import type { NetStatus, Transport } from "./net";
 
-export type Screen = "menu" | "about" | "browse" | "room" | "match";
+export type Screen = "menu" | "about" | "browse" | "room" | "match" | "replay" | "practice" | "settings" | "account" | "friends" | "library" | "editor";
 
 export interface ChatLine {
   /** null = server/system message. */
@@ -25,9 +25,16 @@ export interface Stats {
   fps: number;
 }
 
+/** The signed-in account (from GET /api/account/me), or null for guests. */
+export interface Account {
+  id: number;
+  name: string;
+}
+
 export interface AppState {
   screen: Screen;
   name: string;
+  account: Account | null;
   myId: number | null;
   serverName: string;
   connection: NetStatus;
@@ -44,6 +51,14 @@ export interface AppState {
   /** Stats overlay (F3) and scoreboard (Tab held) visibility. Toggled by app.ts from keys. */
   showStats: boolean;
   showScores: boolean;
+  /** A finished online match can be saved as a replay (cleared when a match starts or the room is left). */
+  replayReady: boolean;
+  /** The connection dropped while in a room; retrying with the room's resume token. */
+  reconnecting: boolean;
+  /** Action to run after the next welcome (menu "Quick play"). */
+  intent: "quick" | null;
+  /** Room code that needs a password (invite link or a join that was refused). */
+  invite: string | null;
 }
 
 export type Listener<T> = (state: T, prev: T) => void;
@@ -67,11 +82,14 @@ export class Store<T extends object> {
 
 export const CHAT_LIMIT = 200;
 export const NAME_STORAGE_KEY = "neobox.name";
+/** sessionStorage: this tab's room seat `{ room, token }`, so a reload resumes it. */
+export const SEAT_STORAGE_KEY = "neobox.seat";
 
 export function initialState(): AppState {
   return {
     screen: "menu",
     name: "",
+    account: null,
     myId: null,
     serverName: "",
     connection: "closed",
@@ -84,5 +102,9 @@ export function initialState(): AppState {
     stats: { transport: "ws", pingMs: -1, rttMs: 0, predDepth: 0, rollbacksPerSec: 0, fps: 0 },
     showStats: false,
     showScores: false,
+    replayReady: false,
+    reconnecting: false,
+    intent: null,
+    invite: null,
   };
 }

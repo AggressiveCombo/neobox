@@ -10,7 +10,8 @@ export type Transport = "udp" | "ws";
 export interface NetHandlers {
   onMessage(msg: ServerMsg): void;
   onBinary(data: Uint8Array): void;
-  onStatus(status: NetStatus, detail?: string): void;
+  /** `unexpected`: the socket closed without close() being called (network drop or server close). */
+  onStatus(status: NetStatus, detail?: string, unexpected?: boolean): void;
 }
 
 interface Rtc {
@@ -66,7 +67,7 @@ export class Net {
       if (this.ws !== ws) return;
       this.ws = null;
       this.dropRtc();
-      this.setStatus("closed", ev.reason || (ev.wasClean ? undefined : "connection lost"));
+      this.setStatus("closed", ev.reason || (ev.wasClean ? undefined : "connection lost"), true);
     };
     ws.onerror = () => {
       // onclose follows; it carries the reason.
@@ -84,7 +85,7 @@ export class Net {
     if (dc?.readyState === "open") {
       dc.send(data as Uint8Array<ArrayBuffer>); // WASM memory is never SharedArrayBuffer
     } else if (this.ws?.readyState === WebSocket.OPEN) {
-      this.ws.send(data);
+      this.ws.send(data as Uint8Array<ArrayBuffer>); // WASM memory is never SharedArrayBuffer
     }
   }
 
@@ -151,9 +152,9 @@ export class Net {
     cur.pc.close();
   }
 
-  private setStatus(status: NetStatus, detail?: string): void {
+  private setStatus(status: NetStatus, detail?: string, unexpected = false): void {
     this.status = status;
-    this.handlers.onStatus(status, detail);
+    this.handlers.onStatus(status, detail, unexpected);
   }
 }
 

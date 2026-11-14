@@ -1,17 +1,13 @@
 // The match loop: one animation frame drives the engine, sends its outgoing
-// frame, and hands the built scene to the renderer, overlay, sounds and HUD.
+// frame, and presents the built scene (renderer, overlay, sounds) and HUD.
 // Ping and stats are timed from frame timestamps, so no timers need clearing.
 
-import { computeCamera, findLocal } from "./camera";
-import type { Sfx } from "./audio";
-import type { HudHandle } from "./ctx";
+import type { HudHandle, Present } from "./ctx";
 import type { Engine } from "./engine";
-import { readScene, type Scene } from "./frame";
+import type { Scene } from "./frame";
 import type { Input } from "./input";
 import type { Net } from "./net";
 import type { MatchStart } from "./protocol";
-import type { Renderer } from "./render";
-import type { Overlay } from "./render/overlay";
 import type { AppState, Store } from "./state";
 
 /** Ping frame period, ms. */
@@ -25,11 +21,8 @@ export interface LoopDeps {
   engine: Engine;
   input: Input;
   net: Net;
-  sfx: Sfx;
   store: Store<AppState>;
-  overlay: Overlay;
-  /** The renderer, or null while it is still starting (the match is simulated, not drawn). */
-  renderer(): Renderer | null;
+  present: Present;
   /** The mounted HUD, or null when another screen is shown. */
   hud(): HudHandle | null;
   /** Player id to display name, for overlay labels. */
@@ -38,10 +31,11 @@ export interface LoopDeps {
   onError(message: string): void;
 }
 
-/** A decoded snapshot: the tick it was taken at and the engine state bytes. */
+/** A decoded snapshot: the tick it was taken at, the engine state bytes and the masks players held. */
 export interface SnapshotBytes {
   tick: number;
   bytes: Uint8Array;
+  held: [number, number][];
 }
 
 export class MatchLoop {
@@ -59,7 +53,7 @@ export class MatchLoop {
   /** Start the engine session (fresh, or from a snapshot) and the frame loop. Throws on engine errors. */
   begin(start: MatchStart, local: number, snap: SnapshotBytes | null): void {
     const now = performance.now();
-    if (snap) this.d.engine.matchSnapshot(start, local, snap.tick, snap.bytes, now);
+    if (snap) this.d.engine.matchSnapshot(start, snap.held, local, snap.tick, snap.bytes, now);
     else this.d.engine.matchStart(start, local, now);
     this.running = true;
     this.lastPing = now;
@@ -106,14 +100,9 @@ export class MatchLoop {
       net.sendBinary(engine.ping(now));
     }
 
-    const fb = engine.framebuffer();
-    if (fb) {
-      const scene = readScene(fb);
+    const scene = this.d.present(this.d.names(), this.d.store.state.tickHz);
+    if (scene) {
       this.lastScene = scene;
-      const cam = computeCamera(scene, window.innerWidth, window.innerHeight, findLocal(scene));
-      this.d.renderer()?.draw(scene, cam);
-      this.d.overlay.draw(scene, cam, this.d.names(), this.d.store.state.tickHz);
-      for (const s of scene.sounds) this.d.sfx.play(s.kind, s.volume);
       this.d.hud()?.onFrame(scene);
     }
 

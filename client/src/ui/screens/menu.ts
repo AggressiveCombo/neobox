@@ -1,9 +1,11 @@
-// Main menu: name entry, Play (connect and show the room browser), About,
-// connection status after a Play attempt, credit line and links.
+// Main menu: name entry (fixed to the account name when signed in), Play (show the
+// room browser), Quick play (join or create a room straight away), and links to the
+// offline screens, settings and about. Status text follows the connection after a try.
 
 import type { ScreenFactory } from "../../ctx";
 import { MAX_NAME_LEN, NAME_RE } from "../../protocol";
-import { NAME_STORAGE_KEY, type AppState } from "../../state";
+import type { AppState } from "../../state";
+import { NAME_STORAGE_KEY } from "../../state";
 import { h } from "../dom";
 import { logoImg } from "../logo";
 import { CREDIT_LINE, LICENSE_URL, REPO_URL } from "./about";
@@ -41,7 +43,10 @@ export const menuScreen: ScreenFactory = (ctx) => {
 
   const status = h("p", { class: "status", role: "status", "aria-live": "polite" });
 
-  const initialName = store.state.name || readStoredName();
+  // Signed-in accounts play under their account name, which cannot be edited here.
+  const account = store.state.account;
+  const initialName = account?.name ?? (store.state.name || readStoredName());
+
   const nameInput = h("input", {
     type: "text",
     placeholder: "name",
@@ -50,38 +55,55 @@ export const menuScreen: ScreenFactory = (ctx) => {
     spellcheck: "false",
     "aria-label": "name",
     value: initialName,
+    readonly: account !== null,
     oninput: () => {
-      playBtn.disabled = !NAME_RE.test(sanitizeName(nameInput.value));
+      sync();
     },
   });
 
-  const playBtn = h("button", {
-    type: "submit",
-    class: "primary",
-    disabled: !NAME_RE.test(sanitizeName(initialName)),
-  }, "Play");
+  const playBtn = h("button", { type: "submit", class: "primary" }, "Play");
+  const quickBtn = h("button", { type: "button", onclick: () => go(true) }, "Quick play");
+  const accountBtn = h(
+    "button",
+    { type: "button", class: "menu-account", onclick: () => store.set({ screen: "account" }) },
+    account ? "Account" : "Sign in",
+  );
+  /** Enable the buttons only when the name is valid. */
+  function sync(): void {
+    const valid = NAME_RE.test(sanitizeName(nameInput.value));
+    playBtn.disabled = !valid;
+    quickBtn.disabled = !valid;
+  }
 
-  function onPlay(e: Event): void {
-    e.preventDefault();
+  /** Connect with the name; `quick` joins or makes a room as soon as the server welcomes us. */
+  function go(quick: boolean): void {
     const name = sanitizeName(nameInput.value);
     if (!NAME_RE.test(name)) return;
     nameInput.value = name;
     writeStoredName(name);
     attempted = true;
-    store.set({ name });
+    store.set({ name, intent: quick ? "quick" : null });
     ctx.play(name);
   }
 
+  sync();
+
   const form = h(
     "form",
-    { class: "menu-form", onsubmit: onPlay },
-    h("label", { class: "field" }, h("span", { class: "field-label" }, "Name"), nameInput),
+    {
+      class: "menu-form",
+      onsubmit: (e: Event) => {
+        e.preventDefault();
+        go(false);
+      },
+    },
     h(
-      "div",
-      { class: "actions" },
-      playBtn,
-      h("button", { type: "button", onclick: () => store.set({ screen: "about" }) }, "About"),
+      "label",
+      { class: "field" },
+      h("span", { class: "field-label" }, account ? "Signed in as" : "Name"),
+      nameInput,
     ),
+    h("div", { class: "actions" }, playBtn, quickBtn),
   );
 
   const el = h(
@@ -93,6 +115,18 @@ export const menuScreen: ScreenFactory = (ctx) => {
       h("header", { class: "brand" }, logoImg(64), h("h1", { class: "wordmark" }, "neobox")),
       form,
       status,
+      h(
+        "nav",
+        { class: "menu-links", "aria-label": "more" },
+        h("button", { type: "button", onclick: () => store.set({ screen: "library" }) }, "Library"),
+        h("button", { type: "button", onclick: () => store.set({ screen: "friends" }) }, "Friends"),
+        h("button", { type: "button", onclick: () => store.set({ screen: "practice" }) }, "Practice"),
+        h("button", { type: "button", onclick: () => store.set({ screen: "replay" }) }, "Replay"),
+        h("button", { type: "button", onclick: () => store.set({ screen: "editor" }) }, "Map editor"),
+        h("button", { type: "button", onclick: () => store.set({ screen: "settings" }) }, "Settings"),
+        h("button", { type: "button", onclick: () => store.set({ screen: "about" }) }, "About"),
+        accountBtn,
+      ),
       h("p", { class: "credit" }, CREDIT_LINE),
       h(
         "footer",
@@ -108,6 +142,12 @@ export const menuScreen: ScreenFactory = (ctx) => {
     el,
     update(state) {
       status.textContent = attempted ? statusText(state) : "";
+      accountBtn.textContent = state.account ? "Account" : "Sign in";
+      if (state.account) {
+        nameInput.value = state.account.name;
+        nameInput.readOnly = true;
+        sync();
+      }
     },
     destroy() {
       el.remove();

@@ -22,7 +22,8 @@ export type ClientMsg =
   | { t: "hello"; version: number; name: string }
   | { t: "list_rooms" }
   | { t: "create_room"; name: string; password: string | null; max_players: number; public: boolean }
-  | { t: "join_room"; room: string; password: string | null }
+  | { t: "join_room"; room: string; password: string | null; resume?: string | null }
+  | { t: "quick_play" }
   | { t: "leave_room" }
   | { t: "chat"; text: string }
   | { t: "set_team"; team: number }
@@ -31,7 +32,12 @@ export type ClientMsg =
   | { t: "reset_settings" }
   | { t: "set_mode"; mode: number }
   | { t: "start" }
+  | { t: "end_match" }
   | { t: "kick"; player: number; ban: boolean }
+  | { t: "unban"; name: string }
+  | { t: "give_host"; player: number }
+  | { t: "move_player"; player: number; team: number }
+  | { t: "set_lock"; locked: boolean }
   | { t: "resync" }
   | { t: "rtc_offer"; sdp: string };
 
@@ -43,6 +49,7 @@ export interface RoomInfo {
   password: boolean;
   in_match: boolean;
   map: string;
+  mode: number;
 }
 
 export interface PlayerInfo {
@@ -51,6 +58,10 @@ export interface PlayerInfo {
   team: number;
   ping_ms: number;
   host: boolean;
+  /** Signed in: `name` is the account name. */
+  account: boolean;
+  /** False while the slot is held for a reconnect. */
+  connected: boolean;
 }
 
 /** GameSettings serialises to an object keyed by Rust field names. */
@@ -66,6 +77,8 @@ export interface RoomState {
   map_name: string;
   in_match: boolean;
   tick_hz: number;
+  locked: boolean;
+  bans: string[];
 }
 
 export interface MatchStart {
@@ -82,7 +95,7 @@ export interface MatchStart {
 
 export type ServerMsg =
   | { t: "welcome"; version: number; server: string; rtc: boolean }
-  | { t: "joined"; you: number }
+  | { t: "joined"; you: number; token: string }
   | { t: "rtc_answer"; sdp: string }
   | { t: "error"; code: string; message: string }
   | { t: "rooms"; rooms: RoomInfo[] }
@@ -90,7 +103,7 @@ export type ServerMsg =
   | { t: "left" }
   | { t: "chat"; from: number | null; name: string; text: string }
   | { t: "match_start"; start: MatchStart; you: number | null }
-  | { t: "snapshot"; start: MatchStart; tick: number; state: string; you: number | null }
+  | { t: "snapshot"; start: MatchStart; tick: number; state: string; you: number | null; held: [number, number][] }
   | { t: "match_end"; reason: string }
   | { t: "kicked"; reason: string }
   | { t: "tick_rate"; tick_hz: number };

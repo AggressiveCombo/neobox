@@ -14,6 +14,8 @@ export interface NeoboxExports {
   nb_match_snapshot(
     json: number,
     jsonLen: number,
+    held: number,
+    heldLen: number,
     local: number,
     tick: number,
     snap: number,
@@ -30,6 +32,14 @@ export interface NeoboxExports {
   nb_map_preview(code: number, codeLen: number): number;
   nb_map_encode(json: number, jsonLen: number): number;
   nb_rtt(): number;
+  nb_map_decode(code: number, codeLen: number): number;
+  nb_replay_export(names: number, namesLen: number): number;
+  nb_replay_load(json: number, jsonLen: number): number;
+  nb_replay_frame(tickF: number, follow: number): number;
+  nb_replay_close(): void;
+  nb_local_start(json: number, jsonLen: number, player: number): number;
+  nb_local_frame(dtMs: number, mask: number): number;
+  nb_local_end(): void;
 }
 
 /** A loaded module: the exports plus the memory they operate on. */
@@ -96,13 +106,16 @@ export class Engine {
     }
   }
 
-  matchSnapshot(start: MatchStart, local: number, tick: number, snap: Uint8Array, nowMs: number): void {
+  /** Join from a `snapshot` message; `held` is its `held` array. */
+  matchSnapshot(start: MatchStart, held: [number, number][], local: number, tick: number, snap: Uint8Array, nowMs: number): void {
     const json = this.alloc(this.enc.encode(JSON.stringify(start)));
+    const h = this.alloc(this.enc.encode(JSON.stringify(held)));
     const s = this.alloc(snap);
     try {
-      this.check(this.x.nb_match_snapshot(json.ptr, json.len, local, tick, s.ptr, s.len, nowMs));
+      this.check(this.x.nb_match_snapshot(json.ptr, json.len, h.ptr, h.len, local, tick, s.ptr, s.len, nowMs));
     } finally {
       this.free(json);
+      this.free(h);
       this.free(s);
     }
   }
@@ -177,15 +190,80 @@ export class Engine {
 
   /** Compact map JSON into a map code. */
   mapEncode(json: string): string {
-    const b = this.alloc(this.enc.encode(json));
+    return this.textCall(json, (p, n) => this.x.nb_map_encode(p, n));
+  }
+
+  /** Map code into its compact JSON text (what the editor edits). */
+  mapDecode(code: string): string {
+    return this.textCall(code, (p, n) => this.x.nb_map_decode(p, n));
+  }
+
+  /**
+   * The recording of the current or last online match as replay JSON, or
+   * null when nothing was recorded. `names`: [player id, name] pairs.
+   */
+  replayExport(names: [number, string][]): string | null {
+    const text = this.textCall(JSON.stringify(names), (p, n) => this.x.nb_replay_export(p, n));
+    return text === "" ? null : text;
+  }
+
+  /** Load a replay (decompressed JSON text) for watching. */
+  replayLoad(json: string): ReplayInfo {
+    return JSON.parse(this.textCall(json, (p, n) => this.x.nb_replay_load(p, n))) as ReplayInfo;
+  }
+
+  /** Build the replay frame at fractional tick `tickF`, following player `follow` (-1 none). */
+  replayFrame(tickF: number, follow: number): void {
+    this.check(this.x.nb_replay_frame(tickF, follow));
+  }
+
+  replayClose(): void {
+    this.x.nb_replay_close();
+  }
+
+  /** Start an offline game (practice, editor test-play) as player `player` of `start.players`. */
+  localStart(start: MatchStart, player: number): void {
+    const b = this.alloc(this.enc.encode(JSON.stringify(start)));
     try {
-      const n = this.x.nb_map_encode(b.ptr, b.len);
+      this.check(this.x.nb_local_start(b.ptr, b.len, player));
+    } finally {
+      this.free(b);
+    }
+  }
+
+  /** Advance the offline game by `dtMs` with input `mask` and build its frame; true once the game is over. */
+  localFrame(dtMs: number, mask: number): boolean {
+    const rc = this.x.nb_local_frame(dtMs, mask);
+    this.check(rc);
+    return rc === 1;
+  }
+
+  localEnd(): void {
+    this.x.nb_local_end();
+  }
+
+  /** Pass `text` in, read the text result at nb_out_ptr (the export returns its length or < 0). */
+  private textCall(text: string, call: (ptr: number, len: number) => number): string {
+    const b = this.alloc(this.enc.encode(text));
+    try {
+      const n = call(b.ptr, b.len);
       this.check(n);
       return this.dec.decode(this.bytes().subarray(this.x.nb_out_ptr(), this.x.nb_out_ptr() + n));
     } finally {
       this.free(b);
     }
   }
+}
+
+/** Summary of a loaded replay. */
+export interface ReplayInfo {
+  /** First and one-past-last tick. */
+  first: number;
+  end: number;
+  hz: number;
+  names: [number, string][];
+  /** [player id, team] at the start of the match. */
+  players: [number, number][];
 }
 
 const EMPTY = new Uint8Array(0);

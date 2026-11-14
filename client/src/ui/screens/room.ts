@@ -1,4 +1,4 @@
-// Room lobby: header, notice, players and team actions, mode, map, settings and chat.
+// Room lobby: header, notice, players and team actions, mode, map, host manage, settings and chat.
 // Room-derived sections rebuild only when the inputs they read change, so settings
 // inputs and draft text survive unrelated room updates.
 
@@ -19,6 +19,8 @@ import type { PlayerInfo, RoomState } from "../../protocol";
 import { SETTINGS, formatValue, normalizeInput, readOnlyKeys } from "../../settings";
 import type { SettingDef } from "../../settings";
 import { drawMapPreview } from "../../render/preview";
+import { openLibraryPicker } from "../library-picker";
+import { playMap } from "../../account";
 
 interface TeamAction {
   label: string;
@@ -35,6 +37,9 @@ const TEAM_ACTIONS_FFA: readonly TeamAction[] = [
   { label: "Join", team: TEAM_FFA },
   { label: "Spectate", team: TEAM_SPECTATOR },
 ];
+
+/** Chat lines remembered for Up/Down recall. */
+const SENT_LIMIT = 50;
 
 function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
@@ -80,6 +85,17 @@ function keyed(slot: HTMLElement, build: () => Node[]): (key: string) => void {
   };
 }
 
+/** Compress a replay JSON document with gzip (the .nbreplay file format). */
+async function gzipText(text: string): Promise<Blob> {
+  const stream = new Blob([text]).stream().pipeThrough(new CompressionStream("gzip"));
+  return new Response(stream).blob();
+}
+
+/** Link to a room for sharing: the server serves `/CODE` as an invite. */
+function inviteUrl(code: string): string {
+  return `${location.origin}/${code}`;
+}
+
 export const roomScreen: ScreenFactory = (ctx: AppCtx) => {
   let st: AppState = ctx.store.state;
   let alive = true;
@@ -87,6 +103,12 @@ export const roomScreen: ScreenFactory = (ctx: AppCtx) => {
   let mapsError: string | null = null;
   let lastMapName: string | null = null;
   let drawnCode: string | null = null;
+  let closeLibrary: (() => void) | null = null;
+
+  /** Chat messages sent from this screen, oldest first; `historyAt` is -1 when not recalling. */
+  const sentHistory: string[] = [];
+  let historyAt = -1;
+  let draft = "";
 
   const isHost = (): boolean => st.room !== null && st.room.players.some((p) => p.id === st.myId && p.host);
 
@@ -94,6 +116,21 @@ export const roomScreen: ScreenFactory = (ctx: AppCtx) => {
   const leave = (): void => ctx.send({ t: "leave_room" });
   const kick = (player: number, ban: boolean): void => {
     if (isHost()) ctx.send({ t: "kick", player, ban });
+  };
+  const giveHost = (player: number): void => {
+    if (isHost()) ctx.send({ t: "give_host", player });
+  };
+  const moveTo = (player: number, team: number): void => {
+    if (isHost()) ctx.send({ t: "move_player", player, team });
+  };
+  const setLock = (locked: boolean): void => {
+    if (isHost()) ctx.send({ t: "set_lock", locked });
+  };
+  const endMatch = (): void => {
+    if (isHost()) ctx.send({ t: "end_match" });
+  };
+  const unban = (name: string): void => {
+    if (isHost()) ctx.send({ t: "unban", name });
   };
   const start = (): void => {
     if (isHost()) ctx.send({ t: "start" });
@@ -107,12 +144,85 @@ export const roomScreen: ScreenFactory = (ctx: AppCtx) => {
   const setSetting = (def: SettingDef, raw: string): void => {
     if (isHost()) ctx.send({ t: "set_setting", key: def.label, value: normalizeInput(def.kind, raw) });
   };
+
+  const toastError = (err: unknown): void => ctx.toast(errorMessage(err), "error");
+
+  /** Share the invite link: the system share sheet when there is one, else copy to the clipboard. */
+  async function shareInvite(): Promise<void> {
+    const room = st.room;
+    if (room === null) return;
+    const url = inviteUrl(room.code);
+    if (typeof navigator.share === "function") {
+      try {
+        await navigator.share({ title: room.name, text: `Join ${room.name} on neobox`, url });
+        return;
+      } catch (err: unknown) {
+        if (err instanceof DOMException && err.name === "AbortError") return;
+      }
+    }
+    try {
+      await navigator.clipboard.writeText(url);
+      ctx.toast("Invite link copied.");
+    } catch {
+      ctx.toast(url);
+    }
+  }
+
+  /** Save the last finished match as a .nbreplay download. */
+  async function saveReplay(): Promise<void> {
+    const room = st.room;
+    if (room === null) return;
+    const eng = await ctx.engine();
+    const json = eng.replayExport(room.players.map((p): [number, string] => [p.id, p.name]));
+    if (json === null) {
+      ctx.toast("no finished match to save", "error");
+      return;
+    }
+    const blob = await gzipText(json);
+    const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+    const url = URL.createObjectURL(blob);
+    const link = h("a", { href: url, download: `${room.code}-${stamp}.nbreplay` });
+    document.body.append(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 10_000);
+  }
+
   const sendChat = (): void => {
     const text = chatInput.value.trim();
     if (text === "") return;
     ctx.send({ t: "chat", text });
+    sentHistory.push(text);
+    if (sentHistory.length > SENT_LIMIT) sentHistory.shift();
+    historyAt = -1;
     chatInput.value = "";
   };
+
+  /** Enter sends; Up/Down recall earlier messages and return to the draft. */
+  function chatKey(e: KeyboardEvent): void {
+    if (e.isComposing) return;
+    if (e.key === "Enter") {
+      sendChat();
+    } else if (e.key === "ArrowUp" && sentHistory.length > 0) {
+      e.preventDefault();
+      if (historyAt === -1) {
+        draft = chatInput.value;
+        historyAt = sentHistory.length - 1;
+      } else {
+        historyAt = Math.max(0, historyAt - 1);
+      }
+      chatInput.value = sentHistory[historyAt] ?? "";
+    } else if (e.key === "ArrowDown" && historyAt !== -1) {
+      e.preventDefault();
+      if (historyAt < sentHistory.length - 1) {
+        historyAt += 1;
+        chatInput.value = sentHistory[historyAt] ?? "";
+      } else {
+        historyAt = -1;
+        chatInput.value = draft;
+      }
+    }
+  }
 
   // Map handling.
   /** Draws the preview of `code`; false (and a toast) when the engine rejects it. */
@@ -166,6 +276,15 @@ export const roomScreen: ScreenFactory = (ctx: AppCtx) => {
     submitMapText(text);
   }
 
+  /** Pick a map from the library: the room shows its library name, and the library counts the play. */
+  function openLibrary(): void {
+    closeLibrary?.();
+    closeLibrary = openLibraryPicker(ctx, (m) => {
+      closeLibrary = null;
+      if (chooseMap(m.code, m.name)) void playMap(m.id).catch(() => {});
+    });
+  }
+
   /** Previews the built-in map matching the room's current map name (visible to everyone). */
   function previewRoomMap(): void {
     const map = builtins?.find((m) => m.name === lastMapName);
@@ -204,7 +323,7 @@ export const roomScreen: ScreenFactory = (ctx: AppCtx) => {
 
   const modeBody = h("div", { class: "room-mode-body" });
   const renderMode = keyed(modeBody, buildMode);
-  const modePanel = h("section", { class: "room-panel room-mode" }, h("h2", { class: "room-panel-title" }, "Mode"), modeBody);
+  const modePanel = h("section", { class: "room-panel room-mode-panel" }, h("h2", { class: "room-panel-title" }, "Mode"), modeBody);
 
   const mapName = h("p", { class: "room-map-name" });
   const mapCanvas = h("canvas", {
@@ -249,10 +368,15 @@ export const roomScreen: ScreenFactory = (ctx: AppCtx) => {
         },
         "Use code",
       ),
+      h("button", { type: "button", class: "room-btn", onclick: openLibrary }, "Library"),
       h("label", { class: "room-file" }, "Load file", fileInput),
     ),
   );
-  const mapPanel = h("section", { class: "room-panel room-map" }, h("h2", { class: "room-panel-title" }, "Map"), mapName, mapCanvas, mapControls);
+  const mapPanel = h("section", { class: "room-panel room-map-panel" }, h("h2", { class: "room-panel-title" }, "Map"), mapName, mapCanvas, mapControls);
+
+  const manageBody = h("div", { class: "room-manage-body" });
+  const renderManage = keyed(manageBody, buildManage);
+  const managePanel = h("section", { class: "room-panel room-manage" }, h("h2", { class: "room-panel-title" }, "Manage"), manageBody);
 
   const settingsBody = h("div", { class: "room-settings-body" });
   const renderSettings = keyed(settingsBody, buildSettings);
@@ -266,7 +390,7 @@ export const roomScreen: ScreenFactory = (ctx: AppCtx) => {
     placeholder: "message",
     "aria-label": "Chat message",
     onkeydown: (e) => {
-      if (e instanceof KeyboardEvent && e.key === "Enter" && !e.isComposing) sendChat();
+      if (e instanceof KeyboardEvent) chatKey(e);
     },
   });
   const chatPanel = h(
@@ -286,7 +410,7 @@ export const roomScreen: ScreenFactory = (ctx: AppCtx) => {
     "div",
     { class: "room-main" },
     h("div", { class: "room-col" }, playersPanel, modePanel, mapPanel),
-    h("div", { class: "room-col" }, chatPanel, settingsPanel),
+    h("div", { class: "room-col" }, chatPanel, managePanel, settingsPanel),
   );
   const root = h("div", { class: "room-screen" }, header, notice, main);
 
@@ -298,7 +422,19 @@ export const roomScreen: ScreenFactory = (ctx: AppCtx) => {
         "div",
         { class: "room-heading" },
         h("h1", { class: "room-title" }, room.name),
-        h("button", { type: "button", class: "room-btn", onclick: leave }, "Leave"),
+        h(
+          "div",
+          { class: "room-heading-actions" },
+          h("button", { type: "button", class: "room-btn", onclick: () => void shareInvite() }, "Invite"),
+          st.replayReady
+            ? h(
+                "button",
+                { type: "button", class: "room-btn", onclick: () => void saveReplay().catch(toastError) },
+                "Save replay",
+              )
+            : null,
+          h("button", { type: "button", class: "room-btn", onclick: leave }, "Leave"),
+        ),
       ),
       h(
         "dl",
@@ -311,7 +447,23 @@ export const roomScreen: ScreenFactory = (ctx: AppCtx) => {
     ];
   }
 
-  function playerRow(p: PlayerInfo, host: boolean): HTMLElement {
+  /** Team picker for one player (host only): the team columns this mode uses. */
+  function teamSelect(p: PlayerInfo, teams: boolean): HTMLSelectElement {
+    const current = columnOf(p, teams);
+    const actions = teams ? TEAM_ACTIONS_TEAMS : TEAM_ACTIONS_FFA;
+    const select: HTMLSelectElement = h(
+      "select",
+      {
+        class: "room-team-select",
+        "aria-label": `team for ${p.name}`,
+        onchange: () => moveTo(p.id, Number(select.value)),
+      },
+      actions.map((a) => h("option", { value: String(a.team), selected: a.team === current }, a.label)),
+    );
+    return select;
+  }
+
+  function playerRow(p: PlayerInfo, host: boolean, teams: boolean): HTMLElement {
     const isMe = p.id === st.myId;
     const ping = p.ping_ms >= 0 ? `${p.ping_ms} ms` : "-";
     return h(
@@ -320,11 +472,15 @@ export const roomScreen: ScreenFactory = (ctx: AppCtx) => {
       h("span", { class: "room-player-name" }, p.name),
       isMe ? h("span", { class: "room-you" }, "you") : null,
       p.host ? h("span", { class: "room-host", title: "room host" }, "host") : null,
+      p.account ? h("span", { class: "room-badge is-verified", title: "signed-in account" }, "verified") : null,
+      p.connected ? null : h("span", { class: "room-badge is-offline", title: "reconnecting" }, "offline"),
       h("span", { class: "room-ping" }, ping),
       host && !isMe
         ? h(
             "span",
             { class: "room-player-actions" },
+            teamSelect(p, teams),
+            h("button", { type: "button", class: "room-btn room-btn-small", onclick: () => giveHost(p.id) }, "Make host"),
             h("button", { type: "button", class: "room-btn room-btn-small", onclick: () => kick(p.id, false) }, "Kick"),
             h("button", { type: "button", class: "room-btn room-btn-small room-btn-danger", onclick: () => kick(p.id, true) }, "Ban"),
           )
@@ -362,7 +518,7 @@ export const roomScreen: ScreenFactory = (ctx: AppCtx) => {
             h("h3", { class: "room-column-title" }, `${col.title} (${members.length})`),
             members.length === 0
               ? h("p", { class: "room-muted" }, "none")
-              : h("ul", { class: "room-list" }, members.map((p) => playerRow(p, host))),
+              : h("ul", { class: "room-list" }, members.map((p) => playerRow(p, host, teams))),
           );
         }),
       ),
@@ -405,19 +561,68 @@ export const roomScreen: ScreenFactory = (ctx: AppCtx) => {
     if (room === null) return [];
     const mode = roomMode(room);
     if (!isHost()) return [h("p", { class: "room-mode-name" }, modeName(mode))];
-    const select = h(
-      "select",
-      {
-        class: "room-mode-select",
-        "aria-label": "Game mode",
-        onchange: () => {
-          if (select.value !== "") setMode(Number(select.value));
-        },
-      },
-      mode === null ? h("option", { value: "", disabled: true, selected: true }, "mode") : null,
-      GAME_MODES.map((m) => h("option", { value: String(m.id), selected: m.id === mode }, m.name)),
-    );
-    return [select];
+    return [
+      h(
+        "div",
+        { class: "room-actions room-mode-buttons" },
+        GAME_MODES.map((m) => {
+          const current = m.id === mode;
+          return h(
+            "button",
+            {
+              type: "button",
+              class: current ? "room-btn is-current" : "room-btn",
+              "aria-pressed": current ? "true" : "false",
+              onclick: () => setMode(m.id),
+            },
+            m.name,
+          );
+        }),
+      ),
+    ];
+  }
+
+  /** Host-only room controls: team lock, end the running match, and the ban list. */
+  function buildManage(): Node[] {
+    const room = st.room;
+    if (room === null || !isHost()) return [];
+    return [
+      h(
+        "div",
+        { class: "room-actions" },
+        h(
+          "button",
+          {
+            type: "button",
+            class: room.locked ? "room-btn is-current" : "room-btn",
+            "aria-pressed": room.locked ? "true" : "false",
+            onclick: () => setLock(!room.locked),
+          },
+          room.locked ? "Unlock teams" : "Lock teams",
+        ),
+        h(
+          "button",
+          { type: "button", class: "room-btn room-btn-danger", disabled: !room.in_match, onclick: endMatch },
+          "End match",
+        ),
+      ),
+      h("p", { class: "room-muted" }, room.locked ? "Players cannot change team." : "Players can change team."),
+      h("h3", { class: "room-subtitle" }, "Bans"),
+      room.bans.length === 0
+        ? h("p", { class: "room-muted" }, "No bans.")
+        : h(
+            "ul",
+            { class: "room-list room-bans" },
+            room.bans.map((name) =>
+              h(
+                "li",
+                { class: "room-ban" },
+                h("span", { class: "room-player-name" }, name),
+                h("button", { type: "button", class: "room-btn room-btn-small", onclick: () => unban(name) }, "Unban"),
+              ),
+            ),
+          ),
+    ];
   }
 
   function settingRow(def: SettingDef, value: unknown, host: boolean): HTMLElement {
@@ -512,6 +717,8 @@ export const roomScreen: ScreenFactory = (ctx: AppCtx) => {
     renderMode(`${host}|${mode}`);
     mapName.textContent = room.map_name;
     mapControls.hidden = !host;
+    managePanel.hidden = !host;
+    renderManage(`${host}|${room.locked}|${room.in_match}|${room.bans.join("\n")}`);
     // Map buttons carry no input state, so rebuilding them on every room render is safe.
     mapList.replaceChildren(...buildMapList());
     renderSettings(`${host}|${JSON.stringify(room.settings)}`);
@@ -543,11 +750,20 @@ export const roomScreen: ScreenFactory = (ctx: AppCtx) => {
     el: root,
     update(next, prev) {
       st = next;
-      if (next.room !== prev.room || next.myId !== prev.myId || next.inMatch !== prev.inMatch) renderRoom();
+      if (
+        next.room !== prev.room ||
+        next.myId !== prev.myId ||
+        next.inMatch !== prev.inMatch ||
+        next.replayReady !== prev.replayReady
+      ) {
+        renderRoom();
+      }
       if (next.chat !== prev.chat) renderChat();
     },
     destroy() {
       alive = false;
+      closeLibrary?.();
+      closeLibrary = null;
     },
   };
 };

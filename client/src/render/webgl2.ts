@@ -5,7 +5,8 @@ import type { Camera } from "../camera";
 import { worldXf } from "../camera";
 import type { Scene } from "../frame";
 import type { Renderer } from "./index";
-import { Geometry, IDENTITY_XF, VERTEX_BYTES, type Span, type Xf } from "./geometry";
+import { prefs } from "../prefs";
+import { Geometry, IDENTITY_XF, VERTEX_BYTES, scaledSize, type Span, type Xf } from "./geometry";
 
 const POS_LOCATION = 0;
 const COLOUR_LOCATION = 1;
@@ -32,12 +33,13 @@ void main() {
 }
 `;
 
-/** Create a WebGL2 renderer on `canvas`. Throws when WebGL2 or its shaders are unavailable. */
-export function createWebGl2Renderer(canvas: HTMLCanvasElement, onLost: () => void): Renderer {
+/** Create a WebGL2 renderer on `canvas`. Throws when WebGL2 or its shaders are unavailable. MSAA follows `antialias` when the browser offers it. */
+export function createWebGl2Renderer(canvas: HTMLCanvasElement, onLost: () => void, antialias: boolean): Renderer {
   // Multisampled default framebuffer when the browser offers it (the driver picks the count, typically 4).
+  const attrs = { alpha: false, depth: false, stencil: false };
   const gl =
-    canvas.getContext("webgl2", { antialias: true, alpha: false, depth: false, stencil: false }) ??
-    canvas.getContext("webgl2", { antialias: false, alpha: false, depth: false, stencil: false });
+    canvas.getContext("webgl2", { ...attrs, antialias }) ??
+    (antialias ? canvas.getContext("webgl2", { ...attrs, antialias: false }) : null);
   if (!gl) throw new Error("WebGL2 not available");
   return new WebGl2Renderer(canvas, gl, onLost);
 }
@@ -51,6 +53,9 @@ class WebGl2Renderer implements Renderer {
   private readonly uXf: WebGLUniformLocation | null;
   private vboBytes = INITIAL_BYTES;
   private alive = true;
+  /** Last requested device-pixel size (before the renderScale pref). */
+  private size: [number, number] = [1, 1];
+  private readonly unsubPrefs: () => void;
 
   private readonly onContextLost = (event: Event): void => {
     event.preventDefault();
@@ -82,6 +87,7 @@ class WebGl2Renderer implements Renderer {
     gl.clearColor(0, 0, 0, 1);
 
     canvas.addEventListener("webglcontextlost", this.onContextLost);
+    this.unsubPrefs = prefs.subscribe(() => this.applySize());
   }
 
   draw(scene: Scene, cam: Camera): void {
@@ -97,8 +103,14 @@ class WebGl2Renderer implements Renderer {
   }
 
   resize(widthPx: number, heightPx: number): void {
-    const w = Math.max(1, Math.round(widthPx));
-    const h = Math.max(1, Math.round(heightPx));
+    this.size = [widthPx, heightPx];
+    this.applySize();
+  }
+
+  /** Apply the requested size scaled by renderScale; re-applied live when that pref changes. */
+  private applySize(): void {
+    const [w, h] = scaledSize(this.size[0], this.size[1]);
+    if (w === this.canvas.width && h === this.canvas.height) return;
     this.canvas.width = w;
     this.canvas.height = h;
     this.gl.viewport(0, 0, w, h);
@@ -106,6 +118,7 @@ class WebGl2Renderer implements Renderer {
 
   destroy(): void {
     this.alive = false;
+    this.unsubPrefs();
     this.canvas.removeEventListener("webglcontextlost", this.onContextLost);
     const { gl } = this;
     gl.deleteBuffer(this.vbo);

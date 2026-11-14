@@ -14,6 +14,7 @@ const VOICES: Record<number, Voice> = {
   2: { type: "sine", f0: 520, f1: 780, dur: 0.1, gain: 0.25 },
   3: { type: "square", f0: 180, f1: 140, dur: 0.06, gain: 0.12 },
   4: { type: "triangle", f0: 260, f1: 200, dur: 0.04, gain: 0.1 },
+  5: { type: "square", f0: 1400, f1: 700, dur: 0.03, gain: 0.1 },
   6: { type: "sawtooth", f0: 120, f1: 60, dur: 0.1, gain: 0.2 },
   7: { type: "sawtooth", f0: 140, f1: 80, dur: 0.09, gain: 0.18 },
   8: { type: "sine", f0: 1200, f1: 900, dur: 0.2, gain: 0.2 },
@@ -28,7 +29,12 @@ const VOICES: Record<number, Voice> = {
   17: { type: "sawtooth", f0: 60, f1: 30, dur: 0.5, gain: 0.35 },
   18: { type: "triangle", f0: 500, f1: 400, dur: 0.3, gain: 0.15 },
   19: { type: "sine", f0: 900, f1: 900, dur: 0.12, gain: 0.08 },
+  20: { type: "triangle", f0: 523, f1: 784, dur: 0.5, gain: 0.2 },
 };
+
+/** Chat pop: not a sound kind, so it has its own rate-limit key (kinds are never negative). */
+const CHAT_POP: Voice = { type: "sine", f0: 880, f1: 1320, dur: 0.05, gain: 0.12 };
+const CHAT_KEY = -1;
 
 const MIN_GAP_MS = 35;
 
@@ -51,13 +57,22 @@ export class Sfx {
 
   /** Play a sound kind at a volume (0..1). Repeats of one kind are rate-limited. */
   play(kind: number, volume: number): void {
-    const ctx = this.ctx;
     const v = VOICES[kind];
-    if (!ctx || !v || this.muted || ctx.state !== "running") return;
+    if (v) this.tone(kind, v, volume);
+  }
+
+  /** Short pop for a chat line from another player. */
+  chatPop(): void {
+    this.tone(CHAT_KEY, CHAT_POP, 1);
+  }
+
+  private tone(key: number, v: Voice, volume: number): void {
+    const ctx = this.ctx;
+    if (!ctx || this.muted || ctx.state !== "running") return;
     const now = performance.now();
-    const last = this.lastPlayed.get(kind) ?? -Infinity;
+    const last = this.lastPlayed.get(key) ?? -Infinity;
     if (now - last < MIN_GAP_MS) return;
-    this.lastPlayed.set(kind, now);
+    this.lastPlayed.set(key, now);
 
     const t = ctx.currentTime;
     const osc = ctx.createOscillator();

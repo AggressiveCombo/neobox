@@ -5,10 +5,13 @@ import type { BuiltinMap } from "./api";
 import type { Input } from "./input";
 import type { ClientMsg } from "./protocol";
 import type { Sfx } from "./audio";
-import type { FrameView } from "./engine";
+import type { Engine, FrameView } from "./engine";
 import type { Scene } from "./frame";
 import type { AppState, Store } from "./state";
 import type { Net } from "./net";
+
+/** Draws the engine's current frame (renderer, overlay labels, sounds); null when it is empty. */
+export type Present = (names: ReadonlyMap<number, string>, tickHz: number) => Scene | null;
 
 /** Engine helpers usable without a running match (map picker). */
 export interface WasmTools {
@@ -24,12 +27,18 @@ export interface AppCtx {
   readonly input: Input;
   readonly sfx: Sfx;
   readonly wasm: WasmTools;
+  /** The game engine (resolves once loaded; replays, local games, editor). */
+  engine(): Promise<Engine>;
+  /** Draw whatever frame the engine built last. Screens with a game view call it every animation frame. */
+  readonly present: Present;
   /** Send a JSON control message (dropped silently when disconnected). */
   send(msg: ClientMsg): void;
   /** Short message at the bottom of the screen. */
   toast(text: string, kind?: "info" | "error"): void;
   /** Connect if needed, say hello with `name`, then show the room browser. */
   play(name: string): void;
+  /** Join a room by code (connects with the saved name first, or asks for a name on the menu). */
+  joinRoom(code: string): void;
   /** Close the connection and return to the main menu. */
   disconnect(): void;
   /** Built-in maps from /api/maps (cached). */

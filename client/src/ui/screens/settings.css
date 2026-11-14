@@ -1,0 +1,265 @@
+/* Settings screen. Panels and buttons come from style.css. */
+
+.settings-screen {
+  gap: 12px;
+  padding-bottom: 24px;
+}
+
+.settings-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.settings-heading {
+  font-size: 20px;
+  font-weight: 600;
+}
+
+.settings-back {
+  min-width: 44px;
+}
+
+.settings-hint {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.settings-sub {
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.settings-legend {
+  color: var(--muted);
+  font-size: 13px;
+  padding: 0;
+  margin-bottom: 6px;
+}
+
+.settings-notice {
+  min-height: 1.4em;
+  font-size: 14px;
+  color: var(--muted);
+}
+
+.settings-notice.is-error {
+  color: var(--danger);
+}
+
+.settings-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.settings-field-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  font-size: 15px;
+}
+
+.settings-value {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.settings-range {
+  width: 100%;
+  min-height: 40px;
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+.settings-check {
+  align-items: flex-start;
+}
+
+.settings-check-body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.settings-check-body small {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+/* Controls */
+
+.bind-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.bind-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--border);
+}
+
+.bind-row:last-child {
+  border-bottom: 0;
+}
+
+.bind-label {
+  font-size: 15px;
+}
+
+.bind-keys {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.bind-key {
+  display: inline-flex;
+  align-items: center;
+}
+
+.bind-slot {
+  min-width: 96px;
+  border-radius: 6px 0 0 6px;
+  font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  font-size: 14px;
+}
+
+.bind-remove {
+  min-width: 40px;
+  padding: 8px 10px;
+  border-radius: 0 6px 6px 0;
+  margin-left: -1px;
+  color: var(--muted);
+}
+
+.bind-add,
+.bind-cancel {
+  font-size: 14px;
+}
+
+.bind-none {
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.bind-slot.is-capturing,
+.bind-add.is-capturing {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.bind-conflict {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--danger);
+  border-radius: var(--radius);
+  font-size: 14px;
+}
+
+.settings-pad {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 6px 14px;
+  margin: 0;
+  font-size: 14px;
+}
+
+.settings-pad dt {
+  color: var(--text);
+}
+
+.settings-pad dd {
+  margin: 0;
+  color: var(--muted);
+}
+
+/* Accessibility: palette choice with team and FFA swatches */
+
+.palette-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.palette-option {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  cursor: pointer;
+}
+
+.palette-option:has(input:checked) {
+  border-color: var(--accent);
+}
+
+.palette-option input {
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  flex: none;
+  accent-color: var(--accent);
+}
+
+.palette-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.palette-name {
+  font-size: 15px;
+}
+
+.palette-swatches {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+}
+
+.swatch {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 1px solid var(--border-strong);
+}
+
+.swatch-gap {
+  width: 6px;
+}
+
+@media (max-width: 600px) {
+  .bind-slot {
+    min-height: 44px;
+  }
+
+  .bind-remove,
+  .bind-add,
+  .bind-cancel {
+    min-height: 44px;
+  }
+
+  .settings-range {
+    min-height: 44px;
+  }
+}

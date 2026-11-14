@@ -398,3 +398,54 @@
     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   }
 }
+
+.room-heading-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.room-badge {
+  flex: none;
+  padding: 1px 7px;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.room-badge.is-verified {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.room-badge.is-offline {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+.room-team-select {
+  min-height: 32px;
+  max-width: 100%;
+  padding: 4px 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  background: var(--surface-2);
+  color: var(--text);
+  font: inherit;
+}
+
+.room-map-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.room-ban {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}

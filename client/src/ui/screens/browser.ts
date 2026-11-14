@@ -1,8 +1,10 @@
-// Room browser: server name header, room list (click to join; locked rooms
-// reveal an inline password field), and the create-room form.
+// Room browser: server name header, quick play, join by room code, an invite
+// password prompt (for links and refused joins), the room list (click to join;
+// locked rooms reveal an inline password field) and the create-room form.
 
 import type { ScreenFactory } from "../../ctx";
 import {
+  GAME_MODES,
   MAX_ROOM_NAME_LEN,
   ROOM_MAX_PLAYERS,
   ROOM_MIN_PLAYERS,
@@ -12,6 +14,8 @@ import { clear, h } from "../dom";
 
 const SVG_NS = "http://www.w3.org/2000/svg";
 const DEFAULT_MAX_PLAYERS = 8;
+/** Room codes: 6 characters from the server's alphabet (no I, O, 0 or 1). */
+const ROOM_CODE_RE = /^[A-HJ-NP-Z2-9]{6}$/;
 
 function lockIcon(): SVGSVGElement {
   const svg = document.createElementNS(SVG_NS, "svg");
@@ -37,6 +41,10 @@ function lockIcon(): SVGSVGElement {
   return svg;
 }
 
+function modeName(mode: number): string {
+  return GAME_MODES.find((m) => m.id === mode)?.name ?? "Unknown";
+}
+
 export const browserScreen: ScreenFactory = (ctx) => {
   const { store } = ctx;
 
@@ -48,6 +56,36 @@ export const browserScreen: ScreenFactory = (ctx) => {
 
   const roomList = h("ul", { class: "room-list", "aria-label": "rooms" });
   const emptyHint = h("p", { class: "empty-hint" }, "No rooms yet. Create one below, or press Refresh.");
+
+  const codeInput = h("input", {
+    type: "text",
+    placeholder: "room code",
+    maxlength: 6,
+    autocapitalize: "characters",
+    autocomplete: "off",
+    spellcheck: "false",
+    "aria-label": "room code",
+    oninput: () => {
+      codeInput.value = codeInput.value.toUpperCase().replace(/[^A-Z0-9]/g, "");
+      codeJoin.disabled = !ROOM_CODE_RE.test(codeInput.value);
+    },
+  });
+  const codeJoin = h("button", { type: "submit", disabled: true }, "Join");
+  const codeForm = h(
+    "form",
+    {
+      class: "code-join",
+      onsubmit: (e: Event) => {
+        e.preventDefault();
+        if (!ROOM_CODE_RE.test(codeInput.value)) return;
+        ctx.joinRoom(codeInput.value);
+      },
+    },
+    codeInput,
+    codeJoin,
+  );
+
+  const inviteSlot = h("div", { class: "invite-slot" });
 
   const roomName = h("input", {
     type: "text",
@@ -113,6 +151,44 @@ export const browserScreen: ScreenFactory = (ctx) => {
     h("div", { class: "actions" }, h("button", { type: "submit", class: "primary" }, "Create room")),
   );
 
+  /** Password prompt for a room the server refused without one (invite link or a join that failed). */
+  function inviteForm(code: string): HTMLFormElement {
+    const input = h("input", {
+      type: "password",
+      placeholder: "password",
+      autocomplete: "off",
+      "aria-label": `password for room ${code}`,
+      oninput: () => {
+        join.disabled = input.value === "";
+      },
+    });
+    const join = h("button", { type: "submit", class: "primary", disabled: true }, "Join");
+    return h(
+      "form",
+      {
+        class: "panel invite-form",
+        onsubmit: (e: Event) => {
+          e.preventDefault();
+          if (input.value === "") return;
+          ctx.send({ t: "join_room", room: code, password: input.value });
+        },
+      },
+      h("h2", null, `Room ${code} needs a password`),
+      h("label", { class: "field" }, h("span", { class: "field-label" }, "Password"), input),
+      h(
+        "div",
+        { class: "actions" },
+        join,
+        h("button", { type: "button", onclick: () => store.set({ invite: null }) }, "Cancel"),
+      ),
+    );
+  }
+
+  function renderInvite(code: string | null): void {
+    clear(inviteSlot);
+    if (code !== null) inviteSlot.appendChild(inviteForm(code));
+  }
+
   function joinForm(room: RoomInfo): HTMLFormElement {
     const input = h("input", {
       type: "password",
@@ -148,7 +224,7 @@ export const browserScreen: ScreenFactory = (ctx) => {
       return;
     }
     pendingCode = null;
-    ctx.send({ t: "join_room", room: room.code, password: null });
+    ctx.joinRoom(room.code);
   }
 
   function roomItem(room: RoomInfo): HTMLLIElement {
@@ -161,10 +237,10 @@ export const browserScreen: ScreenFactory = (ctx) => {
         "aria-expanded": room.password ? String(open) : null,
         onclick: () => onRoomClick(room),
       },
-      h("span", { class: "room-name" }, room.name),
+      h("span", { class: "room-name" }, room.name, room.password ? lockIcon() : null),
+      h("span", { class: "room-mode" }, modeName(room.mode)),
       h("span", { class: "room-map" }, room.map),
       h("span", { class: "room-count" }, `${room.players}/${room.max_players}`),
-      room.password ? lockIcon() : null,
       room.in_match ? h("span", { class: "badge" }, "in match") : null,
     );
     return h("li", { class: "room-item" }, row, open ? joinForm(room) : null);
@@ -190,11 +266,42 @@ export const browserScreen: ScreenFactory = (ctx) => {
         h("button", { type: "button", onclick: () => ctx.disconnect() }, "Back"),
       ),
     ),
-    h("section", { class: "panel room-browser" }, h("h2", null, "Rooms"), roomList, emptyHint),
+    h(
+      "section",
+      { class: "panel quick" },
+      h(
+        "div",
+        { class: "quick-row" },
+        h(
+          "button",
+          { type: "button", class: "primary", onclick: () => ctx.send({ t: "quick_play" }) },
+          "Quick play",
+        ),
+        codeForm,
+      ),
+      h("p", { class: "hint" }, "Quick play joins an open room, or makes a new one."),
+    ),
+    inviteSlot,
+    h(
+      "section",
+      { class: "panel room-browser" },
+      h("h2", null, "Rooms"),
+      h(
+        "div",
+        { class: "room-head", "aria-hidden": "true" },
+        h("span", null, "Room"),
+        h("span", null, "Mode"),
+        h("span", null, "Map"),
+        h("span", null, "Players"),
+      ),
+      roomList,
+      emptyHint,
+    ),
     createForm,
   );
 
   renderRooms();
+  renderInvite(store.state.invite);
 
   return {
     el,
@@ -204,6 +311,7 @@ export const browserScreen: ScreenFactory = (ctx) => {
         rooms = state.rooms;
         renderRooms();
       }
+      if (state.invite !== prev.invite) renderInvite(state.invite);
     },
     destroy() {
       el.remove();

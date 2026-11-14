@@ -1,6 +1,6 @@
 // Decodes the frame buffer header and records (docs/CLIENT-API.md "Frame buffer").
-// Layout: little-endian words; header words 0..29; world verts (3 words), players
-// (12 words), sounds (5 words), score rows (8 words).
+// Layout: little-endian words; header words 0..31; world verts (3 words), players
+// (11 words), sounds (5 words), score rows (13 words), kill pairs (2 words).
 
 import type { FrameView } from "./engine";
 
@@ -12,6 +12,7 @@ export const FLAG_BAT = 16;
 export const FLAG_PUSHING = 32;
 export const FLAG_DASH = 64;
 export const FLAG_TELEPORT = 128;
+export const FLAG_GROUNDED = 256;
 
 export interface PlayerRec {
   id: number;
@@ -25,7 +26,6 @@ export interface PlayerRec {
   size: number;
   health: number;
   aim: number;
-  ability: number;
 }
 
 export interface ScoreRow {
@@ -37,6 +37,19 @@ export interface ScoreRow {
   alive: boolean;
   respawn: number;
   eliminated: number;
+  /** Player id of the last attacker; -1 none. */
+  killedBy: number;
+  /** Player id of the last victim; -1 none. */
+  lastVictim: number;
+  killTimer: number;
+  deathTimer: number;
+  suicideTimer: number;
+}
+
+/** A kill that happened since the previous frame. */
+export interface KillRec {
+  killer: number;
+  victim: number;
 }
 
 export interface SoundRec {
@@ -75,6 +88,7 @@ export interface Scene {
   players: PlayerRec[];
   sounds: SoundRec[];
   scores: ScoreRow[];
+  kills: KillRec[];
   /** Word offset of the world vertex block (for zero-copy geometry). */
   view: FrameView;
 }
@@ -87,10 +101,12 @@ export function readScene(fb: FrameView): Scene {
   const soundOff = u32[6] ?? 0;
   const rowCount = u32[7] ?? 0;
   const rowOff = u32[8] ?? 0;
+  const killCount = u32[30] ?? 0;
+  const killOff = u32[31] ?? 0;
 
   const players: PlayerRec[] = [];
   for (let i = 0; i < playerCount; i++) {
-    const o = playerOff + i * 12;
+    const o = playerOff + i * 11;
     players.push({
       id: u32[o] ?? 0,
       x: f32[o + 1] ?? 0,
@@ -103,7 +119,6 @@ export function readScene(fb: FrameView): Scene {
       size: f32[o + 8] ?? 0,
       health: f32[o + 9] ?? 0,
       aim: f32[o + 10] ?? 0,
-      ability: u32[o + 11] ?? 0,
     });
   }
 
@@ -121,7 +136,7 @@ export function readScene(fb: FrameView): Scene {
 
   const scores: ScoreRow[] = [];
   for (let i = 0; i < rowCount; i++) {
-    const o = rowOff + i * 8;
+    const o = rowOff + i * 13;
     scores.push({
       id: u32[o] ?? 0,
       team: u32[o + 1] ?? 0,
@@ -131,7 +146,18 @@ export function readScene(fb: FrameView): Scene {
       alive: (u32[o + 5] ?? 0) !== 0,
       respawn: f32[o + 6] ?? 0,
       eliminated: f32[o + 7] ?? 0,
+      killedBy: i32[o + 8] ?? -1,
+      lastVictim: i32[o + 9] ?? -1,
+      killTimer: f32[o + 10] ?? 0,
+      deathTimer: f32[o + 11] ?? 0,
+      suicideTimer: f32[o + 12] ?? 0,
     });
+  }
+
+  const kills: KillRec[] = [];
+  for (let i = 0; i < killCount; i++) {
+    const o = killOff + i * 2;
+    kills.push({ killer: u32[o] ?? 0, victim: u32[o + 1] ?? 0 });
   }
 
   return {
@@ -162,6 +188,7 @@ export function readScene(fb: FrameView): Scene {
     players,
     sounds,
     scores,
+    kills,
     view: fb,
   };
 }

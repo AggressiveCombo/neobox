@@ -1,0 +1,129 @@
+// Player preferences: controls, audio, graphics, accessibility. Stored in
+// localStorage; signed-in players also sync them to their account (the
+// server stores the JSON as-is). Every module reads `prefs.value` and
+// subscribes for changes; only the settings screen writes.
+
+export type Action = "left" | "right" | "up" | "down" | "push" | "rocket" | "bat" | "grab";
+
+export const ACTIONS: { action: Action; label: string; bit: number }[] = [
+  { action: "left", label: "Left", bit: 1 },
+  { action: "right", label: "Right", bit: 2 },
+  { action: "up", label: "Jump", bit: 4 },
+  { action: "down", label: "Down", bit: 8 },
+  { action: "push", label: "Force push", bit: 16 },
+  { action: "rocket", label: "Rocket", bit: 32 },
+  { action: "bat", label: "Bat", bit: 64 },
+  { action: "grab", label: "Grab", bit: 128 },
+];
+
+/** Keys per action, by `KeyboardEvent.code` (up to 3 each). */
+export type KeyBindings = Record<Action, string[]>;
+
+export const DEFAULT_KEYS: KeyBindings = {
+  left: ["ArrowLeft", "KeyA"],
+  right: ["ArrowRight", "KeyD"],
+  up: ["ArrowUp", "KeyW", "Space"],
+  down: ["ArrowDown", "KeyS"],
+  push: ["KeyX"],
+  rocket: ["KeyZ"],
+  bat: ["KeyC"],
+  grab: ["KeyV"],
+};
+
+/** Team/player colour sets: "default", or palettes that stay distinct for colour-blind players. */
+export type Palette = "default" | "deuteranopia" | "protanopia" | "tritanopia";
+
+export interface Prefs {
+  keys: KeyBindings;
+  /** 0..1 */
+  volume: number;
+  muted: boolean;
+  /** Rendering resolution relative to the screen (0.5..1); lower is faster on weak devices. */
+  renderScale: number;
+  /** Multisample anti-aliasing. */
+  antialias: boolean;
+  palette: Palette;
+  /** Size multiplier of the on-screen touch controls (0.7..1.5). */
+  touchScale: number;
+  /** Swap the touch stick to the right and buttons to the left. */
+  touchLeftHanded: boolean;
+  /** Show ping/FPS/rollback numbers (same as F3). */
+  showStats: boolean;
+}
+
+export const DEFAULT_PREFS: Prefs = {
+  keys: DEFAULT_KEYS,
+  volume: 0.6,
+  muted: false,
+  renderScale: 1,
+  antialias: true,
+  palette: "default",
+  touchScale: 1,
+  touchLeftHanded: false,
+  showStats: false,
+};
+
+const STORAGE_KEY = "neobox.prefs";
+
+type PrefsListener = (next: Prefs, prev: Prefs) => void;
+
+function clamp(v: unknown, lo: number, hi: number, dflt: number): number {
+  return typeof v === "number" && Number.isFinite(v) ? Math.min(hi, Math.max(lo, v)) : dflt;
+}
+
+/** Accept anything (old versions, hand-edited storage, server copies) and return valid prefs. */
+export function sanitizePrefs(raw: unknown): Prefs {
+  const o = typeof raw === "object" && raw !== null ? (raw as Record<string, unknown>) : {};
+  const keysIn = typeof o.keys === "object" && o.keys !== null ? (o.keys as Record<string, unknown>) : {};
+  const keys = { ...DEFAULT_KEYS };
+  for (const { action } of ACTIONS) {
+    const v = keysIn[action];
+    if (Array.isArray(v)) keys[action] = v.filter((k): k is string => typeof k === "string" && k.length <= 32).slice(0, 3);
+  }
+  const palettes: Palette[] = ["default", "deuteranopia", "protanopia", "tritanopia"];
+  return {
+    keys,
+    volume: clamp(o.volume, 0, 1, DEFAULT_PREFS.volume),
+    muted: typeof o.muted === "boolean" ? o.muted : DEFAULT_PREFS.muted,
+    renderScale: clamp(o.renderScale, 0.5, 1, DEFAULT_PREFS.renderScale),
+    antialias: typeof o.antialias === "boolean" ? o.antialias : DEFAULT_PREFS.antialias,
+    palette: palettes.includes(o.palette as Palette) ? (o.palette as Palette) : DEFAULT_PREFS.palette,
+    touchScale: clamp(o.touchScale, 0.7, 1.5, DEFAULT_PREFS.touchScale),
+    touchLeftHanded: typeof o.touchLeftHanded === "boolean" ? o.touchLeftHanded : DEFAULT_PREFS.touchLeftHanded,
+    showStats: typeof o.showStats === "boolean" ? o.showStats : DEFAULT_PREFS.showStats,
+  };
+}
+
+class PrefsStore {
+  value: Prefs;
+  private listeners = new Set<PrefsListener>();
+
+  constructor() {
+    let stored: unknown = null;
+    try {
+      stored = JSON.parse(window.localStorage.getItem(STORAGE_KEY) ?? "null");
+    } catch {
+      stored = null;
+    }
+    this.value = sanitizePrefs(stored);
+  }
+
+  /** Replace some preferences, persist, notify. */
+  set(patch: Partial<Prefs>): void {
+    const prev = this.value;
+    this.value = sanitizePrefs({ ...prev, ...patch });
+    try {
+      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(this.value));
+    } catch {
+      // storage full or blocked (private mode): keep the session copy
+    }
+    for (const fn of this.listeners) fn(this.value, prev);
+  }
+
+  subscribe(fn: PrefsListener): () => void {
+    this.listeners.add(fn);
+    return () => this.listeners.delete(fn);
+  }
+}
+
+export const prefs = new PrefsStore();

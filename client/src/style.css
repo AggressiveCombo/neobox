@@ -1,5 +1,9 @@
 @import "./ui/screens/room.css";
 @import "./ui/screens/hud.css";
+@import "./ui/screens/settings.css";
+@import "./ui/screens/social.css";
+@import "./ui/screens/offline.css";
+@import "./ui/screens/editor.css";
 
 :root {
   color-scheme: dark;
@@ -474,4 +478,137 @@ button:disabled {
     transition-duration: 0.001ms !important;
     scroll-behavior: auto !important;
   }
+}
+
+/* Browser extras: quick play, code join, invite, room table head */
+.quick-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.quick-row > button {
+  flex: none;
+}
+
+.code-join {
+  display: flex;
+  flex: 1 1 14rem;
+  gap: 8px;
+  min-width: 0;
+}
+
+.code-join input {
+  flex: 1;
+  min-width: 0;
+}
+
+.code-join button {
+  flex: none;
+}
+
+.invite-form {
+  border-color: var(--accent);
+}
+
+.room-head {
+  display: flex;
+  gap: 8px;
+  padding: 0 14px;
+  color: var(--muted);
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.room-head span:nth-child(1) {
+  flex: 1;
+  min-width: 0;
+}
+
+.room-head span:nth-child(2) {
+  flex: 0 0 6rem;
+}
+
+.room-head span:nth-child(3) {
+  flex: 0 0 8rem;
+}
+
+.room-head span:nth-child(4) {
+  flex: 0 0 3.5rem;
+  text-align: right;
+}
+
+.room-row .room-mode,
+.room-row .room-map {
+  flex: 0 1 8rem;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.room-row .room-mode {
+  flex-basis: 6rem;
+}
+
+.room-row .room-count {
+  flex: 0 0 3.5rem;
+  text-align: right;
+}
+
+@media (max-width: 600px) {
+  .room-head {
+    display: none;
+  }
+
+  .room-row {
+    flex-wrap: wrap;
+  }
+
+  .room-row .room-name {
+    flex-basis: 100%;
+  }
+}
+
+/* Menu: account button and secondary links */
+.menu-links {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.menu-links button {
+  width: 100%;
+}
+
+.menu-account {
+  font-weight: 600;
+}
+
+/* Shown over every screen while the connection to a room is being restored */
+.reconnect-banner {
+  position: fixed;
+  top: 12px;
+  left: 50%;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  max-width: calc(100% - 24px);
+  padding: 8px 12px;
+  transform: translateX(-50%);
+  border: 1px solid var(--danger);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--text);
+  font-size: 14px;
+}
+
+.reconnect-banner button {
+  min-height: 32px;
+  padding: 4px 10px;
 }

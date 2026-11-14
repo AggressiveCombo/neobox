@@ -4,8 +4,9 @@
 // shrink, so steady-state frames allocate nothing here.
 
 import type { PlayerRec, Scene } from "../frame";
-import { FLAG_BAT, FLAG_DASH, FLAG_FROZEN, FLAG_GHOST, FLAG_LOCAL, FLAG_PUSHING, FLAG_ROCKET_AIM } from "../frame";
+import { FLAG_BAT, FLAG_DASH, FLAG_FROZEN, FLAG_GHOST, FLAG_GROUNDED, FLAG_LOCAL, FLAG_PUSHING, FLAG_ROCKET_AIM } from "../frame";
 import { TEAM_BLUE, TEAM_RED, TEAM_SPECTATOR } from "../protocol";
+import { prefs, type Palette } from "../prefs";
 
 /** Bytes per vertex. */
 export const VERTEX_BYTES = 12;
@@ -25,11 +26,18 @@ export interface Span {
   count: number;
 }
 
-const FFA_PALETTE = [0x9be15d, 0xffc857, 0xc792ea, 0x4fd1c5, 0xff8fab, 0xf6e05e, 0x7f9cf5, 0xf28c28];
-const RED_RGB = 0xff5252;
-const BLUE_RGB = 0x4d9bff;
+/** Okabe-Ito colours: told apart under the common colour-vision deficiencies. */
+const OKABE_ITO = [0xe69f00, 0x56b4e9, 0x009e73, 0xf0e442, 0xcc79a7, 0xbbbbbb, 0xffffff, 0x0072b2];
+/** Team and FFA colours per palette pref (FFA is indexed by player id). */
+export const PALETTES: Record<Palette, { red: number; blue: number; ffa: readonly number[] }> = {
+  default: { red: 0xff5252, blue: 0x4d9bff, ffa: [0x9be15d, 0xffc857, 0xc792ea, 0x4fd1c5, 0xff8fab, 0xf6e05e, 0x7f9cf5, 0xf28c28] },
+  deuteranopia: { red: 0xd55e00, blue: 0x0072b2, ffa: OKABE_ITO },
+  protanopia: { red: 0xd55e00, blue: 0x0072b2, ffa: OKABE_ITO },
+  tritanopia: { red: 0xd55e00, blue: 0xcc79a7, ffa: [0xe69f00, 0xd55e00, 0xcc79a7, 0xbbbbbb, 0xffffff, 0xff7f9f, 0xf0e442, 0xb0b0ff] },
+};
 const ICE_RGB = 0xbfe9ff;
 const WHITE_RGB = 0xffffff;
+const AIRBORNE_RGB = 0x8a8f99;
 const GHOST_ALPHA = 0.35;
 const AIM_ALPHA = 0.75;
 const MARKER_ALPHA = 0.9;
@@ -42,11 +50,18 @@ const MARKER_GAP = 0.15;
 const MARKER_HEIGHT = 0.35;
 const MARKER_HALF_WIDTH = 0.2;
 
-/** Team colour (red, blue) or the per-id FFA palette colour, as 0xRRGGBB. */
+/** Backing-store size for a device-pixel request, scaled by the renderScale pref. */
+export function scaledSize(widthPx: number, heightPx: number): [number, number] {
+  const s = prefs.value.renderScale;
+  return [Math.max(1, Math.round(widthPx * s)), Math.max(1, Math.round(heightPx * s))];
+}
+
+/** Team colour (red, blue) or the per-id FFA colour, from the palette pref, as 0xRRGGBB. */
 export function playerRgb(team: number, id: number): number {
-  if (team === TEAM_RED) return RED_RGB;
-  if (team === TEAM_BLUE) return BLUE_RGB;
-  return FFA_PALETTE[id % FFA_PALETTE.length];
+  const c = PALETTES[prefs.value.palette];
+  if (team === TEAM_RED) return c.red;
+  if (team === TEAM_BLUE) return c.blue;
+  return c.ffa[id % c.ffa.length];
 }
 
 /** Linear blend of two 0xRRGGBB colours. */
@@ -211,7 +226,7 @@ export class Geometry {
     const baseY = p.y - size / 2 - size * MARKER_GAP;
     const tipY = baseY - size * MARKER_HEIGHT;
     const hw = size * MARKER_HALF_WIDTH;
-    const colour = packRgba(WHITE_RGB, MARKER_ALPHA);
+    const colour = packRgba((p.flags & FLAG_GROUNDED) !== 0 ? WHITE_RGB : AIRBORNE_RGB, MARKER_ALPHA);
     this.put(p.x, tipY, colour);
     this.put(p.x - hw, baseY, colour);
     this.put(p.x + hw, baseY, colour);

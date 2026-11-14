@@ -163,8 +163,8 @@ interface GpuRenderPipelineDescriptor {
   multisample: { count: number };
 }
 
-/** Create a WebGPU renderer on `canvas`. Throws (and releases the device) on any failure. */
-export async function createWebGpuRenderer(canvas: HTMLCanvasElement, onLost: () => void): Promise<Renderer> {
+/** Create a WebGPU renderer on `canvas`. Throws (and releases the device) on any failure. MSAA follows `antialias` when the device allows it. */
+export async function createWebGpuRenderer(canvas: HTMLCanvasElement, onLost: () => void, antialias: boolean): Promise<Renderer> {
   const api = gpuApi();
   if (!api) throw new Error("WebGPU not available");
   const adapter = await api.requestAdapter();
@@ -175,7 +175,7 @@ export async function createWebGpuRenderer(canvas: HTMLCanvasElement, onLost: ()
     if (!isCanvasContext(context)) throw new Error("no WebGPU canvas context");
     const format = api.getPreferredCanvasFormat();
     context.configure({ device, format, alphaMode: "opaque" });
-    const sampleCount = await pickSampleCount(device, format);
+    const sampleCount = antialias ? await pickSampleCount(device, format) : 1;
 
     const module = device.createShaderModule({ code: SHADER });
     const layout = device.createBindGroupLayout({

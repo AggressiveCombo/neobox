@@ -3,6 +3,7 @@
 
 import type { Camera } from "../camera";
 import type { Scene } from "../frame";
+import { prefs } from "../prefs";
 import { h } from "../ui/dom";
 import { createWebGl2Renderer } from "./webgl2";
 import { createWebGpuRenderer } from "./webgpu";
@@ -21,14 +22,14 @@ export interface Renderer {
 export async function createRenderer(host: HTMLElement, onLost: () => void): Promise<Renderer> {
   const gpuCanvas = appendCanvas(host);
   try {
-    return await createWebGpuRenderer(gpuCanvas, onLost);
+    return await createWebGpuRenderer(gpuCanvas, onLost, prefs.value.antialias);
   } catch (err) {
     console.warn("neobox: WebGPU unavailable, using WebGL2", err);
     gpuCanvas.remove();
   }
   const glCanvas = appendCanvas(host);
   try {
-    return createWebGl2Renderer(glCanvas, onLost);
+    return createWebGl2Renderer(glCanvas, onLost, prefs.value.antialias);
   } catch (err) {
     glCanvas.remove();
     throw err;

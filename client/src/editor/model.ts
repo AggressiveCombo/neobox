@@ -1,0 +1,394 @@
+// Map document operations. A document is the plain map JSON object; every
+// operation returns a new object and shares all untouched arrays and entries
+// with the previous one, so undo snapshots stay cheap.
+
+import { type Pt, bbox, convexParts, pointInPoly } from "./geom";
+import {
+  BODY_DEFAULTS,
+  CAP_DEFAULTS,
+  GRAPPLE_DEFAULTS,
+  JOINT_DEFAULTS,
+  MAX_OBJECT_ID,
+  type ListKey,
+  type Obj,
+  SPAWN_DEFAULTS,
+  TURRET_DEFAULTS,
+  asObj,
+  flatPoints,
+  hexColor,
+  list,
+  num,
+  withField,
+} from "./schema";
+
+export type Kind = "body" | "joint" | "spawn" | "turret" | "grapple" | "cap";
+
+export interface Ref {
+  kind: Kind;
+  /** Index in the kind's list. */
+  i: number;
+}
+
+export const LIST_OF: Record<Kind, ListKey> = {
+  body: "b",
+  joint: "j",
+  spawn: "s",
+  turret: "tu",
+  grapple: "gp",
+  cap: "c",
+};
+
+const DEFAULTS_OF: Record<Kind, Obj> = {
+  body: BODY_DEFAULTS,
+  joint: JOINT_DEFAULTS,
+  spawn: SPAWN_DEFAULTS,
+  turret: TURRET_DEFAULTS,
+  grapple: GRAPPLE_DEFAULTS,
+  cap: CAP_DEFAULTS,
+};
+
+/** Body colours offered for new bodies (cycled by id). */
+const PALETTE = ["#394a8e", "#e8a33b", "#5ab38b", "#d4574f", "#7d6bd6", "#4fa3d1"];
+
+export const KIND_ORDER: readonly Kind[] = ["body", "spawn", "turret", "grapple", "cap", "joint"];
+
+export function sameRef(a: Ref, b: Ref): boolean {
+  return a.kind === b.kind && a.i === b.i;
+}
+
+export function getList(doc: Obj, kind: Kind): Obj[] {
+  return list(doc, LIST_OF[kind]);
+}
+
+function withList(doc: Obj, kind: Kind, items: Obj[]): Obj {
+  return { ...doc, [LIST_OF[kind]]: items };
+}
+
+function replaceAt<T>(arr: T[], i: number, v: T): T[] {
+  const out = arr.slice();
+  out[i] = v;
+  return out;
+}
+
+function round(v: number): number {
+  return Math.round(v * 1e6) / 1e6;
+}
+
+export function nextBodyId(doc: Obj): number {
+  let max = -1;
+  for (const b of getList(doc, "body")) max = Math.max(max, num(b, "1", 0));
+  return Math.min(max + 1, MAX_OBJECT_ID);
+}
+
+export function bodyIdAt(doc: Obj, i: number): number {
+  return num(getList(doc, "body")[i] ?? {}, "1", -1);
+}
+
+export function bodyColor(id: number): number {
+  return hexColor(PALETTE[id % PALETTE.length]!);
+}
+
+// Transforms: a body's shapes are local to its position and angle (Box2D convention).
+
+export interface Xf {
+  x: number;
+  y: number;
+  c: number;
+  s: number;
+}
+
+export function bodyXf(b: Obj): Xf {
+  const a = num(b, "4", 0);
+  return { x: num(b, "2", 0), y: num(b, "3", 0), c: Math.cos(a), s: Math.sin(a) };
+}
+
+export function toWorld(xf: Xf, p: Pt): Pt {
+  return { x: xf.x + xf.c * p.x - xf.s * p.y, y: xf.y + xf.s * p.x + xf.c * p.y };
+}
+
+export function toLocal(xf: Xf, w: Pt): Pt {
+  const dx = w.x - xf.x;
+  const dy = w.y - xf.y;
+  return { x: xf.c * dx + xf.s * dy, y: -xf.s * dx + xf.c * dy };
+}
+
+export function isCircle(shape: Obj): boolean {
+  return num(shape, "1", 0) === 1;
+}
+
+/** A polygon shape's points relative to the body (shape offset applied). */
+export function shapeLocal(shape: Obj): Pt[] {
+  const ox = num(shape, "2", 0);
+  const oy = num(shape, "3", 0);
+  const flat = flatPoints(shape);
+  const out: Pt[] = [];
+  for (let i = 0; i + 1 < flat.length; i += 2) out.push({ x: ox + flat[i]!, y: oy + flat[i + 1]! });
+  return out;
+}
+
+/** A polygon shape's own points, relative to its offset. */
+export function shapeOutline(shape: Obj): Pt[] {
+  const flat = flatPoints(shape);
+  const out: Pt[] = [];
+  for (let i = 0; i + 1 < flat.length; i += 2) out.push({ x: flat[i]!, y: flat[i + 1]! });
+  return out;
+}
+
+/** World-space polygon points of a shape (empty for circles). */
+export function shapeWorld(body: Obj, shape: Obj): Pt[] {
+  const xf = bodyXf(body);
+  return shapeLocal(shape).map((p) => toWorld(xf, p));
+}
+
+/** World-space centre of a circle shape. */
+function circleWorld(body: Obj, shape: Obj): Pt {
+  return toWorld(bodyXf(body), { x: num(shape, "2", 0), y: num(shape, "3", 0) });
+}
+
+/** World-space bounds of a body's shapes, or null when it has none. */
+export function bodyBounds(body: Obj): { minX: number; minY: number; maxX: number; maxY: number } | null {
+  const pts: Pt[] = [];
+  for (const s of list(body, "s")) {
+    const shape = asObj(s);
+    if (isCircle(shape)) {
+      const c = circleWorld(body, shape);
+      const r = num(shape, "9", 0);
+      pts.push({ x: c.x - r, y: c.y - r }, { x: c.x + r, y: c.y + r });
+    } else {
+      pts.push(...shapeWorld(body, shape));
+    }
+  }
+  return pts.length ? bbox(pts) : null;
+}
+
+/** Centre used for selection outlines and nudges. */
+export function refCenter(doc: Obj, ref: Ref): Pt | null {
+  const o = getList(doc, ref.kind)[ref.i];
+  if (!o) return null;
+  if (ref.kind === "body") {
+    const b = bodyBounds(o);
+    return b ? { x: (b.minX + b.maxX) / 2, y: (b.minY + b.maxY) / 2 } : { x: num(o, "2", 0), y: num(o, "3", 0) };
+  }
+  if (ref.kind === "joint") {
+    const [a, b] = jointAnchors(doc, o);
+    return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+  }
+  return { x: num(o, "1", 0), y: num(o, "2", 0) };
+}
+
+/** The two anchor points of a joint in world space. Anchors are local to their body; ground anchors are world. */
+export function jointAnchors(doc: Obj, j: Obj): [Pt, Pt] {
+  return [
+    anchorWorld(doc, num(j, "7", -1), { x: num(j, "1", 0), y: num(j, "2", 0) }),
+    anchorWorld(doc, num(j, "8", -1), { x: num(j, "3", 0), y: num(j, "4", 0) }),
+  ];
+}
+
+export function bodyById(doc: Obj, id: number): Obj | null {
+  return getList(doc, "body").find((b) => num(b, "1", -1) === id) ?? null;
+}
+
+function anchorWorld(doc: Obj, id: number, p: Pt): Pt {
+  const body = id < 0 ? null : bodyById(doc, id);
+  return body ? toWorld(bodyXf(body), p) : p;
+}
+
+const HIT_ORDER: readonly Kind[] = ["spawn", "turret", "grapple", "cap", "joint", "body"];
+
+/**
+ * The entity under a world point; `tol` is the pick radius in world units.
+ * Markers win over bodies; among bodies and joints the one drawn last wins.
+ */
+export function hitTest(doc: Obj, w: Pt, tol: number): Ref | null {
+  for (const kind of HIT_ORDER) {
+    const items = getList(doc, kind);
+    for (let i = items.length - 1; i >= 0; i--) {
+      const o = items[i]!;
+      if (kind === "body") {
+        if (bodyHit(o, w, tol)) return { kind, i };
+      } else if (kind === "joint") {
+        const [a, b] = jointAnchors(doc, o);
+        if (Math.hypot(w.x - a.x, w.y - a.y) <= tol || Math.hypot(w.x - b.x, w.y - b.y) <= tol) return { kind, i };
+      } else if (Math.hypot(w.x - num(o, "1", 0), w.y - num(o, "2", 0)) <= tol) {
+        return { kind, i };
+      }
+    }
+  }
+  return null;
+}
+
+function bodyHit(body: Obj, w: Pt, tol: number): boolean {
+  for (const s of list(body, "s")) {
+    const shape = asObj(s);
+    if (isCircle(shape)) {
+      const c = circleWorld(body, shape);
+      if (Math.hypot(w.x - c.x, w.y - c.y) <= num(shape, "9", 0) + tol) return true;
+      continue;
+    }
+    const pts = shapeWorld(body, shape);
+    if (pts.length < 3) continue;
+    if (pointInPoly(w, pts)) return true;
+    for (let i = 0; i < pts.length; i++) {
+      if (distToSegment(w, pts[i]!, pts[(i + 1) % pts.length]!) <= tol) return true;
+    }
+  }
+  return false;
+}
+
+export function distToSegment(p: Pt, a: Pt, b: Pt): number {
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const len2 = dx * dx + dy * dy;
+  const t = len2 === 0 ? 0 : Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / len2));
+  return Math.hypot(p.x - (a.x + t * dx), p.y - (a.y + t * dy));
+}
+
+/** Shift the entities by (dx, dy). Joint anchors are local to their body and follow it by themselves. */
+export function moveRefs(doc: Obj, refs: Ref[], dx: number, dy: number): Obj {
+  if (refs.length === 0 || (dx === 0 && dy === 0)) return doc;
+  const movedIds = new Set<number>();
+  for (const r of refs) if (r.kind === "body") movedIds.add(bodyIdAt(doc, r.i));
+  let next = doc;
+  for (const kind of KIND_ORDER) {
+    if (kind === "joint") continue;
+    const sel = new Set(refs.filter((r) => r.kind === kind).map((r) => r.i));
+    if (sel.size === 0) continue;
+    next = withList(next, kind, getList(next, kind).map((o, i) => (sel.has(i) ? shiftEntity(kind, o, dx, dy) : o)));
+  }
+  const selJoints = new Set(refs.filter((r) => r.kind === "joint").map((r) => r.i));
+  if (selJoints.size === 0) return next;
+  return withList(
+    next,
+    "joint",
+    getList(doc, "joint").map((j, i) => (selJoints.has(i) ? shiftJoint(doc, j, movedIds, dx, dy) : j)),
+  );
+}
+
+function shiftEntity(kind: Kind, o: Obj, dx: number, dy: number): Obj {
+  const [kx, ky] = kind === "body" ? ["2", "3"] : ["1", "2"];
+  return { ...o, [kx!]: num(o, kx!, 0) + dx, [ky!]: num(o, ky!, 0) + dy };
+}
+
+/** Moves a selected joint's anchors in world space; anchors on a moved body already follow it. */
+function shiftJoint(doc: Obj, j: Obj, moved: Set<number>, dx: number, dy: number): Obj {
+  const out: Obj = { ...j };
+  const ends: [number, string, string][] = [
+    [num(j, "7", -1), "1", "2"],
+    [num(j, "8", -1), "3", "4"],
+  ];
+  for (const [id, kx, ky] of ends) {
+    if (moved.has(id)) continue;
+    const body = id < 0 ? null : bodyById(doc, id);
+    if (id >= 0 && !body) continue;
+    const local = { x: num(j, kx, 0), y: num(j, ky, 0) };
+    const world = body ? toWorld(bodyXf(body), local) : local;
+    const next = { x: world.x + dx, y: world.y + dy };
+    const to = body ? toLocal(bodyXf(body), next) : next;
+    out[kx] = round(to.x);
+    out[ky] = round(to.y);
+  }
+  return out;
+}
+
+/** Delete entities. Joints on a deleted body go with it. */
+export function removeRefs(doc: Obj, refs: Ref[]): Obj {
+  const bodyIds = new Set<number>();
+  const kill = new Map<Kind, Set<number>>();
+  for (const r of refs) {
+    if (r.kind === "body") bodyIds.add(bodyIdAt(doc, r.i));
+    const set = kill.get(r.kind) ?? new Set<number>();
+    set.add(r.i);
+    kill.set(r.kind, set);
+  }
+  if (bodyIds.size > 0) {
+    const set = kill.get("joint") ?? new Set<number>();
+    getList(doc, "joint").forEach((j, i) => {
+      if (bodyIds.has(num(j, "7", -1)) || bodyIds.has(num(j, "8", -1))) set.add(i);
+    });
+    kill.set("joint", set);
+  }
+  let next = doc;
+  for (const [kind, set] of kill) {
+    next = withList(
+      next,
+      kind,
+      getList(next, kind).filter((_, i) => !set.has(i)),
+    );
+  }
+  return next;
+}
+
+/** Write fields of one entity. Values equal to their default are removed from the JSON. */
+export function patchEntity(doc: Obj, ref: Ref, patch: Obj): Obj {
+  const items = getList(doc, ref.kind);
+  const cur = items[ref.i];
+  if (!cur) return doc;
+  let o = cur;
+  for (const [k, v] of Object.entries(patch)) o = withField(o, k, v, DEFAULTS_OF[ref.kind]);
+  return withList(doc, ref.kind, replaceAt(items, ref.i, o));
+}
+
+/** Replace the shapes of one body. */
+export function setBodyShapes(doc: Obj, bodyIdx: number, shapes: Obj[]): Obj {
+  const bodies = getList(doc, "body");
+  const b = bodies[bodyIdx];
+  if (!b) return doc;
+  return withList(doc, "body", replaceAt(bodies, bodyIdx, { ...b, s: shapes }));
+}
+
+/**
+ * Replace one polygon shape of a body by convex parts of `outline` (points
+ * relative to the shape offset). Throws when the outline is not a simple polygon.
+ */
+export function setShapeOutline(doc: Obj, bodyIdx: number, shapeIdx: number, outline: Pt[]): Obj {
+  const body = getList(doc, "body")[bodyIdx];
+  if (!body) return doc;
+  const shapes = list(body, "s");
+  const shape = asObj(shapes[shapeIdx]);
+  const made = convexParts(outline).map((part) => ({ ...shape, p: part.flatMap((p) => [round(p.x), round(p.y)]) }));
+  return setBodyShapes(doc, bodyIdx, [...shapes.slice(0, shapeIdx), ...made, ...shapes.slice(shapeIdx + 1)]);
+}
+
+/** Append a body with the given shapes (already relative to `centre`). Returns the new doc and its index. */
+export function addBody(doc: Obj, shapes: Obj[], centre: Pt): { doc: Obj; index: number } {
+  const items = getList(doc, "body");
+  const body: Obj = { "1": nextBodyId(doc), "2": round(centre.x), "3": round(centre.y), s: shapes };
+  return { doc: withList(doc, "body", [...items, body]), index: items.length };
+}
+
+/** Polygon shapes for world-space convex parts, positioned relative to `centre`. */
+export function polyShapes(parts: Pt[][], centre: Pt, colour: number): Obj[] {
+  return parts.map((part) => ({
+    p: part.flatMap((p) => [round(p.x - centre.x), round(p.y - centre.y)]),
+    "7": colour,
+  }));
+}
+
+export function circleShape(r: number, colour: number): Obj {
+  return { "1": 1, "9": round(r), "7": colour };
+}
+
+/** Append an anchored entity (spawn, turret, grapple, capture point) at (x, y). */
+export function addMarker(doc: Obj, kind: Exclude<Kind, "body" | "joint">, x: number, y: number): { doc: Obj; index: number } {
+  const items = getList(doc, kind);
+  return { doc: withList(doc, kind, [...items, { "1": round(x), "2": round(y) }]), index: items.length };
+}
+
+/** Append a joint between two anchored points. `body` is a body id, or -1 for the ground. */
+export function addJoint(doc: Obj, a: { body: number; p: Pt }, b: { body: number; p: Pt }, kind: number): { doc: Obj; index: number } {
+  const items = getList(doc, "joint");
+  const joint: Obj = {
+    "1": round(a.p.x),
+    "2": round(a.p.y),
+    "3": round(b.p.x),
+    "4": round(b.p.y),
+    "5": kind,
+    "7": a.body,
+    "8": b.body,
+  };
+  return { doc: withList(doc, "joint", [...items, joint]), index: items.length };
+}
+
+export function kindLabel(kind: Kind): string {
+  return { body: "Body", joint: "Joint", spawn: "Spawn", turret: "Turret", grapple: "Grapple", cap: "Capture" }[kind];
+}

@@ -1,0 +1,231 @@
+/* Offline screens: replay viewer and practice (replay.ts, practice.ts).
+   Setup panels are normal screens; while a game or replay plays, the root
+   becomes a full-screen layer over the canvas and only its controls take
+   pointer events. */
+
+.offline {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  width: min(100%, var(--panel-max));
+}
+
+.offline > .panel {
+  width: 100%;
+}
+
+#ui > .offline.playing {
+  position: fixed;
+  inset: 0;
+  z-index: 2;
+  margin: 0;
+  width: 100%;
+  padding: calc(env(safe-area-inset-top, 0px) + 12px) calc(env(safe-area-inset-right, 0px) + 12px)
+    calc(env(safe-area-inset-bottom, 0px) + 12px) calc(env(safe-area-inset-left, 0px) + 12px);
+  pointer-events: none;
+  overflow: hidden;
+  justify-content: space-between;
+}
+
+#ui > .offline.playing > * {
+  pointer-events: auto;
+}
+
+.offline-top {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 8px;
+  border-radius: 12px;
+}
+
+.offline-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+  text-shadow: 0 1px 3px #000;
+}
+
+.offline-overlay {
+  background: rgb(11 13 16 / 0.82);
+  border: 1px solid var(--border);
+  backdrop-filter: blur(6px);
+}
+
+.offline-top button,
+.offline-dock button,
+.offline-top select,
+.offline-dock select {
+  background: rgb(11 13 16 / 0.82);
+  backdrop-filter: blur(6px);
+}
+
+.offline-top select,
+.offline-dock select {
+  min-height: 40px;
+  max-width: 50%;
+  padding: 6px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  color: var(--text);
+  font: inherit;
+}
+
+.offline-dock {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: min(100%, 760px);
+  margin-top: auto;
+  align-self: center;
+  padding: 12px;
+  border-radius: 12px;
+}
+
+.offline-seek {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.offline-seek input[type="range"] {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+.offline-time {
+  color: var(--muted);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.offline-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.offline-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.offline-group button {
+  min-width: 44px;
+  min-height: 36px;
+  padding: 6px 10px;
+  font-size: 13px;
+}
+
+.offline-group button[aria-pressed="true"] {
+  border-color: var(--accent);
+  color: #7cc4ff;
+}
+
+/* Setup panels */
+.offline-drop {
+  display: grid;
+  place-items: center;
+  gap: 6px;
+  min-height: 150px;
+  padding: 20px;
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius);
+  color: var(--muted);
+  font-size: 14px;
+  text-align: center;
+  cursor: pointer;
+}
+
+.offline-drop strong {
+  color: var(--text);
+  font-size: 16px;
+}
+
+.offline-drop.drag-over,
+.offline-drop:hover {
+  border-color: var(--accent);
+}
+
+.offline-drop input {
+  display: none;
+}
+
+.offline-list {
+  list-style: none;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 40vh;
+  overflow-y: auto;
+}
+
+.offline-choice {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  padding: 10px 14px;
+  text-align: left;
+}
+
+.offline-choice small {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.offline-choice[aria-pressed="true"] {
+  border-color: var(--accent);
+  background: rgb(0 149 255 / 0.12);
+}
+
+.offline-presets {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.offline-error {
+  color: var(--danger);
+  font-size: 14px;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 600px) {
+  #ui > .offline.playing {
+    padding: 8px;
+  }
+
+  .offline-dock {
+    padding: 10px;
+  }
+
+  .offline-group button,
+  .offline-top button,
+  .offline-dock select,
+  .offline-top select {
+    min-height: 44px;
+  }
+
+  .offline-group button {
+    flex: 1 1 0;
+  }
+
+  .offline-presets {
+    grid-template-columns: 1fr;
+  }
+}

@@ -1,0 +1,747 @@
+// Map editor interaction: tools, selection, pointer gestures, view and keys.
+// The document lives in a History, so every finished gesture is one undo step.
+// Gestures show their work live (history.live) and settle once on release.
+
+import { type Pt, bbox, convexParts } from "./geom";
+import { History } from "./history";
+import {
+  KIND_ORDER,
+  type Ref,
+  addBody,
+  addJoint,
+  addMarker,
+  bodyColor,
+  bodyIdAt,
+  bodyXf,
+  circleShape,
+  getList,
+  hitTest,
+  isCircle,
+  moveRefs,
+  nextBodyId,
+  polyShapes,
+  refCenter,
+  removeRefs,
+  sameRef,
+  setShapeOutline,
+  shapeLocal,
+  shapeOutline,
+  toLocal,
+  toWorld,
+} from "./model";
+import { type MarkerKind, type Preview, type Scene, type View, clampScale, drawMap, fitView, worldAt } from "./view";
+import { type Obj, asObj, emptyDoc, list, num } from "./schema";
+import { loadDraft, saveDraft } from "./io";
+
+export type Tool = "select" | "rect" | "circle" | "poly" | "joint" | MarkerKind;
+
+/** Keys that switch tools (no modifier). */
+const TOOL_KEYS: Record<string, Tool> = {
+  v: "select",
+  r: "rect",
+  c: "circle",
+  p: "poly",
+  j: "joint",
+  s: "spawn",
+  t: "turret",
+  g: "grapple",
+  k: "cap",
+};
+
+const HIT_PX = 8;
+const DRAG_PX = 3;
+/** Smallest box or circle the editor creates, in map units. */
+const MIN_SIZE = 1;
+/** Joints made by the joint tool are pivots; the inspector changes the kind. */
+const JOINT_PIVOT = 1;
+const DRAFT_MS = 400;
+
+interface Anchor {
+  body: number;
+  p: Pt;
+  /** World position. */
+  w: Pt;
+}
+
+type Gesture =
+  | { kind: "move"; start: Pt; startPx: Pt; base: Obj; refs: Ref[]; clicked: Ref; collapse: boolean; moved: boolean }
+  | { kind: "vertex"; base: Obj; bi: number; si: number; k: number }
+  | { kind: "marquee"; a: Pt; b: Pt; keep: Ref[] }
+  | { kind: "rect"; a: Pt; b: Pt }
+  | { kind: "circle"; c: Pt; r: Pt }
+  | { kind: "pan"; p0: Pt; v0: View };
+
+function dist(a: Pt, b: Pt): number {
+  return Math.hypot(a.x - b.x, a.y - b.y);
+}
+
+function errText(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
+
+/** Entities whose centre lies inside the box spanned by a and b. */
+function refsIn(doc: Obj, a: Pt, b: Pt): Ref[] {
+  const x0 = Math.min(a.x, b.x);
+  const x1 = Math.max(a.x, b.x);
+  const y0 = Math.min(a.y, b.y);
+  const y1 = Math.max(a.y, b.y);
+  const out: Ref[] = [];
+  for (const kind of KIND_ORDER) {
+    getList(doc, kind).forEach((_, i) => {
+      const c = refCenter(doc, { kind, i });
+      if (c && c.x >= x0 && c.x <= x1 && c.y >= y0 && c.y <= y1) out.push({ kind, i });
+    });
+  }
+  return out;
+}
+
+/** Index of the shape and polygon vertex of a body under `w`, if any. */
+function vertexAt(doc: Obj, bodyIdx: number, w: Pt, tol: number): { si: number; k: number } | null {
+  const body = getList(doc, "body")[bodyIdx];
+  if (!body) return null;
+  const xf = bodyXf(body);
+  let best: { si: number; k: number } | null = null;
+  let bestD = tol;
+  list(body, "s").forEach((s, si) => {
+    const shape = asObj(s);
+    if (isCircle(shape)) return;
+    shapeLocal(shape).forEach((p, k) => {
+      const d = dist(toWorld(xf, p), w);
+      if (d <= bestD) {
+        bestD = d;
+        best = { si, k };
+      }
+    });
+  });
+  return best;
+}
+
+export class EditorController {
+  private readonly history: History<Obj>;
+  private view: View = { x: 0, y: 0, scale: 1 };
+  private fitted = false;
+  private selection: Ref[] = [];
+  private activeTool: Tool = "select";
+  private gesture: Gesture | null = null;
+  private pinch: { d0: number; m0: Pt; v0: View; w0: Pt } | null = null;
+  private readonly pointers = new Map<number, Pt>();
+  private hover: Pt | null = null;
+  private poly: Pt[] = [];
+  private jointFrom: Anchor | null = null;
+  private spaceDown = false;
+  /** True while test play runs: pointers and keys belong to the game then. */
+  private paused = false;
+  private draftTimer = 0;
+  private paintFrame = 0;
+  private note = "";
+  private readonly cleanups: (() => void)[] = [];
+
+  constructor(
+    private readonly canvas: HTMLCanvasElement,
+    private readonly onChange: () => void,
+  ) {
+    this.history = new History<Obj>(loadDraft() ?? emptyDoc());
+    this.listen(canvas, "pointerdown", (e) => this.onDown(e as PointerEvent));
+    this.listen(canvas, "pointermove", (e) => this.onMove(e as PointerEvent));
+    this.listen(canvas, "pointerup", (e) => this.onUp(e as PointerEvent));
+    this.listen(canvas, "pointercancel", (e) => this.onUp(e as PointerEvent));
+    this.listen(canvas, "pointerleave", () => {
+      if (this.pointers.size === 0) {
+        this.hover = null;
+        this.paint();
+      }
+    });
+    this.listen(canvas, "wheel", (e) => this.onWheel(e as WheelEvent), { passive: false });
+    this.listen(canvas, "contextmenu", (e) => e.preventDefault());
+    this.listen(window, "keydown", (e) => this.onKey(e as KeyboardEvent));
+    this.listen(window, "keyup", (e) => {
+      if ((e as KeyboardEvent).code === "Space") this.spaceDown = false;
+    });
+  }
+
+  get doc(): Obj {
+    return this.history.present;
+  }
+
+  get sel(): readonly Ref[] {
+    return this.selection;
+  }
+
+  get tool(): Tool {
+    return this.activeTool;
+  }
+
+  get canUndo(): boolean {
+    return this.history.canUndo;
+  }
+
+  get canRedo(): boolean {
+    return this.history.canRedo;
+  }
+
+  /** One line of instructions for the current tool. */
+  get hint(): string {
+    switch (this.activeTool) {
+      case "select":
+        return this.selection.length
+          ? "Drag to move. Arrow keys nudge. Delete removes."
+          : "Tap or drag to select. Drag empty space to box-select.";
+      case "rect":
+        return "Drag to draw a box.";
+      case "circle":
+        return "Drag from the centre to set the radius.";
+      case "poly":
+        return this.poly.length
+          ? "Tap points in order. Tap the first point or press Enter to close."
+          : "Tap to place the first point.";
+      case "joint":
+        return this.jointFrom ? "Tap the second anchor. Empty space is the ground." : "Tap the first anchor. Empty space is the ground.";
+      default:
+        return "Tap to place.";
+    }
+  }
+
+  /** The last error or notice, empty when there is none. */
+  get message(): string {
+    return this.note;
+  }
+
+  setTool(tool: Tool): void {
+    this.cancelGesture();
+    this.poly = [];
+    this.jointFrom = null;
+    this.activeTool = tool;
+    this.note = "";
+    this.notify();
+    this.paint();
+  }
+
+  /** Replace the whole map (opened file, built-in map, new map). Clears history. */
+  load(doc: Obj): void {
+    this.cancelGesture();
+    this.history.reset(doc);
+    this.selection = [];
+    this.poly = [];
+    this.jointFrom = null;
+    this.note = "";
+    this.fitted = false;
+    this.fit();
+    this.scheduleDraft();
+    this.notify();
+    this.paint();
+  }
+
+  /** Replace the map with `next` as one undo step; the selection is kept. */
+  commit(next: Obj): void {
+    this.history.set(next);
+    this.scheduleDraft();
+    this.notify();
+    this.paint();
+  }
+
+  removeSelection(): void {
+    if (this.selection.length === 0) return;
+    this.cancelGesture();
+    const next = removeRefs(this.doc, this.selection);
+    this.commitWith(next, []);
+  }
+
+  undo(): void {
+    this.cancelGesture();
+    if (this.history.undo()) this.selection = [];
+    this.afterHistory();
+  }
+
+  redo(): void {
+    this.cancelGesture();
+    if (this.history.redo()) this.selection = [];
+    this.afterHistory();
+  }
+
+  selectAll(): void {
+    const all: Ref[] = [];
+    for (const kind of KIND_ORDER) getList(this.doc, kind).forEach((_, i) => all.push({ kind, i }));
+    this.selection = all;
+    this.notify();
+    this.paint();
+  }
+
+  /** Move the selection by whole map units. */
+  nudge(dx: number, dy: number): void {
+    if (this.selection.length === 0) return;
+    this.commit(moveRefs(this.doc, this.selection, dx, dy));
+  }
+
+  /** Scale the view by `factor` around the canvas centre. */
+  zoomBy(factor: number): void {
+    const { w, h } = this.size();
+    const c = { x: w / 2, y: h / 2 };
+    this.zoomAt(c, factor, w, h);
+  }
+
+  fit(): void {
+    const { w, h } = this.size();
+    if (w === 0 || h === 0) return;
+    this.view = fitView(this.doc, w, h);
+    this.fitted = true;
+  }
+
+  /** Called when the canvas box changes size. */
+  resize(): void {
+    if (!this.fitted) this.fit();
+    this.paint();
+  }
+
+  /** Save the draft now and drop every listener. */
+  destroy(): void {
+    clearTimeout(this.draftTimer);
+    saveDraft(this.doc);
+    cancelAnimationFrame(this.paintFrame);
+    this.cancelGesture();
+    for (const off of this.cleanups) off();
+    this.cleanups.length = 0;
+  }
+
+  /** While paused (test play runs) the editor ignores pointers and keys. */
+  pause(on: boolean): void {
+    this.paused = on;
+    if (on) {
+      this.pointers.clear();
+      this.cancelGesture();
+      this.pinch = null;
+    }
+    this.paint();
+  }
+
+  // Pointer handling
+
+  private onDown(e: PointerEvent): void {
+    if (this.paused) return;
+    this.canvas.setPointerCapture(e.pointerId);
+    const p = this.pos(e);
+    this.pointers.set(e.pointerId, p);
+    if (this.pointers.size >= 2) {
+      this.cancelGesture();
+      const [a, b] = [...this.pointers.values()] as [Pt, Pt];
+      const m0 = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+      const { w, h } = this.size();
+      this.pinch = { d0: dist(a, b), m0, v0: { ...this.view }, w0: worldAt(this.view, w, h, m0.x, m0.y) };
+      this.paint();
+      return;
+    }
+    if (e.button === 1 || e.button === 2 || (e.button === 0 && this.spaceDown)) {
+      this.gesture = { kind: "pan", p0: p, v0: { ...this.view } };
+      return;
+    }
+    if (e.button !== 0) return;
+
+    const raw = this.worldOf(p);
+    const s = this.snap(raw);
+    const tol = HIT_PX / this.view.scale;
+    switch (this.activeTool) {
+      case "select":
+        this.selectDown(e, p, raw, tol, s);
+        break;
+      case "rect":
+        this.gesture = { kind: "rect", a: s, b: s };
+        break;
+      case "circle":
+        this.gesture = { kind: "circle", c: s, r: s };
+        break;
+      case "poly":
+        if (this.poly.length >= 3 && dist(raw, this.poly[0]!) <= tol) this.finishPoly();
+        else {
+          this.poly.push(s);
+          this.notify();
+        }
+        break;
+      case "joint":
+        this.jointDown(raw, s, tol);
+        break;
+      default:
+        this.placeMarker(this.activeTool, s);
+    }
+    this.paint();
+  }
+
+  private selectDown(e: PointerEvent, p: Pt, raw: Pt, tol: number, s: Pt): void {
+    const doc = this.doc;
+    const shift = e.shiftKey;
+    const first = this.selection.length === 1 ? this.selection[0]! : null;
+    if (!shift && first?.kind === "body") {
+      const v = vertexAt(doc, first.i, raw, tol);
+      if (v) {
+        this.gesture = { kind: "vertex", base: doc, bi: first.i, si: v.si, k: v.k };
+        return;
+      }
+    }
+    const ref = hitTest(doc, raw, tol);
+    if (ref) {
+      const was = this.selection.some((r) => sameRef(r, ref));
+      const collapse = !shift && this.selection.length > 1 && was;
+      if (shift) {
+        this.selection = was ? this.selection.filter((r) => !sameRef(r, ref)) : [...this.selection, ref];
+        if (!this.selection.some((r) => sameRef(r, ref))) {
+          this.notify();
+          return;
+        }
+      } else if (!was) {
+        this.selection = [ref];
+      }
+      this.gesture = { kind: "move", start: s, startPx: p, base: doc, refs: [...this.selection], clicked: ref, collapse, moved: false };
+    } else {
+      this.gesture = { kind: "marquee", a: raw, b: raw, keep: shift ? [...this.selection] : [] };
+      if (!shift) this.selection = [];
+    }
+    this.notify();
+  }
+
+  private jointDown(raw: Pt, s: Pt, tol: number): void {
+    const ref = hitTest(this.doc, raw, tol);
+    const anchor: Anchor =
+      ref?.kind === "body"
+        ? { body: bodyIdAt(this.doc, ref.i), p: toLocal(bodyXf(getList(this.doc, "body")[ref.i]!), s), w: s }
+        : { body: -1, p: s, w: s };
+    if (!this.jointFrom) {
+      this.jointFrom = anchor;
+      this.notify();
+      return;
+    }
+    const from = this.jointFrom;
+    this.jointFrom = null;
+    this.create(() => {
+      const made = addJoint(this.doc, from, anchor, JOINT_PIVOT);
+      this.commitWith(made.doc, [{ kind: "joint", i: made.index }]);
+    });
+  }
+
+  private placeMarker(kind: MarkerKind, s: Pt): void {
+    this.create(() => {
+      const made = addMarker(this.doc, kind, s.x, s.y);
+      this.commitWith(made.doc, [{ kind, i: made.index }]);
+    });
+  }
+
+  private onMove(e: PointerEvent): void {
+    const p = this.pos(e);
+    if (this.pointers.has(e.pointerId)) this.pointers.set(e.pointerId, p);
+    if (this.pinch && this.pointers.size >= 2) {
+      const [a, b] = [...this.pointers.values()] as [Pt, Pt];
+      const pn = this.pinch;
+      const m = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+      const scale = clampScale((pn.v0.scale * dist(a, b)) / pn.d0);
+      const { w, h } = this.size();
+      this.view = { scale, x: pn.w0.x - (m.x - w / 2) / scale, y: pn.w0.y - (m.y - h / 2) / scale };
+      this.paint();
+      return;
+    }
+    this.hover = this.snap(this.worldOf(p));
+    const g = this.gesture;
+    if (!g) {
+      if (this.poly.length || this.jointFrom) this.paint();
+      return;
+    }
+    switch (g.kind) {
+      case "pan":
+        this.view = { ...g.v0, x: g.v0.x - (p.x - g.p0.x) / g.v0.scale, y: g.v0.y - (p.y - g.p0.y) / g.v0.scale };
+        break;
+      case "move": {
+        if (!g.moved) {
+          if (dist(p, g.startPx) < DRAG_PX) return;
+          g.moved = true;
+        }
+        const cur = this.snap(this.worldOf(p));
+        this.history.live(moveRefs(g.base, g.refs, cur.x - g.start.x, cur.y - g.start.y));
+        break;
+      }
+      case "vertex":
+        this.dragVertex(g, this.snap(this.worldOf(p)));
+        break;
+      case "marquee": {
+        g.b = this.worldOf(p);
+        const inside = refsIn(this.doc, g.a, g.b);
+        this.selection = [...g.keep, ...inside.filter((r) => !g.keep.some((k) => sameRef(k, r)))];
+        this.notify();
+        break;
+      }
+      case "rect":
+        g.b = this.snap(this.worldOf(p));
+        break;
+      case "circle":
+        g.r = this.snap(this.worldOf(p));
+        break;
+    }
+    this.paint();
+  }
+
+  private dragVertex(g: Extract<Gesture, { kind: "vertex" }>, target: Pt): void {
+    const body = getList(g.base, "body")[g.bi];
+    const shape = body ? asObj(list(body, "s")[g.si]) : null;
+    if (!body || !shape) return;
+    const local = toLocal(bodyXf(body), target);
+    const ox = num(shape, "2", 0);
+    const oy = num(shape, "3", 0);
+    const outline = shapeOutline(shape).map((q, i) => (i === g.k ? { x: local.x - ox, y: local.y - oy } : q));
+    try {
+      this.history.live(setShapeOutline(g.base, g.bi, g.si, outline));
+      this.note = "";
+    } catch (err) {
+      this.note = errText(err);
+    }
+  }
+
+  private onUp(e: PointerEvent): void {
+    this.pointers.delete(e.pointerId);
+    if (this.pinch) {
+      if (this.pointers.size < 2) this.pinch = null;
+      this.paint();
+      return;
+    }
+    const g = this.gesture;
+    this.gesture = null;
+    if (g) this.finish(g);
+    this.paint();
+  }
+
+  private finish(g: Gesture): void {
+    switch (g.kind) {
+      case "pan":
+        return;
+      case "move":
+        if (g.moved) {
+          this.history.settle();
+          this.scheduleDraft();
+        } else if (g.collapse) {
+          this.selection = [g.clicked];
+        }
+        this.notify();
+        return;
+      case "vertex":
+        this.history.settle();
+        this.scheduleDraft();
+        this.notify();
+        return;
+      case "marquee":
+        this.notify();
+        return;
+      case "rect": {
+        const w = Math.abs(g.b.x - g.a.x);
+        const h = Math.abs(g.b.y - g.a.y);
+        if (w < MIN_SIZE || h < MIN_SIZE) return this.notify();
+        this.create(() => {
+          const x0 = Math.min(g.a.x, g.b.x);
+          const x1 = Math.max(g.a.x, g.b.x);
+          const y0 = Math.min(g.a.y, g.b.y);
+          const y1 = Math.max(g.a.y, g.b.y);
+          const corners = [
+            { x: x0, y: y0 },
+            { x: x1, y: y0 },
+            { x: x1, y: y1 },
+            { x: x0, y: y1 },
+          ];
+          const centre = { x: (x0 + x1) / 2, y: (y0 + y1) / 2 };
+          const id = nextBodyId(this.doc);
+          const shapes = polyShapes(convexParts(corners), centre, bodyColor(id));
+          const made = addBody(this.doc, shapes, centre);
+          this.commitWith(made.doc, [{ kind: "body", i: made.index }]);
+        });
+        return;
+      }
+      case "circle": {
+        const r = dist(g.c, g.r);
+        if (r < MIN_SIZE) return this.notify();
+        this.create(() => {
+          const made = addBody(this.doc, [circleShape(r, bodyColor(nextBodyId(this.doc)))], g.c);
+          this.commitWith(made.doc, [{ kind: "body", i: made.index }]);
+        });
+        return;
+      }
+    }
+  }
+
+  /** Close the polygon in progress: its points become convex shapes of one body. */
+  private finishPoly(): void {
+    const pts = this.poly;
+    this.create(() => {
+      const box = bbox(pts);
+      const centre = { x: (box.minX + box.maxX) / 2, y: (box.minY + box.maxY) / 2 };
+      const shapes = polyShapes(convexParts(pts), centre, bodyColor(nextBodyId(this.doc)));
+      const made = addBody(this.doc, shapes, centre);
+      this.poly = [];
+      this.commitWith(made.doc, [{ kind: "body", i: made.index }]);
+    });
+  }
+
+  /** Run a creation step; a failure is shown as the message and nothing changes. */
+  private create(step: () => void): void {
+    try {
+      step();
+      this.note = "";
+    } catch (err) {
+      this.note = errText(err);
+      this.notify();
+    }
+    this.paint();
+  }
+
+  private onWheel(e: WheelEvent): void {
+    e.preventDefault();
+    const { w, h } = this.size();
+    this.zoomAt(this.pos(e), Math.exp(-e.deltaY * 0.0015), w, h);
+    this.paint();
+  }
+
+  private zoomAt(p: Pt, factor: number, w: number, h: number): void {
+    const before = worldAt(this.view, w, h, p.x, p.y);
+    const scale = clampScale(this.view.scale * factor);
+    this.view = { scale, x: before.x - (p.x - w / 2) / scale, y: before.y - (p.y - h / 2) / scale };
+    this.paint();
+  }
+
+  // Keys
+
+  private onKey(e: KeyboardEvent): void {
+    if (this.paused) return;
+    const t = e.target;
+    if (t instanceof HTMLInputElement || t instanceof HTMLSelectElement || t instanceof HTMLTextAreaElement) return;
+    if (t instanceof HTMLElement && t.isContentEditable) return;
+    if (e.code === "Space") {
+      if (!e.repeat) this.spaceDown = true;
+      e.preventDefault();
+      return;
+    }
+    const mod = e.ctrlKey || e.metaKey;
+    const key = e.key.toLowerCase();
+    if (mod) {
+      if (key === "z") {
+        if (e.shiftKey) this.redo();
+        else this.undo();
+      }
+      else if (key === "y") this.redo();
+      else if (key === "a") this.selectAll();
+      else return;
+      e.preventDefault();
+      return;
+    }
+    if (e.altKey) return;
+    if (e.key === "Delete" || e.key === "Backspace") {
+      this.removeSelection();
+    } else if (e.key === "Escape") {
+      this.escape();
+    } else if (e.key === "Enter") {
+      if (this.activeTool !== "poly" || this.poly.length < 3) return;
+      this.finishPoly();
+    } else if (e.key.startsWith("Arrow")) {
+      if (this.selection.length === 0) return;
+      const d = e.shiftKey ? 10 : 1;
+      const dx = e.key === "ArrowLeft" ? -d : e.key === "ArrowRight" ? d : 0;
+      const dy = e.key === "ArrowUp" ? -d : e.key === "ArrowDown" ? d : 0;
+      this.nudge(dx, dy);
+    } else if (TOOL_KEYS[key] && !e.shiftKey) {
+      this.setTool(TOOL_KEYS[key]);
+    } else {
+      return;
+    }
+    e.preventDefault();
+  }
+
+  private escape(): void {
+    if (this.gesture) this.cancelGesture();
+    else if (this.poly.length) this.poly = [];
+    else if (this.jointFrom) this.jointFrom = null;
+    else if (this.activeTool !== "select") this.activeTool = "select";
+    else if (this.selection.length) this.selection = [];
+    else return;
+    this.note = "";
+    this.notify();
+    this.paint();
+  }
+
+  // Helpers
+
+  /** Drop the gesture in progress, restoring the map it started from. */
+  private cancelGesture(): void {
+    const g = this.gesture;
+    if (!g) return;
+    this.gesture = null;
+    if ("base" in g) this.history.live(g.base);
+  }
+
+  private commitWith(next: Obj, sel: Ref[]): void {
+    this.history.set(next);
+    this.selection = sel;
+    this.scheduleDraft();
+    this.notify();
+  }
+
+  private afterHistory(): void {
+    this.scheduleDraft();
+    this.notify();
+    this.paint();
+  }
+
+  private snapStep(): number {
+    return num(asObj(this.doc.set), "4", 1);
+  }
+
+  private snap(p: Pt): Pt {
+    const step = this.snapStep();
+    if (step <= 0) return p;
+    return { x: Math.round(p.x / step) * step, y: Math.round(p.y / step) * step };
+  }
+
+  private size(): { w: number; h: number } {
+    return { w: this.canvas.clientWidth, h: this.canvas.clientHeight };
+  }
+
+  private pos(e: MouseEvent): Pt {
+    const r = this.canvas.getBoundingClientRect();
+    return { x: e.clientX - r.left, y: e.clientY - r.top };
+  }
+
+  private worldOf(p: Pt): Pt {
+    const { w, h } = this.size();
+    return worldAt(this.view, w, h, p.x, p.y);
+  }
+
+  private preview(): Preview | null {
+    const g = this.gesture;
+    if (g?.kind === "rect") return { kind: "rect", a: g.a, b: g.b };
+    if (g?.kind === "circle") return { kind: "circle", c: g.c, r: g.r };
+    if (g?.kind === "marquee") return { kind: "rect", a: g.a, b: g.b };
+    if (this.activeTool === "poly" && this.poly.length) return { kind: "poly", pts: this.poly, cursor: this.hover };
+    if (this.activeTool === "joint" && this.jointFrom) return { kind: "joint", from: this.jointFrom.w, cursor: this.hover };
+    return null;
+  }
+
+  private paint(): void {
+    if (this.paintFrame) return;
+    this.paintFrame = requestAnimationFrame(() => {
+      this.paintFrame = 0;
+      this.draw();
+    });
+  }
+
+  private draw(): void {
+    if (!this.fitted) this.fit();
+    const scene: Scene = { sel: this.selection, preview: this.preview() };
+    drawMap(this.canvas, this.doc, this.view, scene);
+  }
+
+  private notify(): void {
+    this.onChange();
+  }
+
+  private scheduleDraft(): void {
+    clearTimeout(this.draftTimer);
+    this.draftTimer = window.setTimeout(() => {
+      if (!saveDraft(this.doc)) this.note = "Could not save the draft: browser storage is full.";
+    }, DRAFT_MS);
+  }
+
+  private listen(target: EventTarget, type: string, fn: (e: Event) => void, options?: AddEventListenerOptions): void {
+    target.addEventListener(type, fn, options);
+    this.cleanups.push(() => target.removeEventListener(type, fn, options));
+  }
+}
+

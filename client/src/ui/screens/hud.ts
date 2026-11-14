@@ -5,12 +5,17 @@
 import type { AppCtx, HudFactory } from "../../ctx";
 import type { Scene, ScoreRow } from "../../frame";
 import { BIT } from "../../input";
+import { prefs } from "../../prefs";
 import { MAX_CHAT_LEN, TEAM_BLUE, TEAM_FFA, TEAM_RED, TEAM_SPECTATOR } from "../../protocol";
 import type { AppState, ChatLine, Stats } from "../../state";
 import { h } from "../dom";
 
 const SCORE_INTERVAL_MS = 100;
 const CHAT_SHOWN = 8;
+
+/** Own chat lines (most recent last), recalled with Up/Down. Kept for the session only. */
+const SENT_HISTORY_MAX = 50;
+const sentChat: string[] = [];
 
 interface TouchSpec {
   bit: number;
@@ -133,6 +138,34 @@ function touchStick(ctx: AppCtx): HTMLElement {
   return pad;
 }
 
+/**
+ * Movement stick and action buttons, sized and handed by the touch prefs (live).
+ * Feeds ctx.input. The offline test-play screens reuse it outside a match.
+ */
+export function touchControls(ctx: AppCtx): { el: HTMLElement; destroy(): void } {
+  const touchCapable = matchMedia("(pointer: coarse)").matches || navigator.maxTouchPoints > 0;
+  const el = h(
+    "div",
+    { class: "hud-touch-layer", hidden: !touchCapable },
+    touchStick(ctx),
+    h("div", { class: "hud-actions" }, ...ACTIONS.map((s) => touchButton(ctx, s))),
+  );
+  const applyPrefs = (): void => {
+    el.style.setProperty("--hud-touch-scale", String(prefs.value.touchScale));
+    el.classList.toggle("hud-left-handed", prefs.value.touchLeftHanded);
+  };
+  applyPrefs();
+  const unsubscribe = prefs.subscribe(applyPrefs);
+  return {
+    el,
+    destroy() {
+      unsubscribe();
+      ctx.input.clearTouch();
+      el.remove();
+    },
+  };
+}
+
 interface StatRow {
   el: HTMLElement;
   value: HTMLElement;
@@ -159,17 +192,15 @@ function scoreRow(row: ScoreRow, name: string, self: boolean, tickHz: number): H
 }
 
 export const hudScreen: HudFactory = (ctx) => {
-  const touchCapable = matchMedia("(pointer: coarse)").matches || navigator.maxTouchPoints > 0;
-
   let latestScene: Scene | null = null;
   let lastScoresAt = -Infinity;
   let chatOpen = false;
+  let recall = -1;
 
   // Touch controls.
-  const padEl = touchStick(ctx);
-  const actionsEl = h("div", { class: "hud-actions" }, ...ACTIONS.map((s) => touchButton(ctx, s)));
+  const touch = touchControls(ctx);
   const chatBtn = h("button", { type: "button", class: "hud-chat-btn", "aria-label": "Chat", onclick: () => (chatOpen ? closeChat() : openChat()) }, "Chat");
-  const touchEl = h("div", { class: "hud-touch-layer", hidden: !touchCapable }, padEl, actionsEl, chatBtn);
+  touch.el.append(chatBtn);
 
   // Stats overlay.
   const statsRows = {
@@ -228,7 +259,8 @@ export const hudScreen: HudFactory = (ctx) => {
   );
   const connEl = h("div", { class: "hud-conn", role: "status", hidden: true }, "connection lost");
 
-  const el = h("div", { class: "hud-root" }, touchEl, scoresEl, topLeftEl, leaveBtn, connEl);
+  const endBtn = h("button", { type: "button", class: "hud-end", hidden: true, onclick: endMatch }, "End match");
+  const el = h("div", { class: "hud-root" }, touch.el, scoresEl, topLeftEl, leaveBtn, endBtn, connEl);
 
   function renderStats(s: Stats): void {
     statsRows.transport.value.textContent = s.transport === "udp" ? "WebRTC" : "WebSocket";
@@ -278,6 +310,7 @@ export const hudScreen: HudFactory = (ctx) => {
 
   function closeChat(): void {
     chatOpen = false;
+    recall = -1;
     chatInput.value = "";
     chatInput.blur();
     chatForm.hidden = true;
@@ -285,8 +318,23 @@ export const hudScreen: HudFactory = (ctx) => {
 
   function sendChat(): void {
     const text = Array.from(chatInput.value.trim()).slice(0, MAX_CHAT_LEN).join("").trim();
-    if (text !== "") ctx.send({ t: "chat", text });
+    if (text !== "") {
+      ctx.send({ t: "chat", text });
+      sentChat.push(text);
+      if (sentChat.length > SENT_HISTORY_MAX) sentChat.shift();
+    }
     closeChat();
+  }
+
+  /** Up/Down: step back (1) or forward (-1) through own lines; past the newest line the input clears. */
+  function recallChat(step: 1 | -1): void {
+    if (sentChat.length === 0) return;
+    recall = Math.min(Math.max(recall + step, -1), sentChat.length - 1);
+    chatInput.value = recall === -1 ? "" : sentChat[sentChat.length - 1 - recall];
+  }
+
+  function endMatch(): void {
+    if (window.confirm("End the match for everyone?")) ctx.send({ t: "end_match" });
   }
 
   // Capture phase: while chat is open, keys go to chat and never reach the movement input.
@@ -315,6 +363,8 @@ export const hudScreen: HudFactory = (ctx) => {
     if (e.isComposing) return;
     if (e.key === "Enter") sendChat();
     else if (e.key === "Escape") closeChat();
+    else if (e.key === "ArrowUp") recallChat(1);
+    else if (e.key === "ArrowDown") recallChat(-1);
     else return;
     e.preventDefault();
     e.stopPropagation();
@@ -327,9 +377,18 @@ export const hudScreen: HudFactory = (ctx) => {
     if (state.showStats && (!same("showStats") || !same("stats"))) renderStats(state.stats);
     if (!same("showScores")) scoresEl.hidden = !state.showScores;
     if (state.showScores && (!same("showScores") || !same("room"))) renderScores(state);
-    if (!same("chat")) renderChat(state.chat);
+    if (!same("chat")) {
+      renderChat(state.chat);
+      const last = state.chat[state.chat.length - 1];
+      if (prev !== null && last !== undefined && last !== prev.chat[prev.chat.length - 1] && last.from !== null && last.from !== state.myId) {
+        ctx.sfx.chatPop();
+      }
+    }
     if (!same("connection") || !same("inMatch")) {
       connEl.hidden = !(state.inMatch && state.connection === "closed");
+    }
+    if (!same("room") || !same("myId")) {
+      endBtn.hidden = state.room?.players.find((p) => p.id === state.myId)?.host !== true;
     }
   }
 
@@ -350,7 +409,7 @@ export const hudScreen: HudFactory = (ctx) => {
     },
     destroy() {
       window.removeEventListener("keydown", onWindowKey, true);
-      ctx.input.clearTouch();
+      touch.destroy();
       chatInput.blur();
       latestScene = null;
       el.remove();
