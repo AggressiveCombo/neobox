@@ -1,6 +1,7 @@
 //! Authenticated admin interface: live view and control of rooms, players,
-//! tick rate, latency, bandwidth, match state and logs.
+//! tick rate, latency, bandwidth, match state, logs and map review.
 
+use crate::api::{db, Fail, MapDetailJson, MapJson};
 use crate::hub::Hub;
 use crate::room::{AdminCmd, RoomCmd};
 use axum::body::Body;
@@ -9,7 +10,8 @@ use axum::http::{header, HeaderMap, StatusCode};
 use axum::response::{Html, IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
-use serde::Deserialize;
+use neobox_store::Verdict;
+use serde::{Deserialize, Serialize};
 use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -23,6 +25,7 @@ pub fn router() -> Router<Arc<Hub>> {
     Router::new()
         .route("/admin", get(page))
         .route("/admin/", get(page))
+        .route("/admin/admin.js", get(script))
         .route("/admin/api/login", post(login))
         .route("/admin/api/logout", post(logout))
         .route("/admin/api/state", get(state))
@@ -30,10 +33,20 @@ pub fn router() -> Router<Arc<Hub>> {
         .route("/admin/api/broadcast", post(broadcast))
         .route("/admin/api/rooms/{code}", post(room_cmd))
         .route("/admin/api/rooms/{code}/view", get(room_view))
+        .route("/admin/api/maps", get(all_maps))
+        .route("/admin/api/maps/pending", get(pending_maps))
+        .route("/admin/api/maps/{id}/code", get(map_code))
+        .route("/admin/api/maps/{id}/approve", post(approve_map))
+        .route("/admin/api/maps/{id}/reject", post(reject_map))
+        .route("/admin/api/maps/{id}/delete", post(remove_map))
 }
 
 async fn page() -> impl IntoResponse {
     ([(header::CACHE_CONTROL, "no-store")], Html(include_str!("admin.html")))
+}
+
+async fn script() -> impl IntoResponse {
+    ([(header::CONTENT_TYPE, "text/javascript; charset=utf-8"), (header::CACHE_CONTROL, "no-cache")], include_str!("admin.js"))
 }
 
 fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
@@ -83,15 +96,9 @@ async fn login(State(hub): State<Arc<Hub>>, ConnectInfo(peer): ConnectInfo<Socke
     if hub.cfg.admin_password.is_empty() {
         return (StatusCode::SERVICE_UNAVAILABLE, "admin interface disabled: set NEOBOX_ADMIN_PASSWORD").into_response();
     }
-    {
-        let mut attempts = hub.login_attempts.lock().unwrap();
-        let list = attempts.entry(ip).or_default();
-        list.retain(|t| t.elapsed() < Duration::from_secs(60));
-        if list.len() >= 5 {
-            warn!(%ip, "admin login rate limited");
-            return (StatusCode::TOO_MANY_REQUESTS, "too many attempts, wait a minute").into_response();
-        }
-        list.push(Instant::now());
+    if !hub.admin_login.allow(ip) {
+        warn!(%ip, "admin login rate limited");
+        return (StatusCode::TOO_MANY_REQUESTS, "too many attempts, wait a minute").into_response();
     }
     if !constant_time_eq(b.password.as_bytes(), hub.cfg.admin_password.as_bytes()) {
         warn!(%ip, "admin login failed");
@@ -194,4 +201,84 @@ async fn room_view(State(hub): State<Arc<Hub>>, headers: HeaderMap, Path(code): 
         Ok(Some(bytes)) => ([(header::CONTENT_TYPE, "application/octet-stream"), (header::CACHE_CONTROL, "no-store")], Body::from(bytes)).into_response(),
         _ => StatusCode::NO_CONTENT.into_response(),
     }
+}
+
+// Map review: public maps waiting for an admin, and admin decisions on any map.
+
+/// A map in the review queue: its library entry and code size.
+#[derive(Serialize)]
+struct ReviewMapJson {
+    #[serde(flatten)]
+    map: MapJson,
+    size: i64,
+}
+
+async fn pending_maps(State(hub): State<Arc<Hub>>, headers: HeaderMap) -> Result<Response, Fail> {
+    if !authorized(&hub, &headers) {
+        return Ok(StatusCode::UNAUTHORIZED.into_response());
+    }
+    let maps = db(&hub, |s| s.pending()).await?;
+    Ok(Json(maps.iter().map(|m| ReviewMapJson { map: MapJson::of(m), size: m.size }).collect::<Vec<_>>()).into_response())
+}
+
+/// Maps per page in the admin library.
+const ADMIN_PAGE_SIZE: usize = 25;
+
+/// Query for the library: `q` searches map and author names, `page` starts at 0.
+#[derive(Deserialize)]
+struct LibraryQuery {
+    q: Option<String>,
+    page: Option<u32>,
+}
+
+#[derive(Serialize)]
+struct LibraryJson {
+    total: i64,
+    maps: Vec<MapJson>,
+}
+
+/// Every map, any status or visibility, newest first.
+async fn all_maps(State(hub): State<Arc<Hub>>, headers: HeaderMap, Query(q): Query<LibraryQuery>) -> Result<Response, Fail> {
+    if !authorized(&hub, &headers) {
+        return Ok(StatusCode::UNAUTHORIZED.into_response());
+    }
+    let search = q.q.unwrap_or_default();
+    let page = q.page.unwrap_or(0);
+    let listing = db(&hub, move |s| s.admin_list(&search, page, ADMIN_PAGE_SIZE)).await?;
+    Ok(Json(LibraryJson { total: listing.total, maps: listing.maps.iter().map(MapJson::of).collect() }).into_response())
+}
+
+/// The code of any map, whatever its status or visibility.
+async fn map_code(State(hub): State<Arc<Hub>>, headers: HeaderMap, Path(id): Path<i64>) -> Result<Response, Fail> {
+    if !authorized(&hub, &headers) {
+        return Ok(StatusCode::UNAUTHORIZED.into_response());
+    }
+    let d = db(&hub, move |s| s.get(id, None, true)).await?;
+    Ok(Json(MapDetailJson::of(d, false)).into_response())
+}
+
+async fn approve_map(State(hub): State<Arc<Hub>>, headers: HeaderMap, Path(id): Path<i64>) -> Result<Response, Fail> {
+    moderate_map(&hub, &headers, id, Verdict::Approve).await
+}
+
+async fn reject_map(State(hub): State<Arc<Hub>>, headers: HeaderMap, Path(id): Path<i64>) -> Result<Response, Fail> {
+    moderate_map(&hub, &headers, id, Verdict::Reject).await
+}
+
+async fn moderate_map(hub: &Hub, headers: &HeaderMap, id: i64, verdict: Verdict) -> Result<Response, Fail> {
+    if !authorized(hub, headers) {
+        return Ok(StatusCode::UNAUTHORIZED.into_response());
+    }
+    db(hub, move |s| s.moderate(id, verdict)).await?;
+    Ok(StatusCode::NO_CONTENT.into_response())
+}
+
+/// Hard-delete any map, approved or not. Admins skip the owner check, so the
+/// acting account id is never read; 0 names no account.
+async fn remove_map(State(hub): State<Arc<Hub>>, headers: HeaderMap, Path(id): Path<i64>) -> Result<Response, Fail> {
+    if !authorized(&hub, &headers) {
+        return Ok(StatusCode::UNAUTHORIZED.into_response());
+    }
+    db(&hub, move |s| s.delete_map(0, id, true)).await?;
+    Ok(StatusCode::NO_CONTENT.into_response())
 }

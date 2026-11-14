@@ -1,14 +1,15 @@
 //! A room: lobby (players, teams, chat, host settings, map) and, while a
 //! match runs, the authoritative input timeline ticking at the room's rate.
 
-use crate::hub::{ConnInfo, Hub, Out};
+use crate::hub::{AccountRef, ConnInfo, Hub, Out, RoomHandle};
 use base64::Engine;
 use neobox_net::*;
 use neobox_sim::start::Outcome;
 use neobox_sim::{GameSettings, MapData};
 use serde::Serialize;
-use std::collections::{HashSet, VecDeque};
+use std::collections::VecDeque;
 use std::net::IpAddr;
+use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tokio::sync::{mpsc, oneshot};
@@ -16,14 +17,28 @@ use tracing::{info, warn};
 
 /// Longest map code accepted from clients (characters).
 pub const MAX_MAP_CODE: usize = 2 * 1024 * 1024;
+/// Longest room password (characters).
+pub const MAX_PASSWORD_LEN: usize = 64;
 /// Confirmed ticks kept for resending.
 const HISTORY: usize = 256;
 /// Clients further behind than this get a snapshot instead of batches.
 const MAX_CATCHUP: u32 = 90;
+/// A player whose connection dropped keeps their slot this long.
+const LOST_LIMIT: Duration = Duration::from_secs(60);
+const HELP: &str = "Commands: /set <key> <value>, /reset, /mode <n>, /start, /end, /lock, /unlock, \
+    /kick <name>, /ban <name>, /unban <name>, /host <name>, /team <name> <ffa|red|blue|spec>";
+
+/// (player id, resume token) on success, or (code, message).
+type JoinReply = Result<(u32, String), (String, String)>;
 
 pub enum RoomCmd {
-    Join { conn: ConnInfo, password: Option<String>, reply: oneshot::Sender<Result<u32, (String, String)>> },
-    Leave { player: u32 },
+    /// `resume`: the token of an earlier slot, which gives that slot back.
+    Join { conn: ConnInfo, password: Option<String>, resume: Option<String>, reply: oneshot::Sender<JoinReply> },
+    /// The connection left on purpose. `out` identifies the connection, so a
+    /// stale command from a replaced connection changes nothing.
+    Leave { player: u32, out: mpsc::UnboundedSender<Out> },
+    /// The connection dropped: its slot is held for a reconnect.
+    Lost { player: u32, out: mpsc::UnboundedSender<Out> },
     Msg { player: u32, msg: ClientMsg },
     Frame { player: u32, frame: ClientFrame },
     Admin(AdminCmd),
@@ -41,6 +56,8 @@ pub enum AdminCmd {
     SetHost { player: u32 },
     SetMaxPlayers { max: u8 },
     SetTeam { player: u32, team: u8 },
+    /// Lift a ban by the banned player's name.
+    Unban { name: String },
 }
 
 #[derive(Clone, Debug, Serialize, Default)]
@@ -57,8 +74,12 @@ pub struct PlayerSummary {
     /// "udp" (WebRTC data channel) or "ws"
     pub transport: &'static str,
     pub input_mask: u8,
+    /// False while the slot is held for a reconnect.
+    pub connected: bool,
     pub connected_s: u64,
     pub in_match: bool,
+    /// Signed-in account id (`None` for guests).
+    pub account: Option<i64>,
 }
 
 #[derive(Clone, Debug, Serialize, Default)]
@@ -82,11 +103,31 @@ pub struct RoomSummary {
     pub bytes_out_per_s: u64,
     pub settings: Option<GameSettings>,
     pub round: Option<serde_json::Value>,
+    /// Names of banned players.
+    pub bans: Vec<String>,
+}
+
+/// A banned player: the name listed in the room and the keys that block
+/// them (see [`conn_keys`]).
+#[derive(Clone, Debug)]
+struct Ban {
+    name: String,
+    keys: Vec<String>,
+}
+
+enum Link {
+    Live(ConnInfo),
+    /// Connection dropped at this instant; the slot waits for a resume.
+    Lost(Instant),
 }
 
 struct RPlayer {
     id: u32,
-    conn: ConnInfo,
+    name: String,
+    account: Option<AccountRef>,
+    ip: IpAddr,
+    token: String,
+    link: Link,
     team: u8,
     in_match: bool,
     /// next tick the client needs (its confirmed tick)
@@ -97,6 +138,26 @@ struct RPlayer {
     chat_at: Instant,
     last_bytes: (u64, u64),
     rate: (u64, u64),
+}
+
+impl RPlayer {
+    fn live(&self) -> Option<&ConnInfo> {
+        match &self.link {
+            Link::Live(c) => Some(c),
+            Link::Lost(_) => None,
+        }
+    }
+
+    /// Sends to the player's connection; nothing while the slot is held.
+    fn send(&self, o: Out) {
+        if let Some(c) = self.live() {
+            c.send(o);
+        }
+    }
+
+    fn text(&self, m: &ServerMsg) {
+        self.send(Out::Text(json(m)));
+    }
 }
 
 struct Game {
@@ -127,8 +188,11 @@ pub struct Room {
     map_code: String,
     map_name: String,
     tick_hz: f64,
+    /// Tick rate set during a match; applied when the next match starts.
+    next_tick_hz: Option<f64>,
     next_id: u32,
-    bans: HashSet<String>,
+    locked: bool,
+    bans: Vec<Ban>,
     game: Option<Game>,
     summary: Arc<Mutex<RoomSummary>>,
     created: u64,
@@ -140,7 +204,7 @@ fn now_ms() -> u64 {
 }
 
 /// Create a room and start its task.
-pub fn spawn(hub: Arc<Hub>, code: String, name: String, password: Option<String>, max_players: u8, public: bool) -> crate::hub::RoomHandle {
+pub fn spawn(hub: Arc<Hub>, code: String, name: String, password: Option<String>, max_players: u8, public: bool) -> RoomHandle {
     let (tx, rx) = mpsc::unbounded_channel();
     let summary = Arc::new(Mutex::new(RoomSummary { code: code.clone(), name: name.clone(), ..RoomSummary::default() }));
     let map = hub.maps.first().cloned();
@@ -157,20 +221,67 @@ pub fn spawn(hub: Arc<Hub>, code: String, name: String, password: Option<String>
         settings: GameSettings::default(),
         map_code: map.as_ref().map(|m| m.code.clone()).unwrap_or_default(),
         map_name: map.map(|m| m.name).unwrap_or_default(),
+        next_tick_hz: None,
         next_id: 0,
-        bans: HashSet::new(),
+        locked: false,
+        bans: Vec::new(),
         game: None,
         summary: summary.clone(),
         created: now_ms(),
         closed: false,
     };
-    let handle = crate::hub::RoomHandle { tx, summary };
+    let handle = RoomHandle { tx, summary };
     tokio::spawn(room.run(rx));
     handle
 }
 
-fn ip_key(ip: &IpAddr) -> String {
-    format!("ip:{ip}")
+/// Keys a ban matches: the player's address, and their account if signed in.
+fn conn_keys(ip: &IpAddr, account: Option<&AccountRef>) -> Vec<String> {
+    let mut keys = vec![format!("ip:{ip}")];
+    if let Some(a) = account {
+        keys.push(format!("acct:{}", a.id));
+    }
+    keys
+}
+
+/// Compares secrets without stopping at the first differing byte.
+fn ct_eq(a: &str, b: &str) -> bool {
+    a.len() == b.len() && a.bytes().zip(b.bytes()).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
+}
+
+fn new_token() -> String {
+    format!("{:016x}{:016x}", rand::random::<u64>(), rand::random::<u64>())
+}
+
+/// Splits a leading player name off `text`: a quoted name, or else the
+/// longest of `names` that `text` starts with, followed by a space or the end.
+/// Returns the matched name and the rest of the text.
+fn take_name(text: &str, names: &[&str]) -> Option<(String, String)> {
+    if let Some(quoted) = text.strip_prefix('"') {
+        let (name, rest) = quoted.split_once('"')?;
+        let hit = names.iter().find(|n| n.eq_ignore_ascii_case(name))?;
+        return Some(((*hit).to_string(), rest.trim().to_string()));
+    }
+    let mut best: Option<&str> = None;
+    for &n in names {
+        let starts = text.get(..n.len()).is_some_and(|s| s.eq_ignore_ascii_case(n));
+        let ends_word = text.get(n.len()..).is_some_and(|r| r.chars().next().is_none_or(|c| c == ' '));
+        if starts && ends_word && best.is_none_or(|b| n.len() > b.len()) {
+            best = Some(n);
+        }
+    }
+    best.and_then(|n| text.get(n.len()..).map(|rest| (n.to_string(), rest.trim().to_string())))
+}
+
+/// Full state for a player at the current tick (see `ServerMsg::Snapshot`).
+fn snapshot_msg(g: &Game, id: u32) -> ServerMsg {
+    ServerMsg::Snapshot {
+        start: g.m.start.clone(),
+        tick: g.m.tick,
+        state: base64::engine::general_purpose::STANDARD.encode(g.m.snapshot()),
+        you: Some(id),
+        held: g.m.held_masks(),
+    }
 }
 
 impl Room {
@@ -190,6 +301,7 @@ impl Room {
                     self.run_ticks();
                 }
                 _ = stats.tick() => {
+                    self.expire_lost();
                     self.update_summary();
                     if self.game.is_none() {
                         self.broadcast_room();
@@ -201,7 +313,7 @@ impl Room {
             }
         }
         for p in &self.players {
-            p.conn.send(Out::Text(json(&ServerMsg::Left)));
+            p.send(Out::Text(json(&ServerMsg::Left)));
         }
         self.hub.rooms.lock().unwrap().remove(&self.code);
         info!(room = %self.code, "room closed");
@@ -209,11 +321,16 @@ impl Room {
 
     fn handle(&mut self, cmd: RoomCmd) {
         match cmd {
-            RoomCmd::Join { conn, password, reply } => {
-                let r = self.join(conn, password);
+            RoomCmd::Join { conn, password, resume, reply } => {
+                let r = self.join(conn, password, resume);
                 let _ = reply.send(r);
             }
-            RoomCmd::Leave { player } => self.leave(player, "left"),
+            RoomCmd::Leave { player, out } => {
+                if self.is_live_as(player, &out) {
+                    self.remove(player, "left");
+                }
+            }
+            RoomCmd::Lost { player, out } => self.lost(player, &out),
             RoomCmd::Msg { player, msg } => self.message(player, msg),
             RoomCmd::Frame { player, frame } => self.frame(player, frame),
             RoomCmd::Admin(a) => self.admin(a),
@@ -241,16 +358,30 @@ impl Room {
         self.host == Some(id)
     }
 
-    fn error(&self, id: u32, code: &str, message: &str) {
+    /// True if `id` is currently connected through the connection `out`.
+    fn is_live_as(&self, id: u32, out: &mpsc::UnboundedSender<Out>) -> bool {
+        self.player(id).and_then(|p| p.live()).is_some_and(|c| c.out.same_channel(out))
+    }
+
+    fn to(&self, id: u32, m: &ServerMsg) {
         if let Some(p) = self.player(id) {
-            p.conn.send(Out::Text(json(&ServerMsg::Error { code: code.into(), message: message.into() })));
+            p.text(m);
         }
+    }
+
+    fn error(&self, id: u32, code: &str, message: &str) {
+        self.to(id, &ServerMsg::Error { code: code.into(), message: message.into() });
+    }
+
+    /// A line only `id` sees.
+    fn notice(&self, id: u32, text: &str) {
+        self.to(id, &ServerMsg::Chat { from: None, name: String::new(), text: text.into() });
     }
 
     fn system_chat(&self, text: &str) {
         let m = json(&ServerMsg::Chat { from: None, name: String::new(), text: text.into() });
         for p in &self.players {
-            p.conn.send(Out::Text(m.clone()));
+            p.send(Out::Text(m.clone()));
         }
     }
 
@@ -265,12 +396,16 @@ impl Room {
         }
     }
 
-    fn join(&mut self, conn: ConnInfo, password: Option<String>) -> Result<u32, (String, String)> {
-        if self.bans.contains(&ip_key(&conn.ip)) {
+    fn join(&mut self, conn: ConnInfo, password: Option<String>, resume: Option<String>) -> JoinReply {
+        if let Some(i) = resume.and_then(|t| self.players.iter().position(|p| p.token == t)) {
+            return Ok(self.resume(i, conn));
+        }
+        let keys = conn_keys(&conn.ip, conn.account.as_ref());
+        if self.bans.iter().any(|b| b.keys.iter().any(|k| keys.contains(k))) {
             return Err(("banned".into(), "You are banned from this room".into()));
         }
         if let Some(pw) = &self.password {
-            if password.as_deref() != Some(pw.as_str()) {
+            if !password.as_deref().is_some_and(|p| ct_eq(p, pw)) {
                 return Err(("wrong_password".into(), "Wrong password".into()));
             }
         }
@@ -280,12 +415,25 @@ impl Room {
         let id = self.next_id;
         self.next_id += 1;
         let team = self.default_team();
+        // late join: a running match takes the player in at the current tick
+        let in_match = match self.game.as_mut() {
+            Some(g) => {
+                g.m.join(id, team as f64);
+                true
+            }
+            None => false,
+        };
+        let token = new_token();
         info!(room = %self.code, player = id, name = %conn.name, ip = %conn.ip, "join");
-        let mut p = RPlayer {
+        self.players.push(RPlayer {
             id,
-            conn,
+            name: conn.name.clone(),
+            account: conn.account.clone(),
+            ip: conn.ip,
+            token: token.clone(),
+            link: Link::Live(conn),
             team,
-            in_match: false,
+            in_match,
             ack: 0,
             last_sent: None,
             margin16: 0,
@@ -293,48 +441,105 @@ impl Room {
             chat_at: Instant::now(),
             last_bytes: (0, 0),
             rate: (0, 0),
-        };
-        p.conn.send(Out::Text(json(&ServerMsg::Joined { you: id })));
+        });
         if self.host.is_none() {
             self.host = Some(id);
         }
-        if let Some(g) = self.game.as_mut() {
-            // late join: enter the running match at the current tick
-            if team != TEAM_SPECTATOR {
-                g.m.join(id, team as f64);
-                p.in_match = true;
-            }
-            p.ack = g.m.tick;
-            p.last_sent = None;
-            let snap = ServerMsg::Snapshot {
-                start: g.m.start.clone(),
-                tick: g.m.tick,
-                state: base64::engine::general_purpose::STANDARD.encode(g.m.snapshot()),
-                you: Some(id),
-            };
-            p.conn.send(Out::Text(json(&ServerMsg::Room { room: self.room_state() })));
-            p.conn.send(Out::Text(json(&snap)));
-        }
-        self.players.push(p);
+        let i = self.players.len() - 1;
+        self.catch_up(i);
         self.broadcast_room();
-        Ok(id)
+        Ok((id, token))
     }
 
-    fn leave(&mut self, id: u32, why: &str) {
+    /// Takes a held slot back on a new connection.
+    fn resume(&mut self, i: usize, conn: ConnInfo) -> (u32, String) {
+        if let Link::Live(old) = &self.players[i].link {
+            // the replaced connection's later commands are ignored (see `is_live_as`)
+            old.send(Out::Close("replaced by a new connection".into()));
+        }
+        let p = &mut self.players[i];
+        p.ip = conn.ip;
+        p.link = Link::Live(conn);
+        let (id, token) = (p.id, p.token.clone());
+        info!(room = %self.code, player = id, name = %p.name, "resumed");
+        self.catch_up(i);
+        self.broadcast_room();
+        (id, token)
+    }
+
+    /// Brings a joined or resumed player up to date: their id and token,
+    /// the lobby state, and inside a running match a snapshot to continue from.
+    fn catch_up(&mut self, i: usize) {
+        let id = self.players[i].id;
+        let joined = ServerMsg::Joined { you: id, token: self.players[i].token.clone() };
+        let room = ServerMsg::Room { room: self.room_state() };
+        if let Some(g) = self.game.as_mut() {
+            // a reloaded page numbers its input changes from 1 again
+            g.m.reset_input_seq(id);
+        }
+        let p = &mut self.players[i];
+        p.send(Out::Text(json(&joined)));
+        p.send(Out::Text(json(&room)));
+        if let Some(g) = self.game.as_ref() {
+            p.ack = g.m.tick;
+            p.last_sent = None;
+            p.send(Out::Text(json(&snapshot_msg(g, id))));
+        }
+    }
+
+    /// The connection dropped: keep the slot (and its place in a running
+    /// match, standing still) until it resumes or the grace period ends.
+    fn lost(&mut self, id: u32, out: &mpsc::UnboundedSender<Out>) {
+        if !self.is_live_as(id, out) {
+            return;
+        }
+        let Some(p) = self.player_mut(id) else { return };
+        p.link = Link::Lost(Instant::now());
+        let in_match = p.in_match;
+        info!(room = %self.code, player = id, "connection lost");
+        if in_match {
+            if let Some(g) = self.game.as_mut() {
+                g.m.neutralize(id);
+            }
+        }
+        self.broadcast_room();
+    }
+
+    /// Frees the slots of players who have not come back in time.
+    fn expire_lost(&mut self) {
+        let now = Instant::now();
+        let gone: Vec<u32> = self
+            .players
+            .iter()
+            .filter(|p| matches!(&p.link, Link::Lost(t) if now.duration_since(*t) > LOST_LIMIT))
+            .map(|p| p.id)
+            .collect();
+        for id in gone {
+            self.remove(id, "connection timed out");
+        }
+    }
+
+    /// Removes a player for good (left, kicked, banned, timed out).
+    fn remove(&mut self, id: u32, why: &str) {
         let Some(i) = self.players.iter().position(|p| p.id == id) else { return };
         let p = self.players.remove(i);
-        info!(room = %self.code, player = id, name = %p.conn.name, reason = why, "leave");
-        if let Some(g) = self.game.as_mut() {
-            if p.in_match {
+        info!(room = %self.code, player = id, name = %p.name, reason = why, "leave");
+        if p.in_match {
+            if let Some(g) = self.game.as_mut() {
                 g.m.leave(id);
             }
         }
         if self.host == Some(id) {
-            self.host = self.players.iter().map(|p| p.id).min();
-            if let Some(h) = self.host {
-                if let Some(np) = self.player(h) {
-                    self.system_chat(&format!("{} is now the host", np.conn.name));
-                }
+            // prefer a connected player as the new host
+            self.host = self
+                .players
+                .iter()
+                .filter(|q| q.live().is_some())
+                .map(|q| q.id)
+                .min()
+                .or_else(|| self.players.iter().map(|q| q.id).min());
+            if let Some(name) = self.host.and_then(|h| self.player(h)).map(|q| q.name.clone()) {
+                self.system_chat(&format!("{name} is now the host"));
             }
         }
         self.broadcast_room();
@@ -349,20 +554,105 @@ impl Room {
             players: self
                 .players
                 .iter()
-                .map(|p| PlayerInfo { id: p.id, name: p.conn.name.clone(), team: p.team, ping_ms: p.conn.stats.rtt(), host: self.host == Some(p.id) })
+                .map(|p| PlayerInfo {
+                    id: p.id,
+                    name: p.name.clone(),
+                    team: p.team,
+                    ping_ms: p.live().map_or(0, |c| c.stats.rtt()),
+                    host: self.host == Some(p.id),
+                    account: p.account.is_some(),
+                    connected: p.live().is_some(),
+                })
                 .collect(),
             settings: self.settings.clone(),
             map_name: self.map_name.clone(),
             in_match: self.game.is_some(),
             tick_hz: self.tick_hz,
+            locked: self.locked,
+            bans: self.bans.iter().map(|b| b.name.clone()).collect(),
         }
     }
 
     fn broadcast_room(&self) {
         let m = json(&ServerMsg::Room { room: self.room_state() });
         for p in &self.players {
-            p.conn.send(Out::Text(m.clone()));
+            p.send(Out::Text(m.clone()));
         }
+    }
+
+    /// Spends one chat token; false when the player is sending too fast.
+    fn take_chat_token(&mut self, id: u32) -> bool {
+        let Some(p) = self.player_mut(id) else { return false };
+        // 3 messages burst, then one every 3 seconds
+        let now = Instant::now();
+        p.chat_tokens = (p.chat_tokens + now.duration_since(p.chat_at).as_secs_f64() / 3.0).min(3.0);
+        p.chat_at = now;
+        if p.chat_tokens < 1.0 {
+            return false;
+        }
+        p.chat_tokens -= 1.0;
+        true
+    }
+
+    /// The first player whose name starts `text`, and the rest of `text`.
+    fn named_player(&self, text: &str) -> Option<(u32, String)> {
+        let names: Vec<&str> = self.players.iter().map(|p| p.name.as_str()).collect();
+        let (name, rest) = take_name(text, &names)?;
+        let id = self.players.iter().find(|p| p.name == name)?.id;
+        Some((id, rest))
+    }
+
+    /// `/command` chat lines. Each maps onto the client message the UI sends,
+    /// so the permission checks are shared.
+    fn command(&mut self, id: u32, cmd: &str) {
+        let (word, rest) = cmd.split_once(' ').map_or((cmd, ""), |(w, r)| (w, r.trim()));
+        let word = word.to_ascii_lowercase();
+        let msg = match word.as_str() {
+            "help" => return self.notice(id, HELP),
+            "set" => match rest.split_once(' ') {
+                Some((key, value)) => ClientMsg::SetSetting { key: key.into(), value: value.trim().into() },
+                None => return self.notice(id, "Usage: /set <key> <value>"),
+            },
+            "reset" => ClientMsg::ResetSettings,
+            "mode" => match rest.parse() {
+                Ok(mode) => ClientMsg::SetMode { mode },
+                Err(_) => return self.notice(id, "Usage: /mode <number>"),
+            },
+            "start" => ClientMsg::Start,
+            "end" => ClientMsg::EndMatch,
+            "lock" => ClientMsg::SetLock { locked: true },
+            "unlock" => ClientMsg::SetLock { locked: false },
+            "kick" | "ban" => match self.named_player(rest) {
+                Some((player, _)) => ClientMsg::Kick { player, ban: word == "ban" },
+                None => return self.notice(id, "No player with that name"),
+            },
+            "host" => match self.named_player(rest) {
+                Some((player, _)) => ClientMsg::GiveHost { player },
+                None => return self.notice(id, "No player with that name"),
+            },
+            "team" => {
+                let Some((player, tail)) = self.named_player(rest) else {
+                    return self.notice(id, "No player with that name");
+                };
+                let team = match tail.to_ascii_lowercase().as_str() {
+                    "ffa" => TEAM_FFA,
+                    "red" => TEAM_RED,
+                    "blue" => TEAM_BLUE,
+                    "spec" => TEAM_SPECTATOR,
+                    _ => return self.notice(id, "Usage: /team <name> <ffa|red|blue|spec>"),
+                };
+                ClientMsg::MovePlayer { player, team }
+            }
+            "unban" => {
+                let names: Vec<&str> = self.bans.iter().map(|b| b.name.as_str()).collect();
+                match take_name(rest, &names) {
+                    Some((name, _)) => ClientMsg::Unban { name },
+                    None => return self.notice(id, "No banned player with that name"),
+                }
+            }
+            _ => return self.notice(id, "Unknown command, try /help"),
+        };
+        self.message(id, msg);
     }
 
     fn message(&mut self, id: u32, msg: ClientMsg) {
@@ -374,48 +664,45 @@ impl Room {
                 if text.is_empty() {
                     return;
                 }
-                let Some(p) = self.player_mut(id) else { return };
-                // 3 messages burst, then one every 3 seconds
-                let now = Instant::now();
-                p.chat_tokens = (p.chat_tokens + now.duration_since(p.chat_at).as_secs_f64() / 3.0).min(3.0);
-                p.chat_at = now;
-                if p.chat_tokens < 1.0 {
-                    p.conn.send(Out::Text(json(&ServerMsg::Error { code: "rate_limited".into(), message: "You're doing that too much!".into() })));
-                    return;
+                // commands are the same actions the UI sends as plain messages,
+                // which are not throttled; only chat lines are
+                if let Some(cmd) = text.strip_prefix('/') {
+                    return self.command(id, cmd);
                 }
-                p.chat_tokens -= 1.0;
-                let m = json(&ServerMsg::Chat { from: Some(id), name: p.conn.name.clone(), text });
+                if !self.take_chat_token(id) {
+                    return self.error(id, "rate_limited", "You're doing that too much!");
+                }
+                let Some(p) = self.player(id) else { return };
+                let m = json(&ServerMsg::Chat { from: Some(id), name: p.name.clone(), text });
                 for q in &self.players {
-                    q.conn.send(Out::Text(m.clone()));
+                    q.send(Out::Text(m.clone()));
                 }
             }
             ClientMsg::SetTeam { team } => {
-                if team > TEAM_BLUE {
+                if self.locked && !host {
+                    return self.error(id, "teams_locked", "Teams are locked by the host");
+                }
+                if let Err(e) = self.move_to_team(id, team) {
+                    return self.error(id, "bad_team", &e);
+                }
+            }
+            ClientMsg::MovePlayer { player, team } => {
+                if !host {
+                    return self.error(id, "not_host", "Only the host can move players");
+                }
+                if self.player(player).is_none() {
                     return;
                 }
-                let team_mode = self.settings.is_team_mode();
-                let team = match team {
-                    TEAM_FFA if team_mode => return self.error(id, "bad_team", "This mode uses red and blue teams"),
-                    TEAM_RED | TEAM_BLUE if !team_mode => return self.error(id, "bad_team", "Teams are only used in team modes"),
-                    t => t,
-                };
-                let Some(p) = self.player_mut(id) else { return };
-                let was = p.team;
-                p.team = team;
-                let in_match = p.in_match;
-                if let Some(g) = self.game.as_mut() {
-                    if was != team {
-                        if in_match {
-                            g.m.leave(id);
-                        }
-                        if team != TEAM_SPECTATOR {
-                            g.m.join(id, team as f64);
-                        }
-                        if let Some(p) = self.players.iter_mut().find(|p| p.id == id) {
-                            p.in_match = team != TEAM_SPECTATOR;
-                        }
-                    }
+                if let Err(e) = self.move_to_team(player, team) {
+                    return self.error(id, "bad_team", &e);
                 }
+            }
+            ClientMsg::SetLock { locked } => {
+                if !host {
+                    return self.error(id, "not_host", "Only the host can lock teams");
+                }
+                self.locked = locked;
+                self.system_chat(if locked { "Teams are locked" } else { "Teams are unlocked" });
                 self.broadcast_room();
             }
             ClientMsg::SetMap { code, name } => {
@@ -460,7 +747,7 @@ impl Room {
             }
             ClientMsg::ResetSettings => {
                 if !host {
-                    return;
+                    return self.error(id, "not_host", "Only the host can reset settings");
                 }
                 let mode = self.settings.game_mode;
                 self.settings = GameSettings { game_mode: mode, ..GameSettings::default() };
@@ -468,8 +755,11 @@ impl Room {
                 self.broadcast_room();
             }
             ClientMsg::SetMode { mode } => {
-                if !host || !(0..=6).contains(&mode) {
-                    return;
+                if !host {
+                    return self.error(id, "not_host", "Only the host can change the mode");
+                }
+                if !(0..=6).contains(&mode) {
+                    return self.error(id, "bad_setting", "Unknown game mode");
                 }
                 self.settings.game_mode = mode;
                 // move players to fitting teams
@@ -502,51 +792,108 @@ impl Room {
                 }
                 self.start_match();
             }
+            ClientMsg::EndMatch => {
+                if !host {
+                    return self.error(id, "not_host", "Only the host can stop the match");
+                }
+                self.end_match("ended by the host");
+            }
             ClientMsg::Kick { player, ban } => {
                 if !host || player == id {
                     return;
                 }
                 self.kick(player, ban);
             }
-            ClientMsg::Resync => {
-                if let (Some(g), Some(p)) = (self.game.as_ref(), self.players.iter().find(|p| p.id == id)) {
-                    let snap = ServerMsg::Snapshot {
-                        start: g.m.start.clone(),
-                        tick: g.m.tick,
-                        state: base64::engine::general_purpose::STANDARD.encode(g.m.snapshot()),
-                        you: Some(id),
-                    };
-                    p.conn.send(Out::Text(json(&snap)));
-                    let tick = g.m.tick;
-                    if let Some(p) = self.player_mut(id) {
-                        p.ack = tick;
-                        p.last_sent = None;
-                    }
-                    warn!(room = %self.code, player = id, "resync requested");
+            ClientMsg::Unban { name } => {
+                if !host {
+                    return self.error(id, "not_host", "Only the host can lift bans");
                 }
+                let before = self.bans.len();
+                self.bans.retain(|b| !b.name.eq_ignore_ascii_case(&name));
+                if self.bans.len() != before {
+                    self.system_chat(&format!("{name} was unbanned"));
+                    self.broadcast_room();
+                }
+            }
+            ClientMsg::GiveHost { player } => {
+                if !host {
+                    return self.error(id, "not_host", "Only the host can give the host role");
+                }
+                if let Some(name) = self.player(player).map(|p| p.name.clone()) {
+                    self.host = Some(player);
+                    self.system_chat(&format!("{name} is now the host"));
+                    self.broadcast_room();
+                }
+            }
+            ClientMsg::Resync => {
+                let Some(i) = self.players.iter().position(|p| p.id == id) else { return };
+                let Some(g) = self.game.as_mut() else { return };
+                let tick = g.m.tick;
+                let snap = snapshot_msg(g, id);
+                let p = &mut self.players[i];
+                p.text(&snap);
+                p.ack = tick;
+                p.last_sent = None;
+                warn!(room = %self.code, player = id, "resync requested");
             }
             ClientMsg::Hello { .. }
             | ClientMsg::ListRooms
             | ClientMsg::CreateRoom { .. }
             | ClientMsg::JoinRoom { .. }
+            | ClientMsg::QuickPlay
             | ClientMsg::LeaveRoom
             | ClientMsg::RtcOffer { .. } => {}
         }
     }
 
+    /// Puts a player on a team, mid-match too. Errors name the rule broken.
+    fn move_to_team(&mut self, id: u32, team: u8) -> Result<(), String> {
+        if team > TEAM_BLUE {
+            return Err("No such team".into());
+        }
+        let team_mode = self.settings.is_team_mode();
+        match team {
+            TEAM_FFA if team_mode => return Err("This mode uses red and blue teams".into()),
+            TEAM_RED | TEAM_BLUE if !team_mode => return Err("Teams are only used in team modes".into()),
+            _ => {}
+        }
+        let Some(i) = self.players.iter().position(|p| p.id == id) else { return Ok(()) };
+        let p = &mut self.players[i];
+        let was = p.team;
+        p.team = team;
+        if let Some(g) = self.game.as_mut() {
+            if was != team {
+                if p.in_match {
+                    g.m.leave(id);
+                }
+                if team != TEAM_SPECTATOR {
+                    g.m.join(id, team as f64);
+                }
+                p.in_match = team != TEAM_SPECTATOR;
+            }
+        }
+        self.broadcast_room();
+        Ok(())
+    }
+
     fn kick(&mut self, player: u32, ban: bool) {
         let Some(p) = self.player(player) else { return };
-        let (ip, name) = (ip_key(&p.conn.ip), p.conn.name.clone());
-        p.conn.send(Out::Text(json(&ServerMsg::Kicked { reason: if ban { "You were banned".into() } else { "You were kicked".into() } })));
-        p.conn.send(Out::Close(if ban { "banned" } else { "kicked" }.into()));
+        let name = p.name.clone();
+        let keys = conn_keys(&p.ip, p.account.as_ref());
+        let reason = if ban { "You were banned" } else { "You were kicked" };
+        p.send(Out::Text(json(&ServerMsg::Kicked { reason: reason.into() })));
+        p.send(Out::Close(if ban { "banned" } else { "kicked" }.into()));
         if ban {
-            self.bans.insert(ip);
+            self.bans.push(Ban { name: name.clone(), keys });
         }
-        self.leave(player, if ban { "banned" } else { "kicked" });
+        self.remove(player, if ban { "banned" } else { "kicked" });
         self.system_chat(&format!("{name} was {}", if ban { "banned" } else { "kicked" }));
     }
 
     fn start_match(&mut self) {
+        if let Some(hz) = self.next_tick_hz.take() {
+            self.tick_hz = hz;
+        }
         let players: Vec<(u32, f64)> = self.players.iter().filter(|p| p.team != TEAM_SPECTATOR).map(|p| (p.id, p.team as f64)).collect();
         if players.is_empty() {
             return self.system_chat("Nobody to play: everyone is spectating");
@@ -574,7 +921,7 @@ impl Room {
             p.ack = start.start_tick;
             p.last_sent = None;
             p.margin16 = 0;
-            p.conn.send(Out::Text(json(&ServerMsg::MatchStart { start: start.clone(), you: Some(p.id) })));
+            p.text(&ServerMsg::MatchStart { start: start.clone(), you: Some(p.id) });
         }
         let now = Instant::now();
         self.game = Some(Game {
@@ -597,7 +944,7 @@ impl Room {
             let m = json(&ServerMsg::MatchEnd { reason: reason.into() });
             for p in self.players.iter_mut() {
                 p.in_match = false;
-                p.conn.send(Out::Text(m.clone()));
+                p.send(Out::Text(m.clone()));
             }
             self.broadcast_room();
         }
@@ -614,7 +961,7 @@ impl Room {
                     None => (0, 0.0),
                 };
                 if let Some(p) = self.player(id) {
-                    p.conn.send(Out::Binary(ServerFrame::Pong { client_time, server_tick: tick, tick_phase: phase }.encode()));
+                    p.send(Out::Binary(ServerFrame::Pong { client_time, server_tick: tick, tick_phase: phase }.encode()));
                 }
             }
             ClientFrame::Input(f) => {
@@ -684,10 +1031,15 @@ impl Room {
         let first_kept = g.history.front().map_or(latest, |d| d.tick);
         let mut snapshots = Vec::new();
         for p in self.players.iter_mut() {
+            // held slots get nothing until their connection resumes
+            if p.live().is_none() {
+                continue;
+            }
             // over the unreliable data channel every unconfirmed tick is
             // resent (a few bytes each), so a lost packet costs nothing
+            let udp = p.live().is_some_and(|c| c.stats.udp.load(Ordering::Relaxed));
             let from = match p.last_sent {
-                Some(s) if !p.conn.stats.udp.load(std::sync::atomic::Ordering::Relaxed) => (s + 1).max(p.ack),
+                Some(s) if !udp => (s + 1).max(p.ack),
                 _ => p.ack,
             };
             if from >= latest {
@@ -699,10 +1051,10 @@ impl Room {
             }
             let ticks: Vec<TickData> = g.history.iter().filter(|d| d.tick >= from).cloned().collect();
             let input_ack = g.m.input_ack(p.id);
-            p.conn.send(Out::Binary(ServerFrame::Batch { ticks, input_ack, margin16: p.margin16 }.encode()));
+            p.send(Out::Binary(ServerFrame::Batch { ticks, input_ack, margin16: p.margin16 }.encode()));
             p.last_sent = Some(latest - 1);
             if let Some(h) = checksum {
-                p.conn.send(Out::Binary(ServerFrame::Checksum { tick: latest, hash: h }.encode()));
+                p.send(Out::Binary(ServerFrame::Checksum { tick: latest, hash: h }.encode()));
             }
         }
         for id in snapshots {
@@ -717,7 +1069,7 @@ impl Room {
             AdminCmd::Close => {
                 self.system_chat("This room was closed by an administrator");
                 for p in &self.players {
-                    p.conn.send(Out::Text(json(&ServerMsg::Kicked { reason: "Room closed by an administrator".into() })));
+                    p.send(Out::Text(json(&ServerMsg::Kicked { reason: "Room closed by an administrator".into() })));
                 }
                 self.closed = true;
             }
@@ -725,14 +1077,14 @@ impl Room {
             AdminCmd::EndMatch => self.end_match("ended by an administrator"),
             AdminCmd::SetTickRate { hz } => {
                 if hz.is_finite() && (5.0..=120.0).contains(&hz) {
-                    self.tick_hz = hz;
-                    let m = Out::Text(json(&ServerMsg::TickRate { tick_hz: hz }));
-                    for p in &self.players {
-                        p.conn.send(Out::Text(json(&ServerMsg::TickRate { tick_hz: hz })));
-                    }
-                    drop(m);
                     if self.game.is_some() {
+                        self.next_tick_hz = Some(hz);
                         self.system_chat(&format!("Tick rate set to {hz} Hz (applies from the next match)"));
+                    } else {
+                        self.tick_hz = hz;
+                        for p in &self.players {
+                            p.text(&ServerMsg::TickRate { tick_hz: hz });
+                        }
                     }
                     self.broadcast_room();
                 }
@@ -749,8 +1101,16 @@ impl Room {
                 self.broadcast_room();
             }
             AdminCmd::SetTeam { player, team } => {
-                if team <= TEAM_BLUE {
-                    self.message(player, ClientMsg::SetTeam { team });
+                if let Err(e) = self.move_to_team(player, team) {
+                    warn!(room = %self.code, player, "admin team change refused: {e}");
+                }
+            }
+            AdminCmd::Unban { name } => {
+                let before = self.bans.len();
+                self.bans.retain(|b| !b.name.eq_ignore_ascii_case(&name));
+                if self.bans.len() != before {
+                    self.system_chat(&format!("{name} was unbanned"));
+                    self.broadcast_room();
                 }
             }
         }
@@ -758,8 +1118,9 @@ impl Room {
 
     fn update_summary(&mut self) {
         for p in self.players.iter_mut() {
-            let bi = p.conn.stats.bytes_in.load(std::sync::atomic::Ordering::Relaxed);
-            let bo = p.conn.stats.bytes_out.load(std::sync::atomic::Ordering::Relaxed);
+            let (bi, bo) = p.live().map_or((0, 0), |c| {
+                (c.stats.bytes_in.load(Ordering::Relaxed), c.stats.bytes_out.load(Ordering::Relaxed))
+            });
             p.rate = (bi.saturating_sub(p.last_bytes.0), bo.saturating_sub(p.last_bytes.1));
             p.last_bytes = (bi, bo);
         }
@@ -775,6 +1136,7 @@ impl Room {
         s.game_mode = self.settings.game_mode;
         s.created_ms = self.created;
         s.settings = Some(self.settings.clone());
+        s.bans = self.bans.iter().map(|b| b.name.clone()).collect();
         s.bytes_in_per_s = self.players.iter().map(|p| p.rate.0).sum();
         s.bytes_out_per_s = self.players.iter().map(|p| p.rate.1).sum();
         match &mut self.game {
@@ -810,18 +1172,20 @@ impl Room {
             .iter()
             .map(|p| PlayerSummary {
                 id: p.id,
-                name: p.conn.name.clone(),
+                name: p.name.clone(),
                 team: p.team,
                 host: self.host == Some(p.id),
-                ping_ms: p.conn.stats.rtt(),
-                ip: p.conn.ip.to_string(),
+                ping_ms: p.live().map_or(0, |c| c.stats.rtt()),
+                ip: p.ip.to_string(),
                 bytes_in_per_s: p.rate.0,
                 bytes_out_per_s: p.rate.1,
                 margin_ticks: p.margin16 as f64 / 16.0,
-                transport: if p.conn.stats.udp.load(std::sync::atomic::Ordering::Relaxed) { "udp" } else { "ws" },
+                transport: if p.live().is_some_and(|c| c.stats.udp.load(Ordering::Relaxed)) { "udp" } else { "ws" },
                 input_mask: mask(p.id),
-                connected_s: p.conn.connected.elapsed().as_secs(),
+                connected: p.live().is_some(),
+                connected_s: p.live().map_or(0, |c| c.connected.elapsed().as_secs()),
                 in_match: p.in_match,
+                account: p.account.as_ref().map(|a| a.id),
             })
             .collect();
     }

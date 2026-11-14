@@ -9,6 +9,7 @@ repository.workspace = true
 [dependencies]
 neobox-sim = { path = "../sim" }
 neobox-net = { path = "../net" }
+neobox-store = { path = "../store" }
 neobox-wasm = { path = "../wasm" }
 axum = { version = "0.8", features = ["ws"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "sync", "net", "signal"] }
@@ -24,3 +25,7 @@ str0m = { version = "0.25", default-features = false, features = ["rust-crypto"]
 
 [target.'cfg(windows)'.dependencies]
 nu-ansi-term = "0.50"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["io-util"] }
+tokio-tungstenite = "0.29"

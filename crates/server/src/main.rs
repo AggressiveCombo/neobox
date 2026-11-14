@@ -6,6 +6,7 @@
 //! `hub::Config` and DEPLOY.md).
 
 mod admin;
+mod api;
 mod conn;
 mod hub;
 mod logbuf;
@@ -19,7 +20,9 @@ use axum::response::IntoResponse;
 use axum::routing::get;
 use axum::{Json, Router};
 use hub::{Config, Hub};
+use neobox_store::Store;
 use std::net::SocketAddr;
+use std::path::Path;
 use std::sync::Arc;
 use tower_http::compression::CompressionLayer;
 use tower_http::services::{ServeDir, ServeFile};
@@ -28,9 +31,14 @@ use tracing::info;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 
+/// Content policy for every response: pages load only same-origin scripts
+/// (plus the wasm module) and styles.
+const CSP: &str = "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self' ws: wss:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'";
+
 async fn ws(State(hub): State<Arc<Hub>>, ConnectInfo(peer): ConnectInfo<SocketAddr>, headers: HeaderMap, upgrade: WebSocketUpgrade) -> impl IntoResponse {
     let ip = admin::client_ip(&hub, &headers, peer);
-    upgrade.max_message_size(room::MAX_MAP_CODE + 8192).on_upgrade(move |socket| conn::serve(hub, socket, ip))
+    let account = api::socket_account(&hub, &headers).await;
+    upgrade.max_message_size(room::MAX_MAP_CODE + 8192).on_upgrade(move |socket| conn::serve(hub, socket, ip, account))
 }
 
 async fn map_list(State(hub): State<Arc<Hub>>) -> impl IntoResponse {
@@ -66,7 +74,9 @@ async fn main() {
     let static_dir = cfg.static_dir.clone();
     let bind = cfg.bind.clone();
     let rtc = start_rtc(&cfg).await;
-    let hub = Hub::new(cfg, maps, rtc);
+    let store = open_store(&cfg.data);
+    let hub = Hub::new(cfg, maps, rtc, store);
+    spawn_housekeeping(hub.clone());
 
     let files = ServeDir::new(&static_dir).fallback(ServeFile::new(static_dir.join("index.html")));
     let app = Router::new()
@@ -74,9 +84,11 @@ async fn main() {
         .route("/api/maps", get(map_list))
         .route("/healthz", get(|| async { "ok" }))
         .merge(admin::router())
+        .merge(api::router())
         .fallback_service(files)
         .layer(SetResponseHeaderLayer::if_not_present(header::X_CONTENT_TYPE_OPTIONS, HeaderValue::from_static("nosniff")))
         .layer(SetResponseHeaderLayer::if_not_present(header::REFERRER_POLICY, HeaderValue::from_static("same-origin")))
+        .layer(SetResponseHeaderLayer::if_not_present(header::CONTENT_SECURITY_POLICY, HeaderValue::from_static(CSP)))
         .layer(CompressionLayer::new())
         .with_state(hub);
 
@@ -113,4 +125,33 @@ async fn start_rtc(cfg: &Config) -> Option<rtc::RtcHub> {
             None
         }
     }
+}
+
+/// Open the account database, creating its directory first. Without it the
+/// server cannot serve accounts, so a failure stops startup.
+fn open_store(path: &Path) -> Store {
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir).unwrap_or_else(|e| panic!("cannot create {}: {e}", dir.display()));
+    }
+    Store::open(path).unwrap_or_else(|e| panic!("cannot open {}: {e}", path.display()))
+}
+
+/// Once a minute: drop expired sessions and forget rate-limit entries that
+/// have aged out, so none of these tables grows without bound.
+fn spawn_housekeeping(hub: Arc<Hub>) {
+    tokio::spawn(async move {
+        let mut tick = tokio::time::interval(std::time::Duration::from_secs(60));
+        loop {
+            tick.tick().await;
+            hub.admin_login.prune();
+            hub.account_login.prune();
+            hub.uploads.prune();
+            let store = hub.store.clone();
+            match tokio::task::spawn_blocking(move || store.prune_expired_sessions()).await {
+                Ok(Ok(_)) => {}
+                Ok(Err(e)) => tracing::warn!("cannot prune sessions: {e}"),
+                Err(e) => tracing::warn!("session pruning stopped: {e}"),
+            }
+        }
+    });
 }

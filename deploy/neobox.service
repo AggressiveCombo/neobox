@@ -12,6 +12,10 @@ EnvironmentFile=/etc/neobox.env
 Environment=NEOBOX_BIND=127.0.0.1:8080
 Environment=NEOBOX_STATIC=/opt/neobox/client
 Environment=NEOBOX_MAPS=/opt/neobox/maps
+# accounts, friends and the map library (SQLite); systemd creates the directory
+# owned by the neobox user, and it stays writable under ProtectSystem=strict
+StateDirectory=neobox
+Environment=NEOBOX_DATA=/var/lib/neobox/neobox.db
 Environment=RUST_LOG=info
 Restart=always
 RestartSec=2

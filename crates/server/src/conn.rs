@@ -1,6 +1,6 @@
 //! One WebSocket connection: identification, room routing, I/O.
 
-use crate::hub::{ConnInfo, ConnStats, Hub, Out, RoomHandle};
+use crate::hub::{AccountRef, ConnInfo, ConnStats, Hub, Out, RoomHandle};
 use crate::room::{json, RoomCmd};
 use axum::extract::ws::{close_code, CloseFrame, Message, Utf8Bytes, WebSocket};
 use futures_util::{SinkExt, StreamExt};
@@ -18,7 +18,9 @@ const MAX_BINARY: usize = 4096;
 /// Messages per second before a connection is dropped.
 const MAX_MSG_RATE: u32 = 400;
 
-pub async fn serve(hub: Arc<Hub>, mut socket: WebSocket, ip: IpAddr) {
+/// Serve one WebSocket. `account`: the signed-in account of the request's
+/// session cookie, if any.
+pub async fn serve(hub: Arc<Hub>, mut socket: WebSocket, ip: IpAddr, account: Option<AccountRef>) {
     let admitted = {
         let mut per_ip = hub.ip_conns.lock().unwrap();
         let n = per_ip.entry(ip).or_insert(0);
@@ -36,7 +38,10 @@ pub async fn serve(hub: Arc<Hub>, mut socket: WebSocket, ip: IpAddr) {
     }
     hub.conns.fetch_add(1, Ordering::Relaxed);
     let conn_id = hub.next_conn.fetch_add(1, Ordering::Relaxed);
-    run(&hub, socket, ip, conn_id).await;
+    // friends see the account online while any of its sockets is open
+    let presence = account.as_ref().map(|a| hub.presence(a.id));
+    run(&hub, socket, ip, conn_id, account).await;
+    drop(presence);
     hub.conns.fetch_sub(1, Ordering::Relaxed);
     let mut per_ip = hub.ip_conns.lock().unwrap();
     if let Some(n) = per_ip.get_mut(&ip) {
@@ -55,6 +60,7 @@ struct Session {
     stats: Arc<ConnStats>,
     ip: IpAddr,
     conn_id: u64,
+    account: Option<AccountRef>,
     /// data received on the WebRTC channel
     rtc_in: mpsc::UnboundedSender<Vec<u8>>,
 }
@@ -72,22 +78,47 @@ impl Session {
 
     fn leave_room(&mut self) {
         if let Some((r, id)) = self.room.take() {
-            let _ = r.tx.send(RoomCmd::Leave { player: id });
+            let _ = r.tx.send(RoomCmd::Leave { player: id, out: self.out.clone() });
         }
     }
 
-    async fn enter(&mut self, room: RoomHandle, password: Option<String>) {
+    /// The socket dropped: the room holds this player's slot for a reconnect.
+    fn drop_room(&mut self) {
+        if let Some((r, id)) = self.room.take() {
+            let _ = r.tx.send(RoomCmd::Lost { player: id, out: self.out.clone() });
+        }
+    }
+
+    async fn enter(&mut self, room: RoomHandle, password: Option<String>, resume: Option<String>) {
         let Some(info) = self.info.clone() else { return };
         self.leave_room();
         let (tx, rx) = oneshot::channel();
-        if room.tx.send(RoomCmd::Join { conn: info, password, reply: tx }).is_err() {
+        if room.tx.send(RoomCmd::Join { conn: info, password, resume, reply: tx }).is_err() {
             return self.error("room_not_found", "Room not found");
         }
         match rx.await {
-            Ok(Ok(id)) => self.room = Some((room, id)),
+            // the room sends `joined` (with the resume token) itself
+            Ok(Ok((id, _))) => self.room = Some((room, id)),
             Ok(Err((code, msg))) => self.error(&code, &msg),
             Err(_) => self.error("room_not_found", "Room not found"),
         }
+    }
+
+    async fn create_room(&mut self, name: String, password: Option<String>, max_players: u8, public: bool) {
+        if self.hub.rooms.lock().unwrap().len() >= self.hub.cfg.max_rooms {
+            return self.error("server_full", "Too many rooms right now, try again later");
+        }
+        let password = password.filter(|p| !p.is_empty());
+        if password.as_ref().is_some_and(|p| p.chars().count() > crate::room::MAX_PASSWORD_LEN) {
+            return self.error("bad_password", &format!("Passwords are at most {} characters", crate::room::MAX_PASSWORD_LEN));
+        }
+        let name: String = name.trim().chars().take(MAX_ROOM_NAME_LEN).collect();
+        let name = if name.is_empty() { format!("{}'s game", self.info.as_ref().unwrap().name) } else { name };
+        let code = self.hub.new_code();
+        let room = crate::room::spawn(self.hub.clone(), code.clone(), name, password.clone(), max_players, public);
+        self.hub.rooms.lock().unwrap().insert(code, room.clone());
+        // the creator knows the password
+        self.enter(room, password, None).await;
     }
 
     async fn text(&mut self, text: &str) {
@@ -97,7 +128,11 @@ impl Session {
         };
         match msg {
             ClientMsg::Hello { version, name } => {
-                let name = name.trim().to_string();
+                // signed in: the account name is the player name
+                let name = match &self.account {
+                    Some(a) => a.name.clone(),
+                    None => name.trim().to_string(),
+                };
                 if version != PROTOCOL_VERSION {
                     return self.error("version", "Please reload the page: the game was updated");
                 }
@@ -110,6 +145,7 @@ impl Session {
                     stats: self.stats.clone(),
                     ip: self.ip,
                     connected: Instant::now(),
+                    account: self.account.clone(),
                 });
                 debug!(conn = self.conn_id, %name, "hello");
                 self.send(&ServerMsg::Welcome {
@@ -133,25 +169,34 @@ impl Session {
                         password: r.password,
                         in_match: r.in_match,
                         map: r.map_name,
+                        mode: r.game_mode,
                     })
                     .collect();
                 self.send(&ServerMsg::Rooms { rooms });
             }
             ClientMsg::CreateRoom { name, password, max_players, public } => {
-                if self.hub.rooms.lock().unwrap().len() >= self.hub.cfg.max_rooms {
-                    return self.error("server_full", "Too many rooms right now, try again later");
-                }
-                let name: String = name.trim().chars().take(MAX_ROOM_NAME_LEN).collect();
-                let name = if name.is_empty() { format!("{}'s game", self.info.as_ref().unwrap().name) } else { name };
-                let code = self.hub.new_code();
-                let room = crate::room::spawn(self.hub.clone(), code.clone(), name, password, max_players, public);
-                self.hub.rooms.lock().unwrap().insert(code, room.clone());
-                self.enter(room, None).await;
+                self.create_room(name, password, max_players, public).await;
             }
-            ClientMsg::JoinRoom { room, password } => match self.hub.room(&room) {
-                Some(r) => self.enter(r, password).await,
+            ClientMsg::JoinRoom { room, password, resume } => match self.hub.room(&room) {
+                Some(r) => self.enter(r, password, resume).await,
                 None => self.error("room_not_found", "Room not found"),
             },
+            ClientMsg::QuickPlay => {
+                // the fullest open room (the oldest on a tie), else a new public one
+                let best = self
+                    .hub
+                    .summaries()
+                    .into_iter()
+                    .filter(|r| r.public && !r.password && r.players.len() < r.max_players as usize)
+                    .max_by_key(|r| (r.players.len(), std::cmp::Reverse(r.created_ms)));
+                match best.and_then(|r| self.hub.room(&r.code)) {
+                    Some(r) => self.enter(r, None, None).await,
+                    None => {
+                        let max = self.hub.cfg.max_players;
+                        self.create_room(String::new(), None, max, true).await;
+                    }
+                }
+            }
             ClientMsg::LeaveRoom => {
                 self.leave_room();
                 self.send(&ServerMsg::Left);
@@ -189,12 +234,12 @@ impl Session {
     }
 }
 
-async fn run(hub: &Arc<Hub>, socket: WebSocket, ip: IpAddr, conn_id: u64) {
+async fn run(hub: &Arc<Hub>, socket: WebSocket, ip: IpAddr, conn_id: u64, account: Option<AccountRef>) {
     let (mut sink, mut stream) = socket.split();
     let (out_tx, mut out_rx) = mpsc::unbounded_channel::<Out>();
     let (rtc_tx, mut rtc_rx) = mpsc::unbounded_channel::<Vec<u8>>();
     let stats = Arc::new(ConnStats::default());
-    let mut s = Session { hub: hub.clone(), info: None, room: None, out: out_tx, stats: stats.clone(), ip, conn_id, rtc_in: rtc_tx };
+    let mut s = Session { hub: hub.clone(), info: None, room: None, out: out_tx, stats: stats.clone(), ip, conn_id, account, rtc_in: rtc_tx };
     let started = Instant::now();
     let writer_stats = stats.clone();
     let writer_hub = hub.clone();
@@ -287,7 +332,7 @@ async fn run(hub: &Arc<Hub>, socket: WebSocket, ip: IpAddr, conn_id: u64) {
     if let Some(rtc) = &hub.rtc {
         rtc.close(conn_id);
     }
-    s.leave_room();
+    s.drop_room();
     drop(s);
     writer.abort();
 }

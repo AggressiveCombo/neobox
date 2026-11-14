@@ -74,7 +74,7 @@ async fn play(
     } else {
         let mut rx_code = room_rx.ok_or("no room channel")?;
         let code = rx_code.recv().await.ok_or("no room code")?;
-        tx.send(send_json(&ClientMsg::JoinRoom { room: code, password: None })).await.map_err(|e| e.to_string())?;
+        tx.send(send_json(&ClientMsg::JoinRoom { room: code, password: None, resume: None })).await.map_err(|e| e.to_string())?;
     }
 
     let mut session: Option<ClientSession> = None;
@@ -117,10 +117,10 @@ async fn play(
                                 session_base = session.as_ref().map_or(0, |s| s.known);
                                 last = Instant::now();
                             }
-                            ServerMsg::Snapshot { start, tick, state, you } => {
+                            ServerMsg::Snapshot { start, tick, state, you, held } => {
                                 let bytes = base64::engine::general_purpose::STANDARD.decode(state).map_err(|e| e.to_string())?;
                                 let hz = start.tick_hz;
-                                let mut s = ClientSession::from_snapshot(start, you, tick, &bytes).map_err(|e| e.to_string())?;
+                                let mut s = ClientSession::from_snapshot(start, you, tick, &bytes, &held).map_err(|e| e.to_string())?;
                                 if let Some(old) = &session {
                                     s.continue_input_seq(old.last_input_seq() + 1);
                                 }

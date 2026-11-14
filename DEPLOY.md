@@ -65,7 +65,7 @@ Connect: `ssh root@203.0.113.10`, then run:
 
 ```sh
 apt update && apt upgrade -y
-apt install -y curl git unzip build-essential ufw debian-keyring debian-archive-keyring apt-transport-https
+apt install -y curl git unzip build-essential ufw sqlite3 debian-keyring debian-archive-keyring apt-transport-https
 
 # firewall
 ufw allow 22/tcp && ufw allow 80/tcp && ufw allow 443/tcp && ufw allow 3478/udp
@@ -149,13 +149,38 @@ cp -r dist-server/* /opt/neobox/ && chown -R neobox:neobox /opt/neobox
 systemctl restart neobox
 ```
 
-Restarting ends running matches; players reconnect from the menu.
+Restarting ends running matches; players reconnect from the menu. Accounts,
+friends and the map library are kept (they live in `/var/lib/neobox`, which
+updates never touch).
+
+## Backups
+
+Everything players create is in one SQLite database,
+`/var/lib/neobox/neobox.db`. The server keeps it in WAL mode, so copying the
+file while the server runs can give a broken copy; use SQLite's online backup
+instead. A daily backup that keeps the last 14 days:
+
+```sh
+mkdir -p /var/backups/neobox
+cat > /etc/cron.daily/neobox-backup <<'EOF'
+#!/bin/sh
+sqlite3 /var/lib/neobox/neobox.db ".backup '/var/backups/neobox/neobox-$(date +%F).db'"
+find /var/backups/neobox -name 'neobox-*.db' -mtime +14 -delete
+EOF
+chmod 755 /etc/cron.daily/neobox-backup
+```
+
+Copy `/var/backups/neobox` off the server now and then (a VPS can be lost).
+To restore: `systemctl stop neobox`, copy a backup to
+`/var/lib/neobox/neobox.db`, delete `neobox.db-wal` and `neobox.db-shm` next to
+it, `chown neobox:neobox /var/lib/neobox/neobox.db`, `systemctl start neobox`.
 
 ## Everyday operations
 
 | Task | Command / place |
 | --- | --- |
 | Live rooms, players, tick rate, latency, bandwidth, logs, kick/ban, close rooms | `https://neobox.aggressivecombo.com/admin` |
+| Approve or reject maps uploaded to the public library; find and delete any map | `https://neobox.aggressivecombo.com/admin`, "Map approvals" and "Map library" |
 | Server log | `journalctl -u neobox -f` |
 | Restart | `systemctl restart neobox` |
 | Add built-in maps | put map files in `/opt/neobox/maps/` (`.txt` with a Hitbox map code, or `.json` compact map JSON), then restart |
@@ -171,6 +196,7 @@ All settings are environment variables (in `/etc/neobox.env`).
 | `NEOBOX_BIND` | `127.0.0.1:8080` | HTTP address (Caddy forwards to it). |
 | `NEOBOX_STATIC` | `client` | Web client directory. |
 | `NEOBOX_MAPS` | `maps` | Built-in maps directory. |
+| `NEOBOX_DATA` | `data/neobox.db` (the service sets `/var/lib/neobox/neobox.db`) | SQLite database: accounts, friends, map library. Created on first start. |
 | `NEOBOX_RTC_BIND` | `0.0.0.0:3478` | UDP address for WebRTC game data; `off` disables WebRTC. |
 | `NEOBOX_RTC_PUBLIC` | auto-detected | Public `IP:port` browsers use to reach the UDP port. |
 | `NEOBOX_MAX_ROOMS` | `200` | Room limit. |

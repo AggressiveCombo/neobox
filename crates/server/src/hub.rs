@@ -3,11 +3,13 @@
 use crate::room::{RoomCmd, RoomSummary};
 use crate::rtc::RtcHub;
 use std::collections::HashMap;
+use std::hash::Hash;
 use std::net::{IpAddr, SocketAddr};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::Instant;
+use std::time::{Duration, Instant};
+use neobox_store::Store;
 use tokio::sync::mpsc;
 
 #[derive(Clone, Debug)]
@@ -18,6 +20,8 @@ pub struct Config {
     pub static_dir: PathBuf,
     /// Built-in maps (`maps/*.json` compact map JSON or `*.txt` map codes).
     pub maps_dir: PathBuf,
+    /// SQLite file for accounts, friends, the map library and preferences; its directory is created.
+    pub data: PathBuf,
     /// Admin password; the admin interface is disabled when empty.
     pub admin_password: String,
     pub max_rooms: usize,
@@ -39,6 +43,7 @@ impl Config {
             bind: var("NEOBOX_BIND", "127.0.0.1:8080"),
             static_dir: var("NEOBOX_STATIC", "client").into(),
             maps_dir: var("NEOBOX_MAPS", "maps").into(),
+            data: var("NEOBOX_DATA", "data/neobox.db").into(),
             admin_password: var("NEOBOX_ADMIN_PASSWORD", ""),
             max_rooms: var("NEOBOX_MAX_ROOMS", "200").parse().unwrap_or(200),
             max_players: var("NEOBOX_MAX_PLAYERS", "32").parse().unwrap_or(32).clamp(1, 64),
@@ -88,6 +93,16 @@ pub struct ConnInfo {
     pub stats: Arc<ConnStats>,
     pub ip: IpAddr,
     pub connected: Instant,
+    /// The signed-in account of this connection (`None` for guests).
+    pub account: Option<AccountRef>,
+}
+
+/// A signed-in account as rooms see it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AccountRef {
+    pub id: i64,
+    /// Account name (also the player name while signed in).
+    pub name: String,
 }
 
 impl ConnInfo {
@@ -125,12 +140,20 @@ pub struct Hub {
     pub conns: AtomicUsize,
     pub ip_conns: Mutex<HashMap<IpAddr, usize>>,
     pub admin_sessions: Mutex<HashMap<String, Instant>>,
-    pub login_attempts: Mutex<HashMap<IpAddr, Vec<Instant>>>,
+    /// Admin sign-in attempts per IP.
+    pub admin_login: Limiter<IpAddr>,
+    /// Account sign-in and registration attempts per IP.
+    pub account_login: Limiter<IpAddr>,
+    /// Map uploads per account.
+    pub uploads: Limiter<i64>,
+    /// Signed-in accounts with an open WebSocket, with the number of sockets.
+    pub online: Mutex<HashMap<i64, usize>>,
+    pub store: Arc<Store>,
     pub rtc: Option<RtcHub>,
 }
 
 impl Hub {
-    pub fn new(cfg: Config, maps: Vec<BuiltinMap>, rtc: Option<RtcHub>) -> Arc<Hub> {
+    pub fn new(cfg: Config, maps: Vec<BuiltinMap>, rtc: Option<RtcHub>, store: Store) -> Arc<Hub> {
         Arc::new(Hub {
             cfg,
             maps,
@@ -140,7 +163,11 @@ impl Hub {
             conns: AtomicUsize::new(0),
             ip_conns: Mutex::new(HashMap::new()),
             admin_sessions: Mutex::new(HashMap::new()),
-            login_attempts: Mutex::new(HashMap::new()),
+            admin_login: Limiter::new(5, Duration::from_secs(60)),
+            account_login: Limiter::new(5, Duration::from_secs(60)),
+            uploads: Limiter::new(10, Duration::from_secs(3600)),
+            online: Mutex::new(HashMap::new()),
+            store: Arc::new(store),
             rtc,
         })
     }
@@ -168,5 +195,69 @@ impl Hub {
                 return code;
             }
         }
+    }
+
+    /// Mark an account online while the returned guard lives.
+    pub fn presence(self: &Arc<Self>, id: i64) -> Presence {
+        *self.online.lock().unwrap().entry(id).or_insert(0) += 1;
+        Presence { hub: self.clone(), id }
+    }
+
+    pub fn is_online(&self, id: i64) -> bool {
+        self.online.lock().unwrap().contains_key(&id)
+    }
+}
+
+/// Keeps an account online while one of its WebSockets is open.
+pub struct Presence {
+    hub: Arc<Hub>,
+    id: i64,
+}
+
+impl Drop for Presence {
+    fn drop(&mut self) {
+        let mut online = self.hub.online.lock().unwrap();
+        if let Some(n) = online.get_mut(&self.id) {
+            *n -= 1;
+            if *n == 0 {
+                online.remove(&self.id);
+            }
+        }
+    }
+}
+
+/// Sliding-window attempt counter: at most `max` attempts per key in `window`.
+pub struct Limiter<K> {
+    window: Duration,
+    max: usize,
+    hits: Mutex<HashMap<K, Vec<Instant>>>,
+}
+
+impl<K: Hash + Eq> Limiter<K> {
+    pub fn new(max: usize, window: Duration) -> Limiter<K> {
+        Limiter { window, max, hits: Mutex::new(HashMap::new()) }
+    }
+
+    /// Record an attempt. False when the key is already at its limit (the
+    /// refused attempt is not recorded).
+    pub fn allow(&self, key: K) -> bool {
+        let now = Instant::now();
+        let mut hits = self.hits.lock().unwrap();
+        let list = hits.entry(key).or_default();
+        list.retain(|t| now.duration_since(*t) < self.window);
+        if list.len() >= self.max {
+            return false;
+        }
+        list.push(now);
+        true
+    }
+
+    /// Forget keys with no attempt inside the window.
+    pub fn prune(&self) {
+        let now = Instant::now();
+        self.hits.lock().unwrap().retain(|_, list| {
+            list.retain(|t| now.duration_since(*t) < self.window);
+            !list.is_empty()
+        });
     }
 }
