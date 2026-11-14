@@ -53,24 +53,38 @@ This is why I have set up some goals that I believe will make the project an imp
   prediction and rollback; the server stamps inputs, so there is no host
   advantage and no desync from frame-rate differences. Game data travels
   over WebRTC (UDP-like) with automatic WebSocket fallback.
-* **Playing together.** Quick play, invite links, password rooms, and
+* **Playing together.** Quick-play queues (free for all, teams, lives) that
+  drop you into rotating-map rooms, invite links, password rooms, and
   reconnecting to your own slot after a dropped connection or a page reload.
   Hosts manage teams, lock teams, kick, ban and unban, hand over the host
-  role and end matches from the room screen or with chat commands (`/help`).
-* **Accounts (optional).** Sign in to keep settings on every device, add
-  friends, see who is online and join their room, and publish maps.
-* **Map library.** Upload maps (public, unlisted or private), search, vote
-  and star them. Public maps appear once an admin approves them.
-* **Replays and practice.** Save any finished match as a replay and watch it
-  with pause, speed and seeking; practise alone on any map without a server.
-* **Your settings.** Key rebinding, volume, render scale and anti-aliasing,
-  colour-blind palettes, touch control size and a left-handed layout.
+  role, count down and start matches, and end them from the room screen or
+  with chat commands (`/help`).
+* **Levels.** Experience for every finished game (more for better places),
+  a post-game screen with your level bar and a vote on the map, and levels
+  shown next to names. Awards are computed by the server.
+* **Room life.** A YouTube jukebox (paste a link in chat, the host plays it),
+  appearance colours, typing indicators, emoji shortcodes such as `:fire:`,
+  a profanity filter and friend requests from the lobby.
+* **Accounts (optional).** Sign in to keep your level and settings on every
+  device, add friends, see who is online and join their room, and publish maps.
+* **Map library.** Upload maps (public, unlisted or private) with a
+  description, browse hot, top, newest and staff-picked maps, search, vote
+  and star them. Public maps appear once an admin approves them. The main
+  menu lists the week's top map makers.
+* **Replays, training and practice.** `/record` sends the last 15 seconds
+  of a match to the main menu, which plays recorded clips in its background;
+  save any finished match as a replay and watch it with pause, speed and
+  seeking; learn the controls in the training hall; practise alone on any
+  map without a server.
+* **Your settings.** Key rebinding, volume, menu music, render scale and
+  anti-aliasing, colour-blind palettes, touch control size and a left-handed
+  layout.
 * **Runs everywhere.** WebGPU renderer with a WebGL2 fallback, dynamic
   resolution, any refresh rate; keyboard, gamepad and full touch controls;
   iOS Safari included.
 * **Admin interface.** Live rooms, players, tick rate, latency, bandwidth,
-  match state and logs, kick/ban/close controls, and the map approval queue
-  (`/admin`).
+  match state and logs, kick/ban/close controls, the map approval queue,
+  staff picks and recorded clips (`/admin`).
 
 ## Layout
 
@@ -111,6 +125,8 @@ bash deploy/build.sh && (cd client && bun run e2e)   # browser end-to-end suite 
 
 * **Chaz**, creator of Hitbox.io, whose game this project pays tribute to.
 * Box2D by Erin Catto; Box2DFlash/box2dweb ports by their authors.
+* Third-party music and data (menu music, emoji names, the profanity word
+  list) are listed in [CREDITS.md](CREDITS.md).
 
 ## Licence
 

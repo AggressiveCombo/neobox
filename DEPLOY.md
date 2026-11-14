@@ -15,14 +15,19 @@ flowchart LR
 
 * **One program, `neobox-server`**, does everything: it serves the web page,
   runs the game rooms, relays player inputs, and hosts the admin page. It is
-  written in Rust, uses very little memory (a few MB per room) and needs no
-  database.
+  written in Rust, uses very little memory (a few MB per room) and keeps
+  accounts, levels, the map library and recorded menu clips in one SQLite
+  file (no database server to run).
 * **Caddy** sits in front of it and handles HTTPS. It obtains and renews the
   certificate from Let's Encrypt automatically.
 * **Game traffic** uses a WebRTC data channel over UDP when possible
   (lowest latency: a lost packet never holds up the next one) and falls back
   to the WebSocket automatically when UDP is blocked (some office or school
   networks). Nothing to configure in the browser.
+* **Jukebox:** players' browsers load YouTube's embedded player directly; the
+  server only makes outbound HTTPS requests to `www.youtube.com/oembed` to
+  read video titles. If outbound HTTPS is blocked, suggestions show the
+  video id instead of the title.
 
 Why these choices: a single binary is the simplest thing to run and update;
 Caddy is the simplest way to get HTTPS right; UDP is what fast-paced games
