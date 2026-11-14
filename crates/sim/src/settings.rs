@@ -445,6 +445,74 @@ impl GameSettings {
             _ => Err(format!("Couldn't find param {n}")),
         }
     }
+
+    /// `/settings`: every setting `/set` accepts, as `name: value`, in the
+    /// original's order.
+    pub fn listing(&self) -> Vec<String> {
+        let n = |name: &str, v: f64| format!("{name}: {}", js_num(v));
+        let b = |name: &str, v: bool| format!("{name}: {v}");
+        vec![
+            n("timeScale", self.time_scale),
+            n("gravityOffset", self.gravity_offset),
+            n("gameMode", self.game_mode as f64),
+            b("pushPlayers", self.push_players),
+            n("pushRange", self.push_range),
+            n("pushDelay", self.push_delay),
+            n("maxStamina", self.max_stamina),
+            n("pushMinAmmoToStartPush", self.push_min_ammo),
+            n("pushAmmoSpendIfPushing", self.push_spend),
+            n("pushAmmoSpendAtFirstPushFrame", self.push_first_spend),
+            n("pushAmmoReplenish", self.ammo_regen),
+            b("bbEnabled", self.bat_enabled),
+            n("bbPower", self.bat_power),
+            n("bbRange", self.bat_range),
+            n("bbAngleVariance", self.bat_angle),
+            n("bbFireOn", self.bat_fire_on),
+            n("bbFireFramesLength", self.bat_fire_frames),
+            n("bbHideAfterFireFrames", self.bat_hide_after),
+            n("bbResetOn", self.bat_reset_on),
+            n("bbHoldUntil", self.bat_hold_until),
+            n("bbInitAmmoCost", self.bat_init_cost),
+            n("bbHoldAmmoCost", self.bat_hold_cost),
+            n("dashInitDelay", self.dash_init_delay),
+            n("dashActiveLength", self.dash_active),
+            n("dashCoolDownAfterLength", self.dash_cooldown),
+            n("dashBoostSpeed", self.dash_boost),
+            n("dashAmmoCost", self.dash_cost),
+            b("dashEnabled", self.dash_enabled),
+            n("rkAmmoNeeded", self.rocket_cost),
+            n("rkVelocity", self.rocket_speed),
+            n("rkAimRate", self.rocket_aim_rate),
+            b("rkBulletRound", self.rocket_round),
+            n("rkBulletRadius", self.rocket_radius),
+            n("rkBulletAge", self.rocket_age),
+            n("rkBulletTurnRate", self.rocket_turn_rate),
+            n("rkBulletGravityScale", self.rocket_gravity_scale),
+            b("rkBulletBounces", self.rocket_bounces),
+            n("rkBulletRestitution", self.rocket_restitution),
+            n("rkBulletBounceCountLimit", self.rocket_bounce_limit),
+            n("rkSelfBatScale", self.rocket_self_bat_scale),
+            n("rkExplodeRadius", self.rocket_explode_radius),
+            n("rkExplodePush", self.rocket_explode_push),
+            b("egEnabled", self.egg_enabled),
+            n("egSize", self.egg_size),
+            n("egAge", self.egg_age),
+            n("egGravityScale", self.egg_gravity_scale),
+            n("egRestitution", self.egg_restitution),
+            n("egExplodeRadius", self.egg_explode_radius),
+            n("egStartSpin", self.egg_spin),
+            n("egMaxThrowPower", self.egg_power),
+            n("egAmmoNeeded", self.egg_cost),
+            n("egDelay1", self.egg_delay1),
+            n("egDelay2", self.egg_delay2),
+            n("egDelayBeforeAmmoUse", self.egg_delay_ammo),
+            n("egAimRate", self.egg_aim_rate),
+            n("egShape", self.egg_shape),
+            b("parachuteEnabled", self.parachute_enabled),
+            n("playerSize", self.player_width),
+            n("objectiveLimit", self.objective_limit),
+        ]
+    }
 }
 
 /// JS-style number formatting for messages.
