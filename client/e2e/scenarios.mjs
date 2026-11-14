@@ -74,15 +74,18 @@ async function menu(s) {
   await menuName(page).waitFor();
   check(await button(page, "Quick play").isVisible(), "Quick play button not visible");
   check(await button(page, "Play").isVisible(), "Play button not visible");
-  const links = ["Library", "Friends", "Practice", "Replay", "Map editor", "Settings", "About"];
+  const links = ["Training", "Library", "Friends", "Practice", "Replay", "Map editor", "Settings", "About"];
   for (const link of links) {
     await navTo(page, link);
     await sleep(150);
-    if (link !== "Map editor") {
-      // Each screen but the editor shows a Back button.
-      await back(page).click();
-    } else {
+    if (link === "Map editor") {
       await button(page, "Back").click();
+    } else if (link === "Training") {
+      // the training hall is a game view: it leaves like practice does
+      await button(page, "Leave").click();
+    } else {
+      // the other screens show a Back button
+      await back(page).click();
     }
     await menuName(page).waitFor();
   }
@@ -106,12 +109,12 @@ async function settings(s) {
     (await page.getByRole("button", { name: /^Jump key/ }).first().getAttribute("aria-label"))?.includes("K"),
     "rebound Jump key did not persist across reload",
   );
-  const volume = page.getByRole("slider", { name: "Volume" });
+  const volume = page.getByRole("slider", { name: "Volume", exact: true });
   await volume.fill("30");
   await page.reload();
   await menuName(page).waitFor();
   await navTo(page, "Settings");
-  check((await page.getByRole("slider", { name: "Volume" }).inputValue()) === "30", "volume did not persist");
+  check((await page.getByRole("slider", { name: "Volume", exact: true }).inputValue()) === "30", "volume did not persist");
   await page.getByLabel("Deuteranopia (green-blind)", { exact: false }).check();
   await page.reload();
   await menuName(page).waitFor();
@@ -331,13 +334,140 @@ async function reconnect(s) {
 async function quickPlay(s) {
   const host = await s.open("qhost", { name: uniqueName("qh") });
   const roomName = uniqueName("qroom");
-  await createRoom(host, s.base, roomName, { isPublic: true });
+  const code = await createRoom(host, s.base, roomName, { isPublic: true });
   const fresh = await s.open("fresh", { name: uniqueName("qf") });
   await fresh.page.goto(s.base);
-  await menuName(fresh.page).waitFor();
+  await menuName(fresh.page).fill(uniqueName("qf"));
   await button(fresh.page, "Quick play").click();
-  await fresh.page.locator("h1.room-title, .hud-leave").first().waitFor();
-  return "landed in a public room";
+  await fresh.page.getByRole("heading", { name: "Quick play", exact: true }).waitFor();
+  await fresh.page.getByRole("button", { name: /Free for all/ }).click();
+  // quick-play rooms start by themselves: the match HUD comes up without a host
+  await fresh.page.locator(".hud-leave").waitFor({ state: "visible", timeout: 20_000 });
+  await waitForPixels(fresh, "quick-play canvas");
+  check(!fresh.page.url().endsWith(`/${code}`), "quick play joined the custom room");
+  return "queue card opened a self-starting quick-play match";
+}
+
+/** Experience: a finished match shows the post-game panel and levels appear in the roster. */
+async function levels(s) {
+  const user = await signedIn(s, "lvl");
+  const { page } = user;
+  const roomName = uniqueName("lv");
+  const code = await createRoom(user, s.base, roomName, { isPublic: false });
+  const guest = await s.open("lv-guest", { name: uniqueName("lg") });
+  await joinByInvite(guest, s.base, code, roomName);
+  await playerRow(page, "Guest").first().waitFor();
+  // a map with no ground and one life each: the match ends by itself
+  const voidMap = '{"b":[],"j":[],"s":[{"1":15,"2":10},{"1":25,"2":10}],"p":[],"tu":[],"tc":[],"gp":[],"c":[],"set":{"3":40,"15":40,"16":25}}';
+  await page.getByLabel("Map code or JSON", { exact: true }).fill(voidMap);
+  await button(page, "Use code").click();
+  const chat = page.getByLabel("Chat message", { exact: true });
+  await chat.fill("/mode 1");
+  await chat.press("Enter");
+  await chat.fill("/set objectiveLimit 1");
+  await chat.press("Enter");
+  await page.locator("div.room-chat-log").getByText("objectiveLimit: 1").waitFor();
+  await button(page, "Start").click();
+  const panel = page.getByRole("dialog", { name: "Game over" });
+  await panel.waitFor({ timeout: 60_000 });
+  await panel.getByText(/\+\d+ xp/).waitFor();
+  const guestPanel = guest.page.getByRole("dialog", { name: "Game over" });
+  await guestPanel.waitFor({ timeout: 20_000 });
+  await page.keyboard.press("Escape");
+  await panel.waitFor({ state: "detached" });
+  await page.locator("span.room-level").filter({ hasText: /^Level \d+$/ }).first().waitFor();
+  return "post-game panel for the account and the guest, level in the roster";
+}
+
+/** Lobby signals: emoji shortcodes, typing indicator, start countdown with abort. */
+async function lobbySignals(s) {
+  const hostName = uniqueName("sh");
+  const guestName = uniqueName("sg");
+  const roomName = uniqueName("sig");
+  const host = await s.open("sig-host", { name: hostName });
+  const code = await createRoom(host, s.base, roomName, { isPublic: false });
+  const guest = await s.open("sig-guest", { name: guestName });
+  await joinByInvite(guest, s.base, code, roomName);
+  await host.page.locator("div.room-chat-log").getByText(`${guestName} has joined the game`).waitFor();
+  const chat = guest.page.getByLabel("Chat message", { exact: true });
+  await chat.pressSequentially("gg :fire:", { delay: 30 });
+  await host.page.getByLabel(`${guestName} is typing`).waitFor();
+  await chat.press("Enter");
+  await host.page.locator("div.room-chat-log").getByText("gg 🔥").waitFor();
+  await button(host.page, "Start").click();
+  await button(host.page, "Abort start").click();
+  await button(host.page, "Start").waitFor();
+  check(!(await host.page.locator(".hud-leave").isVisible()), "aborted countdown still started the match");
+  return "join line, typing indicator, emoji, start abort";
+}
+
+/** Training hall: lessons name the bound keys; Leave returns to the menu. */
+async function training(s) {
+  const h = await s.open("training", { name: uniqueName("tr") });
+  const { page } = h;
+  await page.goto(s.base);
+  await menuName(page).waitFor();
+  await navTo(page, "Training");
+  await page.locator(".training-text").waitFor();
+  await waitForPixels(h, "training canvas");
+  const first = await page.locator(".training-text").textContent();
+  await button(page, "Next").click();
+  const second = await page.locator(".training-text").textContent();
+  check(first !== second, "Next did not change the lesson");
+  await button(page, "Leave").click();
+  await menuName(page).waitFor();
+  return "lessons step, canvas renders, leave";
+}
+
+/** Update news: opens, pages, closes; the menu shows players online. */
+async function news(s) {
+  const h = await s.open("news", { name: uniqueName("nw") });
+  const { page } = h;
+  await page.goto(s.base);
+  await menuName(page).waitFor();
+  await page.getByText(/\d+ players? online/).waitFor();
+  await page.getByRole("button", { name: /News/ }).click();
+  const dialog = page.getByRole("dialog");
+  await dialog.waitFor();
+  await page.keyboard.press("Escape");
+  await dialog.waitFor({ state: "detached" });
+  return "players online, news dialog";
+}
+
+/** /record in a match saves a clip that plays behind the main menu. */
+async function clips(s) {
+  const m = await matchWithGuest(s, { clipboard: false });
+  const { host } = m;
+  await waitForPixels(host, "match canvas");
+  await sleep(7000);
+  await host.page.keyboard.press("Enter");
+  await host.page.keyboard.type("/record");
+  await host.page.keyboard.press("Enter");
+  await host.page.getByText("Clip saved", { exact: false }).first().waitFor({ timeout: 15_000 });
+  const viewer = await s.open("clip-viewer", { name: uniqueName("cv") });
+  await viewer.page.goto(s.base);
+  await menuName(viewer.page).waitFor();
+  await viewer.page.locator(".menu-clip-credit").filter({ hasText: /recorded by/ }).waitFor({ timeout: 20_000 });
+  await waitForPixels(viewer, "menu clip canvas");
+  return "clip recorded and played behind the menu";
+}
+
+/** Jukebox: a pasted YouTube link becomes a suggestion; the host plays it for the room. */
+async function jukebox(s) {
+  const roomName = uniqueName("jb");
+  const host = await s.open("jb-host", { name: uniqueName("jh") });
+  const code = await createRoom(host, s.base, roomName, { isPublic: true });
+  const guest = await s.open("jb-guest", { name: uniqueName("jg") });
+  await joinByInvite(guest, s.base, code, roomName);
+  const chat = guest.page.getByLabel("Chat message", { exact: true });
+  await chat.fill("https://www.youtube.com/watch?v=dQw4w9WgXcQ");
+  await chat.press("Enter");
+  const play = host.page.getByRole("button", { name: "Play on jukebox" });
+  await play.waitFor({ timeout: 15_000 });
+  await play.click();
+  await host.page.getByLabel("Jukebox", { exact: true }).waitFor({ state: "visible" });
+  await guest.page.getByLabel("Jukebox", { exact: true }).waitFor({ state: "visible" });
+  return "suggestion line, host play, jukebox on both pages";
 }
 
 async function replay(s) {
@@ -437,14 +567,14 @@ async function editor(s) {
   check(box && box.width > 100 && box.height > 100, "editor canvas has no size");
   const cx = box.x + box.width / 2;
   const cy = box.y + box.height / 2;
-  await button(page, "Box").click();
+  await button(page, "Box (W)").click();
   await page.mouse.move(cx - 80, cy - 50);
   await page.mouse.down();
   await page.mouse.move(cx, cy, { steps: 8 });
   await page.mouse.move(cx + 80, cy + 50, { steps: 8 });
   await page.mouse.up();
   check(await button(page, "Undo").isEnabled(), "box drawn does not enable Undo");
-  await button(page, "Select").click();
+  await button(page, "Select (Q)").click();
   await page.mouse.click(cx, cy);
   check(await button(page, "Delete").first().isEnabled(), "selecting does not enable Delete");
   await button(page, "Delete").first().click();
@@ -529,6 +659,12 @@ export const scenarios = [
   { name: "room match", run: roomMatch },
   { name: "reconnect", run: reconnect },
   { name: "quick play", run: quickPlay },
+  { name: "levels", run: levels },
+  { name: "jukebox", run: jukebox },
+  { name: "lobby signals", run: lobbySignals },
+  { name: "training", run: training },
+  { name: "news", run: news },
+  { name: "clips", run: clips },
   { name: "replay", run: replay },
   { name: "practice", run: practice },
   { name: "phone", run: phone },
