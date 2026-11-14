@@ -1,0 +1,80 @@
+/* Floating jukebox panel: shows the room's YouTube player; mounted once on document.body. */
+
+.jukebox {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  z-index: 40;
+  width: min(360px, calc(100vw - 32px));
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 0.35);
+}
+
+.jukebox[hidden] {
+  display: none;
+}
+
+.jukebox-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+
+.jukebox-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.jukebox-screen {
+  aspect-ratio: 16 / 9;
+  width: 100%;
+  background: #000;
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.jukebox-screen iframe {
+  width: 100%;
+  height: 100%;
+  border: 0;
+}
+
+.jukebox-host {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.jukebox-url {
+  flex: 1 1 160px;
+  min-width: 0;
+  padding: 6px 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
+  background: var(--bg, transparent);
+  color: var(--text);
+  font: inherit;
+}
+
+.jukebox-volume {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 0.9em;
+}
+
+.jukebox-volume input {
+  flex: 1;
+}

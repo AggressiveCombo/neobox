@@ -8,6 +8,43 @@ export const CREDIT_LINE = "neobox is a fan-made spiritual successor to Hitbox.i
 export const REPO_URL = "https://github.com/AggressiveCombo/neobox";
 export const LICENSE_URL = "https://www.gnu.org/licenses/agpl-3.0.html";
 
+/** Third-party assets shipped with neobox. The same entries are listed in CREDITS.md. */
+export interface AssetCredit {
+  asset: string;
+  title: string;
+  author: string;
+  licence: string;
+  licenceUrl: string;
+  sourceUrl: string;
+}
+
+export const THIRD_PARTY: AssetCredit[] = [
+  {
+    asset: "Menu music",
+    title: "Menu Loop",
+    author: "Umplix",
+    licence: "CC0 1.0 (public domain dedication)",
+    licenceUrl: "https://creativecommons.org/publicdomain/zero/1.0/",
+    sourceUrl: "https://opengameart.org/content/menu-loop-0",
+  },
+  {
+    asset: "Chat emoji names",
+    title: "gemoji",
+    author: "GitHub",
+    licence: "MIT",
+    licenceUrl: "https://github.com/github/gemoji/blob/master/LICENSE",
+    sourceUrl: "https://github.com/github/gemoji",
+  },
+  {
+    asset: "Profanity filter word list",
+    title: "List of Dirty, Naughty, Obscene, and Otherwise Bad Words",
+    author: "LDNOOBW contributors",
+    licence: "CC BY 4.0",
+    licenceUrl: "https://creativecommons.org/licenses/by/4.0/",
+    sourceUrl: "https://github.com/LDNOOBW/List-of-Dirty-Naughty-Obscene-and-Otherwise-Bad-Words",
+  },
+];
+
 export const aboutScreen: ScreenFactory = (ctx) => {
   const el = h(
     "div",
@@ -32,6 +69,21 @@ export const aboutScreen: ScreenFactory = (ctx) => {
         { class: "links-list" },
         h("li", null, h("a", { href: REPO_URL, target: "_blank", rel: "noopener" }, "Source code")),
         h("li", null, h("a", { href: LICENSE_URL, target: "_blank", rel: "noopener" }, "AGPL-3.0-or-later license text")),
+      ),
+      h("p", null, "Third-party assets:"),
+      h(
+        "ul",
+        { class: "links-list" },
+        THIRD_PARTY.map((c) =>
+          h(
+            "li",
+            null,
+            `${c.asset}: "${c.title}" by ${c.author}, licensed ${c.licence}. `,
+            h("a", { href: c.sourceUrl, target: "_blank", rel: "noopener" }, "Source page"),
+            " / ",
+            h("a", { href: c.licenceUrl, target: "_blank", rel: "noopener" }, "Licence"),
+          ),
+        ),
       ),
       h(
         "div",

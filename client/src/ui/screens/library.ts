@@ -8,12 +8,14 @@ import {
   LIBRARY_PAGE_SIZE,
   favouriteMap,
   getMap,
+  listMakers,
   returnScreen,
   updateMap,
   uploadMap,
   voteMap,
   type LibraryMap,
   type LibrarySort,
+  type MakerScore,
   type Visibility,
 } from "../../account";
 import type { AppCtx, ScreenFactory } from "../../ctx";
@@ -34,7 +36,7 @@ import { signInPrompt } from "./account";
 
 const SEARCH_DELAY_MS = 300;
 const PREVIEW_DELAY_MS = 300;
-const SORTS: LibrarySort[] = ["new", "top", "plays"];
+const SORTS: LibrarySort[] = ["new", "hot", "top", "plays", "picks"];
 const VISIBILITIES: Visibility[] = ["public", "unlisted", "private"];
 
 export const libraryScreen: ScreenFactory = (ctx) => {
@@ -62,6 +64,14 @@ export const libraryScreen: ScreenFactory = (ctx) => {
     autocomplete: "off",
     spellcheck: "false",
   });
+  const descInput = h("textarea", {
+    rows: 2,
+    maxlength: 300,
+    placeholder: "What is the map about? (optional)",
+    "aria-label": "map description",
+    autocomplete: "off",
+    spellcheck: "false",
+  });
   const codeInput = h("textarea", {
     rows: 3,
     placeholder: "Paste a map code",
@@ -83,6 +93,7 @@ export const libraryScreen: ScreenFactory = (ctx) => {
     { class: "social-form upload-form", hidden: true, onsubmit: onUpload },
     h("h2", null, "Upload a map"),
     h("label", { class: "field" }, h("span", { class: "field-label" }, "Name"), nameInput),
+    h("label", { class: "field" }, h("span", { class: "field-label" }, "Description"), descInput),
     h("label", { class: "field" }, h("span", { class: "field-label" }, "Map code"), codeInput),
     previewBox,
     formError,
@@ -111,6 +122,17 @@ export const libraryScreen: ScreenFactory = (ctx) => {
     SORTS.map((s) => h("option", { value: s }, SORT_LABELS[s])),
   );
   const toolbar = h("div", { class: "library-toolbar" }, searchInput, sortSelect);
+
+  // Top makers this week (browse tab only)
+  const makersList = h("ol", { class: "library-makers-list" });
+  const makersStatus = h("p", { class: "status" });
+  const makers = h(
+    "section",
+    { class: "library-makers", "aria-label": "top makers this week", hidden: true },
+    h("h2", null, "Top makers this week"),
+    makersStatus,
+    makersList,
+  );
 
   const list = h("ul", { class: "map-list", "aria-label": "maps" });
   const moreBtn = h(
@@ -141,6 +163,7 @@ export const libraryScreen: ScreenFactory = (ctx) => {
     tabsHost.replaceChildren(tabBar(tab, selectTab));
     const signedOut = needsSignIn();
     toolbar.hidden = tab !== "browse";
+    makers.hidden = tab !== "browse";
     uploadForm.hidden = tab !== "mine" || signedOut;
     list.hidden = signedOut;
     moreBtn.hidden = true;
@@ -178,6 +201,20 @@ export const libraryScreen: ScreenFactory = (ctx) => {
   function reload(): void {
     page = 0;
     void load(false);
+  }
+
+  async function loadMakers(): Promise<void> {
+    try {
+      const got = await listMakers();
+      makersList.replaceChildren(
+        ...got.map((m) =>
+          h("li", null, h("span", { class: "maker-name" }, m.name), h("span", { class: "maker-score" }, String(m.score))),
+        ),
+      );
+      makersStatus.textContent = got.length === 0 ? "Nobody has earned votes or plays this week yet." : "";
+    } catch (err) {
+      makersStatus.textContent = errorText(err);
+    }
   }
 
   async function load(append: boolean): Promise<void> {
@@ -266,6 +303,12 @@ export const libraryScreen: ScreenFactory = (ctx) => {
     }
   }
 
+  async function editDescription(map: LibraryMap): Promise<void> {
+    const text = prompt(`Describe "${map.name}" in up to 300 characters.`, map.description);
+    if (text === null || text.trim() === map.description) return;
+    await act(() => updateMap(map.id, { description: text.trim() }), map.id);
+  }
+
   function visibilitySelect(map: LibraryMap): HTMLSelectElement {
     const select: HTMLSelectElement = h(
       "select",
@@ -325,7 +368,11 @@ export const libraryScreen: ScreenFactory = (ctx) => {
       h("button", { type: "button", onclick: () => void copyCode(map) }, "Copy code"),
     ];
     if (tab === "mine") {
-      actions.push(visibilitySelect(map), h("button", { type: "button", class: "danger", onclick: () => void removeMap(map) }, "Delete"));
+      actions.push(
+        h("button", { type: "button", onclick: () => void editDescription(map) }, "Edit description"),
+        visibilitySelect(map),
+        h("button", { type: "button", class: "danger", onclick: () => void removeMap(map) }, "Delete"),
+      );
     }
     return h(
       "li",
@@ -370,8 +417,9 @@ export const libraryScreen: ScreenFactory = (ctx) => {
     formError.textContent = "";
     try {
       const visibility = visSelect.value as Visibility;
-      await uploadMap({ name, code, visibility });
+      await uploadMap({ name, description: descInput.value.trim(), code, visibility });
       nameInput.value = "";
+      descInput.value = "";
       codeInput.value = "";
       previewBox.hidden = true;
       ctx.toast(visibility === "public" ? "Map uploaded. It shows once an admin approves it." : "Map uploaded.");
@@ -398,6 +446,7 @@ export const libraryScreen: ScreenFactory = (ctx) => {
       h("header", { class: "social-head" }, back, h("h1", { class: "social-title" }, "Library")),
       tabsHost,
       gate,
+      makers,
       uploadForm,
       toolbar,
       status,
@@ -408,6 +457,7 @@ export const libraryScreen: ScreenFactory = (ctx) => {
 
   paintChrome();
   reload();
+  void loadMakers();
 
   return {
     el,

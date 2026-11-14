@@ -27,6 +27,14 @@ export async function readReplayText(file: Blob): Promise<string> {
   return new TextDecoder().decode(bytes);
 }
 
+/** Replay text a clip hands to the next replay screen mount (see `queueReplay`). */
+let pendingReplay: { name: string; text: string } | null = null;
+
+/** Hand replay text to the replay screen, which opens it as soon as it mounts. */
+export function queueReplay(name: string, text: string): void {
+  pendingReplay = { name, text };
+}
+
 /** m:ss.t */
 function clock(sec: number): string {
   const s = Math.max(0, sec);
@@ -172,16 +180,13 @@ export const replayScreen: ScreenFactory = (ctx) => {
   };
   window.addEventListener("keydown", onKey);
 
-  async function openFile(file: File): Promise<void> {
-    if (pickerMsg) pickerMsg.textContent = `Opening ${file.name}…`;
-    pickerMsg?.classList.remove("offline-error");
+  /** Open replay text (a file or a clip) and start playing it at its first frame. */
+  async function openText(name: string, text: string): Promise<void> {
     let eng: Engine;
-    let text: string;
     try {
       eng = await ctx.engine();
-      text = await readReplayText(file);
     } catch (err) {
-      if (!destroyed) showPicker(`Could not read ${file.name}: ${errText(err)}`);
+      if (!destroyed) showPicker(`The engine failed to load: ${errText(err)}`);
       return;
     }
     if (destroyed) return;
@@ -189,24 +194,37 @@ export const replayScreen: ScreenFactory = (ctx) => {
     try {
       loaded = eng.replayLoad(text);
     } catch (err) {
-      showPicker(`${file.name} is not a valid replay: ${errText(err)}`);
+      showPicker(`${name} is not a valid replay: ${errText(err)}`);
       return;
     }
     if (loaded.end <= loaded.first) {
       eng.replayClose();
-      showPicker(`${file.name} has no frames.`);
+      showPicker(`${name} has no frames.`);
       return;
     }
     engine = eng;
     info = loaded;
     names = new Map(loaded.names);
-    fileName = file.name;
+    fileName = name;
     tick = loaded.first;
     playing = false;
     speed = 1;
     follow = loaded.players[0]?.[0] ?? -1;
     showPlaying();
     loop.start();
+  }
+
+  async function openFile(file: File): Promise<void> {
+    if (pickerMsg) pickerMsg.textContent = `Opening ${file.name}…`;
+    pickerMsg?.classList.remove("offline-error");
+    let text: string;
+    try {
+      text = await readReplayText(file);
+    } catch (err) {
+      if (!destroyed) showPicker(`Could not read ${file.name}: ${errText(err)}`);
+      return;
+    }
+    await openText(file.name, text);
   }
 
   /** The file picker and drop zone (no replay loaded). */
@@ -331,7 +349,10 @@ export const replayScreen: ScreenFactory = (ctx) => {
     syncControls();
   }
 
+  const pending = pendingReplay;
+  pendingReplay = null;
   showPicker();
+  if (pending) void openText(pending.name, pending.text);
 
   return {
     el: root,

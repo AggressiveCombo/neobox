@@ -16,6 +16,8 @@ const SVG_NS = "http://www.w3.org/2000/svg";
 const DEFAULT_MAX_PLAYERS = 8;
 /** Room codes: 6 characters from the server's alphabet (no I, O, 0 or 1). */
 const ROOM_CODE_RE = /^[A-HJ-NP-Z2-9]{6}$/;
+/** YouTube video ids: 11 characters from the URL-safe alphabet (anything else gets no thumbnail). */
+const YT_ID_RE = /^[A-Za-z0-9_-]{11}$/;
 
 function lockIcon(): SVGSVGElement {
   const svg = document.createElementNS(SVG_NS, "svg");
@@ -43,6 +45,15 @@ function lockIcon(): SVGSVGElement {
 
 function modeName(mode: number): string {
   return GAME_MODES.find((m) => m.id === mode)?.name ?? "Unknown";
+}
+
+/** The jukebox column of a room row: the playing video's thumbnail and title, empty when nothing plays. */
+function jukeboxCell(box: { video: string; title: string } | null): HTMLElement {
+  if (box === null) return h("span", { class: "room-jukebox" });
+  const thumb = YT_ID_RE.test(box.video)
+    ? h("img", { class: "room-thumb", src: `https://i.ytimg.com/vi/${box.video}/default.jpg`, alt: "", loading: "lazy" })
+    : null;
+  return h("span", { class: "room-jukebox", title: box.title }, thumb, h("span", { class: "room-track" }, box.title));
 }
 
 export const browserScreen: ScreenFactory = (ctx) => {
@@ -237,13 +248,22 @@ export const browserScreen: ScreenFactory = (ctx) => {
         "aria-expanded": room.password ? String(open) : null,
         onclick: () => onRoomClick(room),
       },
-      h("span", { class: "room-name" }, room.name, room.password ? lockIcon() : null),
+      h(
+        "span",
+        { class: "room-name" },
+        room.name,
+        room.password ? lockIcon() : null,
+        room.quick !== null ? h("span", { class: "badge quick-badge" }, "Quick") : null,
+      ),
       h("span", { class: "room-mode" }, modeName(room.mode)),
       h("span", { class: "room-map" }, room.map),
+      jukeboxCell(room.jukebox),
       h("span", { class: "room-count" }, `${room.players}/${room.max_players}`),
       room.in_match ? h("span", { class: "badge" }, "in match") : null,
     );
-    return h("li", { class: "room-item" }, row, open ? joinForm(room) : null);
+    const friends =
+      room.friends.length > 0 ? h("p", { class: "room-friends" }, `Friends: ${room.friends.join(", ")}`) : null;
+    return h("li", { class: "room-item" }, row, friends, open ? joinForm(room) : null);
   }
 
   function renderRooms(): void {
@@ -274,7 +294,7 @@ export const browserScreen: ScreenFactory = (ctx) => {
         { class: "quick-row" },
         h(
           "button",
-          { type: "button", class: "primary", onclick: () => ctx.send({ t: "quick_play" }) },
+          { type: "button", class: "primary", onclick: () => store.set({ screen: "quick" }) },
           "Quick play",
         ),
         codeForm,
@@ -292,6 +312,7 @@ export const browserScreen: ScreenFactory = (ctx) => {
         h("span", null, "Room"),
         h("span", null, "Mode"),
         h("span", null, "Map"),
+        h("span", null, "Playing"),
         h("span", null, "Players"),
       ),
       roomList,

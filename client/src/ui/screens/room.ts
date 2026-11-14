@@ -15,12 +15,16 @@ import {
   TEAM_SPECTATOR,
   isTeamMode,
 } from "../../protocol";
-import type { PlayerInfo, RoomState } from "../../protocol";
+import type { PlayerInfo, QuickQueue, RoomState } from "../../protocol";
 import { SETTINGS, formatValue, normalizeInput, readOnlyKeys } from "../../settings";
 import type { SettingDef } from "../../settings";
 import { drawMapPreview } from "../../render/preview";
+import { cssHex } from "../../render/geometry";
 import { openLibraryPicker } from "../library-picker";
-import { playMap } from "../../account";
+import { acceptFriend, listFriends, removeFriend, requestFriend, type FriendState } from "../../account";
+import { filterProfanity } from "../../profanity";
+import { prefs } from "../../prefs";
+import { openColorPicker } from "../color-picker";
 
 interface TeamAction {
   label: string;
@@ -40,6 +44,15 @@ const TEAM_ACTIONS_FFA: readonly TeamAction[] = [
 
 /** Chat lines remembered for Up/Down recall. */
 const SENT_LIMIT = 50;
+
+/** A player's typing signal shows in the roster for this long after the last one. */
+const TYPING_SHOW_MS = 3000;
+/** Our own typing signals are sent at most this often. */
+const TYPING_SEND_MS = 1000;
+/** How often the roster checks whether a typing signal has expired. */
+const TYPING_TICK_MS = 500;
+
+const QUEUE_NAMES: Record<QuickQueue, string> = { ffa: "Free for all", teams: "Teams", lives: "Lives" };
 
 function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
@@ -69,10 +82,41 @@ function fact(label: string, value: string): HTMLElement {
   return h("div", { class: "room-fact" }, h("dt", null, label), h("dd", null, value));
 }
 
-function chatLine(line: ChatLine, myId: number | null): HTMLElement {
-  if (line.from === null) return h("div", { class: "room-chat-line room-chat-system" }, line.text);
+/** How long ago a unix-seconds time was, in the largest whole unit ("3 days ago"). */
+function ageText(unixSeconds: number): string {
+  const s = Math.max(0, Date.now() / 1000 - unixSeconds);
+  for (const [size, unit] of [
+    [86_400, "day"],
+    [3600, "hour"],
+    [60, "minute"],
+  ] as const) {
+    if (s >= size) {
+      const n = Math.floor(s / size);
+      return `${n} ${unit}${n === 1 ? "" : "s"} ago`;
+    }
+  }
+  return "just now";
+}
+
+function chatLine(line: ChatLine, myId: number | null, text: string, onPlay: ((video: string) => void) | null): HTMLElement {
+  if (line.from === null) return h("div", { class: "room-chat-line room-chat-system" }, text);
   const mine = line.from === myId ? "room-chat-line is-me" : "room-chat-line";
-  return h("div", { class: mine }, h("span", { class: "room-chat-name" }, line.name), ": ", line.text);
+  const suggest = line.suggest;
+  return h(
+    "div",
+    { class: mine },
+    h("span", { class: "room-chat-name" }, line.name),
+    ": ",
+    text,
+    suggest
+      ? h(
+          "div",
+          { class: "room-chat-suggest" },
+          h("span", null, `suggests ${suggest.title}`),
+          onPlay ? h("button", { type: "button", class: "room-btn room-btn-small", onclick: () => onPlay(suggest.video) }, "Play on jukebox") : null,
+        )
+      : null,
+  );
 }
 
 /** Rebuilds `slot` only when `key` differs from the previous call. */
@@ -104,13 +148,21 @@ export const roomScreen: ScreenFactory = (ctx: AppCtx) => {
   let lastMapName: string | null = null;
   let drawnCode: string | null = null;
   let closeLibrary: (() => void) | null = null;
+  let closePicker: (() => void) | null = null;
+  /** Friend relations with the signed-in viewer, by lowercase name; the roster shows them. */
+  let relations = new Map<string, FriendState>();
+  let relationsSeq = 0;
 
   /** Chat messages sent from this screen, oldest first; `historyAt` is -1 when not recalling. */
   const sentHistory: string[] = [];
   let historyAt = -1;
   let draft = "";
+  let lastTypingSent = Number.NEGATIVE_INFINITY;
+  /** What the chat log was last built from; it is rebuilt only when one of these changes. */
+  let shownChat: { list: readonly ChatLine[]; myId: number | null; host: boolean; filter: boolean } | null = null;
 
-  const isHost = (): boolean => st.room !== null && st.room.players.some((p) => p.id === st.myId && p.host);
+  const isHost = (): boolean =>
+    st.room !== null && st.room.quick === null && st.room.players.some((p) => p.id === st.myId && p.host);
 
   // Actions. Host-only messages are guarded here as well as disabled in the DOM.
   const leave = (): void => ctx.send({ t: "leave_room" });
@@ -135,6 +187,9 @@ export const roomScreen: ScreenFactory = (ctx: AppCtx) => {
   const start = (): void => {
     if (isHost()) ctx.send({ t: "start" });
   };
+  const abortStart = (): void => {
+    if (isHost()) ctx.send({ t: "abort_start" });
+  };
   const setMode = (mode: number): void => {
     if (isHost()) ctx.send({ t: "set_mode", mode });
   };
@@ -144,8 +199,102 @@ export const roomScreen: ScreenFactory = (ctx: AppCtx) => {
   const setSetting = (def: SettingDef, raw: string): void => {
     if (isHost()) ctx.send({ t: "set_setting", key: def.label, value: normalizeInput(def.kind, raw) });
   };
+  const playOnJukebox = (video: string): void => {
+    if (isHost()) ctx.send({ t: "jukebox", action: "play", video });
+  };
 
   const toastError = (err: unknown): void => ctx.toast(errorMessage(err), "error");
+
+  /** Loads the viewer's friend relations for the roster; the latest request wins. */
+  function loadFriends(): Promise<void> {
+    const seq = ++relationsSeq;
+    if (st.account === null) {
+      relations = new Map();
+      refreshPlayers();
+      return Promise.resolve();
+    }
+    return listFriends().then(
+      (list) => {
+        if (!alive || seq !== relationsSeq) return;
+        relations = new Map<string, FriendState>(list.map((f): [string, FriendState] => [f.name.toLowerCase(), f.state]));
+        refreshPlayers();
+      },
+      (err: unknown) => {
+        if (alive && seq === relationsSeq) toastError(err);
+      },
+    );
+  }
+
+  /** Runs a friend action from the roster, toasts its result, then reloads the relations. */
+  function friendAction(run: () => Promise<void>, done: string): void {
+    void run().then(() => ctx.toast(done), toastError).then(loadFriends);
+  }
+
+  /** Friend controls for a signed-in player on the roster, shaped by the relation with the viewer. */
+  function friendControls(name: string): Node[] {
+    const rel = relations.get(name.toLowerCase());
+    if (rel === undefined) {
+      return [
+        h(
+          "button",
+          { type: "button", class: "room-btn room-btn-small", onclick: () => friendAction(() => requestFriend(name), `Friend request sent to ${name}.`) },
+          "Add friend",
+        ),
+      ];
+    }
+    if (rel === "incoming") {
+      return [
+        h("span", { class: "room-friend-request", title: "sent you a friend request", "aria-label": `${name} sent you a friend request` }, "!"),
+        h(
+          "button",
+          { type: "button", class: "room-btn room-btn-small", onclick: () => friendAction(() => acceptFriend(name), `You and ${name} are now friends.`) },
+          "Accept",
+        ),
+        h(
+          "button",
+          { type: "button", class: "room-btn room-btn-small", onclick: () => friendAction(() => removeFriend(name), `Declined ${name}'s request.`) },
+          "Decline",
+        ),
+      ];
+    }
+    if (rel === "friend") {
+      return [
+        h("span", { class: "room-badge is-friend", title: "friend" }, "Friend"),
+        h(
+          "button",
+          { type: "button", class: "room-btn room-btn-small", onclick: () => friendAction(() => removeFriend(name), `Removed ${name} from friends.`) },
+          "Remove",
+        ),
+      ];
+    }
+    return [h("button", { type: "button", class: "room-btn room-btn-small", disabled: true }, "Request sent")];
+  }
+
+  /** Opens the appearance colour picker; the saved colour is kept locally and sent to the room. */
+  function openAppearance(): void {
+    closePicker?.();
+    const me = st.room?.players.find((p) => p.id === st.myId);
+    closePicker = openColorPicker(me?.color ?? prefs.value.color ?? 0x888888, (color) => {
+      closePicker = null;
+      prefs.set({ color });
+      ctx.send({ t: "set_color", color });
+    });
+  }
+
+  /** Sends a typing signal, at most once per TYPING_SEND_MS. */
+  function typingSignal(): void {
+    const now = performance.now();
+    if (now - lastTypingSent < TYPING_SEND_MS) return;
+    lastTypingSent = now;
+    ctx.send({ t: "typing" });
+  }
+
+  /** Opens the map editor for the host: the editor can send its map back to this room. */
+  function openEditor(): void {
+    if (!isHost()) return;
+    ctx.store.set({ editorForRoom: true, screen: "editor" });
+    ctx.send({ t: "editing", open: true });
+  }
 
   /** Share the invite link: the system share sheet when there is one, else copy to the clipboard. */
   async function shareInvite(): Promise<void> {
@@ -276,12 +425,13 @@ export const roomScreen: ScreenFactory = (ctx: AppCtx) => {
     submitMapText(text);
   }
 
-  /** Pick a map from the library: the room shows its library name, and the library counts the play. */
+  /** Pick a map from the library: the server loads its code, names it and counts the play. */
   function openLibrary(): void {
     closeLibrary?.();
     closeLibrary = openLibraryPicker(ctx, (m) => {
       closeLibrary = null;
-      if (chooseMap(m.code, m.name)) void playMap(m.id).catch(() => {});
+      if (!isHost() || !showPreview(m.code)) return;
+      ctx.send({ t: "set_library_map", id: m.id });
     });
   }
 
@@ -313,9 +463,19 @@ export const roomScreen: ScreenFactory = (ctx: AppCtx) => {
     });
   }
 
+  /** The library map's author, votes and age, when the room's map comes from the library. */
+  function buildMapInfo(room: RoomState): Node[] {
+    const m = room.map;
+    if (m === null) return [];
+    const nodes: Node[] = [h("p", { class: "room-map-meta" }, `by ${m.author} · ${m.up} up · ${m.down} down · added ${ageText(m.created)}`)];
+    if (m.description !== "") nodes.push(h("p", { class: "room-map-desc" }, m.description));
+    return nodes;
+  }
+
   // Static DOM. Sections are built once; their contents are rebuilt by the keyed renderers.
   const header = h("header", { class: "room-header" });
   const notice = h("p", { class: "room-notice", role: "status" });
+  const startNotice = h("div", { class: "room-starting", role: "status" });
 
   const playersBody = h("div", { class: "room-players-body" });
   const renderPlayers = keyed(playersBody, buildPlayers);
@@ -326,6 +486,7 @@ export const roomScreen: ScreenFactory = (ctx: AppCtx) => {
   const modePanel = h("section", { class: "room-panel room-mode-panel" }, h("h2", { class: "room-panel-title" }, "Mode"), modeBody);
 
   const mapName = h("p", { class: "room-map-name" });
+  const mapInfo = h("div", { class: "room-map-info" });
   const mapCanvas = h("canvas", {
     class: "room-map-preview",
     width: 480,
@@ -369,10 +530,19 @@ export const roomScreen: ScreenFactory = (ctx: AppCtx) => {
         "Use code",
       ),
       h("button", { type: "button", class: "room-btn", onclick: openLibrary }, "Library"),
+      h("button", { type: "button", class: "room-btn", onclick: openEditor }, "Editor"),
       h("label", { class: "room-file" }, "Load file", fileInput),
     ),
   );
-  const mapPanel = h("section", { class: "room-panel room-map-panel" }, h("h2", { class: "room-panel-title" }, "Map"), mapName, mapCanvas, mapControls);
+  const mapPanel = h(
+    "section",
+    { class: "room-panel room-map-panel" },
+    h("h2", { class: "room-panel-title" }, "Map"),
+    mapName,
+    mapInfo,
+    mapCanvas,
+    mapControls,
+  );
 
   const manageBody = h("div", { class: "room-manage-body" });
   const renderManage = keyed(manageBody, buildManage);
@@ -392,6 +562,7 @@ export const roomScreen: ScreenFactory = (ctx: AppCtx) => {
     onkeydown: (e) => {
       if (e instanceof KeyboardEvent) chatKey(e);
     },
+    oninput: typingSignal,
   });
   const chatPanel = h(
     "section",
@@ -412,7 +583,7 @@ export const roomScreen: ScreenFactory = (ctx: AppCtx) => {
     h("div", { class: "room-col" }, playersPanel, modePanel, mapPanel),
     h("div", { class: "room-col" }, chatPanel, managePanel, settingsPanel),
   );
-  const root = h("div", { class: "room-screen" }, header, notice, main);
+  const root = h("div", { class: "room-screen" }, header, notice, startNotice, main);
 
   // Section builders. Each reads `st`, which is set before any render runs.
 
@@ -443,6 +614,7 @@ export const roomScreen: ScreenFactory = (ctx: AppCtx) => {
         fact("Map", room.map_name),
         fact("Mode", modeName(roomMode(room))),
         fact("Players", `${room.players.length} / ${room.max_players}`),
+        room.quick === null ? null : fact("Queue", QUEUE_NAMES[room.quick]),
       ),
     ];
   }
@@ -463,18 +635,23 @@ export const roomScreen: ScreenFactory = (ctx: AppCtx) => {
     return select;
   }
 
-  function playerRow(p: PlayerInfo, host: boolean, teams: boolean): HTMLElement {
+  function playerRow(p: PlayerInfo, host: boolean, teams: boolean, typing: boolean): HTMLElement {
     const isMe = p.id === st.myId;
     const ping = p.ping_ms >= 0 ? `${p.ping_ms} ms` : "-";
     return h(
       "li",
       { class: isMe ? "room-player is-me" : "room-player" },
+      h("span", { class: "room-swatch", style: `background:${cssHex(p.color)}`, "aria-hidden": "true" }),
       h("span", { class: "room-player-name" }, p.name),
       isMe ? h("span", { class: "room-you" }, "you") : null,
       p.host ? h("span", { class: "room-host", title: "room host" }, "host") : null,
       p.account ? h("span", { class: "room-badge is-verified", title: "signed-in account" }, "verified") : null,
+      h("span", { class: "room-level", title: p.level > 0 ? "account level" : "playing as a guest" }, p.level > 0 ? `Level ${p.level}` : "Guest"),
+      typing ? h("span", { class: "room-typing", title: "typing", "aria-label": `${p.name} is typing` }, "...") : null,
+      p.editing ? h("span", { class: "room-editing", title: "building a map" }, "editing") : null,
       p.connected ? null : h("span", { class: "room-badge is-offline", title: "reconnecting" }, "offline"),
       h("span", { class: "room-ping" }, ping),
+      ...(st.account !== null && p.account && !isMe ? friendControls(p.name) : []),
       host && !isMe
         ? h(
             "span",
@@ -488,12 +665,32 @@ export const roomScreen: ScreenFactory = (ctx: AppCtx) => {
     );
   }
 
+  /** Ids of players whose typing signal is recent, sorted. Part of the roster key so the roster refreshes when it changes. */
+  function activeTypers(): number[] {
+    const now = performance.now();
+    return Object.entries(st.typing)
+      .filter(([, at]) => now - at < TYPING_SHOW_MS)
+      .map(([id]) => Number(id))
+      .sort((a, b) => a - b);
+  }
+
+  /** Rebuilds the roster when anything it shows has changed. */
+  function refreshPlayers(): void {
+    const room = st.room;
+    if (room === null) return;
+    const mode = roomMode(room);
+    renderPlayers(
+      JSON.stringify([room.players, st.myId, mode, isHost(), room.in_match, room.starting, st.account !== null, activeTypers(), Array.from(relations)]),
+    );
+  }
+
   function buildPlayers(): Node[] {
     const room = st.room;
     if (room === null) return [];
     const mode = roomMode(room);
     const teams = mode !== null && isTeamMode(mode);
     const host = isHost();
+    const typers = new Set(activeTypers());
     const columns: { title: string; bucket: number }[] = teams
       ? [
           { title: "Red", bucket: TEAM_RED },
@@ -518,7 +715,7 @@ export const roomScreen: ScreenFactory = (ctx: AppCtx) => {
             h("h3", { class: "room-column-title" }, `${col.title} (${members.length})`),
             members.length === 0
               ? h("p", { class: "room-muted" }, "none")
-              : h("ul", { class: "room-list" }, members.map((p) => playerRow(p, host, teams))),
+              : h("ul", { class: "room-list" }, members.map((p) => playerRow(p, host, teams, typers.has(p.id)))),
           );
         }),
       ),
@@ -539,6 +736,7 @@ export const roomScreen: ScreenFactory = (ctx: AppCtx) => {
             a.label,
           );
         }),
+        h("button", { type: "button", class: "room-btn", onclick: openAppearance }, "Appearance"),
       ),
       ...(host
         ? [
@@ -547,7 +745,12 @@ export const roomScreen: ScreenFactory = (ctx: AppCtx) => {
               { class: "room-actions" },
               h(
                 "button",
-                { type: "button", class: "room-btn room-btn-primary", disabled: room.in_match, onclick: start },
+                {
+                  type: "button",
+                  class: "room-btn room-btn-primary",
+                  disabled: room.in_match || room.starting,
+                  onclick: start,
+                },
                 "Start",
               ),
             ),
@@ -706,6 +909,7 @@ export const roomScreen: ScreenFactory = (ctx: AppCtx) => {
     main.hidden = room === null;
     notice.hidden = !inNotice;
     notice.textContent = inNotice ? "match in progress" : "";
+    startNotice.hidden = room === null || !room.starting;
     if (room === null) return;
 
     const host = isHost();
@@ -713,9 +917,14 @@ export const roomScreen: ScreenFactory = (ctx: AppCtx) => {
     lastMapName = room.map_name;
     previewRoomMap();
     header.replaceChildren(...buildHeader(room));
-    renderPlayers(JSON.stringify([room.players, st.myId, mode, host, room.in_match]));
+    startNotice.replaceChildren(
+      h("span", null, "Match starting"),
+      ...(host ? [h("button", { type: "button", class: "room-btn room-btn-small", onclick: abortStart }, "Abort start")] : []),
+    );
+    refreshPlayers();
     renderMode(`${host}|${mode}`);
     mapName.textContent = room.map_name;
+    mapInfo.replaceChildren(...buildMapInfo(room));
     mapControls.hidden = !host;
     managePanel.hidden = !host;
     renderManage(`${host}|${room.locked}|${room.in_match}|${room.bans.join("\n")}`);
@@ -724,9 +933,23 @@ export const roomScreen: ScreenFactory = (ctx: AppCtx) => {
     renderSettings(`${host}|${JSON.stringify(room.settings)}`);
   }
 
+  /** Rebuilds the chat log only when its lines, the viewer's identity or host status, or the profanity filter changed. */
   function renderChat(): void {
-    chatLog.replaceChildren(...st.chat.map((line) => chatLine(line, st.myId)));
-    chatLog.scrollTop = chatLog.scrollHeight;
+    const host = isHost();
+    const filter = prefs.value.filterProfanity;
+    if (shownChat !== null && shownChat.list === st.chat && shownChat.myId === st.myId && shownChat.host === host && shownChat.filter === filter) {
+      return;
+    }
+    const listChanged = shownChat === null || shownChat.list !== st.chat;
+    shownChat = { list: st.chat, myId: st.myId, host, filter };
+    chatLog.replaceChildren(
+      ...st.chat.map((line) => {
+        // Other players' lines are masked when the viewer filters profanity; their own lines show as typed.
+        const masked = line.from !== null && line.from !== st.myId && prefs.value.filterProfanity;
+        return chatLine(line, st.myId, masked ? filterProfanity(line.text) : line.text, host ? playOnJukebox : null);
+      }),
+    );
+    if (listChanged) chatLog.scrollTop = chatLog.scrollHeight;
   }
 
   renderRoom();
@@ -746,24 +969,39 @@ export const roomScreen: ScreenFactory = (ctx: AppCtx) => {
     },
   );
 
+  // The roster's friend controls need the viewer's relations; load them on entry.
+  void loadFriends();
+
+  // Typing signals expire on their own: refresh the roster when one does.
+  const typingTimer = setInterval(refreshPlayers, TYPING_TICK_MS);
+  const unsubPrefs = prefs.subscribe(renderChat);
+
   return {
     el: root,
     update(next, prev) {
       st = next;
+      if (next.account !== prev.account) void loadFriends();
       if (
         next.room !== prev.room ||
         next.myId !== prev.myId ||
         next.inMatch !== prev.inMatch ||
-        next.replayReady !== prev.replayReady
+        next.replayReady !== prev.replayReady ||
+        next.account !== prev.account
       ) {
         renderRoom();
+      } else if (next.typing !== prev.typing) {
+        refreshPlayers();
       }
-      if (next.chat !== prev.chat) renderChat();
+      renderChat();
     },
     destroy() {
       alive = false;
+      clearInterval(typingTimer);
+      unsubPrefs();
       closeLibrary?.();
       closeLibrary = null;
+      closePicker?.();
+      closePicker = null;
     },
   };
 };

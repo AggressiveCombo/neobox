@@ -34,6 +34,7 @@ export interface NeoboxExports {
   nb_rtt(): number;
   nb_map_decode(code: number, codeLen: number): number;
   nb_replay_export(names: number, namesLen: number): number;
+  nb_replay_clip(names: number, namesLen: number, maxSecs: number, minSecs: number): number;
   nb_replay_load(json: number, jsonLen: number): number;
   nb_replay_frame(tickF: number, follow: number): number;
   nb_replay_close(): void;
@@ -57,6 +58,11 @@ export interface FrameView {
 }
 
 export class EngineError extends Error {}
+
+/** Start options of an offline game: a `MatchStart` plus its scripted training dummies. */
+export interface LocalStart extends MatchStart {
+  dummies?: { id: number; mode: "idle" | "left_even" }[];
+}
 
 export class Engine {
   readonly x: NeoboxExports;
@@ -207,6 +213,15 @@ export class Engine {
     return text === "" ? null : text;
   }
 
+  /**
+   * The last `maxSecs` (at least `minSecs`) of the current or last online match as clip replay
+   * JSON, starting from a state snapshot. Null when the recording is too short or empty.
+   */
+  replayClip(names: [number, string][], maxSecs: number, minSecs: number): string | null {
+    const text = this.textCall(JSON.stringify(names), (p, n) => this.x.nb_replay_clip(p, n, maxSecs, minSecs));
+    return text === "" ? null : text;
+  }
+
   /** Load a replay (decompressed JSON text) for watching. */
   replayLoad(json: string): ReplayInfo {
     return JSON.parse(this.textCall(json, (p, n) => this.x.nb_replay_load(p, n))) as ReplayInfo;
@@ -221,8 +236,8 @@ export class Engine {
     this.x.nb_replay_close();
   }
 
-  /** Start an offline game (practice, editor test-play) as player `player` of `start.players`. */
-  localStart(start: MatchStart, player: number): void {
+  /** Start an offline game (practice, training, editor test-play) as player `player` of `start.players`. */
+  localStart(start: LocalStart, player: number): void {
     const b = this.alloc(this.enc.encode(JSON.stringify(start)));
     try {
       this.check(this.x.nb_local_start(b.ptr, b.len, player));

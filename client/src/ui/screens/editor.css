@@ -193,3 +193,22 @@
   flex-direction: column;
   gap: 10px;
 }
+
+.editor-lag {
+  position: absolute;
+  left: 8px;
+  bottom: 6px;
+  margin: 0;
+  padding: 2px 8px;
+  border-radius: 4px;
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 12px;
+  pointer-events: none;
+}
+
+.editor-colour {
+  width: 44px;
+  min-height: 40px;
+  padding: 2px;
+}

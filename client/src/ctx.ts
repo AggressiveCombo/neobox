@@ -43,6 +43,8 @@ export interface AppCtx {
   disconnect(): void;
   /** Built-in maps from /api/maps (cached). */
   maps(): Promise<BuiltinMap[]>;
+  /** The current room's map code and name (asks the server; rejects outside a room or after 5 s). */
+  roomMap(): Promise<{ code: string; name: string }>;
 }
 
 /** A mounted screen. The app calls `update` after every store change and `destroy` when leaving. */

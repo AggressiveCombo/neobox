@@ -1,15 +1,31 @@
 // Minimal observable store for app-level state (screen, identity, room, stats).
 
-import type { RoomInfo, RoomState } from "./protocol";
+import type { QuickQueue, RoomInfo, RoomState, XpAward } from "./protocol";
 import type { NetStatus, Transport } from "./net";
 
-export type Screen = "menu" | "about" | "browse" | "room" | "match" | "replay" | "practice" | "settings" | "account" | "friends" | "library" | "editor";
+export type Screen =
+  | "menu"
+  | "about"
+  | "browse"
+  | "quick"
+  | "room"
+  | "match"
+  | "replay"
+  | "practice"
+  | "training"
+  | "settings"
+  | "account"
+  | "friends"
+  | "library"
+  | "editor";
 
 export interface ChatLine {
   /** null = server/system message. */
   from: number | null;
   name: string;
   text: string;
+  /** A YouTube link the player pasted: the host can play it on the jukebox. */
+  suggest?: { video: string; title: string };
 }
 
 /** Live numbers for the F3 stats overlay (refreshed about 4 times a second). */
@@ -29,6 +45,8 @@ export interface Stats {
 export interface Account {
   id: number;
   name: string;
+  /** Experience total (see levels.ts). */
+  xp: number;
 }
 
 export interface AppState {
@@ -55,10 +73,16 @@ export interface AppState {
   replayReady: boolean;
   /** The connection dropped while in a room; retrying with the room's resume token. */
   reconnecting: boolean;
-  /** Action to run after the next welcome (menu "Quick play"). */
-  intent: "quick" | null;
+  /** Quick-play queue to join after the next welcome (menu quick play). */
+  intent: QuickQueue | null;
   /** Room code that needs a password (invite link or a join that was refused). */
   invite: string | null;
+  /** Experience from the last game (shown by the post-game panel; cleared when it closes or a match starts). */
+  xp: XpAward | null;
+  /** Players typing a chat line: player id → time (performance.now()) of their last typing signal. */
+  typing: Readonly<Record<number, number>>;
+  /** The map editor was opened from the room by the host: it can send its map back to the room. */
+  editorForRoom: boolean;
 }
 
 export type Listener<T> = (state: T, prev: T) => void;
@@ -106,5 +130,8 @@ export function initialState(): AppState {
     reconnecting: false,
     intent: null,
     invite: null,
+    xp: null,
+    typing: {},
+    editorForRoom: false,
   };
 }

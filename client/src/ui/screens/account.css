@@ -1,0 +1,29 @@
+/* Level and XP progress on the account card. */
+
+.account-level {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.account-level-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin: 0;
+}
+
+.account-level-bar {
+  height: 8px;
+  border-radius: 999px;
+  background: var(--surface-2);
+  overflow: hidden;
+}
+
+.account-level-fill {
+  display: block;
+  height: 100%;
+  width: 0;
+  background: var(--accent);
+  transition: width 0.4s ease;
+}

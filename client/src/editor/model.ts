@@ -11,6 +11,7 @@ import {
   MAX_OBJECT_ID,
   type ListKey,
   type Obj,
+  SHAPE_DEFAULTS,
   SPAWN_DEFAULTS,
   TURRET_DEFAULTS,
   asObj,
@@ -391,4 +392,85 @@ export function addJoint(doc: Obj, a: { body: number; p: Pt }, b: { body: number
 
 export function kindLabel(kind: Kind): string {
   return { body: "Body", joint: "Joint", spawn: "Spawn", turret: "Turret", grapple: "Grapple", cap: "Capture" }[kind];
+}
+
+/** Set a shape's keys in place: undefined removes a key, values equal to the default are dropped. */
+export function patchShape(doc: Obj, bodyIdx: number, shapeIdx: number, patch: Obj): Obj {
+  const body = getList(doc, "body")[bodyIdx];
+  const shapes = body ? list(body, "s") : [];
+  if (!body || !shapes[shapeIdx]) return doc;
+  const next: Obj = { ...asObj(shapes[shapeIdx]) };
+  for (const [k, v] of Object.entries(patch)) {
+    if (v === undefined || (k in SHAPE_DEFAULTS && SHAPE_DEFAULTS[k] === v)) delete next[k];
+    else next[k] = v;
+  }
+  return setBodyShapes(doc, bodyIdx, replaceAt(shapes, shapeIdx, next));
+}
+
+/** Set one shape's fill colour (0xRRGGBB). */
+export function setShapeColor(doc: Obj, bodyIdx: number, shapeIdx: number, colour: number): Obj {
+  return patchShape(doc, bodyIdx, shapeIdx, { "7": colour });
+}
+
+/**
+ * Merge bodies into the lowest-indexed one. Their shapes move onto it, re-expressed
+ * in its frame; joints and grapples that pointed at a merged body point at the survivor.
+ * A joint whose ends would both be the survivor is dropped.
+ */
+export function mergeBodies(doc: Obj, bodyIdxs: number[]): { doc: Obj; index: number } {
+  const bodies = getList(doc, "body");
+  const idxs = [...new Set(bodyIdxs)].filter((i) => bodies[i]).sort((a, b) => a - b);
+  const surv = idxs[0];
+  if (surv === undefined || idxs.length < 2) return { doc, index: surv ?? -1 };
+  const sb = bodies[surv]!;
+  const sx = bodyXf(sb);
+  const survId = bodyIdAt(doc, surv);
+  const absorbed = idxs.slice(1);
+  const merged = new Set(absorbed.map((i) => bodyIdAt(doc, i)));
+  const moved: Obj[] = [];
+  for (const i of absorbed) {
+    const b = bodies[i]!;
+    const bx = bodyXf(b);
+    const origin = toLocal(sx, toWorld(bx, { x: 0, y: 0 }));
+    const dir = (x: number, y: number): Pt => {
+      const w = toLocal(sx, toWorld(bx, { x, y }));
+      return { x: w.x - origin.x, y: w.y - origin.y };
+    };
+    for (const s of list(b, "s")) {
+      const shape = asObj(s);
+      const at = toLocal(sx, toWorld(bx, { x: num(shape, "2", 0), y: num(shape, "3", 0) }));
+      const next: Obj = { ...shape, "2": round(at.x), "3": round(at.y) };
+      const pts = flatPoints(shape);
+      if (pts.length) {
+        const rot: number[] = [];
+        for (let k = 0; k + 1 < pts.length; k += 2) {
+          const q = dir(pts[k]!, pts[k + 1]!);
+          rot.push(round(q.x), round(q.y));
+        }
+        next.p = rot;
+      }
+      moved.push(next);
+    }
+  }
+  const survBody: Obj = { ...sb, s: [...list(sb, "s"), ...moved] };
+  const remap = (id: number): number => (merged.has(id) ? survId : id);
+  let next = withList(
+    doc,
+    "body",
+    bodies.map((b, i) => (i === surv ? survBody : b)).filter((_, i) => !absorbed.includes(i)),
+  );
+  const joints: Obj[] = [];
+  for (const j of getList(next, "joint")) {
+    const a = num(j, "7", -1);
+    const b = num(j, "8", -1);
+    if (remap(a) === remap(b) && remap(a) !== -1) continue;
+    const out: Obj = { ...j };
+    if (remap(a) !== a) out["7"] = remap(a);
+    if (remap(b) !== b) out["8"] = remap(b);
+    joints.push(out);
+  }
+  next = withList(next, "joint", joints);
+  const grapples = getList(next, "grapple").map((g) => (merged.has(num(g, "4", -1)) ? { ...g, "4": survId } : g));
+  next = withList(next, "grapple", grapples);
+  return { doc: next, index: surv };
 }

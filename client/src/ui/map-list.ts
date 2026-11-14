@@ -20,8 +20,10 @@ export type LibraryTab = "browse" | "mine" | "favourites";
 
 export const SORT_LABELS: Record<LibrarySort, string> = {
   new: "Newest",
+  hot: "Hot",
   top: "Top rated",
   plays: "Most played",
+  picks: "Staff picks",
 };
 
 export const STATUS_LABELS: Record<MapStatus, string> = {
@@ -146,9 +148,12 @@ function count(n: number, word: string): string {
 
 /** The text lines of a map card: name, then author and counts, then visibility state. */
 export function mapLines(map: LibraryMap): HTMLElement[] {
-  return [
+  const lines: HTMLElement[] = [
     h("span", { class: "map-name" }, map.name),
     h("span", { class: "map-meta" }, `by ${map.author} · ${count(map.votes, "vote")} · ${count(map.plays, "play")}`),
     h("span", { class: "map-meta" }, mapState(map)),
   ];
+  if (map.pick) lines.push(h("span", { class: "map-pick" }, "Staff pick"));
+  if (map.description !== "") lines.push(h("span", { class: "map-desc" }, map.description));
+  return lines;
 }

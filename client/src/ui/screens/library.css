@@ -1,0 +1,35 @@
+/* Map library: top makers panel and the pick and description lines of map cards. */
+
+.library-makers {
+  margin: 0 0 12px;
+}
+
+.library-makers h2 {
+  margin: 0 0 6px;
+  font-size: 1em;
+}
+
+.library-makers-list {
+  margin: 0;
+  padding-left: 1.5em;
+}
+
+.library-makers-list li {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  max-width: 24em;
+}
+
+.map-pick,
+.map-desc {
+  display: block;
+}
+
+.map-pick {
+  font-weight: 600;
+}
+
+.map-desc {
+  opacity: 0.8;
+}

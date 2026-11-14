@@ -4,6 +4,17 @@
 @import "./ui/screens/social.css";
 @import "./ui/screens/offline.css";
 @import "./ui/screens/editor.css";
+@import "./ui/screens/menu.css";
+@import "./ui/screens/browser.css";
+@import "./ui/screens/quick.css";
+@import "./ui/screens/library.css";
+@import "./ui/news.css";
+@import "./ui/screens/account.css";
+@import "./ui/color-picker.css";
+@import "./ui/postgame.css";
+@import "./ui/jukebox.css";
+@import "./ui/screens/training.css";
+@import "./ui/menu-clips.css";
 
 :root {
   color-scheme: dark;
@@ -536,6 +547,10 @@ button:disabled {
 }
 
 .room-head span:nth-child(4) {
+  flex: 0 0 9rem;
+}
+
+.room-head span:nth-child(5) {
   flex: 0 0 3.5rem;
   text-align: right;
 }

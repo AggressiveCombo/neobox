@@ -1,0 +1,61 @@
+/* Quick play screen (ui/screens/quick.ts). Panel and button base styles come from style.css. */
+
+.quick-panel {
+  width: min(100%, 560px);
+  gap: 14px;
+}
+
+.quick-head h1 {
+  margin: 0;
+  font-size: 26px;
+}
+
+.quick-online {
+  margin: 0;
+  color: var(--muted);
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+}
+
+.quick-cards {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 10px;
+}
+
+.quick-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  width: 100%;
+  padding: 14px 16px;
+  text-align: left;
+}
+
+.quick-title {
+  font-size: 17px;
+  font-weight: 700;
+}
+
+.quick-text {
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.4;
+}
+
+.quick-count {
+  color: var(--accent);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+.quick-card:disabled {
+  opacity: 0.5;
+}
+
+@media (min-width: 560px) {
+  .quick-cards {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}

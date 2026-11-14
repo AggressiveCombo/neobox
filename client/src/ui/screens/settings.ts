@@ -6,6 +6,7 @@ import { GAMEPAD_LABELS, RESERVED_KEYS, keyLabel } from "../../input";
 import { ACTIONS, DEFAULT_KEYS, prefs, type Action, type KeyBindings, type Palette } from "../../prefs";
 import { PALETTES, cssHex } from "../../render/geometry";
 import type { Screen } from "../../state";
+import { openColorPicker } from "../color-picker";
 import { h, type Child } from "../dom";
 
 const PALETTE_LABELS: Record<Palette, string> = {
@@ -109,6 +110,11 @@ export const settingsScreen: ScreenFactory = (ctx) => {
   // Audio, graphics and touch inputs; refresh() keeps them in step with prefs.
   const volume = rangeField("Volume", 0, 100, 1, (v) => prefs.set({ volume: v / 100 }));
   const muted = checkField("Mute all sound", null, (on) => prefs.set({ muted: on }));
+  const musicMuted = checkField("Mute menu music", null, (on) => prefs.set({ musicMuted: on }));
+  const jukebox = rangeField("Jukebox volume", 0, 100, 1, (v) => prefs.set({ jukeboxVolume: v / 100 }));
+  const filterProfanity = checkField("Filter profanity", "Masks rude words in other players' chat.", (on) =>
+    prefs.set({ filterProfanity: on }),
+  );
   const scale = rangeField("Render scale", 50, 100, 5, (v) => prefs.set({ renderScale: v / 100 }));
   const antialias = checkField("Anti-aliasing", "Smooths edges. Takes effect after a reload.", (on) => prefs.set({ antialias: on }));
   const stats = checkField("Show stats", "Ping, FPS and rollbacks. Same as F3.", (on) => {
@@ -148,6 +154,30 @@ export const settingsScreen: ScreenFactory = (ctx) => {
   const leftHanded = checkField("Left-handed layout", "Movement stick on the right, buttons on the left.", (on) =>
     prefs.set({ touchLeftHanded: on }),
   );
+
+  const colorSwatch = h("span", { class: "swatch", "aria-hidden": "true" });
+  const colorNote = h("p", { class: "settings-hint" });
+  /** The colour picker opened from this screen, closed again when the screen is left. */
+  let closePicker: (() => void) | null = null;
+  const chooseColor = h(
+    "button",
+    {
+      type: "button",
+      onclick: () => {
+        closePicker?.();
+        closePicker = openColorPicker(prefs.value.color ?? 0x888888, (color) => prefs.set({ color }));
+      },
+    },
+    "Choose colour",
+  );
+  const autoColor = h("button", { type: "button", onclick: () => prefs.set({ color: null }) }, "Automatic");
+
+  function syncColor(): void {
+    const color = prefs.value.color;
+    colorSwatch.hidden = color === null;
+    if (color !== null) colorSwatch.style.background = cssHex(color);
+    colorNote.textContent = color === null ? "The server picks a colour until you choose one." : "Your colour in rooms.";
+  }
 
   /** Cancel a pending key capture (if any) and make its waiter a no-op. */
   function stopCapture(): void {
@@ -350,6 +380,10 @@ export const settingsScreen: ScreenFactory = (ctx) => {
     for (const [name, radio] of paletteRadios) radio.checked = name === p.palette;
     touchSize.set(Math.round(p.touchScale * 100));
     leftHanded.set(p.touchLeftHanded);
+    musicMuted.set(p.musicMuted);
+    jukebox.set(Math.round(p.jukeboxVolume * 100));
+    filterProfanity.set(p.filterProfanity);
+    syncColor();
   }
 
   const el = h(
@@ -378,6 +412,8 @@ export const settingsScreen: ScreenFactory = (ctx) => {
       h("h2", null, "Audio"),
       volume.el,
       muted.el,
+      musicMuted.el,
+      jukebox.el,
     ),
     h(
       "section",
@@ -395,6 +431,19 @@ export const settingsScreen: ScreenFactory = (ctx) => {
       h("h2", null, "Touch"),
       touchSize.el,
       leftHanded.el,
+    ),
+    h(
+      "section",
+      { class: "panel" },
+      h("h2", null, "Chat"),
+      filterProfanity.el,
+    ),
+    h(
+      "section",
+      { class: "panel" },
+      h("h2", null, "Appearance"),
+      h("div", { class: "actions" }, colorSwatch, chooseColor, autoColor),
+      colorNote,
     ),
   );
 
@@ -422,6 +471,7 @@ export const settingsScreen: ScreenFactory = (ctx) => {
     destroy() {
       destroyed = true;
       stopCapture();
+      closePicker?.();
       unsubscribe();
       el.remove();
     },

@@ -107,7 +107,7 @@ export const removeFriend = (name: string): Promise<void> => request<void>("POST
 
 export type Visibility = "public" | "unlisted" | "private";
 export type MapStatus = "pending" | "approved" | "rejected";
-export type LibrarySort = "new" | "top" | "plays";
+export type LibrarySort = "new" | "hot" | "top" | "plays" | "picks";
 
 export interface LibraryMap {
   id: number;
@@ -118,6 +118,9 @@ export interface LibraryMap {
   created: string;
   visibility: Visibility;
   status: MapStatus;
+  description: string;
+  /** Staff picks are listed first under "Staff picks". */
+  pick: boolean;
   my_vote?: number | null;
   favourite?: boolean;
 }
@@ -148,13 +151,27 @@ export const listMine = (): Promise<LibraryMap[]> => request<LibraryMap[]>("GET"
 
 export const listFavourites = (): Promise<LibraryMap[]> => request<LibraryMap[]>("GET", "/api/library/favourites");
 
+/** One of this week's top map makers: votes and plays on their maps. */
+export interface MakerScore {
+  name: string;
+  score: number;
+}
+
+export const listMakers = (): Promise<MakerScore[]> => request<MakerScore[]>("GET", "/api/library/makers");
+
 export const getMap = (id: number): Promise<LibraryDetail> => request<LibraryDetail>("GET", `/api/library/${id}`);
 
-export const uploadMap = (body: { name: string; code: string; visibility: Visibility }): Promise<void> =>
-  request<void>("POST", "/api/library", body);
+export const uploadMap = (body: {
+  name: string;
+  description: string;
+  code: string;
+  visibility: Visibility;
+}): Promise<void> => request<void>("POST", "/api/library", body);
 
-export const updateMap = (id: number, patch: { name?: string; visibility?: Visibility }): Promise<void> =>
-  request<void>("PATCH", `/api/library/${id}`, patch);
+export const updateMap = (
+  id: number,
+  patch: { name?: string; description?: string; visibility?: Visibility; code?: string },
+): Promise<void> => request<void>("PATCH", `/api/library/${id}`, patch);
 
 export const deleteMap = (id: number): Promise<void> => request<void>("DELETE", `/api/library/${id}`);
 

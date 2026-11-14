@@ -20,3 +20,16 @@ export function wsUrl(): string {
   const scheme = location.protocol === "https:" ? "wss:" : "ws:";
   return `${scheme}//${location.host}/ws`;
 }
+
+/** GET /api/stats: connections, rooms and quick-play players, for the lobby. */
+export interface ServerStats {
+  online: number;
+  rooms: number;
+  quick: { ffa: number; teams: number; lives: number };
+}
+
+export async function fetchStats(signal?: AbortSignal): Promise<ServerStats> {
+  const res = await fetch("/api/stats", { signal, headers: { accept: "application/json" } });
+  if (!res.ok) throw new Error(`/api/stats: HTTP ${res.status}`);
+  return (await res.json()) as ServerStats;
+}

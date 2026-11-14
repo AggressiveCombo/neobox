@@ -7,6 +7,7 @@ import type { AppCtx, ScreenFactory } from "../../ctx";
 import { MAX_NAME_LEN, NAME_RE } from "../../protocol";
 import { type Account, type AppState } from "../../state";
 import { h } from "../dom";
+import { guestXp, levelOf, xpForLevel } from "../../levels";
 
 const NAME_HINT = "Names are 1 to 15 letters, numbers, spaces or _.";
 
@@ -16,6 +17,25 @@ function field(label: string, input: HTMLInputElement): HTMLElement {
 
 function passwordInput(label: string, autocomplete: string): HTMLInputElement {
   return h("input", { type: "password", autocomplete, "aria-label": label, placeholder: label, spellcheck: "false" });
+}
+
+/** Level and progress through it, shown on the account card. */
+function levelBar(xp: number): HTMLElement {
+  const level = levelOf(xp);
+  const from = xpForLevel(level);
+  const pct = Math.min(100, ((xp - from) / (xpForLevel(level + 1) - from)) * 100);
+  const fill = h("span", { class: "account-level-fill" });
+  fill.style.width = `${pct}%`;
+  return h(
+    "div",
+    { class: "account-level" },
+    h("p", { class: "account-level-head" }, h("strong", null, `Level ${level}`), ` · ${xp} XP`),
+    h(
+      "div",
+      { class: "account-level-bar", role: "progressbar", "aria-valuemin": "0", "aria-valuemax": "100", "aria-valuenow": String(Math.round(pct)) },
+      fill,
+    ),
+  );
 }
 
 /** A notice with a button to the account screen, for screens that need a signed-in player. */
@@ -97,6 +117,7 @@ export const accountScreen: ScreenFactory = (ctx) => {
     return h(
       "div",
       { class: "social-section" },
+      levelBar(guestXp()),
       h("p", { class: "credit" }, "Sign in to keep your settings on any device, add friends and publish maps."),
       h(
         "form",
@@ -155,6 +176,7 @@ export const accountScreen: ScreenFactory = (ctx) => {
       "div",
       { class: "social-section" },
       h("p", null, "Signed in as ", h("strong", null, account.name), "."),
+      levelBar(account.xp),
       h(
         "form",
         { class: "social-form", onsubmit: changeSubmit },

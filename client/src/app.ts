@@ -27,6 +27,13 @@ import { accountScreen } from "./ui/screens/account";
 import { friendsScreen } from "./ui/screens/friends";
 import { libraryScreen } from "./ui/screens/library";
 import { editorScreen } from "./ui/screens/editor";
+import { quickScreen } from "./ui/screens/quick";
+import { trainingScreen } from "./ui/screens/training";
+import { mountJukebox } from "./ui/jukebox";
+import { showPostGame } from "./ui/postgame";
+import { prefs } from "./prefs";
+import { music } from "./music";
+import type { XpAward } from "./protocol";
 import { h } from "./ui/dom";
 import { showToast } from "./ui/toast";
 
@@ -34,15 +41,23 @@ const SCREEN_FACTORIES: Record<Exclude<Screen, "match">, ScreenFactory> = {
   menu: menuScreen,
   about: aboutScreen,
   browse: browserScreen,
+  quick: quickScreen,
   room: roomScreen,
   replay: replayScreen,
   settings: settingsScreen,
   practice: practiceScreen,
+  training: trainingScreen,
   account: accountScreen,
   friends: friendsScreen,
   library: libraryScreen,
   editor: editorScreen,
 };
+
+/** Screens without menu music. */
+const GAME_SCREENS: Partial<Record<Screen, true>> = { room: true, match: true, training: true, practice: true, replay: true, editor: true };
+
+/** The game view hides after this long without a drawn frame. */
+const VIEW_IDLE_MS = 250;
 
 /** Room codes: 6 characters from the server's alphabet (no I, O, 0 or 1). */
 const ROOM_CODE_RE = /^[A-HJ-NP-Z2-9]{6}$/;
@@ -110,6 +125,8 @@ export function start(): void {
   let joinAttempt: string | null = null;
   /** A resume join is in flight after a reconnect. */
   let resuming = false;
+  /** Callers of ctx.roomMap() waiting for the server's `map_code`. */
+  const mapWaiters: ((map: { code: string; name: string }) => void)[] = [];
   let reconnectTimer: number | null = null;
   let reconnectSince = 0;
   let reconnectAttempt = 0;
@@ -134,6 +151,22 @@ export function start(): void {
   });
   engineP.catch((err: unknown) => toast(`engine failed to load: ${errText(err)}`, "error"));
 
+  /** When the game view was last drawn; the view hides once nothing has drawn it for a moment. */
+  let lastPresent = 0;
+  let viewShown = true;
+  const overlayCanvas = byId("overlay");
+  const setViewShown = (shown: boolean): void => {
+    if (shown === viewShown) return;
+    viewShown = shown;
+    glHost.style.visibility = shown ? "" : "hidden";
+    overlayCanvas.style.visibility = shown ? "" : "hidden";
+  };
+  // Screens that stop drawing (a match ends, a menu clip is unmounted) must not leave
+  // their last frame behind the next screen.
+  window.setInterval(() => {
+    if (performance.now() - lastPresent > VIEW_IDLE_MS) setViewShown(false);
+  }, VIEW_IDLE_MS);
+
   /** Draw the engine's current frame buffer (built by a match, replay or local game). */
   const present: Present = (names, tickHz) => {
     const fb = engine?.framebuffer();
@@ -143,6 +176,8 @@ export function start(): void {
     const cam = computeCamera(scene, window.innerWidth, window.innerHeight, findLocal(scene));
     renderer?.draw(scene, cam);
     overlay.draw(scene, cam, names, tickHz);
+    lastPresent = performance.now();
+    setViewShown(true);
     for (const s of scene.sounds) sfx.play(s.kind, s.volume);
     return scene;
   };
@@ -174,6 +209,25 @@ export function start(): void {
     play,
     joinRoom,
     disconnect,
+    roomMap: () => {
+      const { promise, resolve, reject } = Promise.withResolvers<{ code: string; name: string }>();
+      if (store.state.room === null || net.status !== "open") {
+        reject(new Error("not in a room"));
+        return promise;
+      }
+      const waiter = (map: { code: string; name: string }): void => {
+        window.clearTimeout(timer);
+        resolve(map);
+      };
+      const timer = window.setTimeout(() => {
+        const i = mapWaiters.indexOf(waiter);
+        if (i >= 0) mapWaiters.splice(i, 1);
+        reject(new Error("the server did not send the map"));
+      }, 5000);
+      mapWaiters.push(waiter);
+      net.send({ t: "get_map" });
+      return promise;
+    },
     maps: () => {
       if (!mapsP) {
         mapsP = fetchBuiltinMaps().catch((err: unknown) => {
@@ -186,6 +240,14 @@ export function start(): void {
   };
 
   startAccountSync(ctx);
+  mountJukebox(ctx);
+
+  // The appearance colour follows the preference into the room.
+  prefs.subscribe((next, prev) => {
+    if (next.color !== prev.color && next.color !== null && net.status === "open" && store.state.serverName !== "") {
+      net.send({ t: "set_color", color: next.color });
+    }
+  });
 
   /** Mount a screen factory's output, replacing whatever is shown. */
   function mount(screen: Screen): void {
@@ -207,6 +269,34 @@ export function start(): void {
   store.subscribe((state, prev) => {
     if (state.screen !== mounted) mount(state.screen);
     current?.update(state, prev);
+  });
+
+  // Menu music plays on the menu screens and stops (fading) in rooms,
+  // matches, training, practice, replays and the editor, like the original.
+  const syncMusic = (screen: Screen): void => {
+    if (GAME_SCREENS[screen]) music.stop();
+    else music.start();
+  };
+  syncMusic(store.state.screen);
+  store.subscribe((state, prev) => {
+    if (state.screen !== prev.screen) syncMusic(state.screen);
+  });
+
+  // The post-game panel opens once per custom-match award, over the room
+  // (the award arrives just before the match ends). Quick-play awards are
+  // shown and cleared by the match HUD.
+  let shownAward: XpAward | null = null;
+  let closePostGame: (() => void) | null = null;
+  store.subscribe((state) => {
+    const award = state.xp;
+    if (award === null) {
+      closePostGame?.();
+      closePostGame = null;
+      return;
+    }
+    if (award.quick || award === shownAward || state.screen !== "room") return;
+    shownAward = award;
+    closePostGame = showPostGame(ctx, award, state.room?.map ?? null);
   });
 
   // Shown over every screen while the connection to a room is being restored.
@@ -306,6 +396,9 @@ export function start(): void {
       replayReady: false,
       intent: null,
       invite: null,
+      xp: null,
+      typing: {},
+      editorForRoom: false,
     });
     syncUrl(null);
   }
@@ -324,6 +417,9 @@ export function start(): void {
       tickHz: 0,
       showScores: false,
       replayReady: false,
+      xp: null,
+      typing: {},
+      editorForRoom: false,
       screen: "browse",
     });
     syncUrl(null);
@@ -355,7 +451,7 @@ export function start(): void {
       toast(`match failed: ${errText(err)}`, "error");
       return;
     }
-    store.set({ inMatch: true, tickHz: match.tick_hz, screen: "match", showScores: false, replayReady: false });
+    store.set({ inMatch: true, tickHz: match.tick_hz, screen: "match", showScores: false, replayReady: false, xp: null });
   }
 
   function sendJoin(room: string, password: string | null): void {
@@ -372,14 +468,14 @@ export function start(): void {
           net.send({ t: "join_room", room: roomCode, password: null, resume: resumeToken });
           return;
         }
-        const quick = store.state.intent === "quick";
-        store.set({ serverName: msg.server, screen: "browse", intent: null });
+        const queue = store.state.intent;
+        store.set({ serverName: msg.server, screen: queue === null ? "browse" : "quick", intent: null });
         net.send({ t: "list_rooms" });
         if (pendingJoin !== null) {
           sendJoin(pendingJoin, null);
           pendingJoin = null;
-        } else if (quick) {
-          net.send({ t: "quick_play" });
+        } else if (queue !== null) {
+          net.send({ t: "quick_play", queue });
         }
         return;
       }
@@ -410,11 +506,13 @@ export function start(): void {
         roomCode = msg.room.code;
         saveSeat();
         syncUrl(roomCode);
+        // a match, or the host's map editor opened from the room, stays on screen
+        const keep = store.state.inMatch || (store.state.editorForRoom && store.state.screen === "editor");
         store.set({
           room: msg.room,
           chat,
           invite: null,
-          screen: store.state.inMatch ? store.state.screen : "room",
+          screen: keep ? store.state.screen : "room",
         });
         return;
       }
@@ -430,6 +528,34 @@ export function start(): void {
       case "chat":
         if (msg.from !== null && msg.from !== store.state.myId) sfx.chatPop();
         store.set({ chat: appendChat(store.state.chat, { from: msg.from, name: msg.name, text: msg.text }) });
+        return;
+      case "suggest":
+        if (msg.from !== store.state.myId) sfx.chatPop();
+        store.set({
+          chat: appendChat(store.state.chat, {
+            from: msg.from,
+            name: msg.name,
+            text: msg.title,
+            suggest: { video: msg.video, title: msg.title },
+          }),
+        });
+        return;
+      case "typing":
+        store.set({ typing: { ...store.state.typing, [msg.player]: performance.now() } });
+        return;
+      case "xp": {
+        const { t: _t, ...award } = msg;
+        const account = store.state.account;
+        store.set({ xp: award, account: account !== null && award.xp !== null ? { ...account, xp: award.xp } : account });
+        return;
+      }
+      case "jukebox": {
+        const room = store.state.room;
+        if (room !== null) store.set({ room: { ...room, jukebox: msg.jukebox } });
+        return;
+      }
+      case "map_code":
+        for (const waiter of mapWaiters.splice(0)) waiter({ code: msg.code, name: msg.name });
         return;
       case "match_start":
         startMatch(msg.start, msg.you, null);
@@ -502,7 +628,7 @@ export function start(): void {
     if (status === "open") {
       const name = pendingName ?? (store.state.reconnecting ? store.state.name : null);
       pendingName = null;
-      if (name !== null) net.send({ t: "hello", version: PROTOCOL_VERSION, name });
+      if (name !== null) net.send({ t: "hello", version: PROTOCOL_VERSION, name, color: prefs.value.color });
       return;
     }
     if (status !== "closed") return;
@@ -520,7 +646,7 @@ export function start(): void {
     store.set({ name });
     window.localStorage.setItem(NAME_STORAGE_KEY, name);
     if (net.status === "open") {
-      net.send({ t: "hello", version: PROTOCOL_VERSION, name });
+      net.send({ t: "hello", version: PROTOCOL_VERSION, name, color: prefs.value.color });
       return;
     }
     pendingName = name;

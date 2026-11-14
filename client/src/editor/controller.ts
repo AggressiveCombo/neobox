@@ -2,7 +2,7 @@
 // The document lives in a History, so every finished gesture is one undo step.
 // Gestures show their work live (history.live) and settle once on release.
 
-import { type Pt, bbox, convexParts } from "./geom";
+import { type Pt, bbox, convexParts, pointInPoly } from "./geom";
 import { History } from "./history";
 import {
   KIND_ORDER,
@@ -17,15 +17,18 @@ import {
   getList,
   hitTest,
   isCircle,
+  mergeBodies,
   moveRefs,
   nextBodyId,
   polyShapes,
   refCenter,
   removeRefs,
   sameRef,
+  setShapeColor,
   setShapeOutline,
   shapeLocal,
   shapeOutline,
+  shapeWorld,
   toLocal,
   toWorld,
 } from "./model";
@@ -33,19 +36,20 @@ import { type MarkerKind, type Preview, type Scene, type View, clampScale, drawM
 import { type Obj, asObj, emptyDoc, list, num } from "./schema";
 import { loadDraft, saveDraft } from "./io";
 
-export type Tool = "select" | "rect" | "circle" | "poly" | "joint" | MarkerKind;
+export type Tool = "select" | "rect" | "circle" | "poly" | "joint" | "fill" | MarkerKind;
 
 /** Keys that switch tools (no modifier). */
 const TOOL_KEYS: Record<string, Tool> = {
-  v: "select",
-  r: "rect",
-  c: "circle",
-  p: "poly",
+  q: "select",
+  w: "rect",
+  e: "circle",
+  r: "poly",
   j: "joint",
-  s: "spawn",
-  t: "turret",
+  t: "spawn",
+  i: "turret",
   g: "grapple",
-  k: "cap",
+  y: "cap",
+  u: "fill",
 };
 
 const HIT_PX = 8;
@@ -77,6 +81,25 @@ function dist(a: Pt, b: Pt): number {
 
 function errText(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
+}
+
+/** Physics shapes a map costs: shapes of bodies that are not scenery (body 23) and are not scenery shapes (shape 14). */
+export function physicsShapeCount(doc: Obj): number {
+  let n = 0;
+  for (const b of getList(doc, "body")) {
+    if (b["23"]) continue;
+    for (const s of list(b, "s")) if (!asObj(s)?.["14"]) n++;
+  }
+  return n;
+}
+
+/** The lag verdict for a physics shape count, in the editor's wording. */
+export function lagVerdict(n: number): string {
+  if (n <= 20) return "no lag";
+  if (n <= 40) return "may be a little laggy";
+  if (n <= 60) return "probably laggy for some players";
+  if (n <= 80) return "laggy for most players";
+  return "probably unplayable";
 }
 
 /** Entities whose centre lies inside the box spanned by a and b. */
@@ -116,6 +139,21 @@ function vertexAt(doc: Obj, bodyIdx: number, w: Pt, tol: number): { si: number; 
   return best;
 }
 
+/** Index of the topmost shape of a body that `w` lies in (within `tol` for circles), if any. */
+function shapeAt(body: Obj, w: Pt, tol: number): number | null {
+  const xf = bodyXf(body);
+  const shapes = list(body, "s");
+  for (let si = shapes.length - 1; si >= 0; si--) {
+    const shape = asObj(shapes[si]);
+    if (!shape) continue;
+    if (isCircle(shape)) {
+      const c = toWorld(xf, { x: num(shape, "2", 0), y: num(shape, "3", 0) });
+      if (dist(c, w) <= num(shape, "9", 0) + tol) return si;
+    } else if (pointInPoly(w, shapeWorld(body, shape))) return si;
+  }
+  return null;
+}
+
 export class EditorController {
   private readonly history: History<Obj>;
   private view: View = { x: 0, y: 0, scale: 1 };
@@ -134,13 +172,16 @@ export class EditorController {
   private draftTimer = 0;
   private paintFrame = 0;
   private note = "";
+  private colour = bodyColor(0);
   private readonly cleanups: (() => void)[] = [];
 
   constructor(
     private readonly canvas: HTMLCanvasElement,
     private readonly onChange: () => void,
+    /** False for a room map: the local draft is neither read nor written. */
+    private readonly draft = true,
   ) {
-    this.history = new History<Obj>(loadDraft() ?? emptyDoc());
+    this.history = new History<Obj>((draft ? loadDraft() : null) ?? emptyDoc());
     this.listen(canvas, "pointerdown", (e) => this.onDown(e as PointerEvent));
     this.listen(canvas, "pointermove", (e) => this.onMove(e as PointerEvent));
     this.listen(canvas, "pointerup", (e) => this.onUp(e as PointerEvent));
@@ -171,6 +212,20 @@ export class EditorController {
     return this.activeTool;
   }
 
+  get fillColour(): number {
+    return this.colour;
+  }
+
+  /** Physics shapes the map costs (see physicsShapeCount). */
+  get physicsShapes(): number {
+    return physicsShapeCount(this.doc);
+  }
+
+  setFillColour(colour: number): void {
+    this.colour = colour;
+    this.notify();
+  }
+
   get canUndo(): boolean {
     return this.history.canUndo;
   }
@@ -196,6 +251,8 @@ export class EditorController {
           : "Tap to place the first point.";
       case "joint":
         return this.jointFrom ? "Tap the second anchor. Empty space is the ground." : "Tap the first anchor. Empty space is the ground.";
+      case "fill":
+        return "Click a shape to paint it with the current colour.";
       default:
         return "Tap to place.";
     }
@@ -266,6 +323,27 @@ export class EditorController {
     this.paint();
   }
 
+  /** Join the selected bodies into one body. One undo step; needs two or more bodies selected. */
+  mergeSelected(): void {
+    const idx = this.selection.filter((r) => r.kind === "body").map((r) => r.i);
+    if (idx.length < 2) {
+      this.note = "Select two or more bodies to merge.";
+      this.notify();
+      return;
+    }
+    this.cancelGesture();
+    this.create(() => {
+      const made = mergeBodies(this.doc, idx);
+      this.commitWith(made.doc, [{ kind: "body", i: made.index }]);
+    });
+  }
+
+  /** Show the whole map again (the same view as opening the editor). */
+  resetZoom(): void {
+    this.fit();
+    this.paint();
+  }
+
   /** Move the selection by whole map units. */
   nudge(dx: number, dy: number): void {
     if (this.selection.length === 0) return;
@@ -295,7 +373,7 @@ export class EditorController {
   /** Save the draft now and drop every listener. */
   destroy(): void {
     clearTimeout(this.draftTimer);
-    saveDraft(this.doc);
+    if (this.draft) saveDraft(this.doc);
     cancelAnimationFrame(this.paintFrame);
     this.cancelGesture();
     for (const off of this.cleanups) off();
@@ -358,6 +436,9 @@ export class EditorController {
       case "joint":
         this.jointDown(raw, s, tol);
         break;
+      case "fill":
+        this.fillDown(raw, tol);
+        break;
       default:
         this.placeMarker(this.activeTool, s);
     }
@@ -413,6 +494,17 @@ export class EditorController {
       const made = addJoint(this.doc, from, anchor, JOINT_PIVOT);
       this.commitWith(made.doc, [{ kind: "joint", i: made.index }]);
     });
+  }
+
+  /** Paint the shape under the pointer with the current colour. */
+  private fillDown(raw: Pt, tol: number): void {
+    const ref = hitTest(this.doc, raw, tol);
+    if (ref?.kind !== "body") return;
+    const body = getList(this.doc, "body")[ref.i];
+    const si = body ? shapeAt(body, raw, tol) : null;
+    if (si === null) return;
+    const colour = this.colour;
+    this.create(() => this.commit(setShapeColor(this.doc, ref.i, si, colour)));
   }
 
   private placeMarker(kind: MarkerKind, s: Pt): void {
@@ -733,6 +825,7 @@ export class EditorController {
   }
 
   private scheduleDraft(): void {
+    if (!this.draft) return;
     clearTimeout(this.draftTimer);
     this.draftTimer = window.setTimeout(() => {
       if (!saveDraft(this.doc)) this.note = "Could not save the draft: browser storage is full.";

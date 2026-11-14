@@ -1,0 +1,41 @@
+/* Room browser (ui/screens/browser.ts). Base room list and row styles live in style.css. */
+
+.room-jukebox {
+  flex: 0 0 9rem;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.room-thumb {
+  flex: none;
+  width: 40px;
+  height: 30px;
+  object-fit: cover;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--surface-2);
+}
+
+.room-track {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.room-friends {
+  padding-left: 14px;
+  color: var(--muted);
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.quick-badge {
+  border-color: rgb(64 220 128 / 0.4);
+  background: rgb(64 220 128 / 0.15);
+  color: #9ee8b8;
+}

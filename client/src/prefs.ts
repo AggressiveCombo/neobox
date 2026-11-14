@@ -49,6 +49,14 @@ export interface Prefs {
   touchLeftHanded: boolean;
   /** Show ping/FPS/rollback numbers (same as F3). */
   showStats: boolean;
+  /** Appearance colour (0xRRGGBB); null until the player picks one (the server assigns one meanwhile). */
+  color: number | null;
+  /** Main-menu music off. */
+  musicMuted: boolean;
+  /** Mask rude words in other players' chat. */
+  filterProfanity: boolean;
+  /** Jukebox volume (0..1), on top of the master volume. */
+  jukeboxVolume: number;
 }
 
 export const DEFAULT_PREFS: Prefs = {
@@ -61,6 +69,10 @@ export const DEFAULT_PREFS: Prefs = {
   touchScale: 1,
   touchLeftHanded: false,
   showStats: false,
+  color: null,
+  musicMuted: false,
+  filterProfanity: true,
+  jukeboxVolume: 0.5,
 };
 
 const STORAGE_KEY = "neobox.prefs";
@@ -91,6 +103,11 @@ export function sanitizePrefs(raw: unknown): Prefs {
     touchScale: clamp(o.touchScale, 0.7, 1.5, DEFAULT_PREFS.touchScale),
     touchLeftHanded: typeof o.touchLeftHanded === "boolean" ? o.touchLeftHanded : DEFAULT_PREFS.touchLeftHanded,
     showStats: typeof o.showStats === "boolean" ? o.showStats : DEFAULT_PREFS.showStats,
+    color:
+      typeof o.color === "number" && Number.isInteger(o.color) && o.color >= 0 && o.color <= 0xffffff ? o.color : DEFAULT_PREFS.color,
+    musicMuted: typeof o.musicMuted === "boolean" ? o.musicMuted : DEFAULT_PREFS.musicMuted,
+    filterProfanity: typeof o.filterProfanity === "boolean" ? o.filterProfanity : DEFAULT_PREFS.filterProfanity,
+    jukeboxVolume: clamp(o.jukeboxVolume, 0, 1, DEFAULT_PREFS.jukeboxVolume),
   };
 }
 

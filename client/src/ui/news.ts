@@ -1,0 +1,145 @@
+// Update news: release notes, one entry per page, shown in a modal over the menu.
+// The player has seen the news when the count of entries they last viewed matches
+// NEWS.length; a new entry at the top lights the menu's News button again.
+
+import { h } from "./dom";
+
+interface NewsEntry {
+  /** ISO date (YYYY-MM-DD). */
+  date: string;
+  items: string[];
+}
+
+/** Newest first. Player-facing wording only. */
+const NEWS: NewsEntry[] = [
+  {
+    date: "2026-11-14",
+    items: [
+      "Experience and levels: finish games to earn XP. The game-over panel shows your placement, the XP you gained and your progress to the next level.",
+      "Guests can reach level 1. Sign in to keep earning levels.",
+      "Quick play: pick Free for all, Team rounds or Lives. Quick rooms have no host and rotate through maps.",
+      "Menu music, with a mute switch on the menu and in Settings.",
+      "Jukebox: the room host can play YouTube videos for everyone, then pause, resume or stop them. Players can suggest a video by pasting its link in chat.",
+      "Training hall: a new practice screen from the menu.",
+      "The menu plays shared match clips in the background.",
+      "Appearance colour: pick your player colour in Settings or in a room.",
+      "Emoji: type a shortcode such as :smile: in chat to send an emoji.",
+      "Profanity filter, on by default. Turn it off in Settings.",
+      "Chat shows when someone is typing. Rooms show who is in the map editor.",
+      "Start countdowns can be aborted by the host. The room shows each map's author, votes and age.",
+      "The menu shows how many players are online and this week's top map makers.",
+      "Room list: each room shows its jukebox video, the friends in it and a badge for quick-play rooms.",
+    ],
+  },
+  {
+    date: "2026-11-14",
+    items: [
+      "Accounts: sign up, sign in, change your password or delete your account.",
+      "Friends: send and accept friend requests, and see which room your friends are in.",
+      "Map library: publish your maps, browse new, hot, top and most-played maps, vote, pick favourites and read map descriptions.",
+      "Replays: record finished matches and watch them back.",
+      "Practice: play offline against your own settings.",
+      "Host tools: lock the room, kick or ban players, move players between teams and hand over host.",
+      "Reconnect: if your connection drops during a game, you rejoin the same seat.",
+    ],
+  },
+  {
+    date: "2026-11-13",
+    items: [
+      "neobox launched: a free, open-source browser game inspired by Hitbox.io.",
+      "Deterministic physics: the same inputs give the same result on every device, so online matches stay in step.",
+      "Rollback netcode keeps online play smooth on slower connections.",
+      "Rendering uses WebGPU where it is available, with WebGL2 as the fallback.",
+      "Keyboard controls and touch controls for phones and tablets.",
+      "Built-in maps to play and learn on.",
+    ],
+  },
+];
+
+const SEEN_KEY = "neobox.newsSeen";
+
+function readSeen(): number {
+  try {
+    const n = Number(window.localStorage.getItem(SEEN_KEY));
+    return Number.isFinite(n) ? n : 0;
+  } catch {
+    return 0;
+  }
+}
+
+function writeSeen(count: number): void {
+  try {
+    window.localStorage.setItem(SEEN_KEY, String(count));
+  } catch {
+    // Storage blocked (private mode, quota): the news shows as unread next time.
+  }
+}
+
+/** True while entries exist that the player has not opened the news for. */
+export function hasUnreadNews(): boolean {
+  return readSeen() < NEWS.length;
+}
+
+/** Open the news modal (marks it read). Returns a function that closes it; calling it again does nothing. */
+export function openNews(): () => void {
+  writeSeen(NEWS.length);
+  let index = 0;
+  let open = true;
+
+  const body = h("div", { class: "news-body" });
+  const counter = h("span", { class: "news-count", "aria-live": "polite" });
+  const prev = h("button", { type: "button", onclick: () => show(index - 1) }, "Previous");
+  const next = h("button", { type: "button", class: "primary", onclick: () => show(index + 1) }, "Next");
+  const close = h("button", { type: "button", class: "news-close", "aria-label": "Close", onclick: () => closeNews() }, "×");
+
+  const dialog = h(
+    "div",
+    { class: "panel news-dialog", role: "dialog", "aria-modal": "true", "aria-labelledby": "news-title" },
+    h("header", { class: "news-head" }, h("h2", { id: "news-title" }, "Update news"), close),
+    body,
+    h("footer", { class: "news-nav" }, prev, counter, next),
+  );
+  const backdrop = h(
+    "div",
+    {
+      class: "news-backdrop",
+      onclick: (e: Event) => {
+        if (e.target === backdrop) closeNews();
+      },
+    },
+    dialog,
+  );
+
+  function show(i: number): void {
+    index = Math.min(NEWS.length - 1, Math.max(0, i));
+    const entry = NEWS[index];
+    body.replaceChildren(
+      h("time", { class: "news-date", datetime: entry.date }, entry.date),
+      h(
+        "ul",
+        { class: "news-list" },
+        entry.items.map((text) => h("li", null, text)),
+      ),
+    );
+    counter.textContent = `${index + 1} / ${NEWS.length}`;
+    prev.disabled = index === 0;
+    next.disabled = index === NEWS.length - 1;
+  }
+
+  function onKey(e: KeyboardEvent): void {
+    if (e.key === "Escape") closeNews();
+  }
+
+  function closeNews(): void {
+    if (!open) return;
+    open = false;
+    window.removeEventListener("keydown", onKey);
+    backdrop.remove();
+  }
+
+  show(0);
+  document.body.append(backdrop);
+  window.addEventListener("keydown", onKey);
+  close.focus();
+  return closeNews;
+}

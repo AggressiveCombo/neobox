@@ -1,0 +1,47 @@
+/* Main menu (ui/screens/menu.ts). Panel, button and link base styles come from style.css. */
+
+/* Shared match clips fill the viewport behind the panel. Clicks pass through to the game. */
+.menu-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+/* Keep the panel readable over the clips; the reserved bottom strip holds the clip credit. */
+.screen.menu {
+  position: relative;
+  z-index: 1;
+  margin-bottom: 3rem;
+}
+
+.screen.menu > .panel {
+  background: rgb(11 13 16 / 0.86);
+}
+
+.menu-online {
+  color: var(--muted);
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+}
+
+.menu-makers {
+  color: var(--muted);
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.menu-news {
+  font-weight: 600;
+}
+
+.menu-tools {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.menu-tools button {
+  width: 100%;
+}

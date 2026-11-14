@@ -39,6 +39,11 @@ export const TEAM_SPAWNS = [
 /** Body defaults (sim BodyDef::default). */
 export const BODY_DEFAULTS: Obj = {
   "4": 0,
+  "5": 0,
+  "6": 0,
+  "7": 0,
+  "16": false,
+  "64": 1,
   "8": 1,
   "9": 0.5,
   "10": 0.5,
@@ -117,7 +122,28 @@ export const JOINT_DEFAULTS: Obj = {
 
 export const SPAWN_DEFAULTS: Obj = { "3": 0, "4": 0, "5": true, "6": false, "7": false, "8": -2 };
 
-export const TURRET_DEFAULTS: Obj = { "5": 0, "6": 0, "7": 20, "8": 0, "9": 1, "10": 10, "11": 5, "24": 20 };
+export const TURRET_DEFAULTS: Obj = {
+  "5": 0,
+  "6": 0,
+  "7": 20,
+  "8": 0,
+  "9": 1,
+  "10": 10,
+  "11": 5,
+  "24": 20,
+  "12": 0,
+  "13": 0.1,
+  "14": 5,
+  "15": 0.5,
+  "16": 0,
+  "17": 300,
+  "18": 1,
+  "19": 0,
+  "20": 0,
+  "21": false,
+  "22": 0,
+  "23": 0,
+};
 
 export const GRAPPLE_DEFAULTS: Obj = { "3": 5, "4": -1 };
 

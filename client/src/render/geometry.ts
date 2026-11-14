@@ -5,7 +5,7 @@
 
 import type { PlayerRec, Scene } from "../frame";
 import { FLAG_BAT, FLAG_DASH, FLAG_FROZEN, FLAG_GHOST, FLAG_GROUNDED, FLAG_LOCAL, FLAG_PUSHING, FLAG_ROCKET_AIM } from "../frame";
-import { TEAM_BLUE, TEAM_RED, TEAM_SPECTATOR } from "../protocol";
+import { TEAM_BLUE, TEAM_FFA, TEAM_RED, TEAM_SPECTATOR } from "../protocol";
 import { prefs, type Palette } from "../prefs";
 
 /** Bytes per vertex. */
@@ -56,11 +56,23 @@ export function scaledSize(widthPx: number, heightPx: number): [number, number] 
   return [Math.max(1, Math.round(widthPx * s)), Math.max(1, Math.round(heightPx * s))];
 }
 
+/** Colours the room gave its players (id to 0xRRGGBB); used for FFA players on the default palette. */
+let playerColours = new Map<number, number>();
+
+/** Replace the room's player colours; players without one keep the palette colour. */
+export function setPlayerColors(colours: ReadonlyMap<number, number>): void {
+  playerColours = new Map(colours);
+}
+
 /** Team colour (red, blue) or the per-id FFA colour, from the palette pref, as 0xRRGGBB. */
 export function playerRgb(team: number, id: number): number {
   const c = PALETTES[prefs.value.palette];
   if (team === TEAM_RED) return c.red;
   if (team === TEAM_BLUE) return c.blue;
+  if (team === TEAM_FFA && prefs.value.palette === "default") {
+    const own = playerColours.get(id);
+    if (own !== undefined) return own;
+  }
   return c.ffa[id % c.ffa.length];
 }
 
