@@ -5,10 +5,11 @@
 //! recordings with [`ReplayPlayer`].
 
 use crate::protocol::{DecodeError, MatchStart, Reader, TickData, TickEvent, Writer};
-use crate::timeline::{decode_state, load_maps, to_events, InputLog, MatchError};
+use crate::timeline::{decode_state, encode_state, load_maps, to_events, InputLog, MatchError};
 use base64::Engine;
 use neobox_sim::{advance, match_start, GameSettings, Sim, State};
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 
 pub const REPLAY_VERSION: u32 = 1;
 /// Ticks between the states [`ReplayPlayer`] keeps for seeking backwards.
@@ -324,5 +325,92 @@ impl ReplayPlayer {
         while self.tick < tick {
             self.step();
         }
+    }
+}
+
+/// The last `max_ticks` ticks of `source` as a recording that starts from a
+/// state snapshot, so it plays back exactly as the match did over that span.
+pub fn clip(source: &Replay, max_ticks: u32) -> Result<Replay, ReplayError> {
+    let mut player = ReplayPlayer::new(source.clone())?;
+    let from = player.end_tick().saturating_sub(max_ticks).max(player.first_tick());
+    player.seek(from);
+    let snapshot = encode_state(player.states().1);
+    // the masks in effect just before `from`: the source's held masks, then
+    // every change made before it, in order
+    let mut held: BTreeMap<u32, u8> = source.held.iter().copied().collect();
+    let ticks = source.decode_ticks()?;
+    for t in ticks.iter().take_while(|t| t.tick < from) {
+        for &(p, m) in &t.changes {
+            held.insert(p, m);
+        }
+    }
+    let held: Vec<(u32, u8)> = held.into_iter().filter(|e| e.1 != 0).collect();
+    let mut recorder = ReplayRecorder::new(source.start.clone(), Some((from, snapshot, held)));
+    recorder.push(&ticks);
+    Ok(recorder.finish(source.names.clone()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::protocol::InputFrame;
+    use crate::timeline::{ServerMatch, checksum};
+    use neobox_sim::MapData;
+
+    fn start() -> MatchStart {
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../maps/01-proving-grounds.json");
+        let json: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+        let code = MapData::from_json(&json["map"]).unwrap().to_code();
+        MatchStart {
+            seed: 9,
+            start_tick: 0,
+            tick_hz: 30.0,
+            players: vec![(0, 1.0), (1, 1.0)],
+            settings: GameSettings::default(),
+            maps: vec![code],
+            intro: false,
+            rotation: false,
+        }
+    }
+
+    #[test]
+    fn clip_plays_back_like_the_source_match() {
+        let start = start();
+        let mut server = ServerMatch::new(start.clone()).unwrap();
+        let mut recorder = ReplayRecorder::new(start, None);
+        let mut hashes = vec![checksum(&server.state)];
+        let mut rng = 0x9e37_79b9_7f4a_7c15u64;
+        for _ in 0..600 {
+            for p in 0..2u32 {
+                rng ^= rng << 13;
+                rng ^= rng >> 7;
+                rng ^= rng << 17;
+                if rng % 5 == 0 {
+                    let frame = InputFrame { ack: 0, now: server.tick, changes: vec![(server.input_ack(p) + 1, server.tick, (rng >> 8) as u8)] };
+                    server.submit(p, &frame);
+                }
+            }
+            recorder.push(&[server.step()]);
+            hashes.push(checksum(&server.state));
+        }
+        let source = Replay::from_json(recorder.finish(vec![(0, "a".to_string())]).to_json().as_bytes()).unwrap();
+
+        // the last 150 ticks: they start from a snapshot with the held masks
+        let c = Replay::from_json(clip(&source, 150).unwrap().to_json().as_bytes()).unwrap();
+        let mut player = ReplayPlayer::new(c).unwrap();
+        assert_eq!((player.first_tick(), player.end_tick()), (450, 600));
+        assert_eq!(checksum(player.states().1), hashes[450]);
+        while player.step() {
+            assert_eq!(checksum(player.states().1), hashes[player.tick() as usize], "tick {}", player.tick());
+        }
+        player.seek(455);
+        assert_eq!(checksum(player.states().1), hashes[455]);
+
+        // longer than the recording: the whole match
+        let c = clip(&source, 10_000).unwrap();
+        let mut player = ReplayPlayer::new(c).unwrap();
+        assert_eq!((player.first_tick(), player.end_tick()), (0, 600));
+        player.seek(600);
+        assert_eq!(checksum(player.states().1), hashes[600]);
     }
 }

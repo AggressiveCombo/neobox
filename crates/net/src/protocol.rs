@@ -34,7 +34,14 @@ pub fn valid_name(name: &str) -> bool {
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[serde(tag = "t", rename_all = "snake_case")]
 pub enum ClientMsg {
-    Hello { version: u16, name: String },
+    /// `color`: the player's appearance colour (0xRRGGBB); absent: the
+    /// server picks one.
+    Hello {
+        version: u16,
+        name: String,
+        #[serde(default)]
+        color: Option<u32>,
+    },
     ListRooms,
     CreateRoom { name: String, password: Option<String>, max_players: u8, public: bool },
     /// Join a room by code. `resume` is the token from an earlier `joined`:
@@ -45,22 +52,31 @@ pub enum ClientMsg {
         #[serde(default)]
         resume: Option<String>,
     },
-    /// Join the fullest public, open, password-less room with space, or
-    /// create one.
-    QuickPlay,
+    /// Join a quick-play room of `queue` (see [`QUICK_QUEUES`]; absent:
+    /// the first), creating one when all are full.
+    QuickPlay {
+        #[serde(default)]
+        queue: Option<String>,
+    },
     LeaveRoom,
     /// Chat line. Lines starting with `/` are commands (`/help` lists them).
     Chat { text: String },
     SetTeam { team: u8 },
     /// Host: load a map (Hitbox map code).
     SetMap { code: String, name: Option<String> },
+    /// Host: load map `id` of the map library.
+    SetLibraryMap { id: i64 },
     /// Host: `/set <key> <value>`.
     SetSetting { key: String, value: String },
     /// Host: reset settings to defaults (keeps the game mode).
     ResetSettings,
     /// Host: game mode.
     SetMode { mode: i32 },
+    /// Host: start the match (after a one-second countdown when two or
+    /// more players play).
     Start,
+    /// Host: cancel the start countdown.
+    AbortStart,
     /// Host: stop the running match (back to the lobby).
     EndMatch,
     /// Host: kick or ban a player.
@@ -73,10 +89,60 @@ pub enum ClientMsg {
     MovePlayer { player: u32, team: u8 },
     /// Host: lock teams (players can no longer change their own team).
     SetLock { locked: bool },
+    /// Appearance colour (0xRRGGBB).
+    SetColor { color: u32 },
+    /// The player is typing a chat line (sent at most once a second).
+    Typing,
+    /// The player opened (`true`) or closed the map editor from the room.
+    Editing { open: bool },
+    /// Host: jukebox control. `action`: "play" (with `video`), "pause",
+    /// "resume" or "stop".
+    Jukebox {
+        action: String,
+        #[serde(default)]
+        video: Option<String>,
+    },
+    /// Ask for the room's current map code (answered with `map_code`), for
+    /// the map editor.
+    GetMap,
     /// Ask for a full state snapshot (desync recovery).
     Resync,
     /// WebRTC offer (SDP) for the unreliable game data channel.
     RtcOffer { sdp: String },
+}
+
+/// Quick-play queues: (id, game mode). Quick-play rooms have no host, play
+/// the built-in maps in rotation and never return to the lobby.
+pub const QUICK_QUEUES: &[(&str, i32)] = &[("ffa", 0), ("teams", 3), ("lives", 1)];
+
+/// A map of the map library, as rooms show it.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct MapMeta {
+    pub id: i64,
+    pub name: String,
+    pub author: String,
+    pub description: String,
+    /// Unix seconds.
+    pub created: i64,
+    pub up: i64,
+    pub down: i64,
+}
+
+/// The room's jukebox (a YouTube video).
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct JukeboxState {
+    pub video: String,
+    pub title: String,
+    pub playing: bool,
+    /// Seconds into the video when this was sent.
+    pub position: f64,
+}
+
+/// What the room list shows of a room's jukebox.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct JukeboxInfo {
+    pub video: String,
+    pub title: String,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
@@ -90,6 +156,11 @@ pub struct RoomInfo {
     pub map: String,
     /// Game mode (see `GameSettings::game_mode`).
     pub mode: i32,
+    /// Queue of a quick-play room.
+    pub quick: Option<String>,
+    pub jukebox: Option<JukeboxInfo>,
+    /// Names of the viewer's friends in the room.
+    pub friends: Vec<String>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
@@ -104,6 +175,12 @@ pub struct PlayerInfo {
     /// False while the player's connection is lost and its slot is held for
     /// a reconnect.
     pub connected: bool,
+    /// Account level (0 for guests).
+    pub level: u32,
+    /// Appearance colour (0xRRGGBB).
+    pub color: u32,
+    /// In the map editor.
+    pub editing: bool,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
@@ -121,6 +198,29 @@ pub struct RoomState {
     pub locked: bool,
     /// Names of banned players (the host can lift bans).
     pub bans: Vec<String>,
+    /// Queue of a quick-play room (no host; maps rotate).
+    pub quick: Option<String>,
+    /// The start countdown is running.
+    pub starting: bool,
+    /// The current map, when it comes from the map library.
+    pub map: Option<MapMeta>,
+    pub jukebox: Option<JukeboxState>,
+}
+
+/// Experience awarded to one player at the end of a game.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct XpAward {
+    /// Placement (1 = first; team modes: 1 won, 2 lost; -1 none).
+    pub placement: i32,
+    pub gained: u32,
+    /// Account total after the award (`None` for guests).
+    pub xp: Option<u64>,
+    /// Account level after the award (0 for guests).
+    pub level: u32,
+    /// "short" / "long": the hourly / daily limit cut the award.
+    pub limit: Option<String>,
+    /// Awarded by a quick-play rotation game.
+    pub quick: bool,
 }
 
 /// Everything a client needs to reproduce a match deterministically.
@@ -163,6 +263,25 @@ pub enum ServerMsg {
     TickRate { tick_hz: f64 },
     /// WebRTC answer (SDP) to `rtc_offer`.
     RtcAnswer { sdp: String },
+    /// `player` is typing a chat line.
+    Typing { player: u32 },
+    Xp(XpAward),
+    /// A player pasted a YouTube link: the host can play it.
+    Suggest { from: u32, name: String, video: String, title: String },
+    Jukebox { jukebox: Option<JukeboxState> },
+    /// Answer to `get_map`.
+    MapCode { code: String, name: String },
+}
+
+/// Level of an experience total (the original's formula).
+pub fn level_of(xp: u64) -> u32 {
+    ((xp as f64).sqrt() / 10.0).floor() as u32 + 1
+}
+
+/// Experience at which `level` starts.
+pub fn xp_for_level(level: u32) -> u64 {
+    let l = level.saturating_sub(1) as u64 * 10;
+    l * l
 }
 
 // ------------------------------------------------------------------ binary codec

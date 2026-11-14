@@ -65,7 +65,7 @@ async fn play(
     let (ws, _) = tokio_tungstenite::connect_async(url).await.map_err(|e| format!("connect: {e}"))?;
     let (mut tx, mut rx) = ws.split();
     let send_json = |m: &ClientMsg| Message::Text(serde_json::to_string(m).unwrap().into());
-    tx.send(send_json(&ClientMsg::Hello { version: PROTOCOL_VERSION, name: name.to_string() })).await.map_err(|e| e.to_string())?;
+    tx.send(send_json(&ClientMsg::Hello { version: PROTOCOL_VERSION, name: name.to_string(), color: None })).await.map_err(|e| e.to_string())?;
     let host = index == 0;
     if host {
         tx.send(send_json(&ClientMsg::CreateRoom { name: "bots".into(), password: None, max_players: players as u8, public: false }))
