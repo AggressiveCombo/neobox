@@ -1,11 +1,14 @@
 //! neobox browser module (see docs/CLIENT-API.md): owns the client match
 //! session (prediction + rollback), the tick clock, input latching and the
-//! per-frame render buffer.
+//! per-frame render buffer. Besides online matches it records replays of
+//! them, plays replays back, and runs offline local games (practice and
+//! editor test-play) on the same simulation.
 
 pub mod frame;
 
 use frame::{FrameBuilder, Meta, SoundOut};
-use neobox_net::{ClientFrame, ClientSession, MatchStart, ServerFrame, TickClock};
+use neobox_net::{ClientFrame, ClientSession, InputFrame, MatchStart, Replay, ReplayPlayer, ReplayRecorder, ServerFrame, ServerMatch, TickClock};
+use neobox_sim::start::Outcome;
 use neobox_sim::{GameSettings, MapData, State};
 use std::cell::RefCell;
 
@@ -22,7 +25,11 @@ struct App {
     err: String,
     last_now: f64,
     last_mask: u8,
+    /// keys pressed during the tick in progress (a tap shorter than a tick
+    /// still counts for that tick)
     latch: u8,
+    /// the tick in progress: the one the local input currently applies to
+    input_tick: u32,
     last_sent: u32,
     sent_seq: u32,
     /// first input sequence number of the next session
@@ -33,6 +40,28 @@ struct App {
     rtt_jitter: f64,
     rollback_window: (f64, u64),
     rollback_rate: f32,
+    /// recording of the current (or last) online match
+    recorder: Option<ReplayRecorder>,
+    /// replay being watched
+    replay: Option<ReplayPlayer>,
+    replay_sound_tick: u32,
+    /// offline local game
+    local: Option<LocalGame>,
+}
+
+/// An offline game: the authoritative match runs right here, with the
+/// local player's input applied directly.
+struct LocalGame {
+    m: ServerMatch,
+    prev: State,
+    player: u32,
+    /// fraction of the next tick elapsed
+    acc: f64,
+    seq: u32,
+    /// keys pressed since the last simulated tick
+    latch: u8,
+    last_mask: u8,
+    applied: u8,
 }
 
 thread_local! {
@@ -118,6 +147,7 @@ fn begin(a: &mut App, mut session: ClientSession, now_ms: f64) {
     a.sent_seq = 0;
     a.last_now = now_ms;
     a.latch = 0;
+    a.input_tick = session.head();
     a.session = Some(session);
 }
 
@@ -136,8 +166,9 @@ pub unsafe extern "C" fn nb_match_start(json: u32, json_len: u32, local: i32, no
             Err(e) => return fail(a, e),
         };
         let local = (local >= 0).then_some(local as u32);
-        match ClientSession::new(start, local) {
+        match ClientSession::new(start.clone(), local) {
             Ok(s) => {
+                a.recorder = Some(ReplayRecorder::new(start, None));
                 begin(a, s, now_ms);
                 0
             }
@@ -147,19 +178,31 @@ pub unsafe extern "C" fn nb_match_start(json: u32, json_len: u32, local: i32, no
 }
 
 /// # Safety
-/// The pointer/length pairs must describe readable memory.
+/// The pointer/length pairs must describe readable memory. `held` is the
+/// snapshot message's `held` array as JSON (`[[player, mask], ...]`).
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn nb_match_snapshot(json: u32, json_len: u32, local: i32, tick: u32, snap: u32, snap_len: u32, now_ms: f64) -> i32 {
+pub unsafe extern "C" fn nb_match_snapshot(json: u32, json_len: u32, held: u32, held_len: u32, local: i32, tick: u32, snap: u32, snap_len: u32, now_ms: f64) -> i32 {
     let text = unsafe { bytes(json, json_len) };
+    let held = unsafe { bytes(held, held_len) };
     let snap = unsafe { bytes(snap, snap_len) };
     with(|a| {
         let start: MatchStart = match serde_json::from_slice(text) {
             Ok(s) => s,
             Err(e) => return fail(a, e),
         };
+        let held: Vec<(u32, u8)> = match serde_json::from_slice(held) {
+            Ok(h) => h,
+            Err(e) => return fail(a, e),
+        };
         let local = (local >= 0).then_some(local as u32);
-        match ClientSession::from_snapshot(start, local, tick, snap) {
+        match ClientSession::from_snapshot(start.clone(), local, tick, snap, &held) {
             Ok(s) => {
+                // a resync snapshot within the recorded match keeps the
+                // recording (confirmed ticks continue); otherwise it starts here
+                let keep = a.recorder.as_ref().is_some_and(|r| *r.start() == start && r.next_tick() >= tick);
+                if !keep {
+                    a.recorder = Some(ReplayRecorder::new(start, Some((tick, snap.to_vec(), held))));
+                }
                 begin(a, s, now_ms);
                 0
             }
@@ -189,6 +232,9 @@ pub unsafe extern "C" fn nb_server_frame(ptr: u32, len: u32) -> i32 {
             ServerFrame::Batch { ticks, input_ack, margin16 } => {
                 if let Some(s) = a.session.as_mut() {
                     s.on_ticks(&ticks);
+                    if let Some(r) = a.recorder.as_mut() {
+                        r.push(&ticks);
+                    }
                     s.input_ack(input_ack);
                     if let Some(c) = a.clock.as_mut() {
                         c.on_margin(margin16 as f64 / 16.0);
@@ -242,7 +288,7 @@ pub extern "C" fn nb_frame(now_ms: f64, mask: u32) -> u32 {
         let mask = mask as u8;
         let dt = ((now_ms - a.last_now) / 1000.0).max(0.0);
         a.last_now = now_ms;
-        a.latch |= mask & !a.last_mask;
+        let pressed = mask & !a.last_mask;
         a.last_mask = mask;
         let (Some(s), Some(clock)) = (a.session.as_mut(), a.clock.as_mut()) else {
             a.frame.words.clear();
@@ -250,22 +296,23 @@ pub extern "C" fn nb_frame(now_ms: f64, mask: u32) -> u32 {
         };
         let tick_f = clock.update(dt);
         let target = tick_f.floor().max(0.0) as u32;
-        let head = s.head();
-        if target > head {
-            // a key tapped and released between ticks still counts for one tick
-            let tapped = a.latch & !mask;
-            if tapped != 0 {
-                s.local_input(head, mask | a.latch);
-                s.local_input(head + 1, mask);
-            } else {
-                s.local_input(head, mask);
+        // The input applies to the tick in progress (`target`), whose result
+        // (state target+1) is predicted right away and is what the frame
+        // interpolates towards: a key press moves the player in the same
+        // display frame instead of one tick later. Rollback redoes that one
+        // tick when the input changes mid-tick.
+        if target > a.input_tick {
+            // the finished tick kept its taps; they end with it
+            if a.latch & !mask != 0 {
+                s.local_input(a.input_tick + 1, mask);
             }
             a.latch = 0;
-        } else {
-            s.local_input(head.max(target), mask | a.latch);
+            a.input_tick = target;
         }
+        a.latch |= pressed;
+        s.local_input(target, mask | a.latch);
         let rb_before = s.rollbacks;
-        s.advance_to(target);
+        s.advance_to(target + 1);
         // rollbacks per second (for the stats overlay)
         a.rollback_window.0 += dt;
         a.rollback_window.1 += s.rollbacks - rb_before;
@@ -282,8 +329,8 @@ pub extern "C" fn nb_frame(now_ms: f64, mask: u32) -> u32 {
             a.sound_tick = new_head;
         }
         let (prev, cur) = s.latest_pair();
-        // render one tick behind the clock: between head-1 and head
-        let alpha = (tick_f - new_head as f64).clamp(0.0, 1.0);
+        // between the last finished tick and the one in progress
+        let alpha = (tick_f - (new_head as f64 - 1.0)).clamp(0.0, 1.0);
         let meta = Meta {
             tick: new_head,
             local: s.local.map_or(-1, |l| l as i32),
@@ -291,12 +338,13 @@ pub extern "C" fn nb_frame(now_ms: f64, mask: u32) -> u32 {
             rollbacks_per_s: a.rollback_rate,
         };
         a.frame.build(prev, cur, alpha, &s.start.settings, meta, &a.sounds);
-        // send once per simulated tick (heartbeat + unacknowledged changes),
-        // and immediately when the input changed
+        // send once per tick (heartbeat + unacknowledged changes) and
+        // immediately when the input changed; the heartbeat names the tick in
+        // progress, the one new inputs are stamped with
         let newest = s.last_input_seq();
-        if new_head >= a.last_sent || newest != a.sent_seq {
-            a.out = ClientFrame::Input(s.input_frame(new_head, MAX_RESEND)).encode();
-            a.last_sent = a.last_sent.max(new_head + 1);
+        if target >= a.last_sent || newest != a.sent_seq {
+            a.out = ClientFrame::Input(s.input_frame(target, MAX_RESEND)).encode();
+            a.last_sent = a.last_sent.max(target + 1);
             a.sent_seq = newest;
             return a.out.len() as u32;
         }
@@ -340,4 +388,177 @@ pub unsafe extern "C" fn nb_map_encode(json: u32, len: u32) -> i32 {
             Err(e) => fail(a, e),
         }
     })
+}
+
+/// # Safety
+/// `code`/`len` must describe readable memory.
+///
+/// Hitbox map code → the map's compact JSON (what the editor edits). The
+/// text is at `nb_out_ptr()`, its length returned.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn nb_map_decode(code: u32, len: u32) -> i32 {
+    let text = unsafe { bytes(code, len) };
+    with(|a| {
+        let Ok(code) = std::str::from_utf8(text) else { return fail(a, "map code is not text") };
+        match MapData::from_code(code.trim()) {
+            Ok(m) => {
+                a.out = m.to_json().to_string().into_bytes();
+                a.out.len() as i32
+            }
+            Err(e) => fail(a, e),
+        }
+    })
+}
+
+// ------------------------------------------------------------------ replays
+
+/// # Safety
+/// `names`/`len` must describe readable memory.
+///
+/// The recording of the current or last online match as replay JSON at
+/// `nb_out_ptr()` (length returned; 0 when nothing was recorded). `names`:
+/// JSON `[[player id, name], ...]` stored for display.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn nb_replay_export(names: u32, len: u32) -> i32 {
+    let text = unsafe { bytes(names, len) };
+    with(|a| {
+        let names: Vec<(u32, String)> = match serde_json::from_slice(text) {
+            Ok(n) => n,
+            Err(e) => return fail(a, e),
+        };
+        match &a.recorder {
+            Some(r) if !r.is_empty() => {
+                a.out = r.finish(names).to_json().into_bytes();
+                a.out.len() as i32
+            }
+            _ => 0,
+        }
+    })
+}
+
+/// # Safety
+/// `json`/`len` must describe readable memory.
+///
+/// Load a replay (its JSON, already decompressed) for watching. Summary JSON
+/// `{"first","end","hz","names","players"}` at `nb_out_ptr()`, length returned.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn nb_replay_load(json: u32, len: u32) -> i32 {
+    let text = unsafe { bytes(json, len) };
+    with(|a| {
+        let replay = match Replay::from_json(text) {
+            Ok(r) => r,
+            Err(e) => return fail(a, e),
+        };
+        let player = match ReplayPlayer::new(replay) {
+            Ok(p) => p,
+            Err(e) => return fail(a, e),
+        };
+        let info = serde_json::json!({
+            "first": player.first_tick(),
+            "end": player.end_tick(),
+            "hz": player.replay.start.tick_hz,
+            "names": player.replay.names,
+            "players": player.replay.start.players,
+        });
+        a.out = info.to_string().into_bytes();
+        a.replay_sound_tick = player.tick();
+        a.replay = Some(player);
+        a.out.len() as i32
+    })
+}
+
+/// Build the frame of the loaded replay at fractional tick `tick_f`,
+/// following player `follow` (-1: none). Seeking anywhere is allowed;
+/// sounds play only when playback moves forward one tick at a time.
+#[unsafe(no_mangle)]
+pub extern "C" fn nb_replay_frame(tick_f: f64, follow: i32) -> i32 {
+    with(|a| {
+        let Some(p) = a.replay.as_mut() else { return fail(a, "no replay loaded") };
+        let first = p.first_tick() as f64;
+        let last = p.end_tick() as f64;
+        let t = tick_f.clamp(first, last);
+        let base = t.floor() as u32;
+        // show the step from `base` to `base + 1` (the last state at the end)
+        p.seek((base + 1).min(p.end_tick()));
+        let alpha = if p.tick() == base + 1 { t - base as f64 } else { 1.0 };
+        a.sounds.clear();
+        if p.tick() == a.replay_sound_tick + 1 {
+            let (prev, cur) = p.states();
+            frame::new_sounds(prev, cur, &mut a.sounds);
+        }
+        a.replay_sound_tick = p.tick();
+        let (prev, cur) = p.states();
+        let meta = Meta { tick: p.tick(), local: follow, ..Meta::default() };
+        a.frame.build(prev, cur, alpha, p.settings(), meta, &a.sounds);
+        0
+    })
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn nb_replay_close() {
+    with(|a| a.replay = None)
+}
+
+// ------------------------------------------------------------------ local games
+
+/// # Safety
+/// `json`/`len` must describe readable memory.
+///
+/// Start an offline game from a `MatchStart` (JSON); `player` is the local
+/// player's id (one of `start.players`).
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn nb_local_start(json: u32, len: u32, player: u32) -> i32 {
+    let text = unsafe { bytes(json, len) };
+    with(|a| {
+        let start: MatchStart = match serde_json::from_slice(text) {
+            Ok(s) => s,
+            Err(e) => return fail(a, e),
+        };
+        match ServerMatch::new(start) {
+            Ok(m) => {
+                a.local = Some(LocalGame { prev: m.state.clone(), m, player, acc: 0.0, seq: 0, latch: 0, last_mask: 0, applied: 0 });
+                0
+            }
+            Err(e) => fail(a, e),
+        }
+    })
+}
+
+/// Advance the offline game by the time since the previous call (`dt_ms`,
+/// capped at 5 ticks), apply the local input mask, build the frame.
+/// Returns 0 while the game runs, 1 once it is over.
+#[unsafe(no_mangle)]
+pub extern "C" fn nb_local_frame(dt_ms: f64, mask: u32) -> i32 {
+    with(|a| {
+        let Some(g) = a.local.as_mut() else { return fail(a, "no local game") };
+        let mask = mask as u8;
+        g.latch |= mask & !g.last_mask;
+        g.last_mask = mask;
+        let hz = g.m.start.tick_hz;
+        g.acc = (g.acc + dt_ms.max(0.0) / 1000.0 * hz).min(5.0);
+        a.sounds.clear();
+        while g.acc >= 1.0 {
+            g.acc -= 1.0;
+            // a key tapped between two ticks still counts for one tick
+            let effective = mask | g.latch;
+            g.latch = 0;
+            if effective != g.applied {
+                g.seq += 1;
+                let tick = g.m.tick;
+                g.m.submit(g.player, &InputFrame { ack: 0, now: tick, changes: vec![(g.seq, tick, effective)] });
+                g.applied = effective;
+            }
+            g.prev = g.m.state.clone();
+            g.m.step();
+            frame::new_sounds(&g.prev, &g.m.state, &mut a.sounds);
+        }
+        let meta = Meta { tick: g.m.tick, local: g.player as i32, ..Meta::default() };
+        a.frame.build(&g.prev, &g.m.state, g.acc, &g.m.start.settings, meta, &a.sounds);
+        (g.m.last_outcome == Outcome::MatchOver) as i32
+    })
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn nb_local_end() {
+    with(|a| a.local = None)
 }

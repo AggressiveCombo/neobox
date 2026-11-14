@@ -6,11 +6,14 @@ use neobox_sim::state::{Body, Effect, Player, Projectile, State};
 use neobox_sim::GameSettings;
 use std::collections::HashMap;
 
-pub const LAYOUT_VERSION: u32 = 1;
+pub const LAYOUT_VERSION: u32 = 2;
 pub const HEADER_WORDS: usize = 32;
-pub const PLAYER_WORDS: usize = 12;
+pub const PLAYER_WORDS: usize = 11;
 pub const SOUND_WORDS: usize = 5;
-pub const SCORE_WORDS: usize = 8;
+pub const SCORE_WORDS: usize = 13;
+/// Client-only sound cues (the sim emits kinds 1-4 and 6-19): push stamina ran out, game over.
+pub const SOUND_PUSH_CLICK: u32 = 5;
+pub const SOUND_FANFARE: u32 = 20;
 
 /// Team colours (0xRRGGBB).
 pub const RED: u32 = 0xd44234;
@@ -63,6 +66,8 @@ pub struct FrameBuilder {
     /// triangulated local geometry per shape list (keyed by body definition)
     cache: HashMap<usize, Vec<Mesh>>,
     tmp: Vec<[f32; 2]>,
+    /// Kill events of the built frame: (killer, victim) pairs.
+    kills: Vec<u32>,
 }
 
 /// Local-space triangles of one shape and its colour.
@@ -377,6 +382,14 @@ impl FrameBuilder {
             self.effect(e);
         }
 
+        // kills since prev as (killer, victim) pairs; the client shows each tick's kills once
+        self.kills.clear();
+        for (id, r) in cur.round.players.iter() {
+            let before = prev.round.players.get(id).map_or(0.0, |pr| pr.kills);
+            if r.kills > before && r.last_victim >= 0.0 {
+                self.kills.extend([id, r.last_victim as u32]);
+            }
+        }
         // ---- assemble
         let w = &mut self.words;
         w.clear();
@@ -420,6 +433,9 @@ impl FrameBuilder {
             if p.teleported {
                 flags |= 128;
             }
+            if p.grounded {
+                flags |= 256;
+            }
             let aim = if p.rocket_frame >= 0.0 { p.rocket_aim } else if p.egg_frame > 0.0 { p.egg_aim } else { p.bat_aim };
             w.extend([
                 id,
@@ -433,7 +449,6 @@ impl FrameBuilder {
                 f(gs.player_width),
                 f(p.health),
                 f(aim),
-                0,
             ]);
         }
         w[5] = sounds.len() as u32;
@@ -447,8 +462,27 @@ impl FrameBuilder {
         // identical gameplay); they are shown clamped at 0 (DEVIATIONS.md S5)
         let shown = |v: f64| f(v.max(0.0));
         for (id, r) in cur.round.players.iter() {
-            w.extend([id, r.team.max(0.0) as u32, shown(r.kills), shown(r.wins), shown(r.lives), r.alive as u32, f(r.respawn), f(r.eliminated)]);
+            let killed_by = if r.killed_by >= 0.0 { r.killed_by as u32 } else { u32::MAX };
+            let last_victim = if r.last_victim >= 0.0 { r.last_victim as u32 } else { u32::MAX };
+            w.extend([
+                id,
+                r.team.max(0.0) as u32,
+                shown(r.kills),
+                shown(r.wins),
+                shown(r.lives),
+                r.alive as u32,
+                f(r.respawn),
+                f(r.eliminated),
+                killed_by,
+                last_victim,
+                f(r.kill_timer),
+                f(r.death_timer),
+                f(r.suicide_timer),
+            ]);
         }
+        w[30] = (self.kills.len() / 2) as u32;
+        w[31] = w.len() as u32;
+        w.extend_from_slice(&self.kills);
         let st = &cur.settings;
         w[9] = f(st.screen_width);
         w[10] = f(st.width);
@@ -491,11 +525,22 @@ fn interp_player(prev: Option<&Player>, p: &Player, t: f64) -> (f64, f64) {
     }
 }
 
-/// New sounds of `cur` relative to `prev` (sounds append after survivors).
+/// New sounds of `cur` relative to `prev` (sounds append after survivors), then the client-only
+/// cues the sim does not emit: a push click when a push runs out of stamina, and the fanfare
+/// when the game ends.
 pub fn new_sounds(prev: &State, cur: &State, out: &mut Vec<SoundOut>) {
     let survivors = prev.sounds.iter().filter(|s| s.ttl - 1.0 > 0.0).count();
     for s in cur.sounds.iter().skip(survivors) {
         out.push(SoundOut { kind: s.kind as u32, x: s.x as f32, y: s.y as f32, volume: s.volume as f32, player: s.player as i32 });
+    }
+    for (id, p) in cur.players.iter() {
+        let Some(pp) = prev.players.get(id) else { continue };
+        if pp.stamina > 0.0 && p.stamina <= 0.0 && p.push_frames > 0.0 {
+            out.push(SoundOut { kind: SOUND_PUSH_CLICK, x: p.x as f32, y: p.y as f32, volume: 0.6, player: id as i32 });
+        }
+    }
+    if prev.round.game_over < 0.0 && cur.round.game_over >= 0.0 {
+        out.push(SoundOut { kind: SOUND_FANFARE, x: 0.0, y: 0.0, volume: 1.0, player: -1 });
     }
 }
 
