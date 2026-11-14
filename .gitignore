@@ -3,4 +3,4 @@
 /client/node_modules
 /client/dist
 /client/public/neobox.wasm
-/client/dev/shots
+/client/e2e/shots
