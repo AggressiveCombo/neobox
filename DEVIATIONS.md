@@ -39,7 +39,7 @@ Entries marked **FLAG** are judgement calls that may need revisiting.
 | # | Original | neobox | Reason |
 | --- | --- | --- | --- |
 | M1 | Map codes are read and written by the original's encoder. | Map codes are read losslessly: every field the original reads decodes to the same value, and fields it ignores are kept verbatim so a neobox round trip never loses data. Future neobox extensions may only add new keys. | "Never break existing Hitbox maps." |
-| M2 | Online map browser, saving, publishing, voting, editor. | Not implemented: maps are imported by pasting a map code or loading a file in the lobby; built-in maps ship with the server. | Out of scope (feature list limited to Hitbox.io gameplay); avoids the original's moderation/privacy problems. |
+| M2 | Online map browser with saving, publishing and voting, and a map editor. | A map library: signed-in players upload maps as public, unlisted or private; everyone can search and sort (new, top, most played), vote and star maps; room hosts pick library maps from the room. Public uploads appear only after an admin approves them in `/admin`. A map editor in the client builds maps and exports ordinary Hitbox map codes. | Approval keeps abusive or broken maps out of the public list without blocking private sharing. Map codes stay the exchange format, so maps move freely between the library, the editor, pasted codes and files. |
 | M3 | No size limit. | Map codes up to 2 MB (the largest public code is 0.7 MB) and up to 64 MB of map data after decompression; at most 65 536 shapes and 1 048 576 polygon vertices per map. Of 378 public maps sampled from hitbox.io, 376 load. The 2 rejected maps stack 600 000+ shapes on one spot (the largest map that loads has about 25 000 shapes). The host gets a "map has N shapes; the limit is 65536" error. **FLAG**: the two rejected maps cannot be played in neobox. Judging by their size they cannot be played in the original either. | A small code can expand to gigabytes, and maps this dense cannot be simulated in real time. The limits protect the server and phones. |
 
 ## Presentation
@@ -51,8 +51,14 @@ Entries marked **FLAG** are judgement calls that may need revisiting.
 | P3 | Hitbox.io art, fonts, sounds and music. | Original neobox visuals; sounds are synthesised procedurally; no music. | Legal: original assets only. |
 | P4 | Off-screen objects are rendered; memory from finished rounds can leak. | GPU draws one vertex buffer per frame built from the current state; nothing persists between rounds. | Performance on low-end devices (reported bugs). |
 
-## Not implemented
+## Platform
 
-Accounts, XP, levels, cosmetics/skins, friends, quick play, map browser and
-editor, jukebox/music, replays, emotes. These are platform features around
-the game rather than gameplay, and several of them require a user database.
+| # | Original | neobox | Reason |
+| --- | --- | --- | --- |
+| L1 | Accounts with XP, levels and unlockable skins. | Optional accounts (name and password) that keep settings on every device, own uploaded maps and hold the friends list. Guests can play everything except publishing maps and friends. No XP, levels or skins. | Playing never requires an account. The original's progression unlocks the original's art, which neobox cannot use (P3). |
+| L2 | Friends list. | Friends list with online status and the room a friend is in, with a Join button. | Same purpose; joining a friend's room is one click. |
+| L3 | Quick play. | Quick play joins the fullest public room that has no password and a free slot (oldest on a tie), or creates a public room when there is none. | Fills existing rooms first so players find each other. |
+| L4 | — | A dropped connection or a page reload keeps the player's slot; the client rejoins the same room, team and match automatically with a resume token. | Mobile networks and accidental reloads no longer cost a player their place. |
+| L5 | Replays. | Any finished match can be saved as a `.nbreplay` file (the match's inputs; the deterministic simulation rebuilds every tick) and watched with play/pause, speed 0.25–4×, frame stepping and seeking. Files stay on the player's device. | Small files, exact playback, no server storage. |
+| L6 | — | Practice: play alone on any built-in or pasted map without a server, with endless respawns. | Learning maps and movement offline. |
+| L7 | Jukebox/music and emotes. | Not included. | They need music and emote art neobox does not have (P3); gameplay does not depend on them. |

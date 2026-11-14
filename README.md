@@ -47,16 +47,30 @@ This is why I have set up some goals that I believe will make the project an imp
   verified tick-by-tick against trajectories recorded from the original
   game (`tests/reference`). Differences are deliberate and listed in
   [DEVIATIONS.md](DEVIATIONS.md).
-* **Hitbox.io maps work.** Paste a map code or load a map file in the lobby.
+* **Hitbox.io maps work.** Paste a map code or load a map file in the lobby,
+  pick one from the map library, or make your own in the map editor.
 * **Low latency netcode.** Deterministic 30 Hz simulation with client-side
   prediction and rollback; the server stamps inputs, so there is no host
   advantage and no desync from frame-rate differences. Game data travels
   over WebRTC (UDP-like) with automatic WebSocket fallback.
+* **Playing together.** Quick play, invite links, password rooms, and
+  reconnecting to your own slot after a dropped connection or a page reload.
+  Hosts manage teams, lock teams, kick, ban and unban, hand over the host
+  role and end matches from the room screen or with chat commands (`/help`).
+* **Accounts (optional).** Sign in to keep settings on every device, add
+  friends, see who is online and join their room, and publish maps.
+* **Map library.** Upload maps (public, unlisted or private), search, vote
+  and star them. Public maps appear once an admin approves them.
+* **Replays and practice.** Save any finished match as a replay and watch it
+  with pause, speed and seeking; practise alone on any map without a server.
+* **Your settings.** Key rebinding, volume, render scale and anti-aliasing,
+  colour-blind palettes, touch control size and a left-handed layout.
 * **Runs everywhere.** WebGPU renderer with a WebGL2 fallback, dynamic
   resolution, any refresh rate; keyboard, gamepad and full touch controls;
   iOS Safari included.
 * **Admin interface.** Live rooms, players, tick rate, latency, bandwidth,
-  match state and logs, with kick/ban/close controls (`/admin`).
+  match state and logs, kick/ban/close controls, and the map approval queue
+  (`/admin`).
 
 ## Layout
 
@@ -66,7 +80,8 @@ This is why I have set up some goals that I believe will make the project an imp
 | `crates/sim` | Deterministic game simulation and the Hitbox map format. |
 | `crates/net` | Wire protocol, server input timeline, client prediction/rollback. |
 | `crates/wasm` | The browser game module (simulation + netcode + frame building). |
-| `crates/server` | Game server: rooms, WebSocket/WebRTC transport, admin interface. |
+| `crates/server` | Game server: rooms, WebSocket/WebRTC transport, accounts/friends/library HTTP API, admin interface. |
+| `crates/store` | SQLite storage for accounts, sessions, friends and the map library. |
 | `crates/bots` | Headless bot players for load and soak tests (`cargo run --release -p neobox-bots -- ws://127.0.0.1:8080/ws 32 120`). |
 | `client` | Web client (TypeScript, no framework): renderer, input, UI, audio. |
 | `maps` | Built-in maps. |
@@ -88,7 +103,8 @@ Open <http://127.0.0.1:8080>. To put it online see [DEPLOY.md](DEPLOY.md).
 Tests:
 
 ```sh
-cargo test --release                         # includes the reference trajectories
+cargo test --release                         # includes the reference trajectories and server end-to-end tests
+bash deploy/build.sh && (cd client && bun run e2e)   # browser end-to-end suite (headless Chromium)
 ```
 
 ## Credits
