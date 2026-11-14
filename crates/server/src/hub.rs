@@ -95,6 +95,8 @@ pub struct ConnInfo {
     pub connected: Instant,
     /// The signed-in account of this connection (`None` for guests).
     pub account: Option<AccountRef>,
+    /// Appearance colour the player chose (`None`: the room assigns one).
+    pub color: Option<u32>,
 }
 
 /// A signed-in account as rooms see it.

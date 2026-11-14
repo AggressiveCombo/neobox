@@ -40,6 +40,9 @@ pub fn router() -> Router<Arc<Hub>> {
         .route("/admin/api/maps/{id}/approve", post(approve_map))
         .route("/admin/api/maps/{id}/reject", post(reject_map))
         .route("/admin/api/maps/{id}/delete", post(remove_map))
+        .route("/admin/api/maps/{id}/pick", post(pick_map))
+        .route("/admin/api/clips", get(admin_clips))
+        .route("/admin/api/clips/{id}/delete", post(admin_delete_clip))
 }
 
 async fn page() -> impl IntoResponse {
@@ -286,5 +289,55 @@ async fn remove_map(State(hub): State<Arc<Hub>>, headers: HeaderMap, Path(id): P
         return Ok(StatusCode::UNAUTHORIZED.into_response());
     }
     db(&hub, move |s| s.delete_map(0, id, true)).await?;
+    Ok(StatusCode::NO_CONTENT.into_response())
+}
+
+#[derive(Deserialize)]
+struct PickBody {
+    pick: bool,
+}
+
+/// Staff picks lead the library's "picks" listing; unpicking clears the pick.
+async fn pick_map(State(hub): State<Arc<Hub>>, headers: HeaderMap, Path(id): Path<i64>, Json(b): Json<PickBody>) -> Result<Response, Fail> {
+    if !authorized(&hub, &headers) {
+        return Ok(StatusCode::UNAUTHORIZED.into_response());
+    }
+    db(&hub, move |s| s.set_pick(id, b.pick)).await?;
+    Ok(StatusCode::NO_CONTENT.into_response())
+}
+
+/// A clip in the admin list: who recorded it, on which map, and when.
+#[derive(Serialize)]
+struct ClipJson {
+    id: i64,
+    recorder: String,
+    map_name: String,
+    created: i64,
+    size: i64,
+}
+
+#[derive(Deserialize)]
+struct ClipsQuery {
+    before: Option<i64>,
+}
+
+/// Clips newest first, a page at a time; `before` is the last id seen.
+async fn admin_clips(State(hub): State<Arc<Hub>>, headers: HeaderMap, Query(q): Query<ClipsQuery>) -> Result<Response, Fail> {
+    if !authorized(&hub, &headers) {
+        return Ok(StatusCode::UNAUTHORIZED.into_response());
+    }
+    let clips = db(&hub, move |s| s.clips(q.before, ADMIN_PAGE_SIZE)).await?;
+    let out: Vec<ClipJson> = clips
+        .into_iter()
+        .map(|c| ClipJson { id: c.id, recorder: c.recorder, map_name: c.map_name, created: c.created, size: c.size })
+        .collect();
+    Ok(Json(out).into_response())
+}
+
+async fn admin_delete_clip(State(hub): State<Arc<Hub>>, headers: HeaderMap, Path(id): Path<i64>) -> Result<Response, Fail> {
+    if !authorized(&hub, &headers) {
+        return Ok(StatusCode::UNAUTHORIZED.into_response());
+    }
+    db(&hub, move |s| s.delete_clip(id)).await?;
     Ok(StatusCode::NO_CONTENT.into_response())
 }

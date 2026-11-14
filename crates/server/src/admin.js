@@ -18,7 +18,7 @@ async function api(path, body) {
   return r;
 }
 function showLogin() { $("#app").hidden = true; $("#login").hidden = false; $("#pw").focus(); }
-function showApp() { $("#login").hidden = true; $("#app").hidden = false; }
+function showApp() { $("#login").hidden = true; $("#app").hidden = false; loadClips(true); }
 
 $("#loginform").onsubmit = async (e) => {
   e.preventDefault();
@@ -156,10 +156,11 @@ function renderLibrary({ total, maps }) {
   tb.innerHTML = "";
   for (const m of maps) {
     const tr = document.createElement("tr");
-    tr.innerHTML = `<td><b>${esc(m.name)}</b></td><td>${esc(m.author)}</td><td>${esc(m.status)}</td><td>${esc(m.visibility)}</td><td>${esc(m.created)}</td><td></td>`;
+    tr.innerHTML = `<td><b>${esc(m.name)}</b></td><td>${esc(m.author)}</td><td>${esc(m.status)}</td><td>${esc(m.visibility)}</td><td>${m.pick ? "yes" : ""}</td><td>${esc(m.created)}</td><td></td>`;
     const actions = tr.lastChild;
     const mk = (label, fn, cls) => { const b = document.createElement("button"); b.textContent = label; if (cls) b.className = cls; b.onclick = fn; actions.appendChild(b); };
     mk("Show code", () => showMapCode(m));
+    mk(m.pick ? "Unpick" : "Pick", () => pickMap(m, !m.pick));
     mk("Delete", () => { if (confirm("Delete \"" + m.name + "\" for good? Its owner loses it and players can no longer open it.")) deleteMap(m); }, "bad");
     tb.appendChild(tr);
   }
@@ -182,9 +183,46 @@ async function deleteMap(m) {
   $("#libcode").hidden = true;
   refreshLibrary();
 }
+async function pickMap(m, on) {
+  const r = await api("/admin/api/maps/" + m.id + "/pick", { pick: on });
+  $("#libmsg").textContent = r.ok ? (on ? "Picked " : "Unpicked ") + m.name + "." : "Could not change the pick of " + m.name + " (HTTP " + r.status + ").";
+  refreshLibrary();
+}
+
 $("#libq").oninput = () => { libPage = 0; refreshLibrary(); };
 $("#libprev").onclick = () => { libPage--; refreshLibrary(); };
 $("#libnext").onclick = () => { libPage++; refreshLibrary(); };
+// Clips recorded with /record, newest first; "More" pages on from the last id shown.
+const CLIP_PAGE = 25;
+let clipCursor = null;
+async function loadClips(reset) {
+  if (reset) { clipCursor = null; $("#clips tbody").innerHTML = ""; }
+  try {
+    const r = await api("/admin/api/clips" + (clipCursor === null ? "" : "?before=" + clipCursor));
+    if (!r.ok) { $("#clipmsg").textContent = "Could not load clips (HTTP " + r.status + ")."; return; }
+    const clips = await r.json();
+    const tb = $("#clips tbody");
+    for (const c of clips) {
+      const tr = document.createElement("tr");
+      tr.innerHTML = `<td>${esc(c.recorder)}</td><td>${esc(c.map_name)}</td><td>${esc(new Date(c.created * 1000).toISOString())}</td><td>${c.size} B</td><td></td>`;
+      const del = document.createElement("button");
+      del.textContent = "Delete";
+      del.className = "bad";
+      del.onclick = () => { if (confirm("Delete this clip for good?")) deleteClip(c.id); };
+      tr.lastChild.appendChild(del);
+      tb.appendChild(tr);
+      clipCursor = c.id;
+    }
+    $("#noclips").hidden = tb.children.length > 0;
+    $("#clipmore").disabled = clips.length < CLIP_PAGE;
+  } catch (_) {}
+}
+async function deleteClip(id) {
+  const r = await api("/admin/api/clips/" + id + "/delete", {});
+  $("#clipmsg").textContent = r.ok ? "Deleted clip " + id + "." : "Could not delete clip " + id + " (HTTP " + r.status + ").";
+  loadClips(true);
+}
+$("#clipmore").onclick = () => loadClips(false);
 
 async function refresh() {
   if ($("#app").hidden) return;

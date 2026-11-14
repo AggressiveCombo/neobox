@@ -9,6 +9,7 @@ use axum::http::{header, HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
+use neobox_net::level_of;
 use neobox_store::{
     Account, Error, FriendState, MapDetail, MapSummary, Sort, Status, Store, Visibility, MAX_CODE_BYTES, SESSION_TTL,
 };
@@ -16,6 +17,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
+use std::sync::atomic::Ordering;
 use tracing::error;
 
 const COOKIE: &str = "nb_session";
@@ -24,6 +26,7 @@ const PAGE_SIZE: usize = 24;
 
 pub fn router() -> Router<Arc<Hub>> {
     Router::new()
+        .route("/api/stats", get(stats))
         .route("/api/account/me", get(me))
         .route("/api/account/register", post(register))
         .route("/api/account/login", post(login))
@@ -37,6 +40,7 @@ pub fn router() -> Router<Arc<Hub>> {
         .route("/api/friends/remove", post(friend_remove))
         .route("/api/library", get(library_list).post(library_upload))
         .route("/api/library/mine", get(library_mine))
+        .route("/api/library/makers", get(library_makers))
         .route("/api/library/favourites", get(library_favourites))
         .route("/api/library/{id}", get(library_get).patch(library_update).delete(library_delete))
         .route("/api/library/{id}/vote", post(library_vote))
@@ -134,8 +138,9 @@ fn attempt(hub: &Hub, headers: &HeaderMap, peer: SocketAddr) -> Result<(), Fail>
 async fn sign_in(hub: &Hub, headers: &HeaderMap, acc: Account) -> Result<Response, Fail> {
     let id = acc.id;
     let token = db(hub, move |s| s.create_session(id)).await?;
+    let xp = db(hub, move |s| s.account_xp(id)).await?;
     let cookie = session_cookie(hub, headers, &token, SESSION_TTL);
-    Ok(([(header::SET_COOKIE, cookie)], Json(AccountJson::from(acc))).into_response())
+    Ok(([(header::SET_COOKIE, cookie)], Json(AccountJson::new(acc, xp))).into_response())
 }
 
 /// Clear the session cookie.
@@ -147,12 +152,46 @@ fn signed_out(hub: &Hub, headers: &HeaderMap) -> Response {
 pub struct AccountJson {
     pub id: i64,
     pub name: String,
+    pub xp: u64,
+    pub level: u32,
 }
 
-impl From<Account> for AccountJson {
-    fn from(a: Account) -> AccountJson {
-        AccountJson { id: a.id, name: a.name }
+impl AccountJson {
+    fn new(a: Account, xp: u64) -> AccountJson {
+        AccountJson { id: a.id, name: a.name, xp, level: level_of(xp) }
     }
+}
+
+// Server
+
+#[derive(Serialize)]
+struct QuickCounts {
+    ffa: usize,
+    teams: usize,
+    lives: usize,
+}
+
+#[derive(Serialize)]
+struct StatsJson {
+    online: usize,
+    rooms: usize,
+    quick: QuickCounts,
+}
+
+/// Connections, rooms and players in quick-play queues, for the lobby.
+async fn stats(State(hub): State<Arc<Hub>>) -> Json<StatsJson> {
+    let rooms = hub.summaries();
+    let mut quick = QuickCounts { ffa: 0, teams: 0, lives: 0 };
+    for room in &rooms {
+        let players = room.players.len();
+        match room.quick.as_deref() {
+            Some("ffa") => quick.ffa += players,
+            Some("teams") => quick.teams += players,
+            Some("lives") => quick.lives += players,
+            _ => {}
+        }
+    }
+    Json(StatsJson { online: hub.conns.load(Ordering::Relaxed), rooms: rooms.len(), quick })
 }
 
 // Accounts
@@ -161,8 +200,10 @@ impl From<Account> for AccountJson {
 /// guest is not an error.
 async fn me(State(hub): State<Arc<Hub>>, headers: HeaderMap) -> Result<Json<Option<AccountJson>>, Fail> {
     let Some(token) = session_token(&headers) else { return Ok(Json(None)) };
-    let account = db(&hub, move |s| s.session_account(&token)).await?;
-    Ok(Json(account.map(AccountJson::from)))
+    let Some(account) = db(&hub, move |s| s.session_account(&token)).await? else { return Ok(Json(None)) };
+    let id = account.id;
+    let xp = db(&hub, move |s| s.account_xp(id)).await?;
+    Ok(Json(Some(AccountJson::new(account, xp))))
 }
 
 #[derive(Deserialize)]
@@ -323,6 +364,8 @@ pub struct MapJson {
     pub created: String,
     pub visibility: &'static str,
     pub status: &'static str,
+    pub description: String,
+    pub pick: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub my_vote: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -340,6 +383,8 @@ impl MapJson {
             created: iso_time(m.created),
             visibility: visibility_name(m.visibility),
             status: status_name(m.status),
+            description: m.description.clone(),
+            pick: m.pick > 0,
             my_vote: None,
             favourite: None,
         }
@@ -427,6 +472,8 @@ fn parse_sort(s: Option<&str>) -> Result<Sort, Fail> {
         None | Some("new") => Ok(Sort::New),
         Some("top") => Ok(Sort::Top),
         Some("plays") => Ok(Sort::Plays),
+        Some("hot") => Ok(Sort::Hot),
+        Some("picks") => Ok(Sort::Picks),
         Some(_) => Err(Error::Invalid("Unknown sort").into()),
     }
 }
@@ -453,6 +500,18 @@ async fn library_mine(State(hub): State<Arc<Hub>>, headers: HeaderMap) -> Result
     Ok(Json(maps_json(&hub, Some(me), maps).await?))
 }
 
+#[derive(Serialize)]
+struct MakerJson {
+    name: String,
+    score: i64,
+}
+
+/// The makers with the most upvotes and plays this week.
+async fn library_makers(State(hub): State<Arc<Hub>>) -> Result<Json<Vec<MakerJson>>, Fail> {
+    let makers = db(&hub, |s| s.top_makers(Store::activity_since(), 5)).await?;
+    Ok(Json(makers.into_iter().map(|(name, score)| MakerJson { name, score }).collect()))
+}
+
 async fn library_favourites(State(hub): State<Arc<Hub>>, headers: HeaderMap) -> Result<Json<Vec<MapJson>>, Fail> {
     let me = signed_in(&hub, &headers).await?.id;
     let maps = db(&hub, move |s| s.favourites(me)).await?;
@@ -462,6 +521,7 @@ async fn library_favourites(State(hub): State<Arc<Hub>>, headers: HeaderMap) -> 
 #[derive(Deserialize)]
 struct UploadBody {
     name: String,
+    description: String,
     code: String,
     visibility: String,
 }
@@ -472,7 +532,7 @@ async fn library_upload(State(hub): State<Arc<Hub>>, headers: HeaderMap, Json(b)
         return Err(Fail::new(StatusCode::TOO_MANY_REQUESTS, "Too many uploads, try again later"));
     }
     let visibility = parse_visibility(&b.visibility)?;
-    let id = db(&hub, move |s| s.upload(me, &b.name, &b.code, visibility)).await?;
+    let id = db(&hub, move |s| s.upload(me, &b.name, &b.code, visibility, &b.description)).await?;
     Ok((StatusCode::CREATED, Json(serde_json::json!({ "id": id }))).into_response())
 }
 
@@ -485,7 +545,9 @@ async fn library_get(State(hub): State<Arc<Hub>>, headers: HeaderMap, Path(id): 
 #[derive(Deserialize)]
 struct PatchBody {
     name: Option<String>,
+    description: Option<String>,
     visibility: Option<String>,
+    code: Option<String>,
 }
 
 /// Fields left out keep their current value.
@@ -500,7 +562,8 @@ async fn library_update(
     db(&hub, move |s| {
         let cur = s.get(id, Some(me), false)?;
         let name = b.name.unwrap_or(cur.map.name);
-        s.update(me, id, &name, None, visibility.unwrap_or(cur.map.visibility))
+        let description = b.description.unwrap_or(cur.map.description);
+        s.update(me, id, &name, b.code.as_deref(), visibility.unwrap_or(cur.map.visibility), &description)
     })
     .await?;
     Ok(StatusCode::NO_CONTENT)

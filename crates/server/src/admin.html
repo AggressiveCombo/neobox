@@ -90,10 +90,17 @@ canvas { width:100%; aspect-ratio: 16/10; background:#05070a; border-radius:6px;
   <section>
     <h2>Map library</h2>
     <div class="row"><input id="libq" placeholder="Search name or author" style="flex:1"><button id="libprev">Prev</button><button id="libnext">Next</button></div>
-    <div class="scroll"><table id="library"><thead><tr><th>Name</th><th>Author</th><th>Status</th><th>Visibility</th><th>Created</th><th></th></tr></thead><tbody></tbody></table></div>
+    <div class="scroll"><table id="library"><thead><tr><th>Name</th><th>Author</th><th>Status</th><th>Visibility</th><th>Picked</th><th>Created</th><th></th></tr></thead><tbody></tbody></table></div>
     <div id="libinfo" class="muted"></div>
     <div id="libmsg" class="muted"></div>
     <textarea id="libcode" readonly hidden style="width:100%;height:120px;font:12px ui-monospace, monospace;margin-top:8px"></textarea>
+  </section>
+  <section>
+    <h2>Clips</h2>
+    <div class="scroll"><table id="clips"><thead><tr><th>Recorder</th><th>Map</th><th>Created</th><th>Size</th><th></th></tr></thead><tbody></tbody></table></div>
+    <div id="noclips" class="muted" hidden>No clips.</div>
+    <div class="row"><button id="clipmore">More</button></div>
+    <div id="clipmsg" class="muted"></div>
   </section>
   <section class="wide">
     <h2>Logs</h2>

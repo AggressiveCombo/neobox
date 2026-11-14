@@ -1,6 +1,8 @@
 //! End-to-end checks against a real server process on a free local port:
-//! room create/join, reconnect by token, quick play, password rooms, the
-//! `/lock` `/unlock` `/ban` `/unban` chat commands, and friends' presence.
+//! room create/join, reconnect by token, quick-play rooms, password rooms,
+//! the `/lock` `/unlock` `/ban` `/unban` chat commands, friends' presence,
+//! lobby signals (presence lines, typing, colours, start countdown) and the
+//! experience awarded when a match ends.
 
 use futures_util::{SinkExt, StreamExt};
 use neobox_net::*;
@@ -131,7 +133,7 @@ impl Client {
         }
         let (ws, _) = tokio_tungstenite::connect_async(req).await.expect("connect");
         let mut c = Client { ws };
-        c.send(&ClientMsg::Hello { version: PROTOCOL_VERSION, name: name.into() }).await;
+        c.send(&ClientMsg::Hello { version: PROTOCOL_VERSION, name: name.into(), color: None }).await;
         c.until("welcome", |m| matches!(m, ServerMsg::Welcome { .. }).then_some(Ok(()))).await.unwrap();
         c
     }
@@ -222,12 +224,20 @@ async fn rooms_reconnect_quick_play_and_host_commands() {
     assert_eq!((back.you, back.token.as_str()), (g.you, g.token.as_str()), "resume restores the same slot");
     host.room_where("guest reconnected", |r| r.players.iter().any(|p| p.name == "guest" && p.connected)).await;
 
-    // quick play joins the open public room; leaving answers `left`
+    // quick play opens a host-less quick-play room that starts by itself;
+    // the next player of the same queue lands in it; leaving answers `left`
     let mut quick = Client::connect(&url, "quick").await;
-    quick.send(&ClientMsg::QuickPlay).await;
+    quick.send(&ClientMsg::QuickPlay { queue: Some("ffa".into()) }).await;
     let (q, room) = quick.seat("quick play").await.unwrap();
-    assert_eq!(q.code, h.code, "quick play picks the open public room");
-    assert!(room.players.iter().any(|p| p.name == "quick"));
+    assert_ne!(q.code, h.code, "quick play never lands in a custom room");
+    assert_eq!(room.quick.as_deref(), Some("ffa"));
+    assert!(room.players.iter().all(|p| !p.host), "quick-play rooms have no host");
+    quick.until("quick match start", |m| matches!(m, ServerMsg::MatchStart { .. } | ServerMsg::Snapshot { .. }).then_some(Ok(()))).await.unwrap();
+    let mut second = Client::connect(&url, "second").await;
+    second.send(&ClientMsg::QuickPlay { queue: Some("ffa".into()) }).await;
+    let (s, _) = second.seat("second quick play").await.unwrap();
+    assert_eq!(s.code, q.code, "the same queue fills the open quick-play room");
+    second.until("late join snapshot", |m| matches!(m, ServerMsg::Snapshot { .. }).then_some(Ok(()))).await.unwrap();
     quick.send(&ClientMsg::LeaveRoom).await;
     quick.until("left", |m| matches!(m, ServerMsg::Left).then_some(Ok(()))).await.unwrap();
 
@@ -270,9 +280,10 @@ async fn password_rooms() {
 
     // quick play never lands in a password room
     let mut quick = Client::connect(&url, "quick").await;
-    quick.send(&ClientMsg::QuickPlay).await;
-    let (q, _) = quick.seat("quick play").await.unwrap();
+    quick.send(&ClientMsg::QuickPlay { queue: None }).await;
+    let (q, room) = quick.seat("quick play").await.unwrap();
     assert_ne!(q.code, h.code);
+    assert_eq!(room.quick.as_deref(), Some("ffa"), "the default queue");
 }
 
 #[tokio::test]
@@ -311,4 +322,103 @@ async fn friends_see_presence_and_room() {
         assert!(Instant::now() < deadline, "bob still online after closing his socket");
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
+}
+
+/// The chat line `text` from the server (system lines have `from: None`).
+fn is_chat(m: &ServerMsg, text: &str) -> bool {
+    matches!(m, ServerMsg::Chat { text: t, .. } if t == text)
+}
+
+#[tokio::test]
+async fn lobby_signals_and_start_countdown() {
+    let server = Server::start();
+    let url = server.ws();
+    let mut host = Client::connect(&url, "host").await;
+    let (h, _) = host.create(None).await.unwrap();
+    let mut guest = Client::connect(&url, "guest").await;
+    let (g, _) = guest.join(&h.code, None, None).await.unwrap();
+    host.until("join line", |m| is_chat(m, "guest has joined the game").then_some(Ok(()))).await.unwrap();
+
+    // typing reaches the others, not the typist
+    guest.send(&ClientMsg::Typing).await;
+    let who = host.until("typing", |m| match m {
+        ServerMsg::Typing { player } => Some(Ok(*player)),
+        _ => None,
+    });
+    assert_eq!(who.await.unwrap(), g.you);
+
+    // colours and editor presence show in the room state
+    guest.send(&ClientMsg::SetColor { color: 0x123456 }).await;
+    host.room_where("colour", |r| r.players.iter().any(|p| p.id == g.you && p.color == 0x123456)).await;
+    guest.send(&ClientMsg::Editing { open: true }).await;
+    host.room_where("editing", |r| r.players.iter().any(|p| p.id == g.you && p.editing)).await;
+
+    // emoji shortcodes become emoji
+    guest.chat("gg :fire:").await;
+    host.until("emoji", |m| is_chat(m, "gg 🔥").then_some(Ok(()))).await.unwrap();
+
+    // two players: start counts down and can be aborted; /settings lists the settings
+    host.send(&ClientMsg::Start).await;
+    host.room_where("countdown", |r| r.starting).await;
+    host.send(&ClientMsg::AbortStart).await;
+    host.room_where("aborted", |r| !r.starting && !r.in_match).await;
+    host.chat("/settings").await;
+    host.until("settings", |m| matches!(m, ServerMsg::Chat { text, .. } if text.contains("timeScale: ")).then_some(Ok(()))).await.unwrap();
+    host.send(&ClientMsg::Start).await;
+    host.until("countdown match start", |m| matches!(m, ServerMsg::MatchStart { .. }).then_some(Ok(()))).await.unwrap();
+
+    // the room's map code is served for the editor
+    host.send(&ClientMsg::GetMap).await;
+    let code = host.until("map code", |m| match m {
+        ServerMsg::MapCode { code, .. } => Some(Ok(code.clone())),
+        _ => None,
+    });
+    assert!(!code.await.unwrap().is_empty());
+
+    drop(guest);
+    host.room_where("guest slot held", |r| r.players.iter().any(|p| p.id == g.you && !p.connected)).await;
+}
+
+#[tokio::test]
+async fn match_end_awards_experience() {
+    let server = Server::start();
+    let alice = server.register("alice").await;
+    let url = server.ws();
+    let mut host = Client::connect_as(&url, "alice", Some(&alice)).await;
+    host.create(None).await.unwrap();
+    let mut guest = Client::connect(&url, "guest").await;
+    let code = host.room_where("room", |_| true).await.code;
+    guest.join(&code, None, None).await.unwrap();
+
+    // a map with spawns and no ground: everyone falls; one life each ends the game
+    let void = r#"{"b":[],"j":[],"s":[{"1":15,"2":10},{"1":25,"2":10}],"p":[],"tu":[],"tc":[],"gp":[],"c":[],"set":{"3":40,"15":40,"16":25}}"#;
+    host.send(&ClientMsg::SetMap { code: neobox_sim::map::encode_code(void), name: Some("void".into()) }).await;
+    host.send(&ClientMsg::SetMode { mode: 1 }).await;
+    host.chat("/set objectiveLimit 1").await;
+    host.room_where("lives, one life", |r| r.settings.game_mode == 1 && r.settings.objective_limit == 1.0 && r.map_name == "void").await;
+    host.send(&ClientMsg::Start).await;
+
+    let deadline = Instant::now() + Duration::from_secs(60);
+    let award = loop {
+        let left = deadline.saturating_duration_since(Instant::now());
+        let next = tokio::time::timeout(left, host.ws.next()).await.expect("no experience before the deadline");
+        if let Some(Ok(Message::Text(t))) = next {
+            if let Ok(ServerMsg::Xp(a)) = serde_json::from_str::<ServerMsg>(t.as_str()) {
+                break a;
+            }
+        }
+    };
+    assert!(!award.quick);
+    assert_eq!(award.xp, Some(award.gained as u64), "a new account's total is its first award");
+    assert_eq!(award.level, level_of(award.gained as u64));
+    let (_, _, me) = server.http("GET", "/api/account/me", Some(&alice), None).await;
+    assert_eq!(me["xp"], award.gained, "{me}");
+    // guests get the same award message, without an account total
+    let guest_award = guest.until("guest award", |m| match m {
+        ServerMsg::Xp(a) => Some(Ok(a.clone())),
+        _ => None,
+    });
+    let guest_award = guest_award.await.unwrap();
+    assert_eq!((guest_award.xp, guest_award.level), (None, 0));
+    host.until("match end", |m| matches!(m, ServerMsg::MatchEnd { .. }).then_some(Ok(()))).await.unwrap();
 }

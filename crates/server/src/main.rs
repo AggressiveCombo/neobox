@@ -7,12 +7,16 @@
 
 mod admin;
 mod api;
+mod clips;
+mod award;
 mod conn;
+mod emoji;
 mod hub;
 mod logbuf;
 mod maps;
 mod room;
 mod rtc;
+mod youtube;
 
 use axum::extract::{ConnectInfo, State, WebSocketUpgrade};
 use axum::http::{header, HeaderMap, HeaderValue};
@@ -32,8 +36,12 @@ use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 
 /// Content policy for every response: pages load only same-origin scripts
-/// (plus the wasm module) and styles.
-const CSP: &str = "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self' ws: wss:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'";
+/// (plus the wasm module) and styles. The jukebox embeds YouTube's player
+/// (its script and frame) and shows video thumbnails.
+const CSP: &str = "default-src 'self'; script-src 'self' 'wasm-unsafe-eval' https://www.youtube.com https://s.ytimg.com; \
+    frame-src https://www.youtube.com https://www.youtube-nocookie.com; style-src 'self' 'unsafe-inline'; \
+    img-src 'self' data: blob: https://i.ytimg.com; connect-src 'self' ws: wss:; object-src 'none'; base-uri 'none'; \
+    frame-ancestors 'none'";
 
 async fn ws(State(hub): State<Arc<Hub>>, ConnectInfo(peer): ConnectInfo<SocketAddr>, headers: HeaderMap, upgrade: WebSocketUpgrade) -> impl IntoResponse {
     let ip = admin::client_ip(&hub, &headers, peer);
@@ -85,6 +93,7 @@ async fn main() {
         .route("/healthz", get(|| async { "ok" }))
         .merge(admin::router())
         .merge(api::router())
+        .merge(clips::router())
         .fallback_service(files)
         .layer(SetResponseHeaderLayer::if_not_present(header::X_CONTENT_TYPE_OPTIONS, HeaderValue::from_static("nosniff")))
         .layer(SetResponseHeaderLayer::if_not_present(header::REFERRER_POLICY, HeaderValue::from_static("same-origin")))

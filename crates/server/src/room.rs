@@ -2,6 +2,7 @@
 //! match runs, the authoritative input timeline ticking at the room's rate.
 
 use crate::hub::{AccountRef, ConnInfo, Hub, Out, RoomHandle};
+use crate::{award, emoji, youtube};
 use base64::Engine;
 use neobox_net::*;
 use neobox_sim::start::Outcome;
@@ -25,8 +26,20 @@ const HISTORY: usize = 256;
 const MAX_CATCHUP: u32 = 90;
 /// A player whose connection dropped keeps their slot this long.
 const LOST_LIMIT: Duration = Duration::from_secs(60);
-const HELP: &str = "Commands: /set <key> <value>, /reset, /mode <n>, /start, /end, /lock, /unlock, \
-    /kick <name>, /ban <name>, /unban <name>, /host <name>, /team <name> <ffa|red|blue|spec>";
+/// Countdown between the host's start and the match (two or more players).
+const START_DELAY: Duration = Duration::from_secs(1);
+/// Quick-play players who change no input and say nothing this long are removed.
+const IDLE_LIMIT: Duration = Duration::from_secs(120);
+/// Typing signals relayed per player at most this often.
+const TYPING_GAP: Duration = Duration::from_millis(800);
+/// The quick-play rotation awards experience when the game-over countdown
+/// reaches this tick (the original's `xo == 10`).
+const QUICK_AWARD_TICK: f64 = 10.0;
+/// Appearance colours for players who have not picked one.
+const DEFAULT_COLORS: [u32; 8] = [0x9be15d, 0xffc857, 0xc792ea, 0x4fd1c5, 0xff8fab, 0xf6e05e, 0x7f9cf5, 0xf28c28];
+const HELP: &str = "Commands: /set <key> <value>, /settings, /reset, /mode <n>, /start, /end, /lock, /unlock, \
+    /kick <name>, /ban <name>, /unban <name>, /host <name>, /team <name> <ffa|red|blue|spec>, \
+    /join <ffa|red|blue|spec>, /upvote, /downvote, /fav, /unfav, /record";
 
 /// (player id, resume token) on success, or (code, message).
 type JoinReply = Result<(u32, String), (String, String)>;
@@ -43,6 +56,10 @@ pub enum RoomCmd {
     Frame { player: u32, frame: ClientFrame },
     Admin(AdminCmd),
     View { reply: oneshot::Sender<Option<Vec<u8>>> },
+    /// The title of a suggested video arrived (fetched off the room task).
+    Suggested { from: u32, name: String, video: String, title: String },
+    /// The title of the jukebox video arrived.
+    JukeboxTitle { video: String, title: String },
 }
 
 #[derive(Debug, Clone, serde::Deserialize)]
@@ -105,6 +122,10 @@ pub struct RoomSummary {
     pub round: Option<serde_json::Value>,
     /// Names of banned players.
     pub bans: Vec<String>,
+    /// Queue of a quick-play room.
+    pub quick: Option<String>,
+    /// The jukebox video, if any.
+    pub jukebox: Option<JukeboxInfo>,
 }
 
 /// A banned player: the name listed in the room and the keys that block
@@ -125,11 +146,21 @@ struct RPlayer {
     id: u32,
     name: String,
     account: Option<AccountRef>,
+    /// Account experience (`None` for guests).
+    xp: Option<u64>,
     ip: IpAddr,
     token: String,
     link: Link,
     team: u8,
     in_match: bool,
+    /// Appearance colour (0xRRGGBB).
+    color: u32,
+    /// In the map editor.
+    editing: bool,
+    /// Last input change or chat line (quick-play idle check).
+    active: Instant,
+    /// Last relayed typing signal.
+    typing_at: Option<Instant>,
     /// next tick the client needs (its confirmed tick)
     ack: u32,
     last_sent: Option<u32>,
@@ -175,8 +206,31 @@ struct Game {
 /// A match whose steps stay slower than real time this long is stopped.
 const SLOW_LIMIT_US: f64 = 3e6;
 
+/// The room's jukebox video. The position is kept as a base plus the time
+/// it has been playing since.
+struct Jukebox {
+    video: String,
+    title: String,
+    playing: bool,
+    /// Seconds into the video at `since`.
+    base: f64,
+    since: Instant,
+}
+
+impl Jukebox {
+    fn position(&self) -> f64 {
+        if self.playing { self.base + self.since.elapsed().as_secs_f64() } else { self.base }
+    }
+
+    fn state(&self) -> JukeboxState {
+        JukeboxState { video: self.video.clone(), title: self.title.clone(), playing: self.playing, position: self.position() }
+    }
+}
+
 pub struct Room {
     hub: Arc<Hub>,
+    /// The room's own command channel (for work finished off the room task).
+    tx: mpsc::UnboundedSender<RoomCmd>,
     code: String,
     name: String,
     password: Option<String>,
@@ -187,6 +241,15 @@ pub struct Room {
     settings: GameSettings,
     map_code: String,
     map_name: String,
+    /// The current map's library entry, when it comes from the library.
+    map_meta: Option<MapMeta>,
+    /// Quick-play queue: no host, the built-in maps rotate, matches start by themselves.
+    quick: Option<String>,
+    /// Built-in map names in the order the quick-play rotation plays them.
+    rotation: Vec<String>,
+    /// When the start countdown ends.
+    starting: Option<Instant>,
+    jukebox: Option<Jukebox>,
     tick_hz: f64,
     /// Tick rate set during a match; applied when the next match starts.
     next_tick_hz: Option<f64>,
@@ -203,14 +266,39 @@ fn now_ms() -> u64 {
     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0)
 }
 
-/// Create a room and start its task.
-pub fn spawn(hub: Arc<Hub>, code: String, name: String, password: Option<String>, max_players: u8, public: bool) -> RoomHandle {
+/// Create a room and start its task. `quick`: the quick-play queue of a
+/// quick-play room (its game mode comes from the queue).
+pub fn spawn(
+    hub: Arc<Hub>,
+    code: String,
+    name: String,
+    password: Option<String>,
+    max_players: u8,
+    public: bool,
+    quick: Option<String>,
+) -> RoomHandle {
     let (tx, rx) = mpsc::unbounded_channel();
     let summary = Arc::new(Mutex::new(RoomSummary { code: code.clone(), name: name.clone(), ..RoomSummary::default() }));
     let map = hub.maps.first().cloned();
+    let mut settings = GameSettings::default();
+    if let Some(&(_, mode)) = quick.as_deref().and_then(|q| QUICK_QUEUES.iter().find(|(id, _)| *id == q)) {
+        settings.game_mode = mode;
+    }
+    let rotation = if quick.is_some() {
+        // every quick-play room starts somewhere else in the rotation
+        let mut names: Vec<String> = hub.maps.iter().map(|m| m.name.clone()).collect();
+        if !names.is_empty() {
+            let k = rand::random_range(0..names.len());
+            names.rotate_left(k);
+        }
+        names
+    } else {
+        Vec::new()
+    };
     let room = Room {
         tick_hz: hub.cfg.default_tick_hz,
         hub: hub.clone(),
+        tx: tx.clone(),
         code: code.clone(),
         name,
         password: password.filter(|p| !p.is_empty()),
@@ -218,9 +306,14 @@ pub fn spawn(hub: Arc<Hub>, code: String, name: String, password: Option<String>
         max_players: max_players.clamp(1, hub.cfg.max_players),
         players: Vec::new(),
         host: None,
-        settings: GameSettings::default(),
+        settings,
         map_code: map.as_ref().map(|m| m.code.clone()).unwrap_or_default(),
-        map_name: map.map(|m| m.name).unwrap_or_default(),
+        map_name: rotation.first().cloned().or_else(|| map.map(|m| m.name)).unwrap_or_default(),
+        map_meta: None,
+        quick,
+        rotation,
+        starting: None,
+        jukebox: None,
         next_tick_hz: None,
         next_id: 0,
         locked: false,
@@ -284,6 +377,19 @@ fn snapshot_msg(g: &Game, id: u32) -> ServerMsg {
     }
 }
 
+/// What the room shows of a library map.
+fn map_meta_of(m: &neobox_store::RoomMap) -> MapMeta {
+    MapMeta {
+        id: m.id,
+        name: m.name.clone(),
+        author: m.author.clone(),
+        description: m.description.clone(),
+        created: m.created,
+        up: m.up,
+        down: m.down,
+    }
+}
+
 impl Room {
     async fn run(mut self, mut rx: mpsc::UnboundedReceiver<RoomCmd>) {
         info!(room = %self.code, name = %self.name, "room created");
@@ -292,6 +398,7 @@ impl Room {
         self.update_summary();
         loop {
             let deadline = self.game.as_ref().map(|g| g.next_tick);
+            let start_at = self.starting;
             tokio::select! {
                 cmd = rx.recv() => match cmd {
                     Some(c) => self.handle(c),
@@ -300,8 +407,14 @@ impl Room {
                 _ = async { tokio::time::sleep_until(deadline.unwrap().into()).await }, if deadline.is_some() => {
                     self.run_ticks();
                 }
+                _ = async { tokio::time::sleep_until(start_at.unwrap().into()).await }, if start_at.is_some() => {
+                    self.starting = None;
+                    self.start_match();
+                }
                 _ = stats.tick() => {
                     self.expire_lost();
+                    self.kick_idle();
+                    self.quick_start();
                     self.update_summary();
                     if self.game.is_none() {
                         self.broadcast_room();
@@ -342,6 +455,18 @@ impl Room {
                     fb.words.iter().flat_map(|w| w.to_le_bytes()).collect()
                 });
                 let _ = reply.send(frame);
+            }
+            RoomCmd::Suggested { from, name, video, title } => {
+                let m = json(&ServerMsg::Suggest { from, name, video, title });
+                for p in &self.players {
+                    p.send(Out::Text(m.clone()));
+                }
+            }
+            RoomCmd::JukeboxTitle { video, title } => {
+                if let Some(j) = self.jukebox.as_mut().filter(|j| j.video == video) {
+                    j.title = title;
+                    self.broadcast_jukebox();
+                }
             }
         }
     }
@@ -425,15 +550,23 @@ impl Room {
         };
         let token = new_token();
         info!(room = %self.code, player = id, name = %conn.name, ip = %conn.ip, "join");
+        let xp = conn.account.as_ref().map(|a| self.hub.store.account_xp(a.id).unwrap_or(0));
+        let color = conn.color.unwrap_or(DEFAULT_COLORS[id as usize % DEFAULT_COLORS.len()]);
+        let name = conn.name.clone();
         self.players.push(RPlayer {
             id,
             name: conn.name.clone(),
             account: conn.account.clone(),
+            xp,
             ip: conn.ip,
             token: token.clone(),
             link: Link::Live(conn),
             team,
             in_match,
+            color,
+            editing: false,
+            active: Instant::now(),
+            typing_at: None,
             ack: 0,
             last_sent: None,
             margin16: 0,
@@ -442,12 +575,16 @@ impl Room {
             last_bytes: (0, 0),
             rate: (0, 0),
         });
-        if self.host.is_none() {
+        // quick-play rooms have no host
+        if self.host.is_none() && self.quick.is_none() {
             self.host = Some(id);
         }
         let i = self.players.len() - 1;
         self.catch_up(i);
+        self.system_chat(&format!("{name} has joined the game"));
         self.broadcast_room();
+        self.publish_players();
+        self.quick_start();
         Ok((id, token))
     }
 
@@ -519,7 +656,7 @@ impl Room {
         }
     }
 
-    /// Removes a player for good (left, kicked, banned, timed out).
+    /// Removes a player for good (left, kicked, banned, timed out, idle).
     fn remove(&mut self, id: u32, why: &str) {
         let Some(i) = self.players.iter().position(|p| p.id == id) else { return };
         let p = self.players.remove(i);
@@ -528,6 +665,10 @@ impl Room {
             if let Some(g) = self.game.as_mut() {
                 g.m.leave(id);
             }
+        }
+        // kicks and bans announce themselves
+        if why != "kicked" && why != "banned" {
+            self.system_chat(&format!("{} has left the game", p.name));
         }
         if self.host == Some(id) {
             // prefer a connected player as the new host
@@ -543,6 +684,7 @@ impl Room {
             }
         }
         self.broadcast_room();
+        self.publish_players();
     }
 
     fn room_state(&self) -> RoomState {
@@ -562,6 +704,9 @@ impl Room {
                     host: self.host == Some(p.id),
                     account: p.account.is_some(),
                     connected: p.live().is_some(),
+                    level: p.xp.map_or(0, level_of),
+                    color: p.color,
+                    editing: p.editing,
                 })
                 .collect(),
             settings: self.settings.clone(),
@@ -570,6 +715,17 @@ impl Room {
             tick_hz: self.tick_hz,
             locked: self.locked,
             bans: self.bans.iter().map(|b| b.name.clone()).collect(),
+            quick: self.quick.clone(),
+            starting: self.starting.is_some(),
+            map: self.map_meta.clone(),
+            jukebox: self.jukebox.as_ref().map(Jukebox::state),
+        }
+    }
+
+    fn broadcast_jukebox(&self) {
+        let m = json(&ServerMsg::Jukebox { jukebox: self.jukebox.as_ref().map(Jukebox::state) });
+        for p in &self.players {
+            p.send(Out::Text(m.clone()));
         }
     }
 
@@ -607,13 +763,21 @@ impl Room {
     fn command(&mut self, id: u32, cmd: &str) {
         let (word, rest) = cmd.split_once(' ').map_or((cmd, ""), |(w, r)| (w, r.trim()));
         let word = word.to_ascii_lowercase();
+        let team_word = |w: &str| match w.to_ascii_lowercase().as_str() {
+            "ffa" => Some(TEAM_FFA),
+            "red" => Some(TEAM_RED),
+            "blue" => Some(TEAM_BLUE),
+            "spec" => Some(TEAM_SPECTATOR),
+            _ => None,
+        };
         let msg = match word.as_str() {
             "help" => return self.notice(id, HELP),
+            "settings" => return self.notice(id, &self.settings.listing().join(", ")),
             "set" => match rest.split_once(' ') {
                 Some((key, value)) => ClientMsg::SetSetting { key: key.into(), value: value.trim().into() },
                 None => return self.notice(id, "Usage: /set <key> <value>"),
             },
-            "reset" => ClientMsg::ResetSettings,
+            "reset" | "resetsettings" => ClientMsg::ResetSettings,
             "mode" => match rest.parse() {
                 Ok(mode) => ClientMsg::SetMode { mode },
                 Err(_) => return self.notice(id, "Usage: /mode <number>"),
@@ -634,15 +798,15 @@ impl Room {
                 let Some((player, tail)) = self.named_player(rest) else {
                     return self.notice(id, "No player with that name");
                 };
-                let team = match tail.to_ascii_lowercase().as_str() {
-                    "ffa" => TEAM_FFA,
-                    "red" => TEAM_RED,
-                    "blue" => TEAM_BLUE,
-                    "spec" => TEAM_SPECTATOR,
-                    _ => return self.notice(id, "Usage: /team <name> <ffa|red|blue|spec>"),
-                };
-                ClientMsg::MovePlayer { player, team }
+                match team_word(&tail) {
+                    Some(team) => ClientMsg::MovePlayer { player, team },
+                    None => return self.notice(id, "Usage: /team <name> <ffa|red|blue|spec>"),
+                }
             }
+            "join" => match team_word(rest) {
+                Some(team) => ClientMsg::SetTeam { team },
+                None => return self.notice(id, "Usage: /join <ffa|red|blue|spec>"),
+            },
             "unban" => {
                 let names: Vec<&str> = self.bans.iter().map(|b| b.name.as_str()).collect();
                 match take_name(rest, &names) {
@@ -650,9 +814,47 @@ impl Room {
                     None => return self.notice(id, "No banned player with that name"),
                 }
             }
+            "upvote" | "downvote" | "fav" | "fave" | "unfav" | "unfave" => return self.map_command(id, &word),
+            // clips are cut on the client from its own recording of the match
+            "record" => return self.notice(id, "Type /record in a running match to send its last 15 seconds to the main menu"),
             _ => return self.notice(id, "Unknown command, try /help"),
         };
         self.message(id, msg);
+    }
+
+    /// `/upvote`, `/downvote`, `/fav`, `/unfav` on the room's library map.
+    fn map_command(&mut self, id: u32, word: &str) {
+        let Some(account) = self.player(id).and_then(|p| p.account.as_ref()).map(|a| a.id) else {
+            return self.notice(id, "Sign in to vote for maps and keep favourites");
+        };
+        let Some(map) = self.map_meta.as_ref().map(|m| m.id) else {
+            return self.notice(id, "This map is not in the map library");
+        };
+        let store = &self.hub.store;
+        let (result, done) = match word {
+            "upvote" => (store.vote(account, map, 1), "You voted for this map"),
+            "downvote" => (store.vote(account, map, -1), "You voted against this map"),
+            "fav" | "fave" => (store.favourite(account, map, true), "Map added to your favourites"),
+            _ => (store.favourite(account, map, false), "Map removed from your favourites"),
+        };
+        match result {
+            Ok(()) => {
+                self.notice(id, done);
+                if word.ends_with("vote") {
+                    self.refresh_map_meta();
+                }
+            }
+            Err(e) => self.notice(id, &e.to_string()),
+        }
+    }
+
+    /// Reloads the library entry of the current map (vote counts changed).
+    fn refresh_map_meta(&mut self) {
+        let Some(id) = self.map_meta.as_ref().map(|m| m.id) else { return };
+        if let Ok(m) = self.hub.store.map_meta(id, None) {
+            self.map_meta = Some(map_meta_of(&m));
+            self.broadcast_room();
+        }
     }
 
     fn message(&mut self, id: u32, msg: ClientMsg) {
@@ -672,8 +874,20 @@ impl Room {
                 if !self.take_chat_token(id) {
                     return self.error(id, "rate_limited", "You're doing that too much!");
                 }
-                let Some(p) = self.player(id) else { return };
-                let m = json(&ServerMsg::Chat { from: Some(id), name: p.name.clone(), text });
+                let Some(p) = self.player_mut(id) else { return };
+                p.active = Instant::now();
+                let name = p.name.clone();
+                // a line that is only a YouTube link suggests it for the jukebox
+                if let Some(video) = youtube::video_id(&text) {
+                    let tx = self.tx.clone();
+                    tokio::spawn(async move {
+                        let title = youtube::title(&video).await.unwrap_or_else(|| video.clone());
+                        let _ = tx.send(RoomCmd::Suggested { from: id, name, video, title });
+                    });
+                    return;
+                }
+                let text = emoji::replace_shortcodes(&text);
+                let m = json(&ServerMsg::Chat { from: Some(id), name, text });
                 for q in &self.players {
                     q.send(Out::Text(m.clone()));
                 }
@@ -719,6 +933,7 @@ impl Room {
                     Ok(_) => {
                         self.map_code = code.trim().to_string();
                         self.map_name = name.map(|n| n.chars().take(60).collect()).unwrap_or_else(|| "Custom map".into());
+                        self.map_meta = None;
                         self.system_chat(&format!("Map changed to {}", self.map_name));
                         self.broadcast_room();
                     }
@@ -787,10 +1002,81 @@ impl Room {
                 if !host {
                     return self.error(id, "not_host", "Only the host can start");
                 }
-                if running {
+                if running || self.starting.is_some() {
                     return;
                 }
-                self.start_match();
+                // like the original: alone you start at once, together after a countdown
+                if self.players.iter().filter(|p| p.team != TEAM_SPECTATOR).count() < 2 {
+                    return self.start_match();
+                }
+                self.starting = Some(Instant::now() + START_DELAY);
+                self.system_chat("Game starting!");
+                self.broadcast_room();
+            }
+            ClientMsg::AbortStart => {
+                if !host {
+                    return self.error(id, "not_host", "Only the host can start");
+                }
+                if self.starting.take().is_some() {
+                    self.broadcast_room();
+                }
+            }
+            ClientMsg::SetLibraryMap { id: map } => {
+                if !host {
+                    return self.error(id, "not_host", "Only the host can change the map");
+                }
+                if running {
+                    return self.error(id, "in_match", "Wait for the match to end");
+                }
+                let viewer = self.player(id).and_then(|p| p.account.as_ref()).map(|a| a.id);
+                let found = match self.hub.store.map_meta(map, viewer) {
+                    Ok(m) => m,
+                    Err(e) => return self.error(id, "bad_map", &format!("Could not load the map: {e}")),
+                };
+                if let Err(e) = MapData::from_code(&found.code) {
+                    return self.error(id, "bad_map", &format!("Could not load the map: {e}"));
+                }
+                if let Err(e) = self.hub.store.record_play(map) {
+                    warn!(room = %self.code, map, "could not count the play: {e}");
+                }
+                self.map_meta = Some(map_meta_of(&found));
+                self.map_name = found.name.chars().take(60).collect();
+                self.map_code = found.code;
+                self.system_chat(&format!("Map changed to {}", self.map_name));
+                self.broadcast_room();
+            }
+            ClientMsg::GetMap => {
+                self.to(id, &ServerMsg::MapCode { code: self.map_code.clone(), name: self.map_name.clone() });
+            }
+            ClientMsg::SetColor { color } => {
+                if let Some(p) = self.player_mut(id) {
+                    p.color = color & 0xffffff;
+                    self.broadcast_room();
+                }
+            }
+            ClientMsg::Typing => {
+                let Some(p) = self.player_mut(id) else { return };
+                let now = Instant::now();
+                if p.typing_at.is_some_and(|t| now.duration_since(t) < TYPING_GAP) {
+                    return;
+                }
+                p.typing_at = Some(now);
+                let m = json(&ServerMsg::Typing { player: id });
+                for q in self.players.iter().filter(|q| q.id != id) {
+                    q.send(Out::Text(m.clone()));
+                }
+            }
+            ClientMsg::Editing { open } => {
+                if let Some(p) = self.player_mut(id).filter(|p| p.editing != open) {
+                    p.editing = open;
+                    self.broadcast_room();
+                }
+            }
+            ClientMsg::Jukebox { action, video } => {
+                if !host {
+                    return self.error(id, "not_host", "Only the host can control the jukebox");
+                }
+                self.jukebox_action(id, &action, video);
             }
             ClientMsg::EndMatch => {
                 if !host {
@@ -840,10 +1126,46 @@ impl Room {
             | ClientMsg::ListRooms
             | ClientMsg::CreateRoom { .. }
             | ClientMsg::JoinRoom { .. }
-            | ClientMsg::QuickPlay
+            | ClientMsg::QuickPlay { .. }
             | ClientMsg::LeaveRoom
             | ClientMsg::RtcOffer { .. } => {}
         }
+    }
+
+    /// Host jukebox controls: play a video, pause, resume or stop.
+    fn jukebox_action(&mut self, id: u32, action: &str, video: Option<String>) {
+        match action {
+            "play" => {
+                let Some(video) = video.filter(|v| youtube::valid_id(v)) else {
+                    return self.error(id, "bad_video", "That is not a YouTube video");
+                };
+                self.jukebox =
+                    Some(Jukebox { video: video.clone(), title: video.clone(), playing: true, base: 0.0, since: Instant::now() });
+                let tx = self.tx.clone();
+                tokio::spawn(async move {
+                    if let Some(title) = youtube::title(&video).await {
+                        let _ = tx.send(RoomCmd::JukeboxTitle { video, title });
+                    }
+                });
+            }
+            "pause" => {
+                let Some(j) = self.jukebox.as_mut().filter(|j| j.playing) else { return };
+                j.base = j.position();
+                j.playing = false;
+            }
+            "resume" => {
+                let Some(j) = self.jukebox.as_mut().filter(|j| !j.playing) else { return };
+                j.since = Instant::now();
+                j.playing = true;
+            }
+            "stop" => {
+                if self.jukebox.take().is_none() {
+                    return;
+                }
+            }
+            _ => return self.error(id, "bad_message", "Unknown jukebox action"),
+        }
+        self.broadcast_jukebox();
     }
 
     /// Puts a player on a team, mid-match too. Errors name the rule broken.
@@ -891,14 +1213,28 @@ impl Room {
     }
 
     fn start_match(&mut self) {
+        self.starting = None;
         if let Some(hz) = self.next_tick_hz.take() {
             self.tick_hz = hz;
         }
         let players: Vec<(u32, f64)> = self.players.iter().filter(|p| p.team != TEAM_SPECTATOR).map(|p| (p.id, p.team as f64)).collect();
         if players.is_empty() {
-            return self.system_chat("Nobody to play: everyone is spectating");
+            // a quick-play room waits quietly for someone to stop spectating
+            if self.quick.is_none() {
+                self.system_chat("Nobody to play: everyone is spectating");
+            }
+            return self.broadcast_room();
         }
-        if self.map_code.is_empty() {
+        // quick play rotates through the built-in maps in the room's order
+        let maps: Vec<String> = if self.quick.is_some() {
+            self.rotation
+                .iter()
+                .filter_map(|name| self.hub.maps.iter().find(|m| &m.name == name).map(|m| m.code.clone()))
+                .collect()
+        } else {
+            vec![self.map_code.clone()]
+        };
+        if maps.iter().all(|c| c.is_empty()) {
             return self.system_chat("No map selected");
         }
         let start = MatchStart {
@@ -907,9 +1243,9 @@ impl Room {
             tick_hz: self.tick_hz,
             players,
             settings: self.settings.clone(),
-            maps: vec![self.map_code.clone()],
+            maps,
             intro: true,
-            rotation: false,
+            rotation: self.quick.is_some(),
         };
         let m = match ServerMatch::new(start.clone()) {
             Ok(m) => m,
@@ -971,12 +1307,85 @@ impl Room {
                 if !p.in_match {
                     return;
                 }
+                if !f.changes.is_empty() {
+                    p.active = Instant::now();
+                }
                 let m = g.m.submit(id, &f).margin;
                 // fraction of the current tick already elapsed counts against the margin
                 let to_next = g.next_tick.saturating_duration_since(Instant::now()).as_secs_f64() * self.tick_hz;
                 let precise = m as f64 - (1.0 - to_next.clamp(0.0, 1.0));
                 p.margin16 = (precise * 16.0).round().clamp(-30000.0, 30000.0) as i32;
             }
+        }
+    }
+
+    /// Quick-play rooms play whenever someone is in them.
+    fn quick_start(&mut self) {
+        if self.quick.is_some() && self.game.is_none() && self.players.iter().any(|p| p.team != TEAM_SPECTATOR) {
+            self.start_match();
+        }
+    }
+
+    /// Quick play: removes players who changed no input and said nothing
+    /// for [`IDLE_LIMIT`], so idle players do not hold slots.
+    fn kick_idle(&mut self) {
+        if self.quick.is_none() {
+            return;
+        }
+        let idle: Vec<u32> =
+            self.players.iter().filter(|p| p.live().is_some() && p.active.elapsed() > IDLE_LIMIT).map(|p| p.id).collect();
+        for id in idle {
+            if let Some(p) = self.player(id) {
+                p.text(&ServerMsg::Kicked { reason: "You were removed from the room for being idle too long".into() });
+                p.send(Out::Close("idle".into()));
+            }
+            self.remove(id, "idle");
+        }
+    }
+
+    /// Experience for a finished game: custom matches at their end, the
+    /// quick-play rotation at the end of each game.
+    fn award(&mut self, quick: bool) {
+        let Some(g) = self.game.as_ref() else { return };
+        let round = &g.m.state.round;
+        let gs = &g.m.start.settings;
+        let awards: Vec<(u32, i32, u32)> = self
+            .players
+            .iter()
+            .filter_map(|p| {
+                let r = if quick { award::quick_award(round, gs.game_mode, p.id) } else { award::match_award(round, gs, p.id) };
+                r.map(|(place, xp)| (p.id, place, xp))
+            })
+            .collect();
+        let mut levels_changed = false;
+        for (id, placement, xp) in awards {
+            let Some(p) = self.players.iter_mut().find(|p| p.id == id) else { continue };
+            let msg = match &p.account {
+                Some(a) => match self.hub.store.grant_xp(a.id, xp) {
+                    Ok(grant) => {
+                        levels_changed |= p.xp.map(level_of) != Some(level_of(grant.total));
+                        p.xp = Some(grant.total);
+                        XpAward {
+                            placement,
+                            gained: grant.granted,
+                            xp: Some(grant.total),
+                            level: level_of(grant.total),
+                            limit: grant.limit.map(|l| if l == neobox_store::XpLimit::Short { "short" } else { "long" }.to_string()),
+                            quick,
+                        }
+                    }
+                    Err(e) => {
+                        warn!(room = %self.code, player = id, "could not grant experience: {e}");
+                        continue;
+                    }
+                },
+                // guests keep their (capped) experience in their browser
+                None => XpAward { placement, gained: xp, xp: None, level: 0, limit: None, quick },
+            };
+            p.text(&ServerMsg::Xp(msg));
+        }
+        if levels_changed {
+            self.broadcast_room();
         }
     }
 
@@ -1011,6 +1420,8 @@ impl Room {
             steps += 1;
             let checksum = (g.m.tick % CHECKSUM_INTERVAL == 0).then(|| g.m.checksum());
             let outcome = g.m.last_outcome;
+            let quick_game_over = self.quick.is_some() && g.m.state.round.game_over == QUICK_AWARD_TICK;
+            let rotation_index = g.m.state.round.io;
             self.send_batches(checksum);
             if too_heavy {
                 warn!(room = %self.code, map = %self.map_name, "map too complex to simulate: match stopped");
@@ -1018,7 +1429,18 @@ impl Room {
                 self.end_match("map too complex");
                 return;
             }
+            if quick_game_over {
+                self.award(true);
+            }
+            if outcome == Outcome::NewRound && !self.rotation.is_empty() {
+                let name = &self.rotation[rotation_index as usize % self.rotation.len()];
+                if *name != self.map_name {
+                    self.map_name = name.clone();
+                    self.broadcast_room();
+                }
+            }
             if outcome == Outcome::MatchOver {
+                self.award(false);
                 self.end_match("game over");
                 return;
             }
@@ -1137,6 +1559,8 @@ impl Room {
         s.created_ms = self.created;
         s.settings = Some(self.settings.clone());
         s.bans = self.bans.iter().map(|b| b.name.clone()).collect();
+        s.quick = self.quick.clone();
+        s.jukebox = self.jukebox.as_ref().map(|j| JukeboxInfo { video: j.video.clone(), title: j.title.clone() });
         s.bytes_in_per_s = self.players.iter().map(|p| p.rate.0).sum();
         s.bytes_out_per_s = self.players.iter().map(|p| p.rate.1).sum();
         match &mut self.game {
@@ -1166,8 +1590,16 @@ impl Room {
                 s.round = None;
             }
         }
+        drop(s);
+        self.publish_players();
+    }
+
+    /// Copies the player list into the shared summary right away, so the
+    /// room list, quick-play matching and friends' presence see joins and
+    /// leaves before the next once-a-second refresh.
+    fn publish_players(&self) {
         let mask = |id: u32| self.game.as_ref().map_or(0, |g| g.m.current_mask(id));
-        s.players = self
+        let players = self
             .players
             .iter()
             .map(|p| PlayerSummary {
@@ -1188,6 +1620,7 @@ impl Room {
                 account: p.account.as_ref().map(|a| a.id),
             })
             .collect();
+        self.summary.lock().unwrap().players = players;
     }
 }
 
