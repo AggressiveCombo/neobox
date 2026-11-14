@@ -187,9 +187,10 @@ $("#libprev").onclick = () => { libPage--; refreshLibrary(); };
 $("#libnext").onclick = () => { libPage++; refreshLibrary(); };
 
 async function refresh() {
+  if ($("#app").hidden) return;
   try {
     const r = await api("/admin/api/state");
-    if (r.ok) { showApp(); renderState(await r.json()); refreshMaps(); refreshLibrary(); }
+    if (r.ok) { renderState(await r.json()); refreshMaps(); refreshLibrary(); }
   } catch (_) {}
 }
 
@@ -267,5 +268,8 @@ async function pollView() {
 setInterval(refresh, 1000);
 setInterval(pollLogs, 1500);
 setInterval(pollView, 100);
-refresh(); pollLogs();
-fetch("/admin/api/state", { credentials: "same-origin" }).then((r) => { if (r.status === 401) showLogin(); });
+// a logged-out page asks once and shows the login form; it never polls without a session
+fetch("/admin/api/session", { credentials: "same-origin" })
+  .then((r) => r.json())
+  .then((s) => { if (s.admin) { showApp(); refresh(); pollLogs(); } else showLogin(); })
+  .catch(showLogin);

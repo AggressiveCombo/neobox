@@ -28,6 +28,7 @@ pub fn router() -> Router<Arc<Hub>> {
         .route("/admin/admin.js", get(script))
         .route("/admin/api/login", post(login))
         .route("/admin/api/logout", post(logout))
+        .route("/admin/api/session", get(session))
         .route("/admin/api/state", get(state))
         .route("/admin/api/logs", get(logs))
         .route("/admin/api/broadcast", post(broadcast))
@@ -121,6 +122,11 @@ async fn logout(State(hub): State<Arc<Hub>>, headers: HeaderMap) -> Response {
         hub.admin_sessions.lock().unwrap().remove(&t);
     }
     ([(header::SET_COOKIE, format!("{COOKIE}=; Path=/admin; Max-Age=0"))], "ok").into_response()
+}
+
+/// Whether this browser holds an admin session; the page asks once on load.
+async fn session(State(hub): State<Arc<Hub>>, headers: HeaderMap) -> Json<serde_json::Value> {
+    Json(serde_json::json!({ "admin": authorized(&hub, &headers) }))
 }
 
 async fn state(State(hub): State<Arc<Hub>>, headers: HeaderMap) -> Response {
