@@ -12,7 +12,10 @@ pub mod mode {
     pub const ENDLESS: i32 = 6;
 }
 
+/// Missing fields deserialise to their defaults, so `{}` is the default
+/// settings (offline games, older replays).
 #[derive(serde::Serialize, serde::Deserialize, Clone, Debug, PartialEq)]
+#[serde(default)]
 pub struct GameSettings {
     /// `gsFightersCollide`: players' contact rays see other players.
     pub fighters_collide: bool,
