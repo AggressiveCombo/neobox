@@ -11,6 +11,7 @@ import {
   type RoomInfo,
 } from "../../protocol";
 import { clear, h } from "../dom";
+import { countryName, flagUrl, formatDistance, sortRooms } from "../../rooms";
 
 const SVG_NS = "http://www.w3.org/2000/svg";
 const DEFAULT_MAX_PLAYERS = 8;
@@ -238,6 +239,12 @@ export const browserScreen: ScreenFactory = (ctx) => {
     ctx.joinRoom(room.code);
   }
 
+  /** Flag image of the host's country; the name is the alt text and tooltip. */
+  function flagImg(country: string): HTMLImageElement {
+    const name = countryName(country);
+    return h("img", { class: "room-flag", src: flagUrl(country), alt: name, title: name, loading: "lazy" });
+  }
+
   function roomItem(room: RoomInfo): HTMLLIElement {
     const open = room.password && pendingCode === room.code;
     const row = h(
@@ -251,16 +258,27 @@ export const browserScreen: ScreenFactory = (ctx) => {
       h(
         "span",
         { class: "room-name" },
+        room.country !== null ? flagImg(room.country) : null,
         room.name,
         room.password ? lockIcon() : null,
         room.quick !== null ? h("span", { class: "badge quick-badge" }, "Quick") : null,
+        room.region !== "" ? h("span", { class: "room-region" }, room.region) : null,
       ),
       h("span", { class: "room-mode" }, modeName(room.mode)),
       h("span", { class: "room-map" }, room.map),
+      h("span", { class: "room-distance" }, formatDistance(room.distance, store.state.country)),
       jukeboxCell(room.jukebox),
       h("span", { class: "room-count" }, `${room.players}/${room.max_players}`),
       room.in_match ? h("span", { class: "badge" }, "in match") : null,
     );
+    // Thumbnails load small; hovering or focusing the row swaps in the larger one.
+    const sharpen = (): void => {
+      for (const img of row.querySelectorAll<HTMLImageElement>(".room-thumb")) {
+        img.src = img.src.replace("/default.jpg", "/hqdefault.jpg");
+      }
+    };
+    row.addEventListener("pointerenter", sharpen, { once: true });
+    row.addEventListener("focus", sharpen, { once: true });
     const friends =
       room.friends.length > 0 ? h("p", { class: "room-friends" }, `Friends: ${room.friends.join(", ")}`) : null;
     return h("li", { class: "room-item" }, row, friends, open ? joinForm(room) : null);
@@ -269,7 +287,7 @@ export const browserScreen: ScreenFactory = (ctx) => {
   function renderRooms(): void {
     clear(roomList);
     emptyHint.hidden = rooms.length > 0;
-    for (const room of rooms) roomList.appendChild(roomItem(room));
+    for (const room of sortRooms(rooms)) roomList.appendChild(roomItem(room));
   }
 
   const el = h(
@@ -312,6 +330,7 @@ export const browserScreen: ScreenFactory = (ctx) => {
         h("span", null, "Room"),
         h("span", null, "Mode"),
         h("span", null, "Map"),
+        h("span", null, "Distance"),
         h("span", null, "Playing"),
         h("span", null, "Players"),
       ),
@@ -328,7 +347,7 @@ export const browserScreen: ScreenFactory = (ctx) => {
     el,
     update(state, prev) {
       if (state.serverName !== prev.serverName) title.textContent = state.serverName || "Rooms";
-      if (state.rooms !== prev.rooms) {
+      if (state.rooms !== prev.rooms || state.country !== prev.country) {
         rooms = state.rooms;
         renderRooms();
       }

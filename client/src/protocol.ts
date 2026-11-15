@@ -30,7 +30,7 @@ export const QUICK_QUEUES: { id: QuickQueue; mode: number }[] = [
 export type JukeboxAction = "play" | "pause" | "resume" | "stop";
 
 export type ClientMsg =
-  | { t: "hello"; version: number; name: string; color?: number | null }
+  | { t: "hello"; version: number; name: string; color?: number | null; ticket?: string | null }
   | { t: "list_rooms" }
   | { t: "create_room"; name: string; password: string | null; max_players: number; public: boolean }
   | { t: "join_room"; room: string; password: string | null; resume?: string | null }
@@ -94,6 +94,12 @@ export interface RoomInfo {
   jukebox: { video: string; title: string } | null;
   /** Names of the viewer's friends in the room. */
   friends: string[];
+  /** Region name of the room's server ("" on a single-server setup). */
+  region: string;
+  /** Kilometres from the viewer to the room's server; null when unknown. */
+  distance: number | null;
+  /** ISO 3166-1 alpha-2 country of the host (upper case), if known. */
+  country: string | null;
 }
 
 export interface PlayerInfo {
@@ -166,11 +172,12 @@ export interface MatchStart {
 }
 
 export type ServerMsg =
-  | { t: "welcome"; version: number; server: string; rtc: boolean }
+  | { t: "welcome"; version: number; server: string; rtc: boolean; region: string }
   | { t: "joined"; you: number; token: string }
   | { t: "rtc_answer"; sdp: string }
   | { t: "error"; code: string; message: string }
-  | { t: "rooms"; rooms: RoomInfo[] }
+  | { t: "rooms"; rooms: RoomInfo[]; country: string | null }
+  | { t: "redirect"; url: string; then: ClientMsg }
   | { t: "room"; room: RoomState }
   | { t: "left" }
   | { t: "chat"; from: number | null; name: string; text: string }

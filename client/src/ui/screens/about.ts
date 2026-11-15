@@ -43,6 +43,22 @@ export const THIRD_PARTY: AssetCredit[] = [
     licenceUrl: "https://creativecommons.org/licenses/by/4.0/",
     sourceUrl: "https://github.com/LDNOOBW/List-of-Dirty-Naughty-Obscene-and-Otherwise-Bad-Words",
   },
+  {
+    asset: "Country flags",
+    title: "flag-icons",
+    author: "Panayiotis Lipiridis",
+    licence: "MIT",
+    licenceUrl: "https://github.com/lipis/flag-icons/blob/main/LICENSE",
+    sourceUrl: "https://github.com/lipis/flag-icons",
+  },
+  {
+    asset: "Room distances and flags (IP geolocation)",
+    title: "DB-IP IP to City Lite",
+    author: "DB-IP",
+    licence: "CC BY 4.0",
+    licenceUrl: "https://creativecommons.org/licenses/by/4.0/",
+    sourceUrl: "https://db-ip.com/db_lite.php",
+  },
 ];
 
 export const aboutScreen: ScreenFactory = (ctx) => {

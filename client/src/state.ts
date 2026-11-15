@@ -59,6 +59,8 @@ export interface AppState {
   /** Close reason or error detail for the last connection change. */
   connectDetail: string;
   rooms: RoomInfo[];
+  /** The viewer's country (ISO alpha-2) from the room list: km or miles, and the flag column. Null if unknown. */
+  country: string | null;
   room: RoomState | null;
   chat: ChatLine[];
   /** Set while a match is running (from match_start or snapshot). */
@@ -119,6 +121,7 @@ export function initialState(): AppState {
     connection: "closed",
     connectDetail: "",
     rooms: [],
+    country: null,
     room: null,
     chat: [],
     inMatch: false,

@@ -39,3 +39,27 @@
   background: rgb(64 220 128 / 0.15);
   color: #9ee8b8;
 }
+
+.room-flag {
+  flex: none;
+  width: 18px;
+  height: 13px;
+  margin-right: 6px;
+  border-radius: 2px;
+  vertical-align: middle;
+}
+
+.room-region {
+  margin-left: 6px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: normal;
+}
+
+.room-distance {
+  flex: 0 0 5rem;
+  color: var(--muted);
+  font-size: 13px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}

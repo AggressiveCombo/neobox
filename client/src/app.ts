@@ -1,7 +1,7 @@
 // Application shell: owns the services, the connection state machine and screen
 // mounting. Screens render from the store; this file reacts to server messages.
 
-import { fetchBuiltinMaps, wsUrl, type BuiltinMap } from "./api";
+import { fetchBuiltinMaps, fetchTicket, wsUrl, wsUrlFor, type BuiltinMap } from "./api";
 import { Sfx } from "./audio";
 import { computeCamera, findLocal } from "./camera";
 import type { AppCtx, HudHandle, Present, ScreenFactory, ScreenHandle, WasmTools } from "./ctx";
@@ -10,7 +10,7 @@ import { readScene } from "./frame";
 import { MatchLoop, type SnapshotBytes } from "./game";
 import { Input } from "./input";
 import { Net, type NetStatus } from "./net";
-import { NAME_RE, PROTOCOL_VERSION, type MatchStart, type RoomState, type ServerMsg } from "./protocol";
+import { NAME_RE, PROTOCOL_VERSION, type ClientMsg, type MatchStart, type RoomState, type ServerMsg } from "./protocol";
 import { createRenderer, type Renderer } from "./render";
 import { Overlay } from "./render/overlay";
 import { CHAT_LIMIT, NAME_STORAGE_KEY, SEAT_STORAGE_KEY, Store, initialState, type AppState, type ChatLine, type Screen } from "./state";
@@ -125,6 +125,14 @@ export function start(): void {
   let joinAttempt: string | null = null;
   /** A resume join is in flight after a reconnect. */
   let resuming = false;
+  /** Base URL of the game server this connection is on; null = the home server (the page's own origin). */
+  let server: string | null = null;
+  /** Message to send once the server we were redirected to has welcomed us (the redirect's `then`). */
+  let pendingThen: ClientMsg | null = null;
+  /** Bumped whenever the connection changes, so an async hello from the old connection is dropped. */
+  let linkSeq = 0;
+  /** Set while the app itself closes and reopens the socket: that close is not a lost connection. */
+  let switching = false;
   /** Callers of ctx.roomMap() waiting for the server's `map_code`. */
   const mapWaiters: ((map: { code: string; name: string }) => void)[] = [];
   let reconnectTimer: number | null = null;
@@ -367,11 +375,11 @@ export function start(): void {
     overlay.resize(w, hPx);
   }
 
-  /** This tab's seat, kept in sessionStorage so a page reload rejoins the same slot. */
+  /** This tab's seat, kept in sessionStorage so a page reload rejoins the same slot on the same server. */
   function saveSeat(): void {
     try {
       if (roomCode !== null && resumeToken !== null) {
-        window.sessionStorage.setItem(SEAT_STORAGE_KEY, JSON.stringify({ room: roomCode, token: resumeToken }));
+        window.sessionStorage.setItem(SEAT_STORAGE_KEY, JSON.stringify({ room: roomCode, token: resumeToken, server }));
       } else {
         window.sessionStorage.removeItem(SEAT_STORAGE_KEY);
       }
@@ -380,12 +388,13 @@ export function start(): void {
     }
   }
 
-  /** The resume token this tab holds for `room`, if any. */
-  function seatToken(room: string): string | null {
+  /** This tab's seat in `room` (resume token and the server it is on), if any. */
+  function seat(room: string): { token: string; server: string | null } | null {
     try {
-      const seat: unknown = JSON.parse(window.sessionStorage.getItem(SEAT_STORAGE_KEY) ?? "null");
-      if (typeof seat !== "object" || seat === null || !("room" in seat) || !("token" in seat)) return null;
-      return seat.room === room && typeof seat.token === "string" ? seat.token : null;
+      const saved: unknown = JSON.parse(window.sessionStorage.getItem(SEAT_STORAGE_KEY) ?? "null");
+      if (typeof saved !== "object" || saved === null || !("room" in saved) || !("token" in saved)) return null;
+      if (saved.room !== room || typeof saved.token !== "string") return null;
+      return { token: saved.token, server: "server" in saved && typeof saved.server === "string" ? saved.server : null };
     } catch {
       return null;
     }
@@ -396,6 +405,8 @@ export function start(): void {
     stopReconnect();
     roomCode = null;
     resumeToken = null;
+    server = null;
+    pendingThen = null;
     saveSeat();
     store.set({
       screen: "menu",
@@ -417,7 +428,10 @@ export function start(): void {
     syncUrl(null);
   }
 
-  /** Leave the current room (server said so, or the player did) and show the browser. */
+  /**
+   * Leave the current room (the server said so, or the player did) and show the browser. A room on a game
+   * server sends us back to the home server, whose welcome then shows the list.
+   */
   function leaveRoom(): void {
     loop?.stop();
     roomCode = null;
@@ -437,6 +451,14 @@ export function start(): void {
       screen: "browse",
     });
     syncUrl(null);
+    if (server !== null) connectServer(null, null);
+    else net.send({ t: "list_rooms" });
+  }
+
+  /** The game server we were on is gone: back to the room list on the home server. */
+  function serverGone(): void {
+    leaveRoom();
+    toast("The game server went away", "error");
   }
 
   function startMatch(match: MatchStart, you: number | null, snap: SnapshotBytes | null): void {
@@ -470,7 +492,38 @@ export function start(): void {
 
   function sendJoin(room: string, password: string | null): void {
     joinAttempt = room;
-    net.send({ t: "join_room", room, password, resume: seatToken(room) });
+    net.send({ t: "join_room", room, password, resume: seat(room)?.token ?? null });
+  }
+
+  /** Point the connection at the server `base` (null = home); `then` is sent once that server welcomes us. */
+  function connectServer(base: string | null, then: ClientMsg | null): void {
+    linkSeq++;
+    server = base;
+    pendingThen = then;
+    pendingName = store.state.name || null;
+    switching = true;
+    try {
+      net.connect(socketUrl());
+    } finally {
+      switching = false;
+    }
+  }
+
+  /** Websocket URL of the server we are on. */
+  function socketUrl(): string {
+    return server === null ? wsUrl() : wsUrlFor(server);
+  }
+
+  /**
+   * Say hello on the open socket. A game server needs a ticket from the home server to know the signed-in
+   * player; the home server needs none (its session cookie is enough).
+   */
+  async function sendHello(name: string): Promise<void> {
+    const seq = linkSeq;
+    // guests have no account to vouch for: no ticket (asking would only get a 401)
+    const ticket = server === null || store.state.account === null ? null : await fetchTicket();
+    if (seq !== linkSeq || net.status !== "open") return;
+    net.send({ t: "hello", version: PROTOCOL_VERSION, name, color: prefs.value.color, ticket });
   }
 
   function handleServer(msg: ServerMsg): void {
@@ -482,10 +535,20 @@ export function start(): void {
           net.send({ t: "join_room", room: roomCode, password: null, resume: resumeToken });
           return;
         }
+        // A redirected connection: the server we were sent to runs the action we asked for.
+        if (pendingThen !== null) {
+          const then = pendingThen;
+          pendingThen = null;
+          store.set({ serverName: msg.server });
+          net.send(then);
+          return;
+        }
         const queue = store.state.intent;
         store.set({ serverName: msg.server, screen: queue === null ? "browse" : "quick", intent: null });
         net.send({ t: "list_rooms" });
         if (pendingJoin !== null) {
+          // A join on a game server resumes this tab's seat (see joinRoom): if that fails, the server is gone.
+          resuming = server !== null;
           sendJoin(pendingJoin, null);
           pendingJoin = null;
         } else if (queue !== null) {
@@ -501,19 +564,31 @@ export function start(): void {
           stopReconnect();
         }
         return;
-      case "error":
+      case "error": {
         if (resuming) {
           resuming = false;
-          leaveRoom();
-          net.send({ t: "list_rooms" });
-          toast(`could not rejoin the room: ${msg.message}`, "error");
+          if (server !== null) {
+            serverGone();
+          } else {
+            leaveRoom();
+            toast(`could not rejoin the room: ${msg.message}`, "error");
+          }
           return;
         }
         if (msg.code === "wrong_password" && joinAttempt !== null) store.set({ invite: joinAttempt });
+        // A refusal from a game server we only visited (not in a room there): back to the list on home.
+        if (server !== null && roomCode === null) leaveRoom();
         toast(msg.message, "error");
         return;
+      }
       case "rooms":
-        store.set({ rooms: msg.rooms });
+        store.set({ rooms: msg.rooms, country: msg.country });
+        return;
+      case "redirect":
+        // Another server hosts what we asked for: leave our room here and connect there.
+        if (roomCode !== null) leaveRoom();
+        if (msg.then.t === "join_room") joinAttempt = msg.then.room;
+        connectServer(msg.url, msg.then);
         return;
       case "room": {
         const chat = store.state.room?.code === msg.room.code ? store.state.chat : [];
@@ -532,12 +607,10 @@ export function start(): void {
       }
       case "left":
         leaveRoom();
-        net.send({ t: "list_rooms" });
         return;
       case "kicked":
         toast(`kicked: ${msg.reason}`, "error");
         leaveRoom();
-        net.send({ t: "list_rooms" });
         return;
       case "chat":
         if (msg.from !== null && msg.from !== store.state.myId) sfx.chatPop();
@@ -599,7 +672,7 @@ export function start(): void {
   }
 
   function connectForResume(): void {
-    if (net.status === "closed") net.connect(wsUrl());
+    if (net.status === "closed") net.connect(socketUrl());
   }
 
   /** Schedule the next attempt, or give up once the deadline has passed. */
@@ -607,8 +680,12 @@ export function start(): void {
     if (reconnectTimer !== null) window.clearTimeout(reconnectTimer);
     reconnectTimer = null;
     if (performance.now() - reconnectSince >= RECONNECT_GIVE_UP_MS) {
-      resetToMenu();
-      toast("could not reconnect to the room", "error");
+      if (server !== null) {
+        serverGone();
+      } else {
+        resetToMenu();
+        toast("could not reconnect to the room", "error");
+      }
       return;
     }
     const delay = RECONNECT_DELAYS_MS[Math.min(reconnectAttempt, RECONNECT_DELAYS_MS.length - 1)];
@@ -639,16 +716,23 @@ export function start(): void {
 
   function onStatus(status: NetStatus, detail: string | undefined, unexpected: boolean): void {
     store.set({ connection: status, connectDetail: detail ?? "" });
+    if (switching) return;
     if (status === "open") {
       const name = pendingName ?? (store.state.reconnecting ? store.state.name : null);
       pendingName = null;
-      if (name !== null) net.send({ t: "hello", version: PROTOCOL_VERSION, name, color: prefs.value.color });
+      if (name !== null) void sendHello(name);
       return;
     }
     if (status !== "closed") return;
+    linkSeq++;
     loop?.stop();
     if (unexpected && roomCode !== null && resumeToken !== null) {
       beginReconnect();
+      return;
+    }
+    // The game server dropped and there is no room to resume: back to the list on home.
+    if (unexpected && server !== null) {
+      serverGone();
       return;
     }
     resetToMenu();
@@ -660,23 +744,36 @@ export function start(): void {
     store.set({ name });
     window.localStorage.setItem(NAME_STORAGE_KEY, name);
     if (net.status === "open") {
-      net.send({ t: "hello", version: PROTOCOL_VERSION, name, color: prefs.value.color });
+      void sendHello(name);
       return;
     }
     pendingName = name;
-    if (net.status === "closed") net.connect(wsUrl());
+    if (net.status === "closed") net.connect(socketUrl());
   }
 
-  /** Join room `code`: right away when connected, else after connecting with the saved name (or from the menu). */
+  /**
+   * Join room `code`. A room we hold a seat in lives on that seat's server, any other on the home server
+   * (which redirects to the right one). Connects first when needed; the welcome then sends the join.
+   */
   function joinRoom(code: string): void {
-    if (net.status === "open" && store.state.serverName !== "") {
+    const target = seat(code)?.server ?? null;
+    if (net.status === "open" && store.state.serverName !== "" && server === target) {
       sendJoin(code, null);
       return;
     }
     pendingJoin = code;
     const name = store.state.account?.name ?? (store.state.name || window.localStorage.getItem(NAME_STORAGE_KEY) || "");
-    if (NAME_RE.test(name)) play(name);
-    else store.set({ screen: "menu" });
+    if (!NAME_RE.test(name)) {
+      store.set({ screen: "menu" });
+      return;
+    }
+    if (net.status === "closed") server = target;
+    if (server === target) {
+      play(name);
+      return;
+    }
+    store.set({ name });
+    connectServer(target, null);
   }
 
   /** Close the connection and return to the main menu. */
