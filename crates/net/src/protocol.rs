@@ -35,12 +35,16 @@ pub fn valid_name(name: &str) -> bool {
 #[serde(tag = "t", rename_all = "snake_case")]
 pub enum ClientMsg {
     /// `color`: the player's appearance colour (0xRRGGBB); absent: the
-    /// server picks one.
+    /// server picks one. `ticket`: on a regional game server, the signed
+    /// account ticket from the main server's `GET /api/ticket` (absent:
+    /// guest, or the page's own server, which reads the session cookie).
     Hello {
         version: u16,
         name: String,
         #[serde(default)]
         color: Option<u32>,
+        #[serde(default)]
+        ticket: Option<String>,
     },
     ListRooms,
     CreateRoom { name: String, password: Option<String>, max_players: u8, public: bool },
@@ -161,6 +165,16 @@ pub struct RoomInfo {
     pub jukebox: Option<JukeboxInfo>,
     /// Names of the viewer's friends in the room.
     pub friends: Vec<String>,
+    /// Region name of the server the room runs on (empty: a single-server setup).
+    #[serde(default)]
+    pub region: String,
+    /// Kilometres from the viewer to the room's server; `None` when either
+    /// location is unknown.
+    #[serde(default)]
+    pub distance: Option<u32>,
+    /// ISO 3166-1 alpha-2 country of the room's host (upper case), if known.
+    #[serde(default)]
+    pub country: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
@@ -243,12 +257,29 @@ pub struct MatchStart {
 #[serde(tag = "t", rename_all = "snake_case")]
 pub enum ServerMsg {
     /// `rtc`: the server accepts WebRTC data channels (`rtc_offer`).
-    Welcome { version: u16, server: String, rtc: bool },
+    /// `region`: this server's region name (empty: a single-server setup).
+    Welcome {
+        version: u16,
+        server: String,
+        rtc: bool,
+        #[serde(default)]
+        region: String,
+    },
     /// Sent to a player entering a room: its player id there and the token
     /// that resumes this slot after a lost connection (`join_room.resume`).
     Joined { you: u32, token: String },
     Error { code: String, message: String },
-    Rooms { rooms: Vec<RoomInfo> },
+    /// `country`: the viewer's own country (ISO alpha-2, upper case), if
+    /// known; the client shows miles for GB and US like the original.
+    Rooms {
+        rooms: Vec<RoomInfo>,
+        #[serde(default)]
+        country: Option<String>,
+    },
+    /// The room or the new room is on another server: connect to `url`
+    /// (its base URL; the socket is `<url>/ws`), say hello (with a ticket
+    /// when signed in), then send `then`.
+    Redirect { url: String, then: Box<ClientMsg> },
     Room { room: RoomState },
     Left,
     Chat { from: Option<u32>, name: String, text: String },
