@@ -52,6 +52,19 @@
   gap: 8px;
 }
 
+.social-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+}
+
+.social-check input {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--accent);
+}
+
 .sign-in-prompt {
   display: flex;
   flex-direction: column;

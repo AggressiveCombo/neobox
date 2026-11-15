@@ -82,6 +82,8 @@ export const accountScreen: ScreenFactory = (ctx) => {
       placeholder: "name",
     });
     const password = passwordInput("password", "current-password");
+    // off by default like the original: the session ends with the browser
+    const remember = h("input", { type: "checkbox" });
 
     /** Validated name and password, or null with the problem in the status line. */
     function credentials(): { name: string; password: string } | null {
@@ -102,7 +104,7 @@ export const accountScreen: ScreenFactory = (ctx) => {
       const creds = credentials();
       if (creds === null) return;
       void act(async () => {
-        applyAccount(ctx, await login(creds.name, creds.password));
+        applyAccount(ctx, await login(creds.name, creds.password, remember.checked));
       }, "Signed in.");
     }
 
@@ -110,7 +112,7 @@ export const accountScreen: ScreenFactory = (ctx) => {
       const creds = credentials();
       if (creds === null) return;
       void act(async () => {
-        applyAccount(ctx, await register(creds.name, creds.password));
+        applyAccount(ctx, await register(creds.name, creds.password, remember.checked));
       }, "Account created.");
     }
 
@@ -124,6 +126,7 @@ export const accountScreen: ScreenFactory = (ctx) => {
         { class: "social-form", onsubmit: signIn },
         field("Name", name),
         field("Password", password),
+        h("label", { class: "social-check" }, remember, " Stay signed in"),
         h(
           "div",
           { class: "actions" },

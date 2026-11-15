@@ -64,16 +64,26 @@ async function request<T>(method: string, path: string, body?: unknown, keepaliv
 /** The signed-in account, or null for guests. */
 export const fetchMe = (): Promise<Account | null> => request<Account | null>("GET", "/api/account/me");
 
-export const register = (name: string, password: string): Promise<Account> =>
-  request<Account>("POST", "/api/account/register", { name, password });
+/** This browser's "Stay signed in" choice, so a password change keeps the same kind of session. */
+const REMEMBER_KEY = "neobox.staySignedIn";
 
-export const login = (name: string, password: string): Promise<Account> =>
-  request<Account>("POST", "/api/account/login", { name, password });
+/** Sign in or register; `remember` keeps the session after the browser closes (the original's "Stay logged in"). */
+async function startSession(path: string, name: string, password: string, remember: boolean): Promise<Account> {
+  const account = await request<Account>("POST", path, { name, password, remember });
+  localStorage.setItem(REMEMBER_KEY, remember ? "1" : "0");
+  return account;
+}
+
+export const register = (name: string, password: string, remember: boolean): Promise<Account> =>
+  startSession("/api/account/register", name, password, remember);
+
+export const login = (name: string, password: string, remember: boolean): Promise<Account> =>
+  startSession("/api/account/login", name, password, remember);
 
 export const logout = (): Promise<void> => request<void>("POST", "/api/account/logout");
 
 export const changePassword = (old: string, next: string): Promise<void> =>
-  request<void>("POST", "/api/account/password", { old, new: next });
+  request<void>("POST", "/api/account/password", { old, new: next, remember: localStorage.getItem(REMEMBER_KEY) === "1" });
 
 export const deleteAccount = (password: string): Promise<void> =>
   request<void>("POST", "/api/account/delete", { password });
