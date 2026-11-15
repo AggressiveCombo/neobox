@@ -16,6 +16,8 @@ const PING_MS = 1000;
 const STATS_MS = 250;
 /** FPS measurement window, ms. */
 const FPS_WINDOW_MS = 1000;
+/** Longest gap between animation frames before the page counts as hidden, ms. */
+const STALL_MS = 250;
 
 export interface LoopDeps {
   engine: Engine;
@@ -47,6 +49,7 @@ export class MatchLoop {
   private fpsSince = 0;
   private fps = 0;
   private lastScene: Scene | null = null;
+  private lastStep = 0;
 
   constructor(private readonly d: LoopDeps) {}
 
@@ -55,10 +58,13 @@ export class MatchLoop {
     const now = performance.now();
     if (snap) this.d.engine.matchSnapshot(start, snap.held, local, snap.tick, snap.bytes, now);
     else this.d.engine.matchStart(start, local, now);
-    this.running = true;
     this.lastPing = now;
     this.lastStats = now;
     this.fpsSince = now;
+    this.lastStep = now;
+    // a resync restarts the session while the frame chain runs: keep that one chain
+    if (this.running) return;
+    this.running = true;
     this.raf = requestAnimationFrame(this.tick);
   }
 
@@ -67,6 +73,10 @@ export class MatchLoop {
     if (!this.running) return;
     try {
       if (this.d.engine.serverFrame(bytes)) this.d.net.send({ t: "resync" });
+      // With no animation frames (hidden page) nothing else acknowledges the
+      // server's ticks, and the server would resend a snapshot every few seconds.
+      const now = performance.now();
+      if (now - this.lastStep > STALL_MS) this.d.net.sendBinary(this.d.engine.frame(now, this.d.input.mask()));
     } catch (err) {
       this.fail(err);
     }
@@ -91,6 +101,7 @@ export class MatchLoop {
   };
 
   private step(now: number): void {
+    this.lastStep = now;
     const { engine, net, input } = this.d;
     net.sendBinary(engine.frame(now, input.mask()));
     this.countFrame(now);

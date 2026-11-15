@@ -68,8 +68,10 @@ pub struct Meta {
 pub struct FrameBuilder {
     pub words: Vec<u32>,
     verts: Vec<u32>,
-    /// triangulated local geometry per shape list (keyed by body definition)
-    cache: HashMap<usize, Vec<Mesh>>,
+    /// triangulated local geometry per shape list, keyed by the address of the
+    /// body definition; the entry holds that definition, so the address cannot
+    /// be reused by another definition while it is cached
+    cache: HashMap<usize, (std::sync::Arc<BodyDef>, Vec<Mesh>)>,
     tmp: Vec<[f32; 2]>,
     /// Kill events of the built frame: (killer, victim) pairs.
     kills: Vec<u32>,
@@ -181,7 +183,7 @@ impl FrameBuilder {
         if self.cache.len() > 4096 {
             self.cache.clear();
         }
-        self.cache.entry(key).or_insert_with(|| {
+        let (_, meshes) = self.cache.entry(key).or_insert_with(|| {
             let mut v: Vec<Mesh> = def
                 .shapes
                 .iter()
@@ -191,8 +193,9 @@ impl FrameBuilder {
                 })
                 .collect();
             v.sort_by(|a, b| a.z.partial_cmp(&b.z).unwrap_or(std::cmp::Ordering::Equal));
-            v
-        })
+            (def.clone(), v)
+        });
+        meshes
     }
 
     fn push_tri_list(&mut self, local: &[[f32; 2]], x: f64, y: f64, angle: f64, color: u32) {
@@ -246,7 +249,7 @@ impl FrameBuilder {
         let (x, y, a) = body_pose(prev, cur, t);
         let key = std::sync::Arc::as_ptr(&cur.def) as usize;
         self.meshes(&cur.def);
-        let meshes = &self.cache[&key];
+        let (_, meshes) = &self.cache[&key];
         for m in meshes {
             push_tris(&mut self.verts, &m.tris, x, y, a, rgba(m.color, 1.0));
         }
@@ -709,5 +712,37 @@ mod tests {
         assert_eq!(damage_bar(15.0, 10.0, 20.0), Some((0.5, DAMAGE_REMOVAL_RGB)));
         assert_eq!(damage_bar(25.0, 10.0, 20.0), None);
         assert_eq!(damage_bar(5.0, 0.0, 0.0), None);
+    }
+
+    fn square_def() -> std::sync::Arc<BodyDef> {
+        let points = vec![[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]];
+        let shape = MapShape { kind: 0.0, color: 0x00ff00 as f64, points, ..MapShape::default() };
+        std::sync::Arc::new(BodyDef { shapes: vec![shape], ..BodyDef::default() })
+    }
+
+    fn triangle_def() -> std::sync::Arc<BodyDef> {
+        let points = vec![[0.0, 0.0], [2.0, 0.0], [0.0, 2.0]];
+        let shape = MapShape { kind: 0.0, color: 0xff0000 as f64, points, ..MapShape::default() };
+        std::sync::Arc::new(BodyDef { shapes: vec![shape], ..BodyDef::default() })
+    }
+
+    fn mesh_summary(ms: &[Mesh]) -> Vec<(Vec<[f32; 2]>, u32)> {
+        ms.iter().map(|m| (m.tris.clone(), m.color)).collect()
+    }
+
+    #[test]
+    fn freed_definition_does_not_leak_its_geometry_to_a_new_one() {
+        // Each square is freed right after being cached; the allocator tends to
+        // hand its address to the next definition, which must still get its own
+        // triangles, never the square's.
+        let mut warm = FrameBuilder::default();
+        for _ in 0..64 {
+            let old = square_def();
+            warm.meshes(&old);
+            drop(old);
+            let new = triangle_def();
+            let cold = mesh_summary(FrameBuilder::default().meshes(&new));
+            assert_eq!(mesh_summary(warm.meshes(&new)), cold);
+        }
     }
 }
