@@ -1,8 +1,8 @@
 .training-lesson {
   position: absolute;
   left: 50%;
-  /* under the top bar: the hall's floor and dummies sit low on screen */
-  top: 5rem;
+  /* under the top bar, objective bar and kill line; the floor and dummies sit low */
+  top: 9.5rem;
   transform: translateX(-50%);
   display: flex;
   align-items: center;

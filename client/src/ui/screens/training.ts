@@ -1,6 +1,6 @@
 // Training hall: the fixed training map with two target dummies and a short list
-// of lessons. Next steps through the lessons; Finish marks the hall as done
-// (localStorage) and returns. Keys: the game keys from prefs; Esc leaves.
+// of lessons. Next steps through the lessons; Finish returns. Keys: the game keys
+// from prefs; Esc leaves.
 
 import type { ScreenFactory, ScreenHandle } from "../../ctx";
 import type { Engine, LocalStart } from "../../engine";
@@ -14,8 +14,6 @@ import { touchControls } from "./hud";
 const TICK_HZ = 30;
 /** Endless game mode id, the same one practice uses (lives would strand a player). */
 const ENDLESS = 6;
-/** localStorage flag set when the player finishes the lessons. */
-export const TRAINING_DONE_KEY = "neobox.trainingDone";
 
 /** Label for the first key bound to a game action, as the player set it in Settings. */
 function keyName(action: Action): string {
@@ -31,11 +29,15 @@ function lessonTexts(): string[] {
   const push = keyName("push");
   const rocket = keyName("rocket");
   const bat = keyName("bat");
+  const grab = keyName("grab");
   return [
-    `Run with ${left} and ${right} to get a feel for the ground. Jump with ${jump}.`,
-    `Jump onto the high ledge, then hit the nearest dummy with the bat (${bat}).`,
-    `Hit the dummy on the far side with force push (${push}). Each hit sends it further toward the edge.`,
-    `Dummies do not fight back. Mix the bat (${bat}), force push (${push}) and rocket (${rocket}) until you can hit them at will.`,
+    `Run with ${left} and ${right}. Jump with ${jump}, and press it again in the air for a second jump. Jump off walls too.`,
+    `Keep holding ${jump} after a jump to rise higher. Your marker turns yellow while the second jump is ready.`,
+    `Landing on top of a dummy takes it out. Try it on the dummy that stands still.`,
+    `Hold ${push} to push hard: a dummy shoved into a wall or off the edge is out.`,
+    `Hold ${bat} and let go to swing the bat; it aims by itself. Hold ${rocket} and steer with ${left} and ${right} to aim a rocket.`,
+    `The bar above each name is stamina: abilities spend it and everyone can see it. Hold ${grab} next to a moving object to hang on.`,
+    `Abilities combine, and objects move too. Mix them until you can hit the dummies at will, then Finish.`,
   ];
 }
 
@@ -61,6 +63,7 @@ export const trainingScreen: ScreenFactory = (ctx) => {
   let touch: { el: HTMLElement; destroy(): void } | null = null;
   let lessonEl: HTMLElement | null = null;
   let nextBtn: HTMLButtonElement | null = null;
+  let releaseTop: (() => void) | null = null;
 
   const loop = new FrameLoop(
     (dt) => frame(dt),
@@ -87,6 +90,8 @@ export const trainingScreen: ScreenFactory = (ctx) => {
     running = false;
     touch?.destroy();
     touch = null;
+    releaseTop?.();
+    releaseTop = null;
   }
 
   function frame(dt: number): void {
@@ -157,11 +162,13 @@ export const trainingScreen: ScreenFactory = (ctx) => {
       renderLesson();
       return;
     }
-    localStorage.setItem(TRAINING_DONE_KEY, "1");
     leave();
   }
 
-  function restart(): void {
+  /** The original's "Replay Tutorial": a fresh hall from the first lesson. */
+  function replayTutorial(): void {
+    lesson = 0;
+    renderLesson();
     try {
       begin();
     } catch (err) {
@@ -175,17 +182,15 @@ export const trainingScreen: ScreenFactory = (ctx) => {
     lessonEl = h("p", { class: "training-text" });
     nextBtn = h("button", { type: "button", class: "training-next", onclick: next });
     root.className = "offline playing";
-    root.replaceChildren(
-      touch.el,
-      h(
-        "div",
-        { class: "offline-top offline-overlay" },
-        h("button", { type: "button", onclick: leave }, "Leave"),
-        h("span", { class: "offline-title" }, "Training hall"),
-        h("button", { type: "button", onclick: restart }, "Restart"),
-      ),
-      h("div", { class: "training-lesson" }, lessonEl, nextBtn),
+    const bar = h(
+      "div",
+      { class: "offline-top offline-overlay" },
+      h("button", { type: "button", onclick: leave }, "Leave"),
+      h("span", { class: "offline-title" }, "Training hall"),
+      h("button", { type: "button", onclick: replayTutorial }, "Replay tutorial"),
     );
+    root.replaceChildren(touch.el, bar, h("div", { class: "training-lesson" }, lessonEl, nextBtn));
+    releaseTop = ctx.reserveTop(bar);
     renderLesson();
     loop.start();
   }
