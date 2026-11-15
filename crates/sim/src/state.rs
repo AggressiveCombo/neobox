@@ -370,9 +370,6 @@ pub struct Player {
     pub team: f64,
     /// `Ve` air jump available.
     pub air_jump: bool,
-    /// Standing on ground this tick (set from the jump check; for the client marker only).
-    #[serde(default)]
-    pub grounded: bool,
     /// `Ke`/`Xe` spawn point.
     pub spawn_x: f64,
     pub spawn_y: f64,
@@ -450,7 +447,6 @@ impl Default for Player {
             health: 100.0,
             team: 0.0,
             air_jump: true,
-            grounded: false,
             spawn_x: 0.0,
             spawn_y: 0.0,
             ze2: 0.0,

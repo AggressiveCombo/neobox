@@ -261,7 +261,6 @@ fn movement(ctx: &mut Ctx<'_>, world: &mut World, i: usize, input: &Input) {
         );
         hit
     };
-    ctx.players[i].eo.grounded = grounded;
     if !grounded {
         brake *= 0.3;
         force *= 0.3;

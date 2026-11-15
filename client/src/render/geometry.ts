@@ -4,7 +4,7 @@
 // shrink, so steady-state frames allocate nothing here.
 
 import type { PlayerRec, Scene } from "../frame";
-import { FLAG_BAT, FLAG_DASH, FLAG_FROZEN, FLAG_GHOST, FLAG_GROUNDED, FLAG_LOCAL, FLAG_PUSHING, FLAG_ROCKET_AIM } from "../frame";
+import { FLAG_AIR_JUMP, FLAG_BAT, FLAG_DASH, FLAG_FROZEN, FLAG_GHOST, FLAG_LOCAL, FLAG_PUSHING, FLAG_ROCKET_AIM } from "../frame";
 import { TEAM_BLUE, TEAM_FFA, TEAM_RED, TEAM_SPECTATOR } from "../protocol";
 import { prefs, type Palette } from "../prefs";
 
@@ -37,7 +37,10 @@ export const PALETTES: Record<Palette, { red: number; blue: number; ffa: readonl
 };
 const ICE_RGB = 0xbfe9ff;
 const WHITE_RGB = 0xffffff;
-const AIRBORNE_RGB = 0x8a8f99;
+/** Local marker: frozen, air jump ready, air jump spent (the original's colours). */
+const MARKER_FROZEN_RGB = 0x6b8aff;
+const MARKER_READY_RGB = 0xffd240;
+const MARKER_SPENT_RGB = 0xbbbbbb;
 const GHOST_ALPHA = 0.35;
 const AIM_ALPHA = 0.75;
 const MARKER_ALPHA = 0.9;
@@ -238,7 +241,9 @@ export class Geometry {
     const baseY = p.y - size / 2 - size * MARKER_GAP;
     const tipY = baseY - size * MARKER_HEIGHT;
     const hw = size * MARKER_HALF_WIDTH;
-    const colour = packRgba((p.flags & FLAG_GROUNDED) !== 0 ? WHITE_RGB : AIRBORNE_RGB, MARKER_ALPHA);
+    const rgb =
+      (p.flags & FLAG_FROZEN) !== 0 ? MARKER_FROZEN_RGB : (p.flags & FLAG_AIR_JUMP) !== 0 ? MARKER_READY_RGB : MARKER_SPENT_RGB;
+    const colour = packRgba(rgb, MARKER_ALPHA);
     this.put(p.x, tipY, colour);
     this.put(p.x - hw, baseY, colour);
     this.put(p.x + hw, baseY, colour);

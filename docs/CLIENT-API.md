@@ -109,7 +109,7 @@ Players: 11 words each:
 attacker u32, size f32, health f32, aim f32`.
 Flags: bit0 local, bit1 ghost, bit2 frozen, bit3 rocket aiming, bit4 bat
 swinging, bit5 pushing, bit6 dashing, bit7 teleported (no interpolation),
-bit8 grounded (standing on a surface).
+bit8 air jump available.
 
 Sounds: 5 words each `kind u32, x f32, y f32, volume f32, player i32`.
 Kinds: 1 jump, 2 air jump, 3 push hit, 4 push miss, 5 push click (reserved:

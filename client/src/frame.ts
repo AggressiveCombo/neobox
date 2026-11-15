@@ -12,7 +12,7 @@ export const FLAG_BAT = 16;
 export const FLAG_PUSHING = 32;
 export const FLAG_DASH = 64;
 export const FLAG_TELEPORT = 128;
-export const FLAG_GROUNDED = 256;
+export const FLAG_AIR_JUMP = 256;
 
 export interface PlayerRec {
   id: number;

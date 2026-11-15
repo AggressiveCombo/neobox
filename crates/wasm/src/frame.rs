@@ -433,7 +433,7 @@ impl FrameBuilder {
             if p.teleported {
                 flags |= 128;
             }
-            if p.grounded {
+            if p.air_jump {
                 flags |= 256;
             }
             let aim = if p.rocket_frame >= 0.0 { p.rocket_aim } else if p.egg_frame > 0.0 { p.egg_aim } else { p.bat_aim };
