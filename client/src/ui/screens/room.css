@@ -536,3 +536,77 @@
   margin: 0;
   white-space: pre-line;
 }
+
+.room-map-actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.room-map-votes {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-decoration: underline dotted;
+  cursor: pointer;
+}
+
+.room-vote-menu {
+  position: fixed;
+  z-index: 6;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 9em;
+  padding: 6px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+}
+
+.records-sheet {
+  width: min(100%, 560px);
+}
+
+.records-body {
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.records-table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+  font-variant-numeric: tabular-nums;
+}
+
+.records-table th,
+.records-table td {
+  padding: 4px 8px;
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.records-table th:nth-child(1),
+.records-table td:nth-child(1) {
+  width: 10%;
+}
+
+.records-table th:nth-child(2),
+.records-table td:nth-child(2) {
+  width: 35%;
+}
+
+.records-table th:nth-child(3),
+.records-table td:nth-child(3) {
+  width: 25%;
+}
+
+.records-table th:nth-child(4),
+.records-table td:nth-child(4) {
+  width: 30%;
+}

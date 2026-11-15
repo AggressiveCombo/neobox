@@ -181,7 +181,7 @@ fn summary_row(r: &Row<'_>) -> rusqlite::Result<MapSummary> {
 }
 
 /// Whether `viewer` may open a map with these fields.
-fn viewable(owner: i64, status: Status, visibility: Visibility, viewer: Option<i64>, admin: bool) -> bool {
+pub(crate) fn viewable(owner: i64, status: Status, visibility: Visibility, viewer: Option<i64>, admin: bool) -> bool {
     admin || viewer == Some(owner) || (status == Status::Approved && visibility != Visibility::Private)
 }
 
@@ -208,7 +208,7 @@ fn require_visible(db: &Connection, id: i64, viewer: i64) -> Result<i64> {
 }
 
 /// Owner, status and visibility of a map.
-fn meta(db: &Connection, id: i64) -> Result<(i64, Status, Visibility)> {
+pub(crate) fn meta(db: &Connection, id: i64) -> Result<(i64, Status, Visibility)> {
     db.query_row("SELECT owner_id, status, visibility FROM maps WHERE id = ?1", [id], |r| {
         Ok((
             r.get::<_, i64>(0)?,

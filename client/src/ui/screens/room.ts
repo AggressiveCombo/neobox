@@ -15,13 +15,22 @@ import {
   TEAM_SPECTATOR,
   isTeamMode,
 } from "../../protocol";
-import type { PlayerInfo, RoomState } from "../../protocol";
+import type { MapMeta, PlayerInfo, RoomState } from "../../protocol";
 import { SETTINGS, formatValue, normalizeInput, readOnlyKeys } from "../../settings";
 import type { SettingDef } from "../../settings";
 import { drawMapPreview } from "../../render/preview";
 import { cssHex } from "../../render/geometry";
 import { openLibraryPicker } from "../library-picker";
-import { acceptFriend, listFriends, removeFriend, requestFriend, type FriendState } from "../../account";
+import {
+  acceptFriend,
+  errorText,
+  listFriends,
+  listRecords,
+  removeFriend,
+  requestFriend,
+  type FriendState,
+  type MapRecord,
+} from "../../account";
 import { filterProfanity } from "../../profanity";
 import { prefs } from "../../prefs";
 import { openColorPicker } from "../color-picker";
@@ -94,6 +103,101 @@ function ageText(unixSeconds: number): string {
     }
   }
   return "just now";
+}
+
+/** The original's game clock: records are ticks, shown as seconds at two decimals. */
+const TICKS_PER_SECOND = 30;
+
+/** The table of a map's Fastest Times, fastest first. */
+function recordsTable(rows: MapRecord[]): HTMLElement {
+  return h(
+    "table",
+    { class: "records-table" },
+    h(
+      "thead",
+      null,
+      h(
+        "tr",
+        null,
+        h("th", { scope: "col" }, "Rank"),
+        h("th", { scope: "col" }, "Name"),
+        h("th", { scope: "col" }, "Time"),
+        h("th", { scope: "col" }, "Date"),
+      ),
+    ),
+    h(
+      "tbody",
+      null,
+      rows.map((r) =>
+        h(
+          "tr",
+          null,
+          h("td", null, String(r.rank)),
+          h("td", null, r.name),
+          h("td", null, (r.ticks / TICKS_PER_SECOND).toFixed(2)),
+          h("td", null, ageText(r.date)),
+        ),
+      ),
+    ),
+  );
+}
+
+/** The Fastest Times window for a library map. Close, Escape or the backdrop dismisses it. */
+function showFastestTimes(map: MapMeta): void {
+  const status = h("p", { class: "status", role: "status", "aria-live": "polite" }, "Fetching...");
+  const body = h("div", { class: "records-body" });
+  const closeBtn = h("button", { type: "button", onclick: () => dismiss() }, "Close");
+  const sheet = h(
+    "section",
+    { class: "picker-sheet records-sheet" },
+    h(
+      "header",
+      { class: "picker-head" },
+      h("div", null, h("h2", null, "Fastest Times"), h("p", { class: "row-sub" }, `${map.name} by ${map.author}`)),
+      closeBtn,
+    ),
+    status,
+    body,
+  );
+  const overlay: HTMLDivElement = h(
+    "div",
+    {
+      class: "picker-overlay",
+      role: "dialog",
+      "aria-modal": "true",
+      "aria-label": "Fastest Times",
+      onclick: (e: Event) => {
+        if (e.target === overlay) dismiss();
+      },
+    },
+    sheet,
+  );
+
+  function dismiss(): void {
+    window.removeEventListener("keydown", onKey);
+    overlay.remove();
+  }
+
+  function onKey(e: KeyboardEvent): void {
+    if (e.key === "Escape") dismiss();
+  }
+
+  window.addEventListener("keydown", onKey);
+  document.body.append(overlay);
+  listRecords(map.id).then(
+    (rows) => {
+      if (!overlay.isConnected) return;
+      if (rows.length === 0) {
+        status.textContent = "No Records";
+        return;
+      }
+      status.textContent = "";
+      body.replaceChildren(recordsTable(rows));
+    },
+    (err: unknown) => {
+      if (overlay.isConnected) status.textContent = errorText(err);
+    },
+  );
 }
 
 function chatLine(line: ChatLine, myId: number | null, text: string, onPlay: ((video: string) => void) | null): HTMLElement {
@@ -371,6 +475,57 @@ export const roomScreen: ScreenFactory = (ctx: AppCtx) => {
     }
   }
 
+  // The original's map vote menu: Vote Up and Vote Down send the room's /upvote and /downvote commands.
+  let voteMenu: HTMLElement | null = null;
+
+  function closeVoteMenu(): void {
+    voteMenu?.remove();
+    voteMenu = null;
+    window.removeEventListener("pointerdown", onVoteOutside, true);
+    window.removeEventListener("keydown", onVoteKey);
+  }
+
+  function onVoteOutside(e: Event): void {
+    if (voteMenu !== null && !voteMenu.contains(e.target as Node)) closeVoteMenu();
+  }
+
+  function onVoteKey(e: KeyboardEvent): void {
+    if (e.key === "Escape") closeVoteMenu();
+  }
+
+  function openVoteMenu(anchor: HTMLElement): void {
+    closeVoteMenu();
+    const menu = h(
+      "div",
+      { class: "room-vote-menu", role: "menu" },
+      [
+        ["Vote Up", "/upvote"],
+        ["Vote Down", "/downvote"],
+      ].map(([label, text]) =>
+        h(
+          "button",
+          {
+            type: "button",
+            class: "room-btn",
+            role: "menuitem",
+            onclick: () => {
+              ctx.send({ t: "chat", text });
+              closeVoteMenu();
+            },
+          },
+          label,
+        ),
+      ),
+    );
+    const rect = anchor.getBoundingClientRect();
+    menu.style.left = `${rect.left}px`;
+    menu.style.top = `${rect.bottom + 4}px`;
+    voteMenu = menu;
+    document.body.append(menu);
+    window.addEventListener("pointerdown", onVoteOutside, true);
+    window.addEventListener("keydown", onVoteKey);
+  }
+
   // Map handling.
   /** Draws the preview of `code`; false (and a toast) when the engine rejects it. */
   function showPreview(code: string): boolean {
@@ -461,12 +616,44 @@ export const roomScreen: ScreenFactory = (ctx: AppCtx) => {
     });
   }
 
-  /** The library map's author, votes and age, when the room's map comes from the library. */
+  /**
+   * The library map's author, votes and age, with the Fastest Times button. Signed-in viewers
+   * open the vote menu from the counts; the button needs a library map (id > 0).
+   */
   function buildMapInfo(room: RoomState): Node[] {
     const m = room.map;
-    if (m === null) return [];
-    const nodes: Node[] = [h("p", { class: "room-map-meta" }, `by ${m.author} · ${m.up} up · ${m.down} down · added ${ageText(m.created)}`)];
+    const library = m !== null && m.id > 0;
+    const fastest = h(
+      "button",
+      {
+        type: "button",
+        class: "room-btn room-btn-small",
+        disabled: !library,
+        onclick: () => {
+          if (m !== null) showFastestTimes(m);
+        },
+      },
+      "Fastest Times",
+    );
+    const actions = h("div", { class: "room-map-actions" }, fastest);
+    if (m === null) return [actions];
+    const counts = `${m.up} up · ${m.down} down`;
+    const votes =
+      st.account !== null && library
+        ? h(
+            "button",
+            {
+              type: "button",
+              class: "room-map-votes",
+              title: "Vote on this map",
+              onclick: (e: Event) => openVoteMenu(e.currentTarget as HTMLElement),
+            },
+            counts,
+          )
+        : counts;
+    const nodes: Node[] = [h("p", { class: "room-map-meta" }, `by ${m.author} · `, votes, ` · added ${ageText(m.created)}`)];
     if (m.description !== "") nodes.push(h("p", { class: "room-map-desc" }, m.description));
+    nodes.push(actions);
     return nodes;
   }
 
@@ -1000,6 +1187,7 @@ export const roomScreen: ScreenFactory = (ctx: AppCtx) => {
       alive = false;
       clearInterval(typingTimer);
       unsubPrefs();
+      closeVoteMenu();
       closeLibrary?.();
       closeLibrary = null;
       closePicker?.();

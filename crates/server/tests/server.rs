@@ -434,3 +434,38 @@ async fn match_end_awards_experience() {
     assert_eq!((guest_award.xp, guest_award.level), (None, 0));
     host.until("match end", |m| matches!(m, ServerMsg::MatchEnd { .. }).then_some(Ok(()))).await.unwrap();
 }
+
+#[tokio::test]
+async fn race_finish_sets_a_fastest_time() {
+    let server = Server::start();
+    let alice = server.register("alice").await;
+    // checkpoint 1 above the finish (2), under the spawn: falling passes both
+    let race = r#"{"b":[{"1":0,"2":15,"3":13,"31":1,"s":[{"p":[-3,-0.25,3,-0.25,3,0.25,-3,0.25]}]},
+        {"1":1,"2":15,"3":19,"31":2,"s":[{"p":[-3,-0.25,3,-0.25,3,0.25,-3,0.25]}]}],
+        "j":[],"s":[{"1":15,"2":10}],"p":[],"tu":[],"tc":[],"gp":[],"c":[],"set":{"3":40,"15":40,"16":25}}"#;
+    let body = json!({ "name": "race", "description": "", "code": neobox_sim::map::encode_code(race), "visibility": "unlisted" });
+    let (status, _, made) = server.http("POST", "/api/library", Some(&alice), Some(body)).await;
+    assert_eq!(status, 201, "{made}");
+    let map = made["id"].as_i64().unwrap();
+
+    let mut host = Client::connect_as(&server.ws(), "alice", Some(&alice)).await;
+    host.create(None).await.unwrap();
+    host.send(&ClientMsg::SetLibraryMap { id: map }).await;
+    host.send(&ClientMsg::SetMode { mode: 0 }).await;
+    host.chat("/set recordMode true").await;
+    host.room_where("race map, kills, record mode", |r| r.map.as_ref().is_some_and(|m| m.id == map) && r.settings.record_mode).await;
+    host.send(&ClientMsg::Start).await;
+    let line = host
+        .until("personal best", |m| match m {
+            ServerMsg::Chat { from: None, text, .. } if text.contains("personal best") => Some(Ok(text.clone())),
+            _ => None,
+        })
+        .await
+        .unwrap();
+    assert!(line.starts_with("alice set a personal best: ") && line.ends_with('s'), "{line}");
+    let (status, _, rows) = server.http("GET", &format!("/api/library/{map}/records"), None, None).await;
+    assert_eq!(status, 200, "{rows}");
+    assert_eq!(rows.as_array().map(Vec::len), Some(1), "{rows}");
+    assert_eq!((rows[0]["rank"].as_i64(), rows[0]["name"].as_str()), (Some(1), Some("alice")), "{rows}");
+    assert!(rows[0]["ticks"].as_i64().is_some_and(|t| t > 0), "{rows}");
+}

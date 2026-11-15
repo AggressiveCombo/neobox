@@ -10,6 +10,7 @@ mod account;
 mod clips;
 mod friends;
 mod library;
+mod records;
 mod session;
 mod xp;
 
@@ -22,6 +23,7 @@ pub use library::{
 };
 pub use session::{MAX_SESSIONS_PER_ACCOUNT, SESSION_TTL};
 pub use xp::{XP_PER_DAY, XP_PER_HOUR, XpGrant, XpLimit};
+pub use records::{Record, MAX_RECORDS};
 
 use rusqlite::{Connection, ErrorCode};
 use std::path::Path;
@@ -173,6 +175,16 @@ CREATE TABLE clips (
     created INTEGER NOT NULL
 );
 CREATE INDEX clips_created ON clips (created);
+"#, r#"
+-- Fastest Times: the best finish time (ticks) each account has on each map.
+CREATE TABLE records (
+    map_id INTEGER NOT NULL REFERENCES maps (id) ON DELETE CASCADE,
+    account_id INTEGER NOT NULL REFERENCES accounts (id) ON DELETE CASCADE,
+    ticks INTEGER NOT NULL CHECK (ticks > 0),
+    at INTEGER NOT NULL,
+    PRIMARY KEY (map_id, account_id)
+);
+CREATE INDEX records_rank ON records (map_id, ticks, at);
 "#];
 
 impl Store {

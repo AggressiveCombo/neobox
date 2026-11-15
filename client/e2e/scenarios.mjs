@@ -243,7 +243,14 @@ async function library(s) {
   await picker.waitFor();
   await picker.locator(".map-card").filter({ hasText: name }).first().click();
   await page.locator(".room-map-name").filter({ hasText: name }).waitFor();
-  return `approved ${name}, voted, starred, picked in room`;
+  // the original's Fastest Times window for the library map: nobody has raced it yet
+  await button(page, "Fastest Times").click();
+  const times = page.getByRole("dialog", { name: "Fastest Times" });
+  await times.getByText(`${name} by ${user.userName}`).waitFor();
+  await times.getByText("No Records").waitFor();
+  await page.keyboard.press("Escape");
+  await times.waitFor({ state: "detached" });
+  return `approved ${name}, voted, starred, picked in room, Fastest Times`;
 }
 
 async function roomMatch(s) {

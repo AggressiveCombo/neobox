@@ -46,6 +46,14 @@ pub struct MapCommandBody {
     pub action: MapAction,
 }
 
+/// A finish time on a library map, as sent between servers.
+#[derive(Serialize, Deserialize)]
+pub struct RecordBody {
+    pub account: i64,
+    pub map: i64,
+    pub ticks: i64,
+}
+
 fn store_err(e: neobox_store::Error) -> String {
     e.to_string()
 }
@@ -106,6 +114,17 @@ impl Backend {
                     r.send(json_post(&r.http, r.url("/internal/map-command"), &body)).await?;
                 Ok(())
             }
+        }
+    }
+
+    /// Keep the finish time if it beats the account's stored one; `true` when it is a new personal best.
+    pub async fn save_record(&self, body: RecordBody) -> Result<bool, String> {
+        match self {
+            Backend::Local(s) => {
+                let s = s.clone();
+                blocking(move || s.record_time(body.account, body.map, body.ticks)).await
+            }
+            Backend::Remote(r) => r.send(json_post(&r.http, r.url("/internal/records"), &body)).await,
         }
     }
 

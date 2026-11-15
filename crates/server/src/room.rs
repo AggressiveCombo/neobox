@@ -15,7 +15,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tokio::sync::{mpsc, oneshot};
 use tracing::{info, warn};
-use crate::backend::{MapAction, MapCommandBody};
+use crate::backend::{MapAction, MapCommandBody, RecordBody};
 use neobox_store::{RoomMap, XpGrant};
 
 /// Longest map code accepted from clients (characters).
@@ -37,6 +37,8 @@ const TYPING_GAP: Duration = Duration::from_millis(800);
 /// The quick-play rotation awards experience when the game-over countdown
 /// reaches this tick (the original's `xo == 10`).
 const QUICK_AWARD_TICK: f64 = 10.0;
+/// Ticks run at 30 per second in the original, whatever rate the room simulates at.
+const RECORD_TICKS_PER_SECOND: f64 = 30.0;
 /// Appearance colours for players who have not picked one.
 const DEFAULT_COLORS: [u32; 8] = [0x9be15d, 0xffc857, 0xc792ea, 0x4fd1c5, 0xff8fab, 0xf6e05e, 0x7f9cf5, 0xf28c28];
 const HELP: &str = "Commands: /set <key> <value>, /settings, /reset, /mode <n>, /start, /end, /lock, /unlock, \
@@ -70,6 +72,8 @@ pub enum RoomCmd {
     MapMetaLoaded { result: Result<RoomMap, String> },
     /// A map the host asked for arrived from the library.
     LibraryMapLoaded { player: u32, map: i64, result: Result<RoomMap, String> },
+    /// A finish time was saved for a signed-in player (`result`: whether it is their new best).
+    RecordSaved { name: String, ticks: i64, result: Result<bool, String> },
 }
 
 /// An award waiting for the store's answer.
@@ -187,6 +191,8 @@ struct RPlayer {
     chat_at: Instant,
     last_bytes: (u64, u64),
     rate: (u64, u64),
+    /// The best (map, ticks) already announced for this player; a finish counts only when it beats it.
+    record_seen: Option<(i64, i64)>,
 }
 
 impl RPlayer {
@@ -441,6 +447,11 @@ fn map_meta_of(m: &neobox_store::RoomMap) -> MapMeta {
     }
 }
 
+/// The system chat line for a new personal best.
+fn personal_best_line(name: &str, ticks: i64) -> String {
+    format!("{name} set a personal best: {:.2}s", ticks as f64 / RECORD_TICKS_PER_SECOND)
+}
+
 impl Room {
     async fn run(mut self, mut rx: mpsc::UnboundedReceiver<RoomCmd>) {
         info!(room = %self.code, name = %self.name, "room created");
@@ -525,6 +536,11 @@ impl Room {
                 }
             }
             RoomCmd::LibraryMapLoaded { player, map, result } => self.library_map_loaded(player, map, result),
+            RoomCmd::RecordSaved { name, ticks, result } => match result {
+                Ok(true) => self.system_chat(&personal_best_line(&name, ticks)),
+                Ok(false) => {}
+                Err(e) => warn!(room = %self.code, "could not save a record: {e}"),
+            },
             RoomCmd::Suggested { from, name, video, title } => {
                 let m = json(&ServerMsg::Suggest { from, name, video, title });
                 for p in &self.players {
@@ -643,6 +659,7 @@ impl Room {
             chat_at: Instant::now(),
             last_bytes: (0, 0),
             rate: (0, 0),
+            record_seen: None,
         });
         // quick-play rooms have no host
         if self.host.is_none() && self.quick.is_none() {
@@ -1513,6 +1530,41 @@ impl Room {
         self.broadcast_room();
     }
 
+    /// Fastest Times: a finish that beats every time the room has announced for
+    /// that player on this library map is a personal best. Signed-in players'
+    /// bests are kept by the store, which says whether one is theirs; guests
+    /// have nowhere to keep one, so the room announces it alone.
+    fn check_records(&mut self) {
+        let Some(map) = self.map_meta.as_ref().map(|m| m.id).filter(|&id| id > 0) else { return };
+        let Some(g) = self.game.as_ref() else { return };
+        if !g.m.start.settings.record_mode {
+            return;
+        }
+        let finishes: Vec<(u32, i64)> =
+            g.m.state.round.players.iter().filter(|(_, r)| r.co > 0.0).map(|(id, r)| (id, r.co as i64)).collect();
+        let mut found = Vec::new();
+        for (id, ticks) in finishes {
+            let Some(p) = self.players.iter_mut().find(|p| p.id == id) else { continue };
+            if p.record_seen.is_some_and(|(m, best)| m == map && best <= ticks) {
+                continue;
+            }
+            p.record_seen = Some((map, ticks));
+            found.push((p.name.clone(), p.account.as_ref().map(|a| a.id), ticks));
+        }
+        for (name, account, ticks) in found {
+            match account {
+                Some(account) => {
+                    let (hub, tx) = (self.hub.clone(), self.tx.clone());
+                    tokio::spawn(async move {
+                        let result = hub.backend.save_record(RecordBody { account, map, ticks }).await;
+                        let _ = tx.send(RoomCmd::RecordSaved { name, ticks, result });
+                    });
+                }
+                None => self.system_chat(&personal_best_line(&name, ticks)),
+            }
+        }
+    }
+
     fn run_ticks(&mut self) {
         let period = Duration::from_secs_f64(1.0 / self.tick_hz);
         let mut steps = 0;
@@ -1546,6 +1598,7 @@ impl Room {
             let outcome = g.m.last_outcome;
             let quick_game_over = self.quick.is_some() && g.m.state.round.game_over == QUICK_AWARD_TICK;
             let rotation_index = g.m.state.round.io;
+            self.check_records();
             self.send_batches(checksum);
             if too_heavy {
                 warn!(room = %self.code, map = %self.map_name, "map too complex to simulate: match stopped");

@@ -3,7 +3,7 @@
 //! is created or closes). Both sides talk over the `/internal` API, which
 //! checks the cluster secret (bearer token).
 
-use crate::backend::{Backend, MapCommandBody, XpBody};
+use crate::backend::{Backend, MapCommandBody, RecordBody, XpBody};
 use crate::geo::distance_km;
 use crate::hub::Hub;
 use crate::room::{AdminCmd, RoomCmd, RoomSummary};
@@ -128,6 +128,7 @@ pub fn router() -> Router<Arc<Hub>> {
     Router::new()
         .route("/internal/heartbeat", post(heartbeat))
         .route("/internal/xp", post(xp))
+        .route("/internal/records", post(records))
         .route("/internal/map-command", post(map_command))
         .route("/internal/maps/{id}", get(room_map))
         .route("/internal/maps/{id}/play", post(record_play))
@@ -161,6 +162,16 @@ async fn xp(State(hub): State<Arc<Hub>>, headers: HeaderMap, Json(b): Json<XpBod
     }
     match hub.backend.grant_xp(b.account, b.amount).await {
         Ok(grant) => Json(grant).into_response(),
+        Err(e) => failed(e),
+    }
+}
+
+async fn records(State(hub): State<Arc<Hub>>, headers: HeaderMap, Json(b): Json<RecordBody>) -> Response {
+    if !authorized(&hub, &headers) {
+        return denied();
+    }
+    match hub.backend.save_record(b).await {
+        Ok(new_best) => Json(new_best).into_response(),
         Err(e) => failed(e),
     }
 }

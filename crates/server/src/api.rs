@@ -12,7 +12,7 @@ use axum::routing::{get, post};
 use axum::{Json, Router};
 use neobox_net::level_of;
 use neobox_store::{
-    Account, Error, FriendState, MapDetail, MapSummary, Sort, Status, Store, Visibility, MAX_CODE_BYTES, SESSION_TTL,
+    Account, Error, FriendState, MapDetail, MapSummary, Record, Sort, Status, Store, Visibility, MAX_CODE_BYTES, SESSION_TTL,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
@@ -49,6 +49,7 @@ pub fn router() -> Router<Arc<Hub>> {
         .route("/api/library/{id}/vote", post(library_vote))
         .route("/api/library/{id}/favourite", post(library_favourite))
         .route("/api/library/{id}/play", post(library_play))
+        .route("/api/library/{id}/records", get(library_records))
         .layer(DefaultBodyLimit::max(MAX_CODE_BYTES + 64 * 1024))
 }
 
@@ -582,6 +583,13 @@ async fn library_get(State(hub): State<Arc<Hub>>, headers: HeaderMap, Path(id): 
     let me = viewer(&hub, &headers).await;
     let d = db(&hub, move |s| s.get(id, me, false)).await?;
     Ok(Json(MapDetailJson::of(d, me.is_some())))
+}
+
+/// Fastest Times: a library map's best time per player, fastest first.
+async fn library_records(State(hub): State<Arc<Hub>>, headers: HeaderMap, Path(id): Path<i64>) -> Result<Json<Vec<Record>>, Fail> {
+    let me = viewer(&hub, &headers).await;
+    let rows = db(&hub, move |s| s.records(id, me, false)).await?;
+    Ok(Json(rows))
 }
 
 #[derive(Deserialize)]
