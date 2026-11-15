@@ -45,6 +45,11 @@ export interface AppCtx {
   maps(): Promise<BuiltinMap[]>;
   /** The current room's map code and name (asks the server; rejects outside a room or after 5 s). */
   roomMap(): Promise<{ code: string; name: string }>;
+  /**
+   * Keep the overlay's objective bar and kill line below `bar`, a control strip across
+   * the top of a game view, until the returned function is called.
+   */
+  reserveTop(bar: HTMLElement): () => void;
 }
 
 /** A mounted screen. The app calls `update` after every store change and `destroy` when leaving. */

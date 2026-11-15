@@ -49,6 +49,8 @@ export class Overlay {
   private readonly cssCache = new Map<number, string>();
   private readonly feed: KillEntry[] = [];
   private feedTick = -1;
+  /** CSS px at the top taken by a screen's own controls (AppCtx.reserveTop); the top bars go below. */
+  topInset = 0;
 
   constructor(private readonly canvas: HTMLCanvasElement) {
     const ctx = canvas.getContext("2d");
@@ -215,9 +217,10 @@ export class Overlay {
     const width = Math.min(cssW - 16, ctx.measureText(text).width + 24);
     const left = (cssW - width) / 2;
     ctx.fillStyle = PANEL;
-    ctx.fillRect(left, PERSONAL_TOP, width, PERSONAL_H);
+    const top = PERSONAL_TOP + this.topInset;
+    ctx.fillRect(left, top, width, PERSONAL_H);
     ctx.fillStyle = TEXT;
-    ctx.fillText(text, cssW / 2, PERSONAL_TOP + PERSONAL_H / 2, width - 24);
+    ctx.fillText(text, cssW / 2, top + PERSONAL_H / 2, width - 24);
   }
 
   /** Recent kills, newest first, right-aligned under the buttons. */
@@ -244,11 +247,11 @@ export class Overlay {
 
   private drawObjectiveBar(scene: Scene, cssW: number): void {
     const ctx = this.ctx;
-    // keep clear of the Leave button at the top right (hud.css .hud-leave)
-    const reserve = 112;
+    // keep clear of the Menu and Leave buttons at the top right (hud.css)
+    const reserve = 208;
     const width = Math.min(480, Math.max(160, cssW - 2 * reserve));
     const left = cssW - 2 * reserve >= width ? (cssW - width) / 2 : Math.max(8, cssW - reserve - width);
-    const top = 8;
+    const top = 8 + this.topInset;
     const height = 26;
     const mid = top + height / 2;
     ctx.fillStyle = PANEL;

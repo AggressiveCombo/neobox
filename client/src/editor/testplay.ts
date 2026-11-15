@@ -87,6 +87,7 @@ export async function startTestPlay(ctx: AppCtx, doc: Obj, onLeave: (failure?: s
     h("span", { class: "offline-title" }, "Test play"),
     h("button", { type: "button", onclick: restart }, "Restart"),
   );
+  const releaseTop = ctx.reserveTop(top);
   loop.start();
 
   return {
@@ -96,6 +97,7 @@ export async function startTestPlay(ctx: AppCtx, doc: Obj, onLeave: (failure?: s
       loop.stop();
       halt();
       touch.destroy();
+      releaseTop();
     },
   };
 }

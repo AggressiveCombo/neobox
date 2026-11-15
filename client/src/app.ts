@@ -237,6 +237,20 @@ export function start(): void {
       }
       return mapsP;
     },
+    reserveTop: (bar) => {
+      const update = (): void => {
+        overlay.topInset = bar.getBoundingClientRect().bottom;
+      };
+      const ro = new ResizeObserver(update);
+      ro.observe(bar);
+      window.addEventListener("resize", update);
+      update();
+      return () => {
+        ro.disconnect();
+        window.removeEventListener("resize", update);
+        overlay.topInset = 0;
+      };
+    },
   };
 
   startAccountSync(ctx);

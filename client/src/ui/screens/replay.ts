@@ -84,12 +84,16 @@ export const replayScreen: ScreenFactory = (ctx) => {
     ctx.store.set({ screen: resolveOrigin() });
   }
 
+  let releaseTop: (() => void) | null = null;
+
   /** Stop the loop and release the loaded replay (idempotent). */
   function unload(): void {
     loop.stop();
     if (info) engine?.replayClose();
     info = null;
     playing = false;
+    releaseTop?.();
+    releaseTop = null;
   }
 
   function timeText(): string {
@@ -319,14 +323,15 @@ export const replayScreen: ScreenFactory = (ctx) => {
       h("button", { type: "button", "aria-pressed": "false", onclick: () => setSpeed(s) }, `${s}x`),
     );
 
+    const bar = h(
+      "div",
+      { class: "offline-top offline-overlay" },
+      h("button", { type: "button", onclick: leave }, "Close"),
+      h("span", { class: "offline-title" }, fileName),
+      followSel,
+    );
     root.replaceChildren(
-      h(
-        "div",
-        { class: "offline-top offline-overlay" },
-        h("button", { type: "button", onclick: leave }, "Close"),
-        h("span", { class: "offline-title" }, fileName),
-        followSel,
-      ),
+      bar,
       h(
         "div",
         { class: "offline-dock offline-overlay" },
@@ -347,6 +352,8 @@ export const replayScreen: ScreenFactory = (ctx) => {
       ),
     );
     syncControls();
+    releaseTop?.();
+    releaseTop = ctx.reserveTop(bar);
   }
 
   const pending = pendingReplay;

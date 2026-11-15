@@ -75,6 +75,7 @@ export const practiceScreen: ScreenFactory = (ctx) => {
   let rules: GameSettings = {};
   let names: ReadonlyMap<number, string> = new Map();
   let touch: { el: HTMLElement; destroy(): void } | null = null;
+  let releaseTop: (() => void) | null = null;
 
   const loop = new FrameLoop(
     (dt) => frame(dt),
@@ -101,6 +102,8 @@ export const practiceScreen: ScreenFactory = (ctx) => {
     running = false;
     touch?.destroy();
     touch = null;
+    releaseTop?.();
+    releaseTop = null;
   }
 
   function frame(dt: number): void {
@@ -140,16 +143,15 @@ export const practiceScreen: ScreenFactory = (ctx) => {
   function showGame(): void {
     touch = touchControls(ctx);
     root.className = "offline playing";
-    root.replaceChildren(
-      touch.el,
-      h(
-        "div",
-        { class: "offline-top offline-overlay" },
-        h("button", { type: "button", onclick: () => showSetup() }, "Leave"),
-        h("span", { class: "offline-title" }, mapName),
-        h("button", { type: "button", onclick: restart }, "Restart"),
-      ),
+    const bar = h(
+      "div",
+      { class: "offline-top offline-overlay" },
+      h("button", { type: "button", onclick: () => showSetup() }, "Leave"),
+      h("span", { class: "offline-title" }, mapName),
+      h("button", { type: "button", onclick: restart }, "Restart"),
     );
+    root.replaceChildren(touch.el, bar);
+    releaseTop = ctx.reserveTop(bar);
     loop.start();
   }
 
