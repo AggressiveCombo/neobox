@@ -274,6 +274,8 @@ export class Geometry {
   private putPlayer(scene: Scene, p: PlayerRec, followed: PlayerRec | undefined, now: number): void {
     const rgb = playerRgb(p.team, p.id);
     this.putTrail(p, now);
+    // The trail took room from the up-front reservation: make sure this player's parts still fit.
+    this.reserve(PLAYER_MAX_VERTICES);
     this.putLauncher(p);
     this.putEgg(p);
     this.putBody(p, rgb);
