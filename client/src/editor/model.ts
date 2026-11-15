@@ -30,6 +30,13 @@ export interface Ref {
   i: number;
 }
 
+/** A body being edited in place: its index, map id and selected shape indices. */
+export interface BodyScope {
+  index: number;
+  id: number;
+  shapes: readonly number[];
+}
+
 export const LIST_OF: Record<Kind, ListKey> = {
   body: "b",
   joint: "j",
@@ -337,6 +344,43 @@ export function setBodyShapes(doc: Obj, bodyIdx: number, shapes: Obj[]): Obj {
   return withList(doc, "body", replaceAt(bodies, bodyIdx, { ...b, s: shapes }));
 }
 
+/** Append shapes to one body, in its frame. `first` is the index of the first one added (-1 if no such body). */
+export function addShapes(doc: Obj, bodyIdx: number, shapes: Obj[]): { doc: Obj; first: number } {
+  const body = getList(doc, "body")[bodyIdx];
+  if (!body) return { doc, first: -1 };
+  const old = list(body, "s");
+  return { doc: setBodyShapes(doc, bodyIdx, [...old, ...shapes]), first: old.length };
+}
+
+/** Delete shapes of one body. */
+export function removeShapes(doc: Obj, bodyIdx: number, shapeIdxs: readonly number[]): Obj {
+  const body = getList(doc, "body")[bodyIdx];
+  if (!body) return doc;
+  const drop = new Set(shapeIdxs);
+  return setBodyShapes(
+    doc,
+    bodyIdx,
+    list(body, "s").filter((_, i) => !drop.has(i)),
+  );
+}
+
+/** Shift shapes of one body by a world-space offset. Shape offsets are in the body's frame, so the offset is rotated into it. */
+export function moveShapes(doc: Obj, bodyIdx: number, shapeIdxs: readonly number[], dx: number, dy: number): Obj {
+  const body = getList(doc, "body")[bodyIdx];
+  if (!body || shapeIdxs.length === 0 || (dx === 0 && dy === 0)) return doc;
+  const xf = bodyXf(body);
+  const lx = xf.c * dx + xf.s * dy;
+  const ly = -xf.s * dx + xf.c * dy;
+  const sel = new Set(shapeIdxs);
+  const shapes = list(body, "s").map((s, i) => {
+    if (!sel.has(i)) return s;
+    const shape = asObj(s);
+    const moved = withField(shape, "2", round(num(shape, "2", 0) + lx), SHAPE_DEFAULTS);
+    return withField(moved, "3", round(num(moved, "3", 0) + ly), SHAPE_DEFAULTS);
+  });
+  return setBodyShapes(doc, bodyIdx, shapes);
+}
+
 /**
  * Replace one polygon shape of a body by convex parts of `outline` (points
  * relative to the shape offset). Throws when the outline is not a simple polygon.
@@ -365,8 +409,24 @@ export function polyShapes(parts: Pt[][], centre: Pt, colour: number): Obj[] {
   }));
 }
 
-export function circleShape(r: number, colour: number): Obj {
-  return { "1": 1, "9": round(r), "7": colour };
+/** Circle shape; `at` is its centre in the body's frame (omitted when at the origin). */
+export function circleShape(r: number, colour: number, at: Pt = { x: 0, y: 0 }): Obj {
+  const shape: Obj = { "1": 1, "9": round(r), "7": colour };
+  if (at.x !== 0) shape["2"] = round(at.x);
+  if (at.y !== 0) shape["3"] = round(at.y);
+  return shape;
+}
+
+/** Polygon shapes for convex parts given in a body's own frame; each part is offset to its own centre. */
+export function localPolyShapes(parts: Pt[][], colour: number): Obj[] {
+  return parts.map((part) => {
+    const box = bbox(part);
+    const c = { x: (box.minX + box.maxX) / 2, y: (box.minY + box.maxY) / 2 };
+    const shape: Obj = { p: part.flatMap((p) => [round(p.x - c.x), round(p.y - c.y)]), "7": colour };
+    if (c.x !== 0) shape["2"] = round(c.x);
+    if (c.y !== 0) shape["3"] = round(c.y);
+    return shape;
+  });
 }
 
 /** Append an anchored entity (spawn, turret, grapple, capture point) at (x, y). */

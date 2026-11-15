@@ -318,11 +318,17 @@ export interface InspectorOpts {
   commit(next: Obj): void;
   /** Delete the selected entities. */
   remove(): void;
+  /** Body being edited in place and its selected shapes, if any. */
+  scope?: { index: number; shapes: readonly number[] } | null;
 }
 
 /** The inspector content for the current selection. */
 export function renderInspector(o: InspectorOpts): HTMLElement {
   const { doc, sel } = o;
+  if (o.scope) {
+    const body = getList(doc, "body")[o.scope.index];
+    if (body) return scopeInspector(doc, o.scope.index, body, o.scope.shapes, o.commit, o.remove);
+  }
   if (sel.length === 0) return mapSettings(doc, o.commit);
   if (sel.length > 1) {
     const bodies = sel.filter((r) => r.kind === "body").map((r) => r.i);
@@ -347,7 +353,8 @@ export function renderInspector(o: InspectorOpts): HTMLElement {
     fs.map((f) => fieldRow(f, readField(item, f, defaults), (v) => apply({ [f.key]: stored(f, v) })));
 
   const children: (Node | string | false | null | undefined)[] = [
-    h("p", { class: "inspector-title" }, `${kindLabel(ref.kind)} ${ref.i + 1}`),
+    // bodies go by their map id: the id joints and grapple points refer to
+    h("p", { class: "inspector-title" }, ref.kind === "body" ? `Body ${num(item, "1", ref.i)}` : `${kindLabel(ref.kind)} ${ref.i + 1}`),
   ];
   if (ref.kind === "body") {
     children.push(...fields(BODY_FIELDS, BODY_DEFAULTS), shapesBlock(doc, ref.i, o.commit));
@@ -368,7 +375,16 @@ export function renderInspector(o: InspectorOpts): HTMLElement {
   } else if (ref.kind === "turret") {
     children.push(...fields(TURRET_FIELDS, TURRET_DEFAULTS), ...fields(BULLET_FIELDS, TURRET_DEFAULTS));
   } else if (ref.kind === "grapple") {
-    children.push(...fields(GRAPPLE_FIELDS, GRAPPLE_DEFAULTS));
+    const attach: Field = {
+      key: "4",
+      label: "Attached to",
+      kind: "select",
+      options: [
+        { value: -1, label: "Nothing (static)" },
+        ...getList(doc, "body").map((b) => ({ value: num(b, "1", -1), label: `Body ${num(b, "1", -1)}` })),
+      ],
+    };
+    children.push(...fields([...GRAPPLE_FIELDS, attach], GRAPPLE_DEFAULTS));
   } else {
     children.push(...fields(CAP_FIELDS, CAP_DEFAULTS));
   }
@@ -378,6 +394,37 @@ export function renderInspector(o: InspectorOpts): HTMLElement {
 
 function anchorName(id: number): string {
   return id < 0 ? "the ground" : `body ${id}`;
+}
+
+/** The inspector while editing inside a body: the selected shape's fields, or the body's shape list when none is selected. */
+function scopeInspector(doc: Obj, bi: number, body: Obj, shapes: readonly number[], commit: (next: Obj) => void, remove: () => void): HTMLElement {
+  if (shapes.length === 0) {
+    return h(
+      "div",
+      { class: "inspector" },
+      h("p", { class: "inspector-title" }, `Body ${num(body, "1", bi)}`),
+      h("p", { class: "hint" }, "Click a shape to select it, or draw one with a shape tool."),
+      shapesBlock(doc, bi, commit),
+    );
+  }
+  const del = h("button", { type: "button", class: "danger", onclick: remove }, "Delete");
+  if (shapes.length > 1) {
+    return h(
+      "div",
+      { class: "inspector" },
+      h("p", { class: "inspector-title" }, `${shapes.length} shapes selected`),
+      h("p", { class: "hint" }, "Drag to move them, or use the arrow keys."),
+      del,
+    );
+  }
+  const si = shapes[0]!;
+  return h(
+    "div",
+    { class: "inspector" },
+    h("p", { class: "inspector-title" }, `Shape ${si + 1} in body ${num(body, "1", bi)}`),
+    shapeBlock(doc, bi, body, si, asObj(list(body, "s")[si] ?? {}), commit),
+    del,
+  );
 }
 
 /** Editable rows for every shape of a body. */

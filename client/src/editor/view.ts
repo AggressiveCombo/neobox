@@ -35,6 +35,8 @@ export type Preview =
 export interface Scene {
   sel: readonly Ref[];
   preview: Preview | null;
+  /** Body being edited in place: other bodies are dimmed and its selected shapes highlighted. */
+  scope: { bi: number; shapes: readonly number[] } | null;
 }
 
 export function clampScale(s: number): number {
@@ -111,12 +113,17 @@ export function drawMap(canvas: HTMLCanvasElement, doc: Obj, view: View, scene: 
 
   const S = (p: Pt): Pt => screenAt(view, w, h, p);
   drawGrid(c, view, w, h);
-  for (const b of getList(doc, "body")) drawBody(c, b, S, view.scale);
+  const scope = scene.scope;
+  getList(doc, "body").forEach((b, i) => drawBody(c, b, S, view.scale, scope && i !== scope.bi ? 0.3 : 1));
+  c.globalAlpha = scope ? 0.3 : 1;
   for (const j of getList(doc, "joint")) drawJoint(c, doc, j, S);
   for (const kind of MARKER_KINDS) {
     for (const o of getList(doc, kind)) drawMarker(c, kind, screenAt(view, w, h, { x: num(o, "1", 0), y: num(o, "2", 0) }));
   }
+  c.globalAlpha = 1;
   drawSelection(c, doc, scene.sel, S);
+  const scoped = scope ? getList(doc, "body")[scope.bi] : undefined;
+  if (scope && scoped) drawScope(c, scoped, scope.shapes, view.scale, S);
   drawPreview(c, scene.preview, S);
 }
 
@@ -151,12 +158,13 @@ function drawGrid(c: CanvasRenderingContext2D, v: View, w: number, h: number): v
   c.stroke();
 }
 
-function drawBody(c: CanvasRenderingContext2D, body: Obj, S: (p: Pt) => Pt, scale: number): void {
+function drawBody(c: CanvasRenderingContext2D, body: Obj, S: (p: Pt) => Pt, scale: number, alpha: number): void {
   const invisible = body["50"] === true;
   const xf = bodyXf(body);
   for (const s of list(body, "s")) {
     const shape = asObj(s);
     c.beginPath();
+    c.globalAlpha = alpha;
     if (isCircle(shape)) {
       const centre = S(toWorld(xf, { x: num(shape, "2", 0), y: num(shape, "3", 0) }));
       c.arc(centre.x, centre.y, num(shape, "9", 0) * scale, 0, TAU);
@@ -177,13 +185,14 @@ function drawBody(c: CanvasRenderingContext2D, body: Obj, S: (p: Pt) => Pt, scal
       c.stroke();
       c.setLineDash([]);
     } else {
-      c.globalAlpha = 0.85;
+      c.globalAlpha = 0.85 * alpha;
       c.fillStyle = shapeColor(shape);
       c.fill();
-      c.globalAlpha = 1;
+      c.globalAlpha = alpha;
       c.stroke();
     }
   }
+  c.globalAlpha = 1;
 }
 
 function drawJoint(c: CanvasRenderingContext2D, doc: Obj, j: Obj, S: (p: Pt) => Pt): void {
@@ -268,6 +277,39 @@ function drawSelection(c: CanvasRenderingContext2D, doc: Obj, sel: readonly Ref[
   }
   const only = sel.length === 1 && sel[0]!.kind === "body" ? getList(doc, "body")[sel[0]!.i] : undefined;
   if (only) drawVertexHandles(c, only, S);
+}
+
+/** Outline the selected shapes of the body being edited in place, and the body's bounds. */
+function drawScope(c: CanvasRenderingContext2D, body: Obj, sel: readonly number[], scale: number, S: (p: Pt) => Pt): void {
+  c.strokeStyle = ACCENT;
+  c.lineWidth = 1.5;
+  const bb = bodyBounds(body);
+  if (bb) {
+    const a = S({ x: bb.minX, y: bb.minY });
+    const b = S({ x: bb.maxX, y: bb.maxY });
+    c.setLineDash([5, 3]);
+    c.strokeRect(a.x - 4, a.y - 4, b.x - a.x + 8, b.y - a.y + 8);
+    c.setLineDash([]);
+  }
+  const shapes = list(body, "s");
+  for (const si of sel) {
+    const s = shapes[si];
+    if (s === undefined) continue;
+    const shape = asObj(s);
+    c.beginPath();
+    if (isCircle(shape)) {
+      const centre = S(toWorld(bodyXf(body), { x: num(shape, "2", 0), y: num(shape, "3", 0) }));
+      c.arc(centre.x, centre.y, num(shape, "9", 0) * scale + 3, 0, TAU);
+    } else {
+      shapeWorld(body, shape).forEach((q, i) => {
+        const p = S(q);
+        if (i === 0) c.moveTo(p.x, p.y);
+        else c.lineTo(p.x, p.y);
+      });
+      c.closePath();
+    }
+    c.stroke();
+  }
 }
 
 /** Squares on the corners of a body's polygon shapes, shown when one body is selected. */

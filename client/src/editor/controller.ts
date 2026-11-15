@@ -6,10 +6,12 @@ import { type Pt, bbox, convexParts, pointInPoly } from "./geom";
 import { History } from "./history";
 import {
   KIND_ORDER,
+  type BodyScope,
   type Ref,
   addBody,
   addJoint,
   addMarker,
+  addShapes,
   bodyColor,
   bodyIdAt,
   bodyXf,
@@ -17,12 +19,15 @@ import {
   getList,
   hitTest,
   isCircle,
+  localPolyShapes,
   mergeBodies,
   moveRefs,
+  moveShapes,
   nextBodyId,
   polyShapes,
   refCenter,
   removeRefs,
+  removeShapes,
   sameRef,
   setShapeColor,
   setShapeOutline,
@@ -59,6 +64,8 @@ const MIN_SIZE = 1;
 /** Joints made by the joint tool are pivots; the inspector changes the kind. */
 const JOINT_PIVOT = 1;
 const DRAFT_MS = 400;
+const DOUBLE_MS = 350;
+const DOUBLE_PX = 12;
 
 interface Anchor {
   body: number;
@@ -71,6 +78,8 @@ type Gesture =
   | { kind: "move"; start: Pt; startPx: Pt; base: Obj; refs: Ref[]; clicked: Ref; collapse: boolean; moved: boolean }
   | { kind: "vertex"; base: Obj; bi: number; si: number; k: number }
   | { kind: "marquee"; a: Pt; b: Pt; keep: Ref[] }
+  | { kind: "shapeMove"; start: Pt; startPx: Pt; base: Obj; bi: number; sel: number[]; clicked: number; collapse: boolean; moved: boolean }
+  | { kind: "shapeMarquee"; a: Pt; b: Pt; keep: number[]; bi: number }
   | { kind: "rect"; a: Pt; b: Pt }
   | { kind: "circle"; c: Pt; r: Pt }
   | { kind: "pan"; p0: Pt; v0: View };
@@ -154,6 +163,28 @@ function shapeAt(body: Obj, w: Pt, tol: number): number | null {
   return null;
 }
 
+/** World-space centre of a shape: the circle centre, or the mean of a polygon's points. */
+function shapeMid(body: Obj, shape: Obj): Pt {
+  if (isCircle(shape)) return toWorld(bodyXf(body), { x: num(shape, "2", 0), y: num(shape, "3", 0) });
+  const pts = shapeWorld(body, shape);
+  const n = pts.length || 1;
+  return { x: pts.reduce((a, q) => a + q.x, 0) / n, y: pts.reduce((a, q) => a + q.y, 0) / n };
+}
+
+/** Indices of a body's shapes whose centres lie in the box spanned by a and b. */
+function shapesIn(body: Obj, a: Pt, b: Pt): number[] {
+  const x0 = Math.min(a.x, b.x);
+  const x1 = Math.max(a.x, b.x);
+  const y0 = Math.min(a.y, b.y);
+  const y1 = Math.max(a.y, b.y);
+  const out: number[] = [];
+  list(body, "s").forEach((s, si) => {
+    const m = shapeMid(body, asObj(s));
+    if (m.x >= x0 && m.x <= x1 && m.y >= y0 && m.y <= y1) out.push(si);
+  });
+  return out;
+}
+
 export class EditorController {
   private readonly history: History<Obj>;
   private view: View = { x: 0, y: 0, scale: 1 };
@@ -169,6 +200,12 @@ export class EditorController {
   private spaceDown = false;
   /** True while test play runs: pointers and keys belong to the game then. */
   private paused = false;
+  /** Map id of the body being edited in place, or null. */
+  private scopeId: number | null = null;
+  /** Selected shape indices of the body being edited in place. */
+  private shapeSel: number[] = [];
+  /** The last select-tool press, for double-click and double-tap detection. */
+  private lastTap: { t: number; p: Pt } | null = null;
   private draftTimer = 0;
   private paintFrame = 0;
   private note = "";
@@ -212,6 +249,15 @@ export class EditorController {
     return this.activeTool;
   }
 
+  /** The body being edited in place and its selected shapes, or null. Found by map id, so it follows the body through edits. */
+  get scope(): BodyScope | null {
+    if (this.scopeId === null) return null;
+    const index = getList(this.doc, "body").findIndex((b) => num(b, "1", -1) === this.scopeId);
+    if (index < 0) return null;
+    const count = list(getList(this.doc, "body")[index]!, "s").length;
+    return { index, id: this.scopeId, shapes: this.shapeSel.filter((i) => i < count) };
+  }
+
   get fillColour(): number {
     return this.colour;
   }
@@ -238,6 +284,11 @@ export class EditorController {
   get hint(): string {
     switch (this.activeTool) {
       case "select":
+        if (this.scope) {
+          return this.scope.shapes.length
+            ? "Drag to move. Arrow keys nudge. Delete removes. Esc leaves the body."
+            : "Click a shape, or drag to box-select. Esc leaves the body.";
+        }
         return this.selection.length
           ? "Drag to move. Arrow keys nudge. Delete removes."
           : "Tap or drag to select. Drag empty space to box-select.";
@@ -278,6 +329,9 @@ export class EditorController {
     this.cancelGesture();
     this.history.reset(doc);
     this.selection = [];
+    this.scopeId = null;
+    this.shapeSel = [];
+    this.lastTap = null;
     this.poly = [];
     this.jointFrom = null;
     this.note = "";
@@ -291,12 +345,20 @@ export class EditorController {
   /** Replace the map with `next` as one undo step; the selection is kept. */
   commit(next: Obj): void {
     this.history.set(next);
+    this.dropStaleScope();
     this.scheduleDraft();
     this.notify();
     this.paint();
   }
 
   removeSelection(): void {
+    const scope = this.scope;
+    if (scope) {
+      if (scope.shapes.length === 0) return;
+      this.cancelGesture();
+      this.commitScoped(removeShapes(this.doc, scope.index, scope.shapes), []);
+      return;
+    }
     if (this.selection.length === 0) return;
     this.cancelGesture();
     const next = removeRefs(this.doc, this.selection);
@@ -305,20 +367,26 @@ export class EditorController {
 
   undo(): void {
     this.cancelGesture();
-    if (this.history.undo()) this.selection = [];
+    if (this.history.undo()) this.clearSelection();
     this.afterHistory();
   }
 
   redo(): void {
     this.cancelGesture();
-    if (this.history.redo()) this.selection = [];
+    if (this.history.redo()) this.clearSelection();
     this.afterHistory();
   }
 
   selectAll(): void {
-    const all: Ref[] = [];
-    for (const kind of KIND_ORDER) getList(this.doc, kind).forEach((_, i) => all.push({ kind, i }));
-    this.selection = all;
+    const scope = this.scope;
+    if (scope) {
+      const body = getList(this.doc, "body")[scope.index];
+      this.shapeSel = list(body ?? {}, "s").map((_, i) => i);
+    } else {
+      const all: Ref[] = [];
+      for (const kind of KIND_ORDER) getList(this.doc, kind).forEach((_, i) => all.push({ kind, i }));
+      this.selection = all;
+    }
     this.notify();
     this.paint();
   }
@@ -344,8 +412,13 @@ export class EditorController {
     this.paint();
   }
 
-  /** Move the selection by whole map units. */
+  /** Move the selection by whole map units (the scoped shapes while editing in place). */
   nudge(dx: number, dy: number): void {
+    const scope = this.scope;
+    if (scope) {
+      if (scope.shapes.length) this.commit(moveShapes(this.doc, scope.index, scope.shapes, dx, dy));
+      return;
+    }
     if (this.selection.length === 0) return;
     this.commit(moveRefs(this.doc, this.selection, dx, dy));
   }
@@ -418,6 +491,7 @@ export class EditorController {
     const tol = HIT_PX / this.view.scale;
     switch (this.activeTool) {
       case "select":
+        if (this.tapped(p) && this.enterOrLeave(raw, tol)) break;
         this.selectDown(e, p, raw, tol, s);
         break;
       case "rect":
@@ -446,6 +520,11 @@ export class EditorController {
   }
 
   private selectDown(e: PointerEvent, p: Pt, raw: Pt, tol: number, s: Pt): void {
+    const scope = this.scope;
+    if (scope) {
+      this.scopedSelectDown(e, p, raw, tol, s, scope);
+      return;
+    }
     const doc = this.doc;
     const shift = e.shiftKey;
     const first = this.selection.length === 1 ? this.selection[0]! : null;
@@ -478,11 +557,9 @@ export class EditorController {
   }
 
   private jointDown(raw: Pt, s: Pt, tol: number): void {
-    const ref = hitTest(this.doc, raw, tol);
+    const bi = this.bodyUnder(raw, tol);
     const anchor: Anchor =
-      ref?.kind === "body"
-        ? { body: bodyIdAt(this.doc, ref.i), p: toLocal(bodyXf(getList(this.doc, "body")[ref.i]!), s), w: s }
-        : { body: -1, p: s, w: s };
+      bi !== null ? { body: bodyIdAt(this.doc, bi), p: toLocal(bodyXf(getList(this.doc, "body")[bi]!), s), w: s } : { body: -1, p: s, w: s };
     if (!this.jointFrom) {
       this.jointFrom = anchor;
       this.notify();
@@ -498,13 +575,13 @@ export class EditorController {
 
   /** Paint the shape under the pointer with the current colour. */
   private fillDown(raw: Pt, tol: number): void {
-    const ref = hitTest(this.doc, raw, tol);
-    if (ref?.kind !== "body") return;
-    const body = getList(this.doc, "body")[ref.i];
+    const bi = this.bodyUnder(raw, tol);
+    if (bi === null) return;
+    const body = getList(this.doc, "body")[bi];
     const si = body ? shapeAt(body, raw, tol) : null;
     if (si === null) return;
     const colour = this.colour;
-    this.create(() => this.commit(setShapeColor(this.doc, ref.i, si, colour)));
+    this.create(() => this.commit(setShapeColor(this.doc, bi, si, colour)));
   }
 
   private placeMarker(kind: MarkerKind, s: Pt): void {
@@ -549,6 +626,23 @@ export class EditorController {
       case "vertex":
         this.dragVertex(g, this.snap(this.worldOf(p)));
         break;
+      case "shapeMove": {
+        if (!g.moved) {
+          if (dist(p, g.startPx) < DRAG_PX) return;
+          g.moved = true;
+        }
+        const cur = this.snap(this.worldOf(p));
+        this.history.live(moveShapes(g.base, g.bi, g.sel, cur.x - g.start.x, cur.y - g.start.y));
+        break;
+      }
+      case "shapeMarquee": {
+        g.b = this.worldOf(p);
+        const body = getList(this.doc, "body")[g.bi];
+        const inside = body ? shapesIn(body, g.a, g.b) : [];
+        this.shapeSel = [...g.keep, ...inside.filter((i) => !g.keep.includes(i))];
+        this.notify();
+        break;
+      }
       case "marquee": {
         g.b = this.worldOf(p);
         const inside = refsIn(this.doc, g.a, g.b);
@@ -616,6 +710,18 @@ export class EditorController {
       case "marquee":
         this.notify();
         return;
+      case "shapeMove":
+        if (g.moved) {
+          this.history.settle();
+          this.scheduleDraft();
+        } else if (g.collapse) {
+          this.shapeSel = [g.clicked];
+        }
+        this.notify();
+        return;
+      case "shapeMarquee":
+        this.notify();
+        return;
       case "rect": {
         const w = Math.abs(g.b.x - g.a.x);
         const h = Math.abs(g.b.y - g.a.y);
@@ -631,11 +737,7 @@ export class EditorController {
             { x: x1, y: y1 },
             { x: x0, y: y1 },
           ];
-          const centre = { x: (x0 + x1) / 2, y: (y0 + y1) / 2 };
-          const id = nextBodyId(this.doc);
-          const shapes = polyShapes(convexParts(corners), centre, bodyColor(id));
-          const made = addBody(this.doc, shapes, centre);
-          this.commitWith(made.doc, [{ kind: "body", i: made.index }]);
+          this.addParts(convexParts(corners));
         });
         return;
       }
@@ -643,25 +745,159 @@ export class EditorController {
         const r = dist(g.c, g.r);
         if (r < MIN_SIZE) return this.notify();
         this.create(() => {
-          const made = addBody(this.doc, [circleShape(r, bodyColor(nextBodyId(this.doc)))], g.c);
-          this.commitWith(made.doc, [{ kind: "body", i: made.index }]);
+          this.addCircle(g.c, r);
         });
         return;
       }
     }
   }
 
-  /** Close the polygon in progress: its points become convex shapes of one body. */
+  /** Close the polygon in progress: its points become convex shapes of one body (or of the scoped body). */
   private finishPoly(): void {
     const pts = this.poly;
     this.create(() => {
-      const box = bbox(pts);
-      const centre = { x: (box.minX + box.maxX) / 2, y: (box.minY + box.maxY) / 2 };
-      const shapes = polyShapes(convexParts(pts), centre, bodyColor(nextBodyId(this.doc)));
-      const made = addBody(this.doc, shapes, centre);
+      this.addParts(convexParts(pts));
       this.poly = [];
-      this.commitWith(made.doc, [{ kind: "body", i: made.index }]);
     });
+  }
+
+  /** Add convex world-space parts as polygon shapes: to the scoped body while editing in place, else as a new body. */
+  private addParts(parts: Pt[][]): void {
+    const scope = this.scope;
+    if (scope) {
+      const xf = bodyXf(getList(this.doc, "body")[scope.index]!);
+      this.addScoped(scope.index, localPolyShapes(parts.map((part) => part.map((p) => toLocal(xf, p))), this.colour));
+      return;
+    }
+    const box = bbox(parts.flat());
+    const centre = { x: (box.minX + box.maxX) / 2, y: (box.minY + box.maxY) / 2 };
+    const shapes = polyShapes(parts, centre, bodyColor(nextBodyId(this.doc)));
+    const made = addBody(this.doc, shapes, centre);
+    this.commitWith(made.doc, [{ kind: "body", i: made.index }]);
+  }
+
+  /** Add a circle at world point c: to the scoped body while editing in place, else as a new body. */
+  private addCircle(c: Pt, r: number): void {
+    const scope = this.scope;
+    if (scope) {
+      const xf = bodyXf(getList(this.doc, "body")[scope.index]!);
+      this.addScoped(scope.index, [circleShape(r, this.colour, toLocal(xf, c))]);
+      return;
+    }
+    const made = addBody(this.doc, [circleShape(r, bodyColor(nextBodyId(this.doc)))], c);
+    this.commitWith(made.doc, [{ kind: "body", i: made.index }]);
+  }
+
+  /** Append shapes to the body at `index` and select them. One undo step. */
+  private addScoped(index: number, shapes: Obj[]): void {
+    const made = addShapes(this.doc, index, shapes);
+    this.commitScoped(made.doc, shapes.map((_, i) => made.first + i));
+  }
+
+  private commitScoped(next: Obj, shapeSel: number[]): void {
+    this.history.set(next);
+    this.selection = [];
+    this.shapeSel = shapeSel;
+    this.scheduleDraft();
+    this.notify();
+  }
+
+  /** Edit inside a body: its shapes become selectable and the other bodies are dimmed. */
+  private enterScope(index: number): void {
+    this.cancelGesture();
+    this.scopeId = bodyIdAt(this.doc, index);
+    this.selection = [];
+    this.shapeSel = [];
+    this.poly = [];
+    this.jointFrom = null;
+    this.note = "";
+    this.notify();
+    this.paint();
+  }
+
+  /** Leave the body being edited in place (Esc, double-click on empty space, or the notice's button). */
+  leaveScope(): void {
+    if (this.scopeId === null) return;
+    this.cancelGesture();
+    this.scopeId = null;
+    this.shapeSel = [];
+    this.note = "";
+    this.notify();
+    this.paint();
+  }
+
+  /** Leave the scope when its body is gone (deleted, merged away, or undone past its creation). */
+  private dropStaleScope(): void {
+    if (this.scopeId !== null && !this.scope) {
+      this.scopeId = null;
+      this.shapeSel = [];
+    }
+  }
+
+  private clearSelection(): void {
+    this.selection = [];
+    this.shapeSel = [];
+  }
+
+  /** True when this press completes a double tap or click: same spot and close in time. */
+  private tapped(p: Pt): boolean {
+    const now = performance.now();
+    const prev = this.lastTap;
+    this.lastTap = { t: now, p };
+    if (!prev || now - prev.t > DOUBLE_MS || dist(prev.p, p) > DOUBLE_PX) return false;
+    this.lastTap = null;
+    return true;
+  }
+
+  /** Double-click: enter the body under the pointer, or leave the scope when the pointer is on empty space. False when neither applies. */
+  private enterOrLeave(raw: Pt, tol: number): boolean {
+    const scope = this.scope;
+    if (scope) {
+      const body = getList(this.doc, "body")[scope.index]!;
+      if (shapeAt(body, raw, tol) !== null) return false;
+      this.leaveScope();
+      return true;
+    }
+    const bi = this.bodyUnder(raw, tol);
+    if (bi === null) return false;
+    this.enterScope(bi);
+    return true;
+  }
+
+  /** Index of the body a press lands on: only the scoped body (on one of its shapes) while editing in place. */
+  private bodyUnder(raw: Pt, tol: number): number | null {
+    const scope = this.scope;
+    if (scope) {
+      const body = getList(this.doc, "body")[scope.index];
+      return body && shapeAt(body, raw, tol) !== null ? scope.index : null;
+    }
+    const ref = hitTest(this.doc, raw, tol);
+    return ref?.kind === "body" ? ref.i : null;
+  }
+
+  /** Select-tool press inside a body: a shape moves or joins the selection, empty space starts a box-select of shapes. */
+  private scopedSelectDown(e: PointerEvent, p: Pt, raw: Pt, tol: number, s: Pt, scope: BodyScope): void {
+    const body = getList(this.doc, "body")[scope.index]!;
+    const shift = e.shiftKey;
+    const si = shapeAt(body, raw, tol);
+    if (si !== null) {
+      const was = scope.shapes.includes(si);
+      const collapse = !shift && scope.shapes.length > 1 && was;
+      if (shift) {
+        this.shapeSel = was ? scope.shapes.filter((i) => i !== si) : [...scope.shapes, si];
+        if (was) {
+          this.notify();
+          return;
+        }
+      } else if (!was) {
+        this.shapeSel = [si];
+      }
+      this.gesture = { kind: "shapeMove", start: s, startPx: p, base: this.doc, bi: scope.index, sel: [...this.shapeSel], clicked: si, collapse, moved: false };
+    } else {
+      this.gesture = { kind: "shapeMarquee", a: raw, b: raw, keep: shift ? [...scope.shapes] : [], bi: scope.index };
+      if (!shift) this.shapeSel = [];
+    }
+    this.notify();
   }
 
   /** Run a creation step; a failure is shown as the message and nothing changes. */
@@ -724,7 +960,7 @@ export class EditorController {
       if (this.activeTool !== "poly" || this.poly.length < 3) return;
       this.finishPoly();
     } else if (e.key.startsWith("Arrow")) {
-      if (this.selection.length === 0) return;
+      if (this.selection.length === 0 && !this.scope?.shapes.length) return;
       const d = e.shiftKey ? 10 : 1;
       const dx = e.key === "ArrowLeft" ? -d : e.key === "ArrowRight" ? d : 0;
       const dy = e.key === "ArrowUp" ? -d : e.key === "ArrowDown" ? d : 0;
@@ -741,7 +977,10 @@ export class EditorController {
     if (this.gesture) this.cancelGesture();
     else if (this.poly.length) this.poly = [];
     else if (this.jointFrom) this.jointFrom = null;
-    else if (this.activeTool !== "select") this.activeTool = "select";
+    else if (this.scope) {
+      this.leaveScope();
+      return;
+    } else if (this.activeTool !== "select") this.activeTool = "select";
     else if (this.selection.length) this.selection = [];
     else return;
     this.note = "";
@@ -761,12 +1000,14 @@ export class EditorController {
 
   private commitWith(next: Obj, sel: Ref[]): void {
     this.history.set(next);
+    this.dropStaleScope();
     this.selection = sel;
     this.scheduleDraft();
     this.notify();
   }
 
   private afterHistory(): void {
+    this.dropStaleScope();
     this.scheduleDraft();
     this.notify();
     this.paint();
@@ -816,7 +1057,8 @@ export class EditorController {
 
   private draw(): void {
     if (!this.fitted) this.fit();
-    const scene: Scene = { sel: this.selection, preview: this.preview() };
+    const scope = this.scope;
+    const scene: Scene = { sel: this.selection, preview: this.preview(), scope: scope ? { bi: scope.index, shapes: scope.shapes } : null };
     drawMap(this.canvas, this.doc, this.view, scene);
   }
 

@@ -212,3 +212,23 @@
   min-height: 40px;
   padding: 2px;
 }
+
+.editor-scope {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: calc(100% - 16px);
+  padding: 4px 8px;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.6);
+  color: #fff;
+  font-size: 0.875rem;
+}
+
+.editor-scope[hidden] {
+  display: none;
+}

@@ -55,7 +55,10 @@ export const editorScreen: ScreenFactory = (ctx) => {
   // Canvas and the controls around it. A room map is never drafted locally.
   const canvas = h("canvas", { class: "editor-canvas", "aria-label": "Map canvas" });
   const lagEl = h("p", { class: "editor-lag", role: "status" });
-  const stage = h("div", { class: "editor-stage" }, canvas, lagEl);
+  const scopeText = h("span", {});
+  const scopeBar = h("div", { class: "editor-scope", role: "status" }, scopeText, h("button", { type: "button", onclick: () => ctrl.leaveScope() }, "Leave body"));
+  scopeBar.hidden = true;
+  const stage = h("div", { class: "editor-stage" }, canvas, scopeBar, lagEl);
   const ctrl = new EditorController(canvas, () => refresh(), !inRoom);
   const observer = new ResizeObserver(() => {
     if (stage.isConnected) ctrl.resize();
@@ -185,7 +188,8 @@ export const editorScreen: ScreenFactory = (ctx) => {
   // unchanged selection keeps the inspector as it is, so typing is not interrupted.
   function refreshInspector(): void {
     const doc = ctrl.doc;
-    const sel = ctrl.sel.map((r) => JSON.stringify(r)).join("|");
+    const scope = ctrl.scope;
+    const sel = `${ctrl.sel.map((r) => JSON.stringify(r)).join("|")}/${JSON.stringify(scope)}`;
     if (doc === shownDoc && sel === shownSel) return;
     const sameSel = sel === shownSel;
     shownDoc = doc;
@@ -195,6 +199,7 @@ export const editorScreen: ScreenFactory = (ctx) => {
       renderInspector({
         doc,
         sel: ctrl.sel,
+        scope,
         commit: (next) => ctrl.commit(next),
         remove: () => ctrl.removeSelection(),
       }),
@@ -205,7 +210,10 @@ export const editorScreen: ScreenFactory = (ctx) => {
     for (const [tool, btn] of toolButtons) btn.setAttribute("aria-pressed", String(tool === ctrl.tool));
     undoBtn.disabled = !ctrl.canUndo;
     redoBtn.disabled = !ctrl.canRedo;
-    deleteBtn.disabled = ctrl.sel.length === 0;
+    const scope = ctrl.scope;
+    scopeBar.hidden = !scope;
+    scopeText.textContent = scope ? `Editing shapes inside body ${scope.id}. Esc returns.` : "";
+    deleteBtn.disabled = ctrl.sel.length === 0 && !scope?.shapes.length;
     mergeBtn.disabled = ctrl.sel.filter((r) => r.kind === "body").length < 2;
     const shapes = ctrl.physicsShapes;
     lagEl.textContent = `${shapes} physics shapes: ${lagVerdict(shapes)}`;
