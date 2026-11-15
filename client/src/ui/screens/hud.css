@@ -188,6 +188,81 @@
   background: rgba(0, 0, 0, 0.65);
 }
 
+/* Match menu button, left of Leave; its panel opens under it. */
+.hud-menu-btn {
+  position: absolute;
+  top: calc(var(--hud-safe-top) + var(--hud-inset));
+  right: calc(var(--hud-safe-right) + var(--hud-inset) + 96px);
+  pointer-events: auto;
+  min-width: 88px;
+  min-height: 40px;
+  padding: 0 14px;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.45);
+  color: #fff;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.hud-menu-btn:hover,
+.hud-menu-btn[aria-expanded="true"] {
+  background: rgba(0, 0, 0, 0.65);
+}
+
+.hud-menu {
+  position: absolute;
+  top: calc(var(--hud-safe-top) + var(--hud-inset) + 48px);
+  right: calc(var(--hud-safe-right) + var(--hud-inset) + 96px);
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 200px;
+  padding: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  border-radius: 10px;
+  background: rgba(11, 13, 16, 0.92);
+  pointer-events: auto;
+}
+
+.hud-menu[hidden] {
+  display: none;
+}
+
+.hud-menu button {
+  min-height: 36px;
+  padding: 0 12px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.06);
+  color: #fff;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.hud-menu button:hover {
+  background: rgba(255, 255, 255, 0.14);
+}
+
+.hud-menu button[hidden] {
+  display: none;
+}
+
+.hud-menu-volume {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 4px 2px;
+  color: #fff;
+}
+
+.hud-menu-volume input {
+  flex: 1;
+}
+
 /* End match button, under the chat button. Host only. */
 .hud-end {
   position: absolute;
@@ -346,10 +421,31 @@
   bottom: calc(var(--hud-safe-bottom) + var(--hud-inset) + 8px);
   left: 50%;
   transform: translateX(-50%);
-  padding: 4px 12px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 4px;
   border-radius: 999px;
   background: rgba(0, 0, 0, 0.5);
   white-space: nowrap;
+  pointer-events: auto;
+}
+
+.hud-spectate-label[hidden] {
+  display: none;
+}
+
+.hud-spectate-label button {
+  min-width: 40px;
+  min-height: 40px;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.45);
+  color: #fff;
+  font: inherit;
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
 }
 
 /* Typing indicator, under the chat log. */

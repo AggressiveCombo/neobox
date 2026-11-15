@@ -596,6 +596,10 @@ export const roomScreen: ScreenFactory = (ctx: AppCtx) => {
         h(
           "div",
           { class: "room-heading-actions" },
+          // the lobby opened from the match menu: the match keeps running behind it
+          st.inMatch
+            ? h("button", { type: "button", class: "room-btn room-btn-primary", onclick: () => ctx.store.set({ screen: "match" }) }, "Back to game")
+            : null,
           h("button", { type: "button", class: "room-btn", onclick: () => void shareInvite() }, "Invite"),
           st.replayReady
             ? h(

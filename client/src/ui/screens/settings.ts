@@ -386,13 +386,19 @@ export const settingsScreen: ScreenFactory = (ctx) => {
     syncColor();
   }
 
+  /** Back to the screen settings opened from; a match that ended meanwhile returns to its room. */
+  function back(): void {
+    const ended = returnTo === "match" && !store.state.inMatch;
+    store.set({ screen: ended ? (store.state.room ? "room" : "menu") : returnTo });
+  }
+
   const el = h(
     "div",
     { class: "screen settings-screen" },
     h(
       "header",
       { class: "settings-header" },
-      h("button", { type: "button", class: "settings-back", onclick: () => store.set({ screen: returnTo }) }, "Back"),
+      h("button", { type: "button", class: "settings-back", onclick: back }, "Back"),
       h("h1", { class: "settings-heading" }, "Settings"),
     ),
     h(

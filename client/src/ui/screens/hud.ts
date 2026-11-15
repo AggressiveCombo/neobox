@@ -2,6 +2,7 @@
 // DOM only; it sits over the render canvases and enables pointer events only on
 // interactive elements (see hud.css).
 
+import { applyAccount, errorText, logout } from "../../account";
 import type { AppCtx, HudFactory } from "../../ctx";
 import { cycleSpectate, spectatedId } from "../../camera";
 import { recordClip } from "../../clips";
@@ -222,7 +223,15 @@ export const hudScreen: HudFactory = (ctx) => {
 
   // Spectator: a click on the arena follows the next player. Hidden unless spectating.
   const spectateLayer = h("div", { class: "hud-spectate", hidden: true, onclick: () => spectateStep(1) });
-  const spectateLabelEl = h("div", { class: "hud-spectate-label", hidden: true });
+  // The original's spectate bar: previous / followed player / next (also Left and Right).
+  const spectateName = h("span", { class: "hud-spectate-name", "aria-live": "polite" });
+  const spectateLabelEl = h(
+    "div",
+    { class: "hud-spectate-label", hidden: true },
+    h("button", { type: "button", "aria-label": "Previous player", onclick: () => spectateStep(-1) }, "‹"),
+    spectateName,
+    h("button", { type: "button", "aria-label": "Next player", onclick: () => spectateStep(1) }, "›"),
+  );
 
   // Stats overlay.
   const statsRows = {
@@ -287,6 +296,78 @@ export const hudScreen: HudFactory = (ctx) => {
   );
   const connEl = h("div", { class: "hud-conn", role: "status", hidden: true }, "connection lost");
 
+  // Match menu, the original's in-game menu: the lobby (the match keeps
+  // running behind it), fullscreen, volume, menu music, controls, sign out.
+  // Leave and End match keep their own buttons.
+  const fullscreenItem = h("button", { type: "button", hidden: !document.fullscreenEnabled, onclick: toggleFullscreen });
+  const muteItem = h("button", { type: "button", onclick: () => prefs.set({ musicMuted: !prefs.value.musicMuted }) });
+  const volumeInput = h("input", {
+    type: "range",
+    min: 0,
+    max: 100,
+    step: 1,
+    oninput: (e: Event) => prefs.set({ volume: Number((e.target as HTMLInputElement).value) / 100 }),
+  });
+  const signOutItem = h("button", { type: "button", onclick: () => void signOut() }, "Sign out");
+  const menuPanel = h(
+    "div",
+    { class: "hud-menu", id: "hud-menu", hidden: true },
+    h("button", { type: "button", onclick: () => ctx.store.set({ screen: "room" }) }, "Show lobby"),
+    fullscreenItem,
+    h("label", { class: "hud-menu-volume" }, h("span", null, "Volume"), volumeInput),
+    muteItem,
+    h("button", { type: "button", onclick: () => ctx.store.set({ screen: "settings" }) }, "Change controls"),
+    signOutItem,
+  );
+  const menuBtn = h(
+    "button",
+    { type: "button", class: "hud-menu-btn", "aria-expanded": "false", "aria-controls": "hud-menu", onclick: () => setMenu(menuPanel.hidden) },
+    "Menu",
+  );
+
+  function setMenu(open: boolean): void {
+    menuPanel.hidden = !open;
+    menuBtn.setAttribute("aria-expanded", String(open));
+    if (open) {
+      syncMenu();
+      menuPanel.querySelector<HTMLButtonElement>("button:not([hidden])")?.focus();
+    }
+  }
+
+  function onMenuKey(e: KeyboardEvent): void {
+    if (e.key !== "Escape") return;
+    e.preventDefault();
+    e.stopPropagation();
+    setMenu(false);
+    menuBtn.focus();
+  }
+
+  function syncMenu(): void {
+    fullscreenItem.textContent = document.fullscreenElement !== null ? "Exit fullscreen" : "Fullscreen";
+    muteItem.textContent = prefs.value.musicMuted ? "Unmute music" : "Mute music";
+    volumeInput.value = String(Math.round(prefs.value.volume * 100));
+    signOutItem.hidden = ctx.store.state.account === null;
+  }
+
+  function toggleFullscreen(): void {
+    const request = document.fullscreenElement !== null ? document.exitFullscreen() : document.documentElement.requestFullscreen();
+    // refused without a user gesture or when already in the state asked for
+    request.catch(() => undefined);
+  }
+
+  async function signOut(): Promise<void> {
+    try {
+      await logout();
+      applyAccount(ctx, null);
+      setMenu(false);
+    } catch (err) {
+      ctx.toast(errorText(err), "error");
+    }
+  }
+  menuPanel.addEventListener("keydown", onMenuKey);
+  const unsubPrefs = prefs.subscribe(() => syncMenu());
+  document.addEventListener("fullscreenchange", syncMenu);
+
   const endBtn = h("button", { type: "button", class: "hud-end", hidden: true, onclick: endMatch }, "End match");
   const el = h(
     "div",
@@ -296,6 +377,8 @@ export const hudScreen: HudFactory = (ctx) => {
     scoresEl,
     topLeftEl,
     xpEl,
+    menuBtn,
+    menuPanel,
     leaveBtn,
     endBtn,
     connEl,
@@ -402,7 +485,7 @@ export const hudScreen: HudFactory = (ctx) => {
     const text = name === "" ? "Spectating" : `Spectating ${name}`;
     if (text === spectateLabel) return;
     spectateLabel = text;
-    spectateLabelEl.textContent = text;
+    spectateName.textContent = text;
   }
 
   function spectateStep(step: number): void {
@@ -467,6 +550,9 @@ export const hudScreen: HudFactory = (ctx) => {
       if (e.key === "Enter" && !e.repeat) {
         e.preventDefault();
         openChat();
+      } else if (e.key === "Escape" && !e.repeat) {
+        e.preventDefault();
+        setMenu(menuPanel.hidden);
       } else if (spectating && (e.key === "ArrowLeft" || e.key === "ArrowRight")) {
         e.preventDefault();
         spectateStep(e.key === "ArrowRight" ? 1 : -1);
@@ -543,6 +629,8 @@ export const hudScreen: HudFactory = (ctx) => {
     },
     destroy() {
       window.removeEventListener("keydown", onWindowKey, true);
+      document.removeEventListener("fullscreenchange", syncMenu);
+      unsubPrefs();
       clearInterval(typingTimer);
       clearTimeout(xpTimer);
       touch.destroy();
