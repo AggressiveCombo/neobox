@@ -265,9 +265,10 @@ async function pullPrefs(ctx: AppCtx, accountId: number): Promise<void> {
 
 /**
  * Start account handling: look up the session once, then keep the signed-in
- * player's prefs in step with the server. Call once at boot.
+ * player's prefs in step with the server. Call once at boot. `ready` runs once the lookup has
+ * settled, signed in or not.
  */
-export function startAccountSync(ctx: AppCtx): void {
+export function startAccountSync(ctx: AppCtx, ready: () => void): void {
   prefs.subscribe(() => {
     if (!applying) queuePush(ctx);
   });
@@ -285,8 +286,14 @@ export function startAccountSync(ctx: AppCtx): void {
     void pushPrefs(ctx, true);
   });
   fetchMe().then(
-    (account) => ctx.store.set({ account }),
-    (err: unknown) => ctx.toast(`could not check your account: ${errorText(err)}`, "error"),
+    (account) => {
+      ctx.store.set({ account });
+      ready();
+    },
+    (err: unknown) => {
+      ctx.toast(`could not check your account: ${errorText(err)}`, "error");
+      ready();
+    },
   );
 }
 

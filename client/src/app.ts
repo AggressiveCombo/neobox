@@ -269,7 +269,11 @@ export function start(): void {
     },
   };
 
-  startAccountSync(ctx);
+  // A signed-in player joins under the account's name, so the invite waits for the account lookup.
+  const invite = inviteFromUrl();
+  startAccountSync(ctx, () => {
+    if (invite !== null) joinRoom(invite);
+  });
   mountJukebox(ctx);
 
   // The appearance colour follows the preference into the room.
@@ -829,7 +833,4 @@ export function start(): void {
   mount(store.state.screen);
   const boot = document.getElementById("boot");
   if (boot) boot.hidden = true;
-
-  const invite = inviteFromUrl();
-  if (invite !== null) joinRoom(invite);
 }
