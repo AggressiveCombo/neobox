@@ -28,6 +28,7 @@ const PAGE_SIZE: usize = 24;
 pub fn router() -> Router<Arc<Hub>> {
     Router::new()
         .route("/api/stats", get(stats))
+        .route("/api/rotation", get(rotation))
         .route("/api/ticket", get(ticket))
         .route("/api/account/me", get(me))
         .route("/api/account/register", post(register))
@@ -175,20 +176,16 @@ impl AccountJson {
 // Server
 
 #[derive(Serialize)]
-struct QuickCounts {
-    ffa: usize,
-    teams: usize,
-    lives: usize,
-}
-
-#[derive(Serialize)]
 struct StatsJson {
     online: usize,
     rooms: usize,
-    quick: QuickCounts,
+    /// Players by kind of room, like the original's `playercount.json`:
+    /// each quick-play mode (`qp_1`, ...), `qp` (all quick play), `custom`
+    /// and `total`.
+    counts: HashMap<String, usize>,
 }
 
-/// Connections, rooms and players in quick-play queues, for the lobby.
+/// Connections, rooms and players per kind of room, for the menus.
 async fn stats(State(hub): State<Arc<Hub>>) -> Json<StatsJson> {
     let mut rooms = hub.summaries();
     let mut online = hub.conns.load(Ordering::Relaxed);
@@ -196,17 +193,26 @@ async fn stats(State(hub): State<Arc<Hub>>) -> Json<StatsJson> {
         online += node.conns;
         rooms.extend(node.rooms);
     }
-    let mut quick = QuickCounts { ffa: 0, teams: 0, lives: 0 };
+    let mut counts: HashMap<String, usize> = HashMap::new();
     for room in &rooms {
         let players = room.players.len();
-        match room.quick.as_deref() {
-            Some("ffa") => quick.ffa += players,
-            Some("teams") => quick.teams += players,
-            Some("lives") => quick.lives += players,
-            _ => {}
+        match &room.quick {
+            Some(mode) => {
+                *counts.entry(mode.clone()).or_default() += players;
+                *counts.entry("qp".into()).or_default() += players;
+            }
+            None => *counts.entry("custom".into()).or_default() += players,
         }
+        *counts.entry("total".into()).or_default() += players;
     }
-    Json(StatsJson { online, rooms: rooms.len(), quick })
+    Json(StatsJson { online, rooms: rooms.len(), counts })
+}
+
+/// The quick-play modes and their map rotation, in the format of the
+/// original's `rotationmaps/maps2.json`.
+async fn rotation(State(hub): State<Arc<Hub>>) -> impl IntoResponse {
+    let r = crate::rotation::current(&hub).await;
+    ([(header::CACHE_CONTROL, "public, max-age=60")], Json(r.as_ref().clone()))
 }
 
 // Accounts

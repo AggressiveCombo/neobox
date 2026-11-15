@@ -1,7 +1,7 @@
 /* Quick play screen (ui/screens/quick.ts). Panel and button base styles come from style.css. */
 
 .quick-panel {
-  width: min(100%, 560px);
+  width: min(100%, 720px);
   gap: 14px;
 }
 
@@ -10,31 +10,63 @@
   font-size: 26px;
 }
 
-.quick-online {
-  margin: 0;
-  color: var(--muted);
-  font-size: 14px;
-  font-variant-numeric: tabular-nums;
-}
-
 .quick-cards {
   display: grid;
   grid-template-columns: 1fr;
-  gap: 10px;
+  gap: 12px;
+}
+
+.quick-loading {
+  margin: 0;
+  color: var(--muted);
 }
 
 .quick-card {
   display: flex;
   flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-2);
+  cursor: pointer;
+  transition: border-color 120ms ease, background-color 120ms ease, transform 100ms ease;
+}
+
+.quick-card:hover:not(.disabled) {
+  border-color: var(--border-strong);
+  background: var(--surface-hover);
+  transform: scale(1.02);
+}
+
+.quick-card.disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.quick-choose {
+  display: flex;
+  flex-direction: column;
   align-items: flex-start;
   gap: 4px;
   width: 100%;
-  padding: 14px 16px;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  background: none;
   text-align: left;
 }
 
+.quick-choose:hover:not(:disabled) {
+  background: none;
+}
+
+.quick-choose:disabled {
+  opacity: 1;
+}
+
 .quick-title {
-  font-size: 17px;
+  font-size: 18px;
   font-weight: 700;
 }
 
@@ -50,12 +82,49 @@
   font-variant-numeric: tabular-nums;
 }
 
-.quick-card:disabled {
-  opacity: 0.5;
+.quick-maps {
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
 
-@media (min-width: 560px) {
+.quick-thumbs {
+  display: grid;
+  flex: 1;
+  grid-template-columns: 1fr 1.3fr 1fr;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.quick-thumbs:has(> :only-child) {
+  grid-template-columns: 1fr;
+  justify-items: center;
+}
+
+.quick-thumb {
+  width: 100%;
+  height: auto;
+  aspect-ratio: 16 / 10;
+  opacity: 0.7;
+}
+
+.quick-thumb-mid,
+.quick-thumbs > :only-child {
+  opacity: 1;
+}
+
+.quick-arrow {
+  flex: none;
+  min-width: 32px;
+  min-height: 32px;
+  padding: 0;
+  font-size: 20px;
+  line-height: 1;
+}
+
+@media (min-width: 640px) {
   .quick-cards {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }

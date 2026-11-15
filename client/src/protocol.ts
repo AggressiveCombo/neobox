@@ -18,14 +18,8 @@ export const NAME_RE = /^[A-Za-z0-9 _]{1,15}$/;
 export const ROOM_MIN_PLAYERS = 1;
 export const ROOM_MAX_PLAYERS = 32;
 
-export type QuickQueue = "ffa" | "teams" | "lives";
-
-/** Quick-play queues (crates/net/src/protocol.rs `QUICK_QUEUES`): id and game mode. */
-export const QUICK_QUEUES: { id: QuickQueue; mode: number }[] = [
-  { id: "ffa", mode: 0 },
-  { id: "teams", mode: 3 },
-  { id: "lives", mode: 1 },
-];
+/** A quick-play mode id of the server's rotation (`qp_1`, `qp_2`, ...). */
+export type QuickQueue = string;
 
 export type JukeboxAction = "play" | "pause" | "resume" | "stop";
 
@@ -34,7 +28,7 @@ export type ClientMsg =
   | { t: "list_rooms" }
   | { t: "create_room"; name: string; password: string | null; max_players: number; public: boolean }
   | { t: "join_room"; room: string; password: string | null; resume?: string | null }
-  | { t: "quick_play"; queue?: QuickQueue | null }
+  | { t: "quick_play"; queue?: QuickQueue | null; exclude?: string[] }
   | { t: "leave_room" }
   | { t: "chat"; text: string }
   | { t: "set_team"; team: number }

@@ -298,6 +298,21 @@
   white-space: nowrap;
 }
 
+/* Quick play waiting for other players: centred, below the objective bar. */
+.hud-matching {
+  position: absolute;
+  top: 22%;
+  left: 50%;
+  max-width: calc(100% - 32px);
+  transform: translateX(-50%);
+  padding: 8px 14px;
+  border-radius: 8px;
+  background: rgba(10, 14, 22, 0.75);
+  font-weight: 600;
+  text-align: center;
+  pointer-events: none;
+}
+
 /* Touch controls. Sized so the stick and the 2×2 action grid fit side by
    side on a 320 px wide portrait phone. */
 .hud-touch-layer {

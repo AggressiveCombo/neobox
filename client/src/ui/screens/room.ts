@@ -15,7 +15,7 @@ import {
   TEAM_SPECTATOR,
   isTeamMode,
 } from "../../protocol";
-import type { PlayerInfo, QuickQueue, RoomState } from "../../protocol";
+import type { PlayerInfo, RoomState } from "../../protocol";
 import { SETTINGS, formatValue, normalizeInput, readOnlyKeys } from "../../settings";
 import type { SettingDef } from "../../settings";
 import { drawMapPreview } from "../../render/preview";
@@ -51,8 +51,6 @@ const TYPING_SHOW_MS = 3000;
 const TYPING_SEND_MS = 1000;
 /** How often the roster checks whether a typing signal has expired. */
 const TYPING_TICK_MS = 500;
-
-const QUEUE_NAMES: Record<QuickQueue, string> = { ffa: "Free for all", teams: "Teams", lives: "Lives" };
 
 function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
@@ -618,7 +616,7 @@ export const roomScreen: ScreenFactory = (ctx: AppCtx) => {
         fact("Map", room.map_name),
         fact("Mode", modeName(roomMode(room))),
         fact("Players", `${room.players.length} / ${room.max_players}`),
-        room.quick === null ? null : fact("Queue", QUEUE_NAMES[room.quick]),
+        room.quick === null ? null : fact("Type", "Quick play"),
       ),
     ];
   }

@@ -56,11 +56,16 @@ pub enum ClientMsg {
         #[serde(default)]
         resume: Option<String>,
     },
-    /// Join a quick-play room of `queue` (see [`QUICK_QUEUES`]; absent:
-    /// the first), creating one when all are full.
+    /// Join a quick-play room of mode `queue` (`qp_1`, `qp_2`, ... as the
+    /// server's rotation names them; absent: the first), creating one when
+    /// none has room. Rooms in `exclude` (codes of quick-play rooms this
+    /// player was already in) are skipped, like the original's
+    /// `excludeaddresses`.
     QuickPlay {
         #[serde(default)]
         queue: Option<String>,
+        #[serde(default)]
+        exclude: Vec<String>,
     },
     LeaveRoom,
     /// Chat line. Lines starting with `/` are commands (`/help` lists them).
@@ -114,10 +119,6 @@ pub enum ClientMsg {
     /// WebRTC offer (SDP) for the unreliable game data channel.
     RtcOffer { sdp: String },
 }
-
-/// Quick-play queues: (id, game mode). Quick-play rooms have no host, play
-/// the built-in maps in rotation and never return to the lobby.
-pub const QUICK_QUEUES: &[(&str, i32)] = &[("ffa", 0), ("teams", 3), ("lives", 1)];
 
 /// A map of the map library, as rooms show it.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]

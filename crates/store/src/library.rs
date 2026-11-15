@@ -435,6 +435,35 @@ impl Store {
         )?)
     }
 
+    /// The best-rated public maps created at or after `since` (unix seconds),
+    /// up to `limit`: highest vote score first, newer first on a tie. Only
+    /// maps with a positive score qualify. The quick-play rotation adds them.
+    pub fn rotation_picks(&self, since: i64, limit: usize) -> Result<Vec<RoomMap>> {
+        let db = self.db();
+        let mut stmt = db.prepare(&format!(
+            "SELECT m.id, m.name, a.name, m.description, m.created, m.code, \
+             (SELECT COUNT(*) FROM map_votes v WHERE v.map_id = m.id AND v.value = 1), \
+             (SELECT COUNT(*) FROM map_votes v WHERE v.map_id = m.id AND v.value = -1) \
+             FROM {MAP_FROM} WHERE {LISTED} AND m.created >= ?1 AND {SCORE} > 0 \
+             ORDER BY {SCORE} DESC, m.created DESC, m.id DESC LIMIT ?2"
+        ))?;
+        let maps = stmt
+            .query_map(params![since, limit as i64], |r| {
+                Ok(RoomMap {
+                    id: r.get(0)?,
+                    name: r.get(1)?,
+                    author: r.get(2)?,
+                    description: r.get(3)?,
+                    created: r.get(4)?,
+                    code: r.get(5)?,
+                    up: r.get(6)?,
+                    down: r.get(7)?,
+                })
+            })?
+            .collect::<rusqlite::Result<Vec<RoomMap>>>()?;
+        Ok(maps)
+    }
+
     /// Change a map its owner made. `code` of `None` keeps the code. Changing
     /// the name or code of a public map, or making a map public, sends it back
     /// to review. A description change alone does not. Rejected maps stay
@@ -688,6 +717,36 @@ mod tests {
         assert_eq!(s.get(m, Some(o), false).unwrap().map.description, "a new description");
         assert!(matches!(s.update(o, m, "x", None, Visibility::Unlisted, &long), Err(Error::Invalid(_))));
         assert_eq!(s.get(m, Some(o), false).unwrap().map.description, "a new description", "a failed edit changes nothing");
+    }
+
+    #[test]
+    fn rotation_picks_are_recent_well_rated_public_maps() {
+        let s = store();
+        let o = raw_account(&s, "Owner");
+        let voters: Vec<i64> = (0..3).map(|i| raw_account(&s, &format!("V{i}"))).collect();
+        let vote = |id: i64, n: usize, value: i64| {
+            for v in &voters[..n] {
+                s.vote(*v, id, value).unwrap();
+            }
+        };
+        let best = live_public(&s, o, "Best");
+        vote(best, 3, 1);
+        let good = live_public(&s, o, "Good");
+        vote(good, 1, 1);
+        let disliked = live_public(&s, o, "Disliked");
+        vote(disliked, 2, -1);
+        live_public(&s, o, "Unrated");
+        let old = live_public(&s, o, "Old");
+        vote(old, 3, 1);
+        s.db().execute("UPDATE maps SET created = 10 WHERE id = ?1", [old]).unwrap();
+        let unlisted = s.upload(o, "Unlisted", "code", Visibility::Unlisted, "").unwrap();
+        vote(unlisted, 3, 1);
+
+        let picks: Vec<i64> = s.rotation_picks(100, 4).unwrap().iter().map(|m| m.id).collect();
+        assert_eq!(picks, [best, good], "best first; no old, unlisted, unrated or disliked maps");
+        assert_eq!(s.rotation_picks(100, 1).unwrap().len(), 1, "limit");
+        let picks = s.rotation_picks(100, 4).unwrap();
+        assert_eq!((picks[0].name.as_str(), picks[0].author.as_str(), picks[0].code.as_str(), picks[0].up), ("Best", "Owner", "code", 3));
     }
 
     #[test]

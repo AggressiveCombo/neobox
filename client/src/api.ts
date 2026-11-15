@@ -27,17 +27,60 @@ export function wsUrl(): string {
   return wsUrlFor(location.origin);
 }
 
-/** GET /api/stats: connections, rooms and quick-play players, for the lobby. */
+/**
+ * GET /api/stats: connections, rooms and players per kind of room. `counts` is keyed like the
+ * original's playercount.json: each quick-play mode (`qp_1`, ...), `qp`, `custom` and `total`.
+ */
 export interface ServerStats {
   online: number;
   rooms: number;
-  quick: { ffa: number; teams: number; lives: number };
+  counts: Record<string, number>;
 }
 
 export async function fetchStats(signal?: AbortSignal): Promise<ServerStats> {
   const res = await fetch("/api/stats", { signal, headers: { accept: "application/json" } });
   if (!res.ok) throw new Error(`/api/stats: HTTP ${res.status}`);
   return (await res.json()) as ServerStats;
+}
+
+/** A quick-play mode of the server's rotation, with the maps it plays in order. */
+export interface QuickMode {
+  /** `qp_1`, `qp_2`, ... */
+  id: string;
+  title: string;
+  description: string;
+  maps: { name: string; author: string; code: string }[];
+}
+
+interface RotationJson {
+  maps?: { name?: unknown; author?: unknown; leveldata?: unknown; modes?: unknown }[];
+  meta?: Record<string, { title?: unknown; description?: unknown } | number>;
+}
+
+/** GET /api/rotation (the original's maps2.json format): modes `qp_1`..`qp_10` in order. */
+export async function fetchQuickModes(signal?: AbortSignal): Promise<QuickMode[]> {
+  const res = await fetch("/api/rotation", { signal, headers: { accept: "application/json" } });
+  if (!res.ok) throw new Error(`/api/rotation: HTTP ${res.status}`);
+  const data = (await res.json()) as RotationJson;
+  const modes: QuickMode[] = [];
+  for (let i = 1; i <= 10; i++) {
+    const id = `qp_${i}`;
+    const meta = data.meta?.[id];
+    if (typeof meta !== "object" || meta === null) continue;
+    modes.push({
+      id,
+      title: typeof meta.title === "string" ? meta.title : id,
+      description: typeof meta.description === "string" ? meta.description : "",
+      maps: (data.maps ?? [])
+        .filter((m) => Array.isArray(m.modes) && m.modes.includes(id) && typeof m.leveldata === "string")
+        .map((m) => ({
+          name: typeof m.name === "string" ? m.name : "",
+          author: typeof m.author === "string" ? m.author : "",
+          code: m.leveldata as string,
+        })),
+    });
+  }
+  return modes;
 }
 
 /**

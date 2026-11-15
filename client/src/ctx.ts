@@ -39,6 +39,8 @@ export interface AppCtx {
   play(name: string): void;
   /** Join a room by code (connects with the saved name first, or asks for a name on the menu). */
   joinRoom(code: string): void;
+  /** Quick play: find a room of mode `queue` (`qp_1`, ...), skipping quick-play rooms already visited. */
+  quickPlay(queue: string): void;
   /** Close the connection and return to the main menu. */
   disconnect(): void;
   /** Built-in maps from /api/maps (cached). */

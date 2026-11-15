@@ -261,10 +261,10 @@ pub struct Room {
     map_name: String,
     /// The current map's library entry, when it comes from the library.
     map_meta: Option<MapMeta>,
-    /// Quick-play queue: no host, the built-in maps rotate, matches start by themselves.
+    /// Quick-play mode (`qp_N`): no host, the rotation plays by itself.
     quick: Option<String>,
-    /// Built-in map names in the order the quick-play rotation plays them.
-    rotation: Vec<String>,
+    /// Maps the quick-play rotation plays, in order.
+    rotation: Vec<crate::hub::BuiltinMap>,
     /// When the start countdown ends.
     starting: Option<Instant>,
     jukebox: Option<Jukebox>,
@@ -288,8 +288,16 @@ fn now_ms() -> u64 {
     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0)
 }
 
-/// Create a room and start its task. `quick`: the quick-play queue of a
-/// quick-play room (its game mode comes from the queue).
+/// How a new room starts.
+pub enum RoomSetup {
+    /// A custom room: its first map and game-mode defaults (the rotation's
+    /// `custom` entry, like the original's server).
+    Custom { map: Option<crate::hub::BuiltinMap>, defaults: Option<crate::rotation::ModeMeta> },
+    /// A quick-play room of `mode`, playing `maps` in order.
+    Quick { mode: crate::rotation::QuickMode, maps: Vec<crate::hub::BuiltinMap> },
+}
+
+/// Create a room and start its task.
 pub fn spawn(
     hub: Arc<Hub>,
     code: String,
@@ -297,9 +305,13 @@ pub fn spawn(
     password: Option<String>,
     max_players: u8,
     public: bool,
-    quick: Option<String>,
+    setup: RoomSetup,
 ) -> RoomHandle {
     let (tx, rx) = mpsc::unbounded_channel();
+    let quick = match &setup {
+        RoomSetup::Quick { mode, .. } => Some(mode.id.clone()),
+        RoomSetup::Custom { .. } => None,
+    };
     // Filled in completely once a second; the room list (and a node's
     // "room created" heartbeat) must see whether it is public right away.
     let summary = Arc::new(Mutex::new(RoomSummary {
@@ -312,21 +324,25 @@ pub fn spawn(
         created_ms: now_ms(),
         ..RoomSummary::default()
     }));
-    let map = hub.maps.first().cloned();
     let mut settings = GameSettings::default();
-    if let Some(&(_, mode)) = quick.as_deref().and_then(|q| QUICK_QUEUES.iter().find(|(id, _)| *id == q)) {
-        settings.game_mode = mode;
-    }
-    let rotation = if quick.is_some() {
-        // every quick-play room starts somewhere else in the rotation
-        let mut names: Vec<String> = hub.maps.iter().map(|m| m.name.clone()).collect();
-        if !names.is_empty() {
-            let k = rand::random_range(0..names.len());
-            names.rotate_left(k);
+    let (map, rotation) = match setup {
+        RoomSetup::Custom { map, defaults } => {
+            if let Some(d) = defaults {
+                settings.game_mode = d.game_mode;
+                settings.objective_limit = d.limit;
+            }
+            (map.or_else(|| hub.maps.first().cloned()), Vec::new())
         }
-        names
-    } else {
-        Vec::new()
+        RoomSetup::Quick { mode, mut maps } => {
+            settings.game_mode = mode.meta.game_mode;
+            settings.objective_limit = mode.meta.limit;
+            // every quick-play room starts somewhere else in the rotation
+            if !maps.is_empty() {
+                let k = rand::random_range(0..maps.len());
+                maps.rotate_left(k);
+            }
+            (maps.first().cloned(), maps)
+        }
     };
     let room = Room {
         tick_hz: hub.cfg.default_tick_hz,
@@ -341,7 +357,7 @@ pub fn spawn(
         host: None,
         settings,
         map_code: map.as_ref().map(|m| m.code.clone()).unwrap_or_default(),
-        map_name: rotation.first().cloned().or_else(|| map.map(|m| m.name)).unwrap_or_default(),
+        map_name: map.map(|m| m.name).unwrap_or_default(),
         map_meta: None,
         quick,
         rotation,
@@ -1277,12 +1293,9 @@ impl Room {
             }
             return self.broadcast_room();
         }
-        // quick play rotates through the built-in maps in the room's order
+        // quick play plays its rotation in the room's order
         let maps: Vec<String> = if self.quick.is_some() {
-            self.rotation
-                .iter()
-                .filter_map(|name| self.hub.maps.iter().find(|m| &m.name == name).map(|m| m.code.clone()))
-                .collect()
+            self.rotation.iter().map(|m| m.code.clone()).collect()
         } else {
             vec![self.map_code.clone()]
         };
@@ -1544,9 +1557,10 @@ impl Room {
                 self.award(true);
             }
             if outcome == Outcome::NewRound && !self.rotation.is_empty() {
-                let name = &self.rotation[rotation_index as usize % self.rotation.len()];
-                if *name != self.map_name {
-                    self.map_name = name.clone();
+                let m = &self.rotation[rotation_index as usize % self.rotation.len()];
+                if m.name != self.map_name || m.code != self.map_code {
+                    self.map_name = m.name.clone();
+                    self.map_code = m.code.clone();
                     self.broadcast_room();
                 }
             }

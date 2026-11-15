@@ -518,20 +518,21 @@ async fn quick_play_from_new_york_goes_to_the_node() {
     // no quick room anywhere yet: the New York viewer is handed to the node's quick play
     let mut ny = Client::open(&pair.main_ws(), NEW_YORK_IP, None).await;
     ny.hello("ny", None).await.unwrap();
-    ny.send(&ClientMsg::QuickPlay { queue: None }).await;
+    ny.send(&ClientMsg::QuickPlay { queue: None, exclude: vec![] }).await;
     let (url, then) = ny.redirect().await;
     assert_eq!(url, pair.node_url());
-    assert!(matches!(&then, ClientMsg::QuickPlay { queue: Some(q) } if *q == "ffa"), "redirect carries quick play");
+    assert!(matches!(&then, ClientMsg::QuickPlay { queue: Some(q), .. } if *q == "qp_1"), "redirect carries quick play");
 
-    // the node opens a quick room; the main server then sends the viewer into it
+    // the node opens a quick room (with the main server's rotation); the main server then sends the viewer into it
     let mut node_viewer = Client::open(&pair.node_ws(), NEW_YORK_IP, None).await;
     node_viewer.hello("node", None).await.unwrap();
-    node_viewer.send(&ClientMsg::QuickPlay { queue: Some("ffa".into()) }).await;
-    let (quick, _) = node_viewer.seat("node quick play").await.unwrap();
+    node_viewer.send(&ClientMsg::QuickPlay { queue: Some("qp_1".into()), exclude: vec![] }).await;
+    let (quick, room) = node_viewer.seat("node quick play").await.unwrap();
+    assert_eq!((room.name.as_str(), room.max_players), ("Sweaty Bois", 4));
 
     let deadline = Instant::now() + WAIT;
     let (url, then) = loop {
-        ny.send(&ClientMsg::QuickPlay { queue: None }).await;
+        ny.send(&ClientMsg::QuickPlay { queue: None, exclude: vec![] }).await;
         let (url, then) = ny.redirect().await;
         if matches!(then, ClientMsg::JoinRoom { .. }) {
             break (url, then);

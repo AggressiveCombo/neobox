@@ -53,8 +53,10 @@ This is why I have set up some goals that I believe will make the project an imp
   prediction and rollback; the server stamps inputs, so there is no host
   advantage and no desync from frame-rate differences. Game data travels
   over WebRTC (UDP-like) with automatic WebSocket fallback.
-* **Playing together.** Quick-play queues (free for all, teams, lives) that
-  drop you into rotating-map rooms, invite links, password rooms, and
+* **Playing together.** Quick play as on hitbox.io: "Sweaty Bois" (four
+  players, last one standing, two round wins per map) and "Team Madness"
+  (eight players in teams sharing 50 lives) with their map rotations, plus
+  the week's best-rated library maps. Also invite links, password rooms, and
   reconnecting to your own slot after a dropped connection or a page reload.
   The room list shows each room's distance and its host's flag, nearest
   first with friends' rooms on top. Optional regional game servers: new

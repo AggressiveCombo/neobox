@@ -295,6 +295,12 @@ export const hudScreen: HudFactory = (ctx) => {
     "Leave",
   );
   const connEl = h("div", { class: "hud-conn", role: "status", hidden: true }, "connection lost");
+  // Quick play with nobody else in the game yet (the original's matchmaking notification).
+  const matchingEl = h(
+    "div",
+    { class: "hud-matching", role: "status", hidden: true },
+    "Please wait, currently matching you with other players...",
+  );
 
   // Match menu, the original's in-game menu: the lobby (the match keeps
   // running behind it), fullscreen, volume, menu music, controls, sign out.
@@ -382,6 +388,7 @@ export const hudScreen: HudFactory = (ctx) => {
     leaveBtn,
     endBtn,
     connEl,
+    matchingEl,
     spectateLabelEl,
   );
 
@@ -623,6 +630,8 @@ export const hudScreen: HudFactory = (ctx) => {
     onFrame(scene) {
       latestScene = scene;
       updateSpectate(scene);
+      const alone = ctx.store.state.room?.quick != null && scene.scores.length === 1;
+      if (matchingEl.hidden === alone) matchingEl.hidden = !alone;
       if (!ctx.store.state.showScores) return;
       if (performance.now() - lastScoresAt < SCORE_INTERVAL_MS) return;
       renderScores(ctx.store.state);

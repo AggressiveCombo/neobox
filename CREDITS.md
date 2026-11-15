@@ -40,3 +40,36 @@ Third-party assets shipped with neobox, with their authors, licences and source 
 - Licence: CC BY 4.0, https://creativecommons.org/licenses/by/4.0/
 - Source: https://db-ip.com/db_lite.php
 
+## Maps
+
+### Quick-play rotation and the custom-room starting map: `maps/rotation/maps2.json`
+
+The fixed part of Hitbox.io's quick-play rotation (`https://hitbox.io/scripts/rotationmaps/maps2.json`,
+the maps that stayed in it in every capture from May 2024 to November 2026) with its mode
+descriptions. The maps were made by Hitbox.io players and are credited to them in-game as
+on hitbox.io; the id is the map's id on hitbox.io.
+
+| Map | Author | Mode | hitbox.io id |
+| --- | --- | --- | --- |
+| Golden Temple | NormalCanard | Sweaty Bois | 890 |
+| The Grinder...s | TheGreenestWolf | Sweaty Bois | 1856 |
+| Masters Broken Dojo | AreZHeavZ | Sweaty Bois | 1860 |
+| Praise the PvP God!! | NormalCanard | Sweaty Bois | 2119 |
+| The Watcher | panther234 | Sweaty Bois | 2224 |
+| Cyberstrike Arena | NormalCanard | Sweaty Bois | 2503 |
+| Blackboard | bour9 | Sweaty Bois | 2958 |
+| Ascension Pillars (clean) | NormalCanard | Sweaty Bois | 3079 |
+| King of the tree hill | kiIImeh | Sweaty Bois | 3145 |
+| Ice factory | bour9 | Sweaty Bois | 3203 |
+| Into Madness (clean) | NormalCanard | Sweaty Bois | 3288 |
+| slopes swords | damielreal | Sweaty Bois | 3484 |
+| Grinder | yturtly | Sweaty Bois | 3788 |
+| Modified Simple Map | CJ THE CAT1 | Sweaty Bois | 11866 |
+| Grinder 2.0 | yturtly | Team Madness | 3962 |
+| Rooftops | NormalCanard | Team Madness | 7804 |
+| King of the tree hill | kilImeh | Team Madness | 11482 |
+| QP Teams Test Amazing Fun | scrimpypoops | Team Madness | 16241 |
+| AQUARENA | BOINK_BOINK | Team Madness | 16700 |
+| Simple Extended | scrimpypoops | Team Madness | 16999 |
+| Simple Arena 1 | scrimpypoops | custom rooms | 632 |
+

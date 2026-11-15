@@ -224,20 +224,32 @@ async fn rooms_reconnect_quick_play_and_host_commands() {
     assert_eq!((back.you, back.token.as_str()), (g.you, g.token.as_str()), "resume restores the same slot");
     host.room_where("guest reconnected", |r| r.players.iter().any(|p| p.name == "guest" && p.connected)).await;
 
-    // quick play opens a host-less quick-play room that starts by itself;
-    // the next player of the same queue lands in it; leaving answers `left`
+    // quick play opens a host-less room of the mode (size, game mode and limit
+    // from the rotation) that starts by itself; the next player of the same
+    // mode lands in it unless they exclude it; leaving answers `left`
     let mut quick = Client::connect(&url, "quick").await;
-    quick.send(&ClientMsg::QuickPlay { queue: Some("ffa".into()) }).await;
+    quick.send(&ClientMsg::QuickPlay { queue: Some("qp_1".into()), exclude: vec![] }).await;
     let (q, room) = quick.seat("quick play").await.unwrap();
     assert_ne!(q.code, h.code, "quick play never lands in a custom room");
-    assert_eq!(room.quick.as_deref(), Some("ffa"));
+    assert_eq!(room.quick.as_deref(), Some("qp_1"));
+    assert_eq!((room.name.as_str(), room.max_players), ("Sweaty Bois", 4));
+    assert_eq!((room.settings.game_mode, room.settings.objective_limit), (2, 2.0), "rounds, two to win");
     assert!(room.players.iter().all(|p| !p.host), "quick-play rooms have no host");
     quick.until("quick match start", |m| matches!(m, ServerMsg::MatchStart { .. } | ServerMsg::Snapshot { .. }).then_some(Ok(()))).await.unwrap();
     let mut second = Client::connect(&url, "second").await;
-    second.send(&ClientMsg::QuickPlay { queue: Some("ffa".into()) }).await;
+    second.send(&ClientMsg::QuickPlay { queue: Some("qp_1".into()), exclude: vec![] }).await;
     let (s, _) = second.seat("second quick play").await.unwrap();
-    assert_eq!(s.code, q.code, "the same queue fills the open quick-play room");
+    assert_eq!(s.code, q.code, "the same mode fills the open quick-play room");
     second.until("late join snapshot", |m| matches!(m, ServerMsg::Snapshot { .. }).then_some(Ok(()))).await.unwrap();
+    let mut third = Client::connect(&url, "third").await;
+    third.send(&ClientMsg::QuickPlay { queue: Some("qp_1".into()), exclude: vec![q.code.clone()] }).await;
+    let (t, _) = third.seat("third quick play").await.unwrap();
+    assert_ne!(t.code, q.code, "an excluded room is skipped");
+    let mut teams = Client::connect(&url, "teams").await;
+    teams.send(&ClientMsg::QuickPlay { queue: Some("qp_2".into()), exclude: vec![] }).await;
+    let (_, room) = teams.seat("team quick play").await.unwrap();
+    assert_eq!((room.name.as_str(), room.max_players, room.settings.game_mode), ("Team Madness", 8, 5));
+    assert!(room.players.iter().all(|p| p.team == 2 || p.team == 3), "team quick play puts players in teams");
     quick.send(&ClientMsg::LeaveRoom).await;
     quick.until("left", |m| matches!(m, ServerMsg::Left).then_some(Ok(()))).await.unwrap();
 
@@ -280,10 +292,10 @@ async fn password_rooms() {
 
     // quick play never lands in a password room
     let mut quick = Client::connect(&url, "quick").await;
-    quick.send(&ClientMsg::QuickPlay { queue: None }).await;
+    quick.send(&ClientMsg::QuickPlay { queue: None, exclude: vec![] }).await;
     let (q, room) = quick.seat("quick play").await.unwrap();
     assert_ne!(q.code, h.code);
-    assert_eq!(room.quick.as_deref(), Some("ffa"), "the default queue");
+    assert_eq!(room.quick.as_deref(), Some("qp_1"), "the first mode");
 }
 
 #[tokio::test]

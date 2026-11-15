@@ -21,8 +21,6 @@ const MAX_TEXT: usize = crate::room::MAX_MAP_CODE + 4096;
 const MAX_BINARY: usize = 4096;
 /// Messages per second before a connection is dropped.
 const MAX_MSG_RATE: u32 = 400;
-/// Size of quick-play rooms (capped by the server's room limit).
-const QUICK_ROOM_PLAYERS: u8 = 12;
 
 /// Serve one WebSocket. `account`: the signed-in account of the request's
 /// session cookie, if any.
@@ -109,7 +107,13 @@ impl Session {
         }
     }
 
-    async fn create_room(&mut self, name: String, password: Option<String>, max_players: u8, public: bool, quick: Option<String>) {
+    async fn create_room(&mut self, name: String, password: Option<String>, max_players: u8, public: bool) {
+        let rotation = crate::rotation::current(&self.hub).await;
+        let setup = crate::room::RoomSetup::Custom { map: rotation.maps_of("custom").into_iter().next(), defaults: rotation.custom() };
+        self.open_room(name, password, max_players, public, setup).await;
+    }
+
+    async fn open_room(&mut self, name: String, password: Option<String>, max_players: u8, public: bool, setup: crate::room::RoomSetup) {
         if self.hub.rooms.lock().unwrap().len() >= self.hub.cfg.max_rooms {
             return self.error("server_full", "Too many rooms right now, try again later");
         }
@@ -120,11 +124,12 @@ impl Session {
         let name: String = name.trim().chars().take(MAX_ROOM_NAME_LEN).collect();
         let name = if name.is_empty() { format!("{}'s game", self.info.as_ref().unwrap().name) } else { name };
         let code = self.hub.new_code();
-        let room = crate::room::spawn(self.hub.clone(), code.clone(), name, password.clone(), max_players, public, quick);
+        let room = crate::room::spawn(self.hub.clone(), code.clone(), name, password.clone(), max_players, public, setup);
         self.hub.rooms.lock().unwrap().insert(code, room.clone());
-        self.hub.beat.notify_one();
         // the creator knows the password
         self.enter(room, password, None).await;
+        // tell the main server once the room has its host (players, host country)
+        self.hub.beat.notify_one();
     }
 
     /// Names of this account's friends by account id (empty for guests).
@@ -147,12 +152,17 @@ impl Session {
         self.hub.geo.lookup(self.ip).and_then(|v| v.coords)
     }
 
-    /// Join the fullest quick-play room of `queue` with a free slot (the
-    /// oldest on a tie) on any server, or open a new one on the nearest.
-    async fn quick_play(&mut self, queue: Option<String>) {
-        let queue = queue.unwrap_or_else(|| QUICK_QUEUES[0].0.to_string());
-        let Some(&(id, _)) = QUICK_QUEUES.iter().find(|(id, _)| *id == queue) else {
-            return self.error("bad_queue", "Unknown quick-play queue");
+    /// Join the fullest open quick-play room of mode `queue` on any server,
+    /// skipping the rooms in `exclude` (the oldest on a tie), or open a new
+    /// one on the nearest server.
+    async fn quick_play(&mut self, queue: Option<String>, exclude: Vec<String>) {
+        let rotation = crate::rotation::current(&self.hub).await;
+        let mode = match queue {
+            Some(q) => rotation.mode(&q),
+            None => rotation.modes().into_iter().next(),
+        };
+        let Some(mode) = mode else {
+            return self.error("bad_queue", "Unknown quick-play mode");
         };
         // each room with the node that runs it (`None`: this server)
         let mut rooms: Vec<(crate::room::RoomSummary, Option<cluster::NodeInfo>)> =
@@ -162,7 +172,11 @@ impl Session {
         }
         let best = rooms
             .into_iter()
-            .filter(|(r, _)| r.quick.as_deref() == Some(id) && r.players.len() < r.max_players as usize)
+            .filter(|(r, _)| {
+                r.quick.as_deref() == Some(mode.id.as_str())
+                    && r.players.len() < r.max_players as usize
+                    && !exclude.iter().any(|c| c.eq_ignore_ascii_case(&r.code))
+            })
             .max_by_key(|(r, _)| (r.players.len(), std::cmp::Reverse(r.created_ms)));
         match best {
             Some((r, Some(node))) => {
@@ -176,18 +190,16 @@ impl Session {
             }
             None => {}
         }
-        let title = match id {
-            "teams" => "Quick play: Teams",
-            "lives" => "Quick play: Lives",
-            _ => "Quick play: Free for all",
-        };
-        let max = QUICK_ROOM_PLAYERS.min(self.hub.cfg.max_players);
         match cluster::nearest_site(&self.hub, self.viewer_coords()) {
             Site::Node(node) => {
-                let then = ClientMsg::QuickPlay { queue: Some(id.to_string()) };
+                let then = ClientMsg::QuickPlay { queue: Some(mode.id), exclude };
                 self.send(&ServerMsg::Redirect { url: node.url, then: Box::new(then) });
             }
-            Site::Local => self.create_room(title.into(), None, max, true, Some(id.to_string())).await,
+            Site::Local => {
+                let maps = rotation.maps_of(&mode.id);
+                let (title, max) = (mode.meta.title.clone(), mode.meta.max_players.max(1));
+                self.open_room(title, None, max, true, crate::room::RoomSetup::Quick { mode, maps }).await
+            }
         }
     }
 
@@ -278,7 +290,7 @@ impl Session {
                         let then = ClientMsg::CreateRoom { name, password, max_players, public };
                         self.send(&ServerMsg::Redirect { url: node.url, then: Box::new(then) });
                     }
-                    Site::Local => self.create_room(name, password, max_players, public, None).await,
+                    Site::Local => self.create_room(name, password, max_players, public).await,
                 }
             }
             ClientMsg::JoinRoom { room, password, resume } => match self.hub.room(&room) {
@@ -291,7 +303,7 @@ impl Session {
                     None => self.error("room_not_found", "Room not found"),
                 },
             },
-            ClientMsg::QuickPlay { queue } => self.quick_play(queue).await,
+            ClientMsg::QuickPlay { queue, exclude } => self.quick_play(queue, exclude).await,
             ClientMsg::LeaveRoom => {
                 self.leave_room();
                 self.send(&ServerMsg::Left);

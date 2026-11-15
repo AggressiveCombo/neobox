@@ -245,6 +245,7 @@ main server's room list, so update nodes when few people play.
 | Server log | `journalctl -u neobox -f` |
 | Restart | `systemctl restart neobox` |
 | Add built-in maps | put map files in `/opt/neobox/maps/` (`.txt` with a Hitbox map code, or `.json` compact map JSON), then restart |
+| Change quick play | edit `/opt/neobox/maps/rotation/maps2.json` (hitbox.io's `rotationmaps/maps2.json` format: `meta.qp_1`..`qp_10` are the modes with `title`, `description`, `maxPlayers`, `teams`, `gameMode`, `limit`; `meta.custom` sets the game mode and limit of new custom rooms; each map lists its `modes`, and the first `custom` map is a new custom room's map), then restart. The main server adds the four best-rated public library maps of the past week to every mode without teams; regional nodes use the main server's rotation |
 | Change limits | edit `/etc/neobox.env` (see comments there), then restart |
 
 ## Configuration reference

@@ -344,12 +344,21 @@ async function quickPlay(s) {
   await menuName(fresh.page).fill(uniqueName("qf"));
   await button(fresh.page, "Quick play").click();
   await fresh.page.getByRole("heading", { name: "Quick play", exact: true }).waitFor();
-  await fresh.page.getByRole("button", { name: /Free for all/ }).click();
+  // the original's cards: players online and a rotation carousel that steps through the maps
+  const card = fresh.page.locator(".quick-card", { hasText: "Sweaty Bois" });
+  await card.getByText(/\d+ players online/).waitFor();
+  const mid = card.locator(".quick-thumb-mid");
+  const first = await mid.getAttribute("title");
+  await card.getByRole("button", { name: "Next Sweaty Bois map" }).click();
+  check((await mid.getAttribute("title")) !== first, "the carousel did not move");
+  await card.locator(".quick-choose").click();
   // quick-play rooms start by themselves: the match HUD comes up without a host
   await fresh.page.locator(".hud-leave").waitFor({ state: "visible", timeout: 20_000 });
   await waitForPixels(fresh, "quick-play canvas");
   check(!fresh.page.url().endsWith(`/${code}`), "quick play joined the custom room");
-  return "queue card opened a self-starting quick-play match";
+  // alone in the room: the original's matchmaking notice
+  await fresh.page.getByText("Please wait, currently matching you with other players...").waitFor();
+  return "mode card (count, carousel) opened a self-starting quick-play match with the matching notice";
 }
 
 /** Experience: a finished match shows the post-game panel and levels appear in the roster. */

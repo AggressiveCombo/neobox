@@ -137,6 +137,14 @@ impl Backend {
             }
         }
     }
+
+    /// The main server's quick-play rotation (regional nodes only).
+    pub async fn rotation(&self) -> Result<crate::rotation::Rotation, String> {
+        match self {
+            Backend::Local(_) => Err("the main server builds its own rotation".into()),
+            Backend::Remote(r) => r.send(r.http.get(r.url("/api/rotation"))).await,
+        }
+    }
 }
 
 impl Remote {

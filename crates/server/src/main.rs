@@ -18,6 +18,7 @@ mod hub;
 mod logbuf;
 mod maps;
 mod room;
+mod rotation;
 mod rtc;
 mod ticket;
 mod youtube;
@@ -83,6 +84,7 @@ async fn main() {
         tracing::warn!("NEOBOX_ADMIN_PASSWORD is not set: the admin interface is disabled");
     }
     let maps = maps::load(&cfg.maps_dir);
+    let rotation = rotation::Rotation::load(&cfg.maps_dir.join("rotation").join("maps2.json"));
     let static_dir = cfg.static_dir.clone();
     let bind = cfg.bind.clone();
     let rtc = start_rtc(&cfg).await;
@@ -91,7 +93,7 @@ async fn main() {
         std::process::exit(1);
     }
     let store = if cfg.main_url.is_some() { None } else { Some(open_store(&cfg.data)) };
-    let hub = Hub::new(cfg, maps, rtc, store);
+    let hub = Hub::new(cfg, maps, rotation, rtc, store);
     spawn_housekeeping(hub.clone());
     cluster::spawn_heartbeat(hub.clone());
 

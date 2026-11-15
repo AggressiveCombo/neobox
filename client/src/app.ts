@@ -123,6 +123,12 @@ export function start(): void {
   let resumeToken: string | null = null;
   /** The room of the last join_room we sent: a refused join names the room that needs a password. */
   let joinAttempt: string | null = null;
+  /**
+   * Quick-play rooms this page has been in, never offered again (the original's `excludeaddresses`),
+   * and the mode being matched while quick play looks for a room.
+   */
+  const quickVisited = new Set<string>();
+  let matching: string | null = null;
   /** A resume join is in flight after a reconnect. */
   let resuming = false;
   /** Base URL of the game server this connection is on; null = the home server (the page's own origin). */
@@ -216,6 +222,7 @@ export function start(): void {
     toast,
     play,
     joinRoom,
+    quickPlay,
     disconnect,
     roomMap: () => {
       const { promise, resolve, reject } = Promise.withResolvers<{ code: string; name: string }>();
@@ -552,7 +559,7 @@ export function start(): void {
           sendJoin(pendingJoin, null);
           pendingJoin = null;
         } else if (queue !== null) {
-          net.send({ t: "quick_play", queue });
+          quickPlay(queue);
         }
         return;
       }
@@ -576,6 +583,14 @@ export function start(): void {
           return;
         }
         if (msg.code === "wrong_password" && joinAttempt !== null) store.set({ invite: joinAttempt });
+        // Quick play found a room that filled up or closed meanwhile: skip it and look again (from home).
+        if (matching !== null && roomCode === null && (msg.code === "room_full" || msg.code === "room_not_found")) {
+          if (joinAttempt !== null) quickVisited.add(joinAttempt.toUpperCase());
+          const retry: ClientMsg = { t: "quick_play", queue: matching, exclude: [...quickVisited] };
+          if (server !== null) connectServer(null, retry);
+          else net.send(retry);
+          return;
+        }
         // A refusal from a game server we only visited (not in a room there): back to the list on home.
         if (server !== null && roomCode === null) leaveRoom();
         toast(msg.message, "error");
@@ -593,6 +608,8 @@ export function start(): void {
       case "room": {
         const chat = store.state.room?.code === msg.room.code ? store.state.chat : [];
         roomCode = msg.room.code;
+        if (msg.room.quick !== null) quickVisited.add(msg.room.code.toUpperCase());
+        matching = null;
         saveSeat();
         syncUrl(roomCode);
         // a match, or the host's map editor opened from the room, stays on screen
@@ -776,11 +793,18 @@ export function start(): void {
     connectServer(target, null);
   }
 
+  /** Find a quick-play room of mode `queue`, skipping the quick-play rooms this page has been in. */
+  function quickPlay(queue: string): void {
+    matching = queue;
+    net.send({ t: "quick_play", queue, exclude: [...quickVisited] });
+  }
+
   /** Close the connection and return to the main menu. */
   function disconnect(): void {
     loop?.stop();
     pendingName = null;
     pendingJoin = null;
+    matching = null;
     net.close();
     resetToMenu();
   }

@@ -180,10 +180,20 @@ pub struct Hub {
     pub backend: Backend,
     pub rtc: Option<RtcHub>,
     pub geo: crate::geo::Geo,
+    /// Fixed quick-play rotation (`maps/rotation/maps2.json`).
+    pub rotation: crate::rotation::Rotation,
+    /// The full rotation as last built (see `rotation::current`).
+    pub rotation_cache: tokio::sync::Mutex<Option<(Instant, Arc<crate::rotation::Rotation>)>>,
 }
 
 impl Hub {
-    pub fn new(cfg: Config, maps: Vec<BuiltinMap>, rtc: Option<RtcHub>, store: Option<Store>) -> Arc<Hub> {
+    pub fn new(
+        cfg: Config,
+        maps: Vec<BuiltinMap>,
+        rotation: crate::rotation::Rotation,
+        rtc: Option<RtcHub>,
+        store: Option<Store>,
+    ) -> Arc<Hub> {
         let cfg_geoip = cfg.geoip.clone();
         let backend = match (&cfg.main_url, store) {
             (Some(main), _) => Backend::Remote(Remote::new(main.clone(), cfg.cluster_secret.clone())),
@@ -208,6 +218,8 @@ impl Hub {
             backend,
             rtc,
             geo: crate::geo::Geo::open(cfg_geoip),
+            rotation,
+            rotation_cache: tokio::sync::Mutex::new(None),
         })
     }
 
