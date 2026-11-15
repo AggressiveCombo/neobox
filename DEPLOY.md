@@ -70,7 +70,7 @@ Connect: `ssh root@203.0.113.10`, then run:
 
 ```sh
 apt update && apt upgrade -y
-apt install -y curl git unzip build-essential ufw sqlite3 debian-keyring debian-archive-keyring apt-transport-https
+apt install -y curl git unzip gnupg build-essential ufw sqlite3 debian-keyring debian-archive-keyring apt-transport-https
 
 # firewall
 ufw allow 22/tcp && ufw allow 80/tcp && ufw allow 443/tcp && ufw allow 3478/udp
@@ -100,8 +100,23 @@ git clone https://github.com/AggressiveCombo/neobox.git ~/neobox
 cd ~/neobox && git checkout rewrite
 ```
 
-(Before it is published, copy it from your PC instead:
-`scp -r C:\Users\aggressivecombo\neobox-rewrite root@203.0.113.10:~/neobox`.)
+(Before it is published, copy it from your PC instead. `scp -r` would also copy
+the large `target` and `node_modules` folders, so pack the source first. In
+PowerShell on your PC:
+
+```
+tar --exclude=target --exclude=node_modules --exclude=dist-server -czf neobox.tgz -C C:\Users\aggressivecombo neobox-rewrite
+scp neobox.tgz root@203.0.113.10:
+```
+
+then on the server: `mkdir -p ~/neobox && tar -xzf ~/neobox.tgz -C ~/neobox --strip-components=1`.)
+
+If the server has only 1 GB of RAM, add swap first: the release build can run
+out of memory without it.
+
+```sh
+fallocate -l 2G /swapfile && chmod 600 /swapfile && mkswap /swapfile && swapon /swapfile
+```
 
 Then build (5–15 minutes the first time):
 
@@ -145,7 +160,8 @@ longitude (your provider's data centre city is close enough, e.g.
 ## 6. Check
 
 * `systemctl status neobox` shows `active (running)`; the log line
-  `WebRTC transport listening (UDP)` confirms UDP is enabled, and
+  `WebRTC transport listening (UDP)` confirms UDP is enabled and shows the
+  address it advertises to players (`public=`), and
   `geolocation database loaded` (within a minute of the first download)
   confirms distances and flags.
 * Open `https://neobox.aggressivecombo.com`: the menu appears.
@@ -155,20 +171,32 @@ longitude (your provider's data centre city is close enough, e.g.
   fell back to the WebSocket.
 
 If players always show `ws`: check that UDP 3478 is open (both `ufw` and
-the provider's firewall), and set `NEOBOX_RTC_PUBLIC=203.0.113.10:3478` in
-`/etc/neobox.env`, then `systemctl restart neobox`.
+the provider's firewall). The advertised address in that log line must be the
+server's **public** IPv4: some providers put a private address on the network
+interface, and the server then advertises that. In that case set
+`NEOBOX_RTC_PUBLIC=<public IPv4>:3478` in `/etc/neobox.env` (the port is
+required; a value without it is ignored), then `systemctl restart neobox`.
 
 ## Updating
 
 ```sh
 cd ~/neobox && git pull && bash deploy/build.sh
-cp -r dist-server/* /opt/neobox/ && chown -R neobox:neobox /opt/neobox
-systemctl restart neobox
+systemctl stop neobox
+cp dist-server/neobox-server dist-server/geoip-update.sh /opt/neobox/
+rm -rf /opt/neobox/client && cp -r dist-server/client /opt/neobox/
+cp dist-server/maps/*.json /opt/neobox/maps/
+chown -R neobox:neobox /opt/neobox
+systemctl start neobox
 ```
 
-Restarting ends running matches; players reconnect from the menu. Accounts,
+Stopping ends running matches; players reconnect from the menu. Accounts,
 friends and the map library are kept (they live in `/var/lib/neobox`, which
 updates never touch).
+
+`/opt/neobox/maps/rotation/maps2.json` (the fixed quick-play rotation) is
+never overwritten, so your edits survive. When a release changes it, compare
+with `diff ~/neobox/dist-server/maps/rotation/maps2.json /opt/neobox/maps/rotation/maps2.json`
+and merge by hand.
 
 ## Backups
 
@@ -242,6 +270,7 @@ main server's room list, so update nodes when few people play.
 | --- | --- |
 | Live rooms, players, tick rate, latency, bandwidth, logs, kick/ban, close rooms | `https://neobox.aggressivecombo.com/admin` |
 | Approve or reject maps uploaded to the public library; find and delete any map | `https://neobox.aggressivecombo.com/admin`, "Map approvals" and "Map library" |
+| Review player and map reports (open, resolve, dismiss, delete), search accounts and set a new password | `https://neobox.aggressivecombo.com/admin`, "Reports" and "Accounts" |
 | Server log | `journalctl -u neobox -f` |
 | Restart | `systemctl restart neobox` |
 | Add built-in maps | put map files in `/opt/neobox/maps/` (`.txt` with a Hitbox map code, or `.json` compact map JSON), then restart |
