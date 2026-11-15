@@ -1,47 +1,142 @@
-/* Map editor (ui/screens/editor.ts). Fills the viewport: canvas on top, controls below.
-   Test play swaps the root to offline.css's playing layer, so these rules only
-   apply while editing. */
+/* Map editor (ui/screens/editor.ts). A full-viewport app: a top bar over the stage
+   (canvas + footer) beside a tool rail and the inspector. Phones move the rail to
+   the bottom and the inspector to a sheet. Test play swaps the root to offline.css's
+   playing layer, so these rules only apply while editing. */
 
 .screen.editor {
   position: relative;
+  display: flex;
+  flex-direction: column;
   width: 100%;
-  max-width: none;
-  height: 100dvh;
-  gap: 0;
+  height: 100%;
+  min-height: 0;
   overflow: hidden;
+  background: var(--ground);
+  color: var(--ink);
 }
+
+.editor-sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.screen.editor svg {
+  flex: none;
+  width: 20px;
+  height: 20px;
+  stroke: currentColor;
+  stroke-width: 2;
+  fill: none;
+}
+
+/* ------------------------------------------------------------------ top bar */
 
 .editor-top {
+  flex: none;
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: 8px;
-  min-height: 48px;
-  padding: calc(env(safe-area-inset-top, 0px) + 4px) 8px 4px;
-  border-bottom: 1px solid var(--border);
-  background: var(--surface);
+  padding: 10px 16px;
 }
 
-.editor-top button {
-  min-height: 40px;
-  padding: 0 14px;
+.editor-top-tools {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
-.editor-title {
-  font-weight: 600;
+.editor-name {
+  flex: 1 1 220px;
+  min-width: 0;
+  max-width: 420px;
+  font-size: var(--step-body);
+  font-weight: 500;
 }
 
 .editor-menu-toggle[aria-expanded="true"] {
-  border-color: var(--border-strong);
-  background: var(--surface-hover);
+  background: var(--ink);
+  color: var(--ground);
 }
 
-.editor-stage {
+/* -------------------------------------------------------------------- body */
+
+.editor-body {
   position: relative;
-  flex: 1 1 0;
-  min-height: 180px;
+  flex: 1 1 auto;
+  display: flex;
+  min-height: 0;
+}
+
+/* Tool rail: square tiles, the active tool filled ink. */
+
+.editor-tools {
+  flex: none;
+  width: 96px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  overflow-y: auto;
+  background: var(--ground);
+}
+
+.editor-tool {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  width: 100%;
+  min-height: 76px;
+  padding: 8px 4px;
+  background: var(--surface);
+  font-size: var(--step-small);
+  line-height: 1.15;
+}
+
+.editor-tool:hover:not(:disabled) {
+  background: var(--surface-2);
+}
+
+.editor-tool[aria-pressed="true"],
+.editor-tool[aria-pressed="true"]:hover:not(:disabled) {
+  background: var(--ink);
+  color: var(--ground);
+}
+
+.editor-tool .key {
+  margin-top: 2px;
+}
+
+.editor-tool[aria-pressed="true"] .key {
+  background: transparent;
+  box-shadow: inset 0 0 0 2px currentColor;
+}
+
+/* ------------------------------------------------------------------- stage */
+
+.editor-stage {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.editor-viewport {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
   overflow: hidden;
-  background: var(--bg);
+  background: var(--surface-2);
 }
 
 .editor-canvas {
@@ -51,121 +146,213 @@
   width: 100%;
   height: 100%;
   touch-action: none;
-  user-select: none;
-  -webkit-user-select: none;
 }
 
-.editor-tools {
+.editor-scope {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  right: 12px;
   display: flex;
-  gap: 6px;
-  overflow-x: auto;
-  padding: 8px;
-  border-top: 1px solid var(--border);
-  scrollbar-width: none;
-}
-
-.editor-tools::-webkit-scrollbar {
-  display: none;
-}
-
-.editor-tool {
-  flex: 0 0 auto;
-  min-height: 40px;
-  padding: 0 12px;
-  border-radius: var(--radius);
-}
-
-.editor-tool[aria-pressed="true"] {
-  border-color: var(--accent);
-  background: var(--surface-hover);
-  color: var(--text);
-}
-
-.editor-actions {
-  display: flex;
+  align-items: center;
+  justify-content: space-between;
   flex-wrap: wrap;
-  gap: 6px;
-  padding: 0 8px 8px;
+  gap: 8px 12px;
+  padding: 8px 12px;
+  background: var(--hud);
+  color: var(--hud-ink);
+  font-size: var(--step-small);
 }
 
-.editor-actions button {
-  flex: 1 1 auto;
-  min-height: 40px;
-  padding: 0 12px;
+.editor-scope button {
+  background: var(--hud-ink);
+  color: var(--ink);
+}
+
+.editor-lag {
+  position: absolute;
+  left: 12px;
+  bottom: 12px;
+  max-width: calc(100% - 24px);
+  margin: 0;
+  padding: 6px 10px;
+  background: var(--hud);
+  color: var(--hud-ink);
+  font-size: var(--step-small);
+  font-variant-numeric: tabular-nums;
+}
+
+.editor-foot {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  padding: 8px 12px;
+  background: var(--ground);
 }
 
 .editor-hint {
+  flex: 1 1 220px;
+  min-width: 0;
   margin: 0;
-  padding: 0 12px 8px;
   color: var(--muted);
-  font-size: 14px;
+  font-size: var(--step-small);
 }
 
-.editor-inspector {
-  max-height: 36dvh;
-  overflow-y: auto;
-  padding: 0 12px calc(env(safe-area-inset-bottom, 0px) + 12px);
-  border-top: 1px solid var(--border);
-}
-
-/* Menu sheet over the editor. */
-.editor-menu {
-  position: absolute;
-  inset: 0;
-  z-index: 3;
+.editor-view {
   display: flex;
-  flex-direction: column;
-  background: var(--bg);
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
 }
 
-.editor-menu[hidden] {
+.editor-colour {
+  width: var(--control);
+  height: var(--control);
+  padding: 6px;
+  border: 0;
+  background: var(--surface);
+  cursor: pointer;
+}
+
+/* The inspector toggle exists for phones and narrow windows only. */
+.editor-side-toggle {
   display: none;
 }
 
-.editor-menu-body {
+/* --------------------------------------------------------------- inspector */
+
+.editor-side {
+  flex: none;
+  width: 320px;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--surface);
+}
+
+.editor-side-head {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 12px 12px 4px 20px;
+}
+
+.editor-side-title {
+  font-size: var(--step-lead);
+  font-weight: 500;
+}
+
+.editor-side-body {
   flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 8px 20px 24px;
+}
+
+.editor-side .inspector {
   display: flex;
   flex-direction: column;
   gap: 20px;
-  padding: 16px 12px calc(env(safe-area-inset-bottom, 0px) + 16px);
-  overflow-y: auto;
 }
 
-.editor-menu-body section {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.editor-menu-body h2 {
+.editor-side .inspector-title {
   margin: 0;
-  font-size: 13px;
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
+  font-size: var(--step-small);
+  font-weight: 500;
   color: var(--muted);
 }
 
+.editor-side h3 {
+  margin: 0 0 4px;
+  font-size: var(--step-small);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--muted);
+}
+
+.editor-side .inspector-group,
+.editor-side .inspector-shape {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.editor-side .hint {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--step-small);
+}
+
+.editor-side :is(input, select, textarea) {
+  background: var(--ground);
+}
+
+/* ------------------------------------------------------------------- menu */
+
+.editor-menu {
+  position: absolute;
+  z-index: 5;
+  top: 64px;
+  right: 12px;
+  width: min(400px, calc(100% - 24px));
+  max-height: calc(100% - 76px);
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  padding: 20px;
+  overflow-y: auto;
+  background: var(--surface);
+  box-shadow: var(--float-shadow);
+}
+
+.editor-menu-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.editor-menu-head h2 {
+  margin: 0;
+  font-size: var(--step-lead);
+  font-weight: 500;
+}
+
+.editor-menu-body {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.editor-group {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.editor-group h3 {
+  margin: 0;
+  font-size: var(--step-body);
+  font-weight: 500;
+}
+
+.editor-buttons,
 .editor-row {
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
   gap: 8px;
 }
 
-.editor-row > input {
+.editor-row input {
   flex: 1 1 160px;
-}
-
-.editor-row > button {
-  min-height: 40px;
-}
-
-.editor-field {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  color: var(--muted);
-  font-size: 14px;
+  min-width: 0;
+  background: var(--ground);
 }
 
 .editor-list {
@@ -175,60 +362,155 @@
 }
 
 .editor-item {
-  min-height: 44px;
+  width: 100%;
+  justify-content: flex-start;
   text-align: left;
+}
+
+.editor-status {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--step-small);
+}
+
+.editor-status.error {
+  color: var(--danger);
 }
 
 .editor-code {
   width: 100%;
-  min-height: 72px;
   resize: vertical;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 13px;
-  word-break: break-all;
+  font-size: var(--step-small);
 }
 
-.editor-save {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
+/* ----------------------------------------------------------------- phones */
+
+/* Below 900px the inspector is a sheet over the stage, opened from the footer. */
+@media (max-width: 899px) {
+  .editor-side {
+    position: absolute;
+    z-index: 4;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    width: min(340px, 100%);
+    display: none;
+    box-shadow: var(--float-shadow);
+  }
+
+  .editor-side[data-open="true"] {
+    display: flex;
+  }
+
+  .editor-side-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+  }
 }
 
-.editor-lag {
-  position: absolute;
-  left: 8px;
-  bottom: 6px;
-  margin: 0;
-  padding: 2px 8px;
-  border-radius: 4px;
-  background: var(--surface);
-  color: var(--muted);
-  font-size: 12px;
-  pointer-events: none;
+/* Portrait phone: rail along the bottom, sheet rises from the bottom. */
+@media (max-width: 600px) and (orientation: portrait) {
+  .editor-body {
+    flex-direction: column;
+  }
+
+  .editor-stage {
+    order: 1;
+    flex: 1 1 auto;
+  }
+
+  .editor-tools {
+    order: 2;
+    width: auto;
+    flex-direction: row;
+    gap: 6px;
+    padding: 8px 12px;
+    overflow-x: auto;
+    overflow-y: hidden;
+  }
+
+  .editor-tool {
+    flex: none;
+    width: 72px;
+    min-height: 64px;
+    padding: 6px 4px;
+  }
+
+  .editor-tool .key {
+    display: none;
+  }
+
+  .editor-side {
+    top: auto;
+    left: 0;
+    width: auto;
+    height: 52dvh;
+  }
+
+  .editor-top {
+    flex-wrap: wrap;
+    padding: 8px 12px;
+  }
+
+  .editor-top-tools {
+    flex: 1 1 auto;
+    justify-content: flex-end;
+  }
+
+  .editor-name {
+    order: 2;
+    flex: 1 1 100%;
+    max-width: none;
+  }
+
+  .editor-top .editor-label {
+    display: none;
+  }
+
+  .editor-foot {
+    padding: 8px 12px;
+  }
+
+  .editor-menu {
+    inset: 0;
+    width: auto;
+    max-height: none;
+  }
 }
 
-.editor-colour {
-  width: 44px;
-  min-height: 40px;
-  padding: 2px;
-}
+/* Landscape phone: a two-column rail on the left; the sheet covers the right. */
+@media (max-height: 500px) and (orientation: landscape) {
+  .editor-tools {
+    width: 200px;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    align-content: start;
+  }
 
-.editor-scope {
-  position: absolute;
-  top: 8px;
-  left: 8px;
-  z-index: 2;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  max-width: calc(100% - 16px);
-  padding: 4px 8px;
-  border-radius: 6px;
-  background: rgba(0, 0, 0, 0.6);
-  color: #fff;
-  font-size: 0.875rem;
-}
+  .editor-tool {
+    min-height: 60px;
+    padding: 6px 4px;
+  }
 
-.editor-scope[hidden] {
-  display: none;
+  .editor-tool .key {
+    position: absolute;
+    top: 3px;
+    right: 3px;
+    margin: 0;
+  }
+
+  .editor-side {
+    width: min(300px, 46%);
+  }
+
+  .editor-top {
+    padding: 6px 12px;
+  }
+
+  .editor-menu {
+    inset: 0;
+    width: auto;
+    max-height: none;
+  }
 }

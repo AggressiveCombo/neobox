@@ -359,6 +359,14 @@ export async function regionServers() {
   };
 }
 
+/** A server with WebRTC on loopback (every other scenario runs on the WebSocket alone). */
+export async function rtcServer() {
+  const rtcPort = await freePort();
+  const rtc = `127.0.0.1:${rtcPort}`;
+  const main = await startServer({ extraEnv: { NEOBOX_RTC_BIND: rtc, NEOBOX_RTC_PUBLIC: rtc } });
+  return { base: main.base, nodeBase: null, output: main.output, stop: main.stop };
+}
+
 // ---------------------------------------------------------------- UI helpers
 
 export const menuName = (page) => page.getByPlaceholder("name", { exact: true });
@@ -453,7 +461,7 @@ export async function matchWithGuest(s, { clipboard = true } = {}) {
   const code = await createRoom(host, s.base, roomName, { isPublic: true });
   const guest = await s.open("guest", { name: guestName });
   if (clipboard) {
-    await button(host.page, "Invite").click();
+    await button(host.page, "Copy invite link").click();
     // The toast fades quickly, so poll the clipboard, which holds the link.
     let url = "";
     for (let i = 0; i < 50 && url !== `${s.base}/${code}`; i++) {

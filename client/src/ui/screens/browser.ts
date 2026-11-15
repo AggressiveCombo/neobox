@@ -1,6 +1,7 @@
-// Room browser: server name header, quick play, join by room code, an invite
-// password prompt (for links and refused joins), the room list (click to join;
-// locked rooms reveal an inline password field) and the create-room form.
+// The Play screen: quick play and join-by-code at the top; the open rooms as a table (search,
+// hide full rooms; nearest first, friends on top); the create-room form beside it on desktop and
+// below it on phones. Locked rooms ask for their password inline; a server that refused a join
+// asks for it in a panel above the list.
 
 import type { ScreenFactory } from "../../ctx";
 import {
@@ -12,6 +13,7 @@ import {
 } from "../../protocol";
 import { clear, h } from "../dom";
 import { countryName, flagUrl, formatDistance, sortRooms } from "../../rooms";
+import { field, page, pageHead, toggle } from "../kit";
 
 const SVG_NS = "http://www.w3.org/2000/svg";
 const DEFAULT_MAX_PLAYERS = 8;
@@ -23,7 +25,7 @@ const YT_ID_RE = /^[A-Za-z0-9_-]{11}$/;
 function lockIcon(): SVGSVGElement {
   const svg = document.createElementNS(SVG_NS, "svg");
   svg.setAttribute("viewBox", "0 0 16 16");
-  svg.setAttribute("class", "lock");
+  svg.setAttribute("class", "room-lock");
   svg.setAttribute("role", "img");
   svg.setAttribute("aria-label", "password protected");
 
@@ -32,7 +34,6 @@ function lockIcon(): SVGSVGElement {
   body.setAttribute("y", "7");
   body.setAttribute("width", "10");
   body.setAttribute("height", "8");
-  body.setAttribute("rx", "1.5");
 
   const shackle = document.createElementNS(SVG_NS, "path");
   shackle.setAttribute("d", "M5.5 7V5a2.5 2.5 0 0 1 5 0v2");
@@ -44,13 +45,8 @@ function lockIcon(): SVGSVGElement {
   return svg;
 }
 
-function modeName(mode: number): string {
-  return GAME_MODES.find((m) => m.id === mode)?.name ?? "Unknown";
-}
-
-/** The jukebox column of a room row: the playing video's thumbnail and title, empty when nothing plays. */
-function jukeboxCell(box: { video: string; title: string } | null): HTMLElement {
-  if (box === null) return h("span", { class: "room-jukebox" });
+/** The playing video's thumbnail and title in a room's map cell; nothing when no jukebox is playing. */
+function jukeboxCell(box: { video: string; title: string }): HTMLElement {
   const thumb = YT_ID_RE.test(box.video)
     ? h("img", { class: "room-thumb", src: `https://i.ytimg.com/vi/${box.video}/default.jpg`, alt: "", loading: "lazy" })
     : null;
@@ -63,26 +59,33 @@ export const browserScreen: ScreenFactory = (ctx) => {
   let rooms: RoomInfo[] = store.state.rooms;
   /** Code of the locked room whose password field is open. */
   let pendingCode: string | null = null;
+  let hideFull = false;
 
-  const title = h("h1", { class: "server-name" }, store.state.serverName || "Rooms");
+  const roomList = h("ul", { class: "room-table", "aria-label": "rooms" });
+  const emptyHint = h("p", { class: "empty" });
+  const total = h("p", { class: "muted num room-total", role: "status" });
 
-  const roomList = h("ul", { class: "room-list", "aria-label": "rooms" });
-  const emptyHint = h("p", { class: "empty-hint" }, "No rooms yet. Create one below, or press Refresh.");
+  const searchInput = h("input", {
+    type: "search",
+    placeholder: "Room, map, mode or region",
+    autocomplete: "off",
+    spellcheck: "false",
+    oninput: () => renderRooms(),
+  });
 
   const codeInput = h("input", {
     type: "text",
-    placeholder: "room code",
+    placeholder: "Room code",
     maxlength: 6,
     autocapitalize: "characters",
     autocomplete: "off",
     spellcheck: "false",
-    "aria-label": "room code",
     oninput: () => {
       codeInput.value = codeInput.value.toUpperCase().replace(/[^A-Z0-9]/g, "");
       codeJoin.disabled = !ROOM_CODE_RE.test(codeInput.value);
     },
   });
-  const codeJoin = h("button", { type: "submit", disabled: true }, "Join");
+  const codeJoin = h("button", { type: "submit", class: "primary", disabled: true }, "Join");
   const codeForm = h(
     "form",
     {
@@ -93,8 +96,25 @@ export const browserScreen: ScreenFactory = (ctx) => {
         ctx.joinRoom(codeInput.value);
       },
     },
-    codeInput,
+    field("Join with a code", codeInput),
     codeJoin,
+  );
+
+  const quickPlay = h(
+    "section",
+    { class: "panel start-quick" },
+    h("p", { class: "lead" }, "Jump into an open room, or start a new one, in one tap."),
+    h(
+      "button",
+      { type: "button", class: "primary big", onclick: () => store.set({ screen: "quick" }) },
+      "Quick play",
+    ),
+  );
+  const startCode = h(
+    "section",
+    { class: "panel start-code" },
+    h("p", { class: "lead" }, "Have a room code from a friend?"),
+    codeForm,
   );
 
   const inviteSlot = h("div", { class: "invite-slot" });
@@ -102,15 +122,14 @@ export const browserScreen: ScreenFactory = (ctx) => {
   const roomName = h("input", {
     type: "text",
     maxlength: MAX_ROOM_NAME_LEN,
-    placeholder: "room name (optional)",
+    placeholder: "Optional",
     autocomplete: "off",
     "aria-label": "room name",
   });
   const roomPassword = h("input", {
     type: "password",
-    placeholder: "password (optional)",
+    placeholder: "Optional",
     autocomplete: "new-password",
-    "aria-label": "room password",
   });
   const maxInput = h("input", {
     type: "number",
@@ -118,12 +137,11 @@ export const browserScreen: ScreenFactory = (ctx) => {
     max: ROOM_MAX_PLAYERS,
     step: 1,
     value: DEFAULT_MAX_PLAYERS,
-    "aria-label": "max players",
     onchange: () => {
       readMaxPlayers();
     },
   });
-  const isPublic = h("input", { type: "checkbox", checked: true });
+  const isPublic = h("input", { type: "checkbox", role: "switch", checked: true });
 
   /** Parse the max-players field, clamp it to the allowed range and write it back. */
   function readMaxPlayers(): number {
@@ -156,10 +174,11 @@ export const browserScreen: ScreenFactory = (ctx) => {
       },
     },
     h("h2", null, "Create a room"),
-    h("label", { class: "field" }, h("span", { class: "field-label" }, "Name"), roomName),
-    h("label", { class: "field" }, h("span", { class: "field-label" }, "Password"), roomPassword),
-    h("label", { class: "field" }, h("span", { class: "field-label" }, "Max players"), maxInput),
+    field("Room name", roomName),
+    field("Password", roomPassword, "Optional. Players type it to join."),
+    field("Max players", maxInput, `${ROOM_MIN_PLAYERS} to ${ROOM_MAX_PLAYERS} players`),
     h("label", { class: "check" }, isPublic, "Public"),
+    h("p", { class: "field-hint" }, "Public rooms show in the list. Private rooms open only with the code."),
     h("div", { class: "actions" }, h("button", { type: "submit", class: "primary" }, "Create room")),
   );
 
@@ -167,7 +186,7 @@ export const browserScreen: ScreenFactory = (ctx) => {
   function inviteForm(code: string): HTMLFormElement {
     const input = h("input", {
       type: "password",
-      placeholder: "password",
+      placeholder: "Password",
       autocomplete: "off",
       "aria-label": `password for room ${code}`,
       oninput: () => {
@@ -186,11 +205,11 @@ export const browserScreen: ScreenFactory = (ctx) => {
         },
       },
       h("h2", null, `Room ${code} needs a password`),
-      h("label", { class: "field" }, h("span", { class: "field-label" }, "Password"), input),
+      h("p", { class: "muted" }, "Enter the room's password to join."),
+      h("div", { class: "room-password" }, input, join),
       h(
         "div",
         { class: "actions" },
-        join,
         h("button", { type: "button", onclick: () => store.set({ invite: null }) }, "Cancel"),
       ),
     );
@@ -205,7 +224,7 @@ export const browserScreen: ScreenFactory = (ctx) => {
     const input = h("input", {
       type: "password",
       class: "join-password",
-      placeholder: "password",
+      placeholder: "Password",
       autocomplete: "off",
       "aria-label": `password for ${room.name}`,
       oninput: () => {
@@ -258,18 +277,30 @@ export const browserScreen: ScreenFactory = (ctx) => {
       h(
         "span",
         { class: "room-name" },
-        room.country !== null ? flagImg(room.country) : null,
         room.name,
         room.password ? lockIcon() : null,
-        room.quick !== null ? h("span", { class: "badge quick-badge" }, "Quick") : null,
-        room.region !== "" ? h("span", { class: "room-region" }, room.region) : null,
+        room.quick !== null ? h("span", { class: "chip" }, "Quick") : null,
       ),
-      h("span", { class: "room-mode" }, modeName(room.mode)),
-      h("span", { class: "room-map" }, room.map),
-      h("span", { class: "room-distance" }, formatDistance(room.distance, store.state.country)),
-      jukeboxCell(room.jukebox),
-      h("span", { class: "room-count" }, `${room.players}/${room.max_players}`),
-      room.in_match ? h("span", { class: "badge" }, "in match") : null,
+      h("span", { class: "room-mode" }, GAME_MODES.find((m) => m.id === room.mode)?.name ?? "Unknown"),
+      h(
+        "span",
+        { class: "room-map" },
+        h("span", { class: "room-map-title" }, room.map),
+        room.jukebox ? jukeboxCell(room.jukebox) : null,
+      ),
+      h(
+        "span",
+        { class: "room-where" },
+        room.country !== null ? flagImg(room.country) : null,
+        room.region !== "" ? h("span", { class: "room-region" }, room.region) : null,
+        h("span", { class: "room-distance" }, formatDistance(room.distance, store.state.country)),
+      ),
+      h(
+        "span",
+        { class: "room-count" },
+        h("span", { class: "room-players" }, `${room.players}/${room.max_players}`),
+        room.in_match ? h("span", { class: "chip ink" }, "In match") : null,
+      ),
     );
     // Thumbnails load small; hovering or focusing the row swaps in the larger one.
     const sharpen = (): void => {
@@ -284,60 +315,62 @@ export const browserScreen: ScreenFactory = (ctx) => {
     return h("li", { class: "room-item" }, row, friends, open ? joinForm(room) : null);
   }
 
+  /** The rooms that pass the filters, nearest first with friends on top. */
   function renderRooms(): void {
+    const query = searchInput.value.trim().toLowerCase();
+    const shown = sortRooms(rooms).filter((room) => {
+      if (hideFull && room.players >= room.max_players) return false;
+      if (query === "") return true;
+      return [room.name, room.map, GAME_MODES.find((m) => m.id === room.mode)?.name ?? "Unknown", room.region].some((s) => s.toLowerCase().includes(query));
+    });
     clear(roomList);
-    emptyHint.hidden = rooms.length > 0;
-    for (const room of sortRooms(rooms)) roomList.appendChild(roomItem(room));
+    for (const room of shown) roomList.appendChild(roomItem(room));
+    total.textContent = shown.length === rooms.length ? `${rooms.length} open` : `${shown.length} of ${rooms.length} open`;
+    emptyHint.textContent =
+      rooms.length === 0
+        ? "No open rooms right now. Create one and invite friends."
+        : "No rooms match. Clear the search or show full rooms.";
+    emptyHint.hidden = shown.length > 0;
   }
 
-  const el = h(
-    "div",
-    { class: "screen browser" },
+  const head = pageHead({
+    title: "Play",
+    back: () => ctx.disconnect(),
+    actions: [h("button", { type: "button", onclick: () => ctx.send({ t: "list_rooms" }) }, "Refresh")],
+  });
+
+  const roomsPanel = h(
+    "section",
+    { class: "panel room-browser" },
+    h("div", { class: "room-browser-head" }, h("h2", null, "Open rooms"), total),
     h(
-      "header",
-      { class: "browser-header" },
-      title,
-      h(
-        "div",
-        { class: "actions" },
-        h("button", { type: "button", onclick: () => ctx.send({ t: "list_rooms" }) }, "Refresh"),
-        h("button", { type: "button", onclick: () => ctx.disconnect() }, "Back"),
-      ),
+      "div",
+      { class: "room-tools" },
+      field("Search rooms", searchInput),
+      toggle("Hide full rooms", false, (on) => {
+        hideFull = on;
+        renderRooms();
+      }),
     ),
     h(
-      "section",
-      { class: "panel quick" },
-      h(
-        "div",
-        { class: "quick-row" },
-        h(
-          "button",
-          { type: "button", class: "primary", onclick: () => store.set({ screen: "quick" }) },
-          "Quick play",
-        ),
-        codeForm,
-      ),
-      h("p", { class: "hint" }, "Quick play joins an open room, or makes a new one."),
+      "div",
+      { class: "room-head", "aria-hidden": "true" },
+      h("span", null, "Room"),
+      h("span", null, "Mode"),
+      h("span", null, "Map"),
+      h("span", null, "Where"),
+      h("span", null, "Players"),
     ),
+    roomList,
+    emptyHint,
+  );
+
+  const el = page(
+    "browser",
+    head,
+    h("div", { class: "browser-start" }, quickPlay, startCode),
     inviteSlot,
-    h(
-      "section",
-      { class: "panel room-browser" },
-      h("h2", null, "Rooms"),
-      h(
-        "div",
-        { class: "room-head", "aria-hidden": "true" },
-        h("span", null, "Room"),
-        h("span", null, "Mode"),
-        h("span", null, "Map"),
-        h("span", null, "Distance"),
-        h("span", null, "Playing"),
-        h("span", null, "Players"),
-      ),
-      roomList,
-      emptyHint,
-    ),
-    createForm,
+    h("div", { class: "browser-main" }, roomsPanel, createForm),
   );
 
   renderRooms();
@@ -346,7 +379,6 @@ export const browserScreen: ScreenFactory = (ctx) => {
   return {
     el,
     update(state, prev) {
-      if (state.serverName !== prev.serverName) title.textContent = state.serverName || "Rooms";
       if (state.rooms !== prev.rooms || state.country !== prev.country) {
         rooms = state.rooms;
         renderRooms();

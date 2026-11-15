@@ -1,35 +1,385 @@
-/* Map library: top makers panel and the pick and description lines of map cards. */
+/* Map library and the room's map picker: toolbar, the map grid and cards, the map dialog,
+   the upload and report forms, and the top makers panel. Shared pieces (tabs, chips, modal,
+   fields) come from style.css. */
 
+.library-page [hidden] {
+  display: none !important;
+}
+
+.library-page .status {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--step-small);
+}
+
+.library-page .library-sorts .tabs {
+  box-shadow: none;
+}
+
+.library-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+}
+
+.library-search {
+  flex: 1 1 240px;
+  min-width: 0;
+  max-width: 420px;
+}
+
+.library-search input {
+  width: 100%;
+}
+
+.library-toolbar > button {
+  flex: none;
+}
+
+.library-empty {
+  padding: 32px 0;
+  color: var(--muted);
+}
+
+.library-empty p {
+  margin: 0;
+}
+
+.library-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 300px;
+  align-items: start;
+  gap: 32px;
+}
+
+.library-main {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 24px;
+  min-width: 0;
+}
+
+.library-more {
+  align-self: center;
+}
+
+/* Cards: the square preview on top, then name, author, counts. */
+.map-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  gap: 16px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.map-grid > li {
+  min-width: 0;
+}
+
+.map-card {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  min-height: 0;
+  height: 100%;
+  padding: 0;
+  overflow: hidden;
+  background: var(--surface);
+  color: var(--ink);
+  font-weight: 400;
+  text-align: left;
+  box-shadow: none;
+}
+
+.map-card:hover:not(:disabled) {
+  background: var(--surface-2);
+}
+
+.map-thumb,
+.map-card .map-thumb {
+  display: block;
+  width: 100%;
+  aspect-ratio: 1;
+  background: var(--surface-2);
+}
+
+.map-thumb canvas,
+.detail-thumb canvas,
+.map-preview canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.thumb-missing {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: var(--muted);
+  font-size: var(--step-small);
+}
+
+.map-body {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  padding: 12px;
+  min-width: 0;
+  width: 100%;
+}
+
+.map-name {
+  display: block;
+  max-width: 100%;
+  overflow: hidden;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.map-meta,
+.map-stats,
+.map-state {
+  display: block;
+  max-width: 100%;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: var(--step-small);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.map-body .chip {
+  margin-top: 4px;
+}
+
+/* The map dialog: a wide preview, counts and actions, then the owner's block and records. */
+dialog.modal.map-dialog {
+  width: min(calc(100vw - 32px), 600px);
+}
+
+.detail-thumb {
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  background: var(--surface-2);
+}
+
+.map-info {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.map-byline {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  color: var(--muted);
+}
+
+.map-state,
+.map-desc {
+  margin: 0;
+}
+
+.map-desc {
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+}
+
+.map-stats {
+  margin: 0;
+  overflow: visible;
+  font-size: var(--step-body);
+}
+
+.map-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.map-actions button[aria-pressed="true"] {
+  background: var(--ink);
+  color: var(--ground);
+}
+
+.map-actions button[aria-pressed="true"]:hover:not(:disabled) {
+  background: var(--ink);
+  color: var(--ground);
+}
+
+.map-play:empty {
+  display: none;
+}
+
+.map-play {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.map-play .status {
+  margin: 0;
+}
+
+.map-report {
+  align-self: flex-start;
+}
+
+.map-records {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  overflow-x: auto;
+}
+
+.map-records h3,
+.map-owner h3 {
+  margin: 0;
+  font-size: var(--step-body);
+  font-weight: 500;
+}
+
+.map-owner {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 16px;
+  background: var(--surface);
+}
+
+.map-owner .actions {
+  margin-top: 4px;
+}
+
+/* Forms in the upload and report dialogs. */
+form.modal-form {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+form.modal-form .field-hint {
+  margin: 0;
+}
+
+.map-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.map-preview canvas {
+  aspect-ratio: 16 / 9;
+  background: var(--surface-2);
+}
+
+/* The room's map picker: wider than a form, with the same tabs and cards. */
+dialog.modal.map-picker {
+  width: min(calc(100vw - 32px), 880px);
+}
+
+.map-picker .map-grid {
+  grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+}
+
+.map-picker .library-search {
+  max-width: none;
+}
+
+/* Top makers this week: a short ranked list in a surface block. */
 .library-makers {
-  margin: 0 0 12px;
+  margin: 0;
 }
 
 .library-makers h2 {
-  margin: 0 0 6px;
-  font-size: 1em;
+  margin: 0;
 }
 
 .library-makers-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
   margin: 0;
-  padding-left: 1.5em;
+  padding: 0;
+  list-style: none;
+  counter-reset: maker;
 }
 
 .library-makers-list li {
   display: flex;
+  align-items: center;
   justify-content: space-between;
   gap: 12px;
-  max-width: 24em;
+  min-width: 0;
+  counter-increment: maker;
 }
 
-.map-pick,
-.map-desc {
-  display: block;
+.library-makers-list li::before {
+  content: counter(maker) ".";
+  flex: none;
+  width: 2ch;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
 }
 
-.map-pick {
-  font-weight: 600;
+.maker-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.map-desc {
-  opacity: 0.8;
+.maker-score {
+  flex: none;
+  font-weight: 500;
+}
+
+@media (max-width: 900px) {
+  .library-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 600px) {
+  .map-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+  }
+
+  .map-picker .map-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .library-toolbar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .library-search {
+    max-width: none;
+  }
+
+  .library-toolbar > button {
+    width: 100%;
+  }
+
+  .map-body {
+    padding: 10px;
+  }
+
+  .map-actions > button {
+    flex: 1 1 calc(50% - 8px);
+  }
 }

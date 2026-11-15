@@ -1,91 +1,261 @@
-/* Offline screens: replay viewer and practice (replay.ts, practice.ts).
-   Setup panels are normal screens; while a game or replay plays, the root
-   becomes a full-screen layer over the canvas and only its controls take
-   pointer events. */
+/* Offline play: practice and replay (practice.ts, replay.ts), and the editor's
+   test play (editor/testplay.ts). Setup is an ordinary page. While a game or
+   replay plays, the root is a fixed layer over the canvas: only its controls
+   take pointer events. Over the game the chips are solid --hud, as in hud.css. */
 
-.offline {
+/* Setup pages */
+
+.offline-page .page-inner {
+  max-width: 880px;
+}
+
+.offline-status {
+  min-height: 1.45em;
+  color: var(--muted);
+  font-size: var(--step-small);
+}
+
+.offline-error {
+  color: var(--danger);
+  font-size: var(--step-small);
+  overflow-wrap: anywhere;
+}
+
+/* Map tiles: a square swatch with the map's initial, then its name. */
+.offline-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(148px, 1fr));
+  gap: 8px;
+}
+
+.offline-list > p {
+  grid-column: 1 / -1;
+}
+
+.offline-choice {
   display: flex;
   flex-direction: column;
-  gap: 16px;
-  width: min(100%, var(--panel-max));
+  align-items: stretch;
+  gap: 8px;
+  min-height: 0;
+  padding: 10px;
+  background: var(--surface);
+  text-align: left;
 }
 
-.offline > .panel {
-  width: 100%;
+.offline-choice:hover:not(:disabled) {
+  background: var(--surface-2);
 }
+
+.offline-choice[aria-pressed="true"],
+.offline-choice[aria-pressed="true"]:hover:not(:disabled) {
+  background: var(--ink);
+  color: var(--ground);
+}
+
+.offline-tile {
+  display: grid;
+  place-items: center;
+  aspect-ratio: 1;
+  background: var(--surface-3);
+  color: var(--ink);
+  font-size: var(--step-lead);
+  font-weight: 500;
+  line-height: 1;
+}
+
+.offline-choice[aria-pressed="true"] .offline-tile {
+  background: var(--accent);
+  color: var(--accent-ink);
+}
+
+.offline-choice-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 500;
+}
+
+.offline-choice-hint {
+  color: var(--muted);
+  font-size: var(--step-small);
+}
+
+.offline-choice[aria-pressed="true"] .offline-choice-hint {
+  color: inherit;
+  opacity: 0.8;
+}
+
+/* Replay picker: one drop zone that is also the file button. */
+.offline-drop {
+  position: relative;
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 6px;
+  min-height: 200px;
+  padding: 24px;
+  background: var(--surface);
+  color: var(--muted);
+  font-size: var(--step-small);
+  text-align: center;
+  cursor: pointer;
+  transition: background-color var(--fast) var(--ease);
+}
+
+.offline-drop:hover,
+.offline-drop.drag-over {
+  background: var(--surface-2);
+}
+
+.offline-drop:focus-within {
+  outline: 2px solid var(--ink);
+  outline-offset: 2px;
+}
+
+.offline-drop-mark {
+  width: 40px;
+  height: 40px;
+  margin-bottom: 8px;
+  background: var(--ink);
+  position: relative;
+}
+
+.offline-drop-mark::after {
+  content: "";
+  position: absolute;
+  inset: 30%;
+  background: var(--accent);
+}
+
+.offline-drop strong {
+  color: var(--ink);
+  font-size: var(--step-lead);
+  font-weight: 500;
+}
+
+/* The file input stays focusable and keeps the label's name, but is not drawn. */
+.offline-drop input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* Playing layer */
 
 #ui > .offline.playing {
   position: fixed;
   inset: 0;
   z-index: 2;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
   margin: 0;
   width: 100%;
-  padding: calc(env(safe-area-inset-top, 0px) + 12px) calc(env(safe-area-inset-right, 0px) + 12px)
-    calc(env(safe-area-inset-bottom, 0px) + 12px) calc(env(safe-area-inset-left, 0px) + 12px);
+  padding: calc(env(safe-area-inset-top, 0px) + 8px) calc(env(safe-area-inset-right, 0px) + 8px)
+    calc(env(safe-area-inset-bottom, 0px) + 8px) calc(env(safe-area-inset-left, 0px) + 8px);
   pointer-events: none;
   overflow: hidden;
-  justify-content: space-between;
+  color: var(--hud-ink);
+  font: 400 var(--step-small) / 1.35 var(--font);
+  -webkit-user-select: none;
+  user-select: none;
 }
 
 #ui > .offline.playing > * {
   pointer-events: auto;
 }
 
+/* The top row: Leave, the title, one action. Solid chips, 44px tall. */
 .offline-top {
   position: relative;
   z-index: 1;
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   min-width: 0;
-  padding: 8px;
-  border-radius: 12px;
+}
+
+.offline-top button,
+.offline-top select,
+.offline-dock button,
+.offline-dock select {
+  min-height: 44px;
+  padding: 0 14px;
+  background: var(--hud-solid);
+  color: var(--hud-ink);
+  border: 0;
+  border-radius: 0;
+  box-shadow: inset 0 -2px 0 transparent;
+  font: inherit;
+  font-weight: 500;
+  cursor: pointer;
+  touch-action: manipulation;
+  transition: box-shadow var(--fast), background-color var(--fast);
+}
+
+.offline-top button:hover,
+.offline-dock button:hover:not(:disabled) {
+  box-shadow: inset 0 -2px 0 var(--accent);
+}
+
+.offline-top button:focus-visible,
+.offline-top select:focus-visible,
+.offline-dock button:focus-visible,
+.offline-dock select:focus-visible,
+.offline-dock input[type="range"]:focus-visible {
+  outline: 3px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.offline-top select,
+.offline-dock select {
+  max-width: 50%;
+  padding-right: 10px;
 }
 
 .offline-title {
   flex: 1;
   min-width: 0;
+  display: flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 0 12px;
+  background: var(--hud-solid);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-weight: 600;
-  text-shadow: 0 1px 3px #000;
+  font-weight: 500;
 }
 
 .offline-overlay {
-  background: rgb(11 13 16 / 0.82);
-  border: 1px solid var(--border);
-  backdrop-filter: blur(6px);
+  background: var(--hud-solid);
 }
 
-.offline-top button,
-.offline-dock button,
-.offline-top select,
-.offline-dock select {
-  background: rgb(11 13 16 / 0.82);
-  backdrop-filter: blur(6px);
-}
-
-.offline-top select,
-.offline-dock select {
-  min-height: 40px;
-  max-width: 50%;
-  padding: 6px 10px;
-  border-radius: 6px;
-  border: 1px solid var(--border);
-  color: var(--text);
-  font: inherit;
-}
-
+/* The bottom dock: transport, seek bar, jump and speed. */
 .offline-dock {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 8px;
   width: min(100%, 760px);
   margin-top: auto;
   align-self: center;
-  padding: 12px;
-  border-radius: 12px;
+  padding: 8px;
+  background: var(--hud-solid);
+}
+
+.offline-dock > button.primary {
+  min-width: 96px;
+  background: var(--accent);
+  color: var(--accent-ink);
+  box-shadow: none;
+}
+
+.offline-dock > button.primary:hover:not(:disabled) {
+  background: var(--accent-hover);
+  box-shadow: none;
 }
 
 .offline-seek {
@@ -94,16 +264,46 @@
   gap: 10px;
 }
 
-.offline-seek input[type="range"] {
+/* The seek track: a thin light rule with a square thumb. */
+.offline-dock input[type="range"] {
   flex: 1;
   min-width: 0;
   margin: 0;
+  height: 44px;
   accent-color: var(--accent);
 }
 
+.offline-dock input[type="range"]::-webkit-slider-runnable-track {
+  height: 4px;
+  background: rgb(247 247 247 / 0.3);
+}
+
+.offline-dock input[type="range"]::-moz-range-track {
+  height: 4px;
+  background: rgb(247 247 247 / 0.3);
+}
+
+.offline-dock input[type="range"]::-moz-range-progress {
+  height: 4px;
+  background: var(--accent);
+}
+
+.offline-dock input[type="range"]::-webkit-slider-thumb {
+  width: 18px;
+  height: 18px;
+  margin-top: -7px;
+  background: var(--accent);
+}
+
+.offline-dock input[type="range"]::-moz-range-thumb {
+  width: 18px;
+  height: 18px;
+  background: var(--accent);
+}
+
 .offline-time {
-  color: var(--muted);
-  font-size: 13px;
+  color: var(--hud-ink);
+  font-size: var(--step-small);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
@@ -113,119 +313,40 @@
   flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
+  gap: 6px;
 }
 
 .offline-group {
   display: flex;
   flex-wrap: wrap;
-  gap: 4px;
+  gap: 2px;
 }
 
 .offline-group button {
-  min-width: 44px;
-  min-height: 36px;
-  padding: 6px 10px;
-  font-size: 13px;
+  min-width: 52px;
 }
 
 .offline-group button[aria-pressed="true"] {
-  border-color: var(--accent);
-  color: #7cc4ff;
-}
-
-/* Setup panels */
-.offline-drop {
-  display: grid;
-  place-items: center;
-  gap: 6px;
-  min-height: 150px;
-  padding: 20px;
-  border: 1px dashed var(--border-strong);
-  border-radius: var(--radius);
-  color: var(--muted);
-  font-size: 14px;
-  text-align: center;
-  cursor: pointer;
-}
-
-.offline-drop strong {
-  color: var(--text);
-  font-size: 16px;
-}
-
-.offline-drop.drag-over,
-.offline-drop:hover {
-  border-color: var(--accent);
-}
-
-.offline-drop input {
-  display: none;
-}
-
-.offline-list {
-  list-style: none;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  max-height: 40vh;
-  overflow-y: auto;
-}
-
-.offline-choice {
-  width: 100%;
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 2px;
-  padding: 10px 14px;
-  text-align: left;
-}
-
-.offline-choice small {
-  color: var(--muted);
-  font-size: 13px;
-}
-
-.offline-choice[aria-pressed="true"] {
-  border-color: var(--accent);
-  background: rgb(0 149 255 / 0.12);
-}
-
-.offline-presets {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px;
-}
-
-.offline-error {
-  color: var(--danger);
-  font-size: 14px;
-  overflow-wrap: anywhere;
+  background: var(--accent);
+  color: var(--accent-ink);
 }
 
 @media (max-width: 600px) {
-  #ui > .offline.playing {
-    padding: 8px;
-  }
-
-  .offline-dock {
-    padding: 10px;
-  }
-
-  .offline-group button,
-  .offline-top button,
-  .offline-dock select,
-  .offline-top select {
-    min-height: 44px;
-  }
-
   .offline-group button {
     flex: 1 1 0;
   }
 
-  .offline-presets {
-    grid-template-columns: 1fr;
+  .offline-top select {
+    max-width: 40%;
+  }
+}
+
+@media (max-height: 500px) {
+  #ui > .offline.playing {
+    padding: 4px 8px;
+  }
+
+  .offline-dock {
+    padding: 4px 8px;
   }
 }

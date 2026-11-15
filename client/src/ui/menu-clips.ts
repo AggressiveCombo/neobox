@@ -2,6 +2,7 @@
 // Each clip loads into the engine's replay player and advances in real time; frames are
 // drawn through ctx.present (the GL canvas sits behind the UI). Clips come newest first,
 // 10 per page; the list wraps to the start. Scene sounds stay muted while a clip plays.
+// A server with no clips yet plays the bundled demo (public/clips/demo.json).
 
 import type { AppCtx } from "../ctx";
 import type { Engine, ReplayInfo } from "../engine";
@@ -15,6 +16,15 @@ const MAX_FRAME_MS = 250;
 /** Wait before trying the list again after a failed fetch or a full pass of failed loads. */
 const RETRY_MS = 15_000;
 
+/** The bundled demo match, listed when the server has no clips. */
+const DEMO_CLIP: ClipSummary = { id: 0, recorder: "neobox", map_name: "Simple Arena 1", created: 0, size: 0 };
+
+async function fetchDemo(): Promise<string> {
+  const res = await fetch("/clips/demo.json");
+  if (!res.ok) throw new Error(`/clips/demo.json: HTTP ${res.status}`);
+  return res.text();
+}
+
 /** A clip that is loaded in the engine and playing. */
 interface Playing {
   clip: ClipSummary;
@@ -24,8 +34,11 @@ interface Playing {
   tick: number;
 }
 
-/** Start the background clip playback in `host`. Returns the cleanup function (stops it). */
-export function mountMenuClips(ctx: AppCtx, host: HTMLElement): () => void {
+/**
+ * Start the background clip playback in `host`. `onPlaying` is told when a clip starts
+ * and when it ends. Returns the cleanup function (stops it).
+ */
+export function mountMenuClips(ctx: AppCtx, host: HTMLElement, onPlaying?: (on: boolean) => void): () => void {
   let destroyed = false;
   let eng: Engine | null = null;
   let clips: ClipSummary[] = [];
@@ -49,12 +62,14 @@ export function mountMenuClips(ctx: AppCtx, host: HTMLElement): () => void {
     if (destroyed) return;
     clips = [...clips, ...page];
     atEnd = page.length < PAGE_SIZE;
+    // A new server has no clips yet: the menu plays the bundled demo instead.
+    if (atEnd && clips.length === 0) clips = [DEMO_CLIP];
   }
 
   /** Fetch and load one clip into the engine; throws when it does not load. */
   async function loadClip(clip: ClipSummary): Promise<Playing> {
     const engine = await ctx.engine();
-    const text = await fetchClipReplay(clip.id);
+    const text = clip === DEMO_CLIP ? await fetchDemo() : await fetchClipReplay(clip.id);
     if (destroyed) throw new Error("the menu closed");
     engine.replayClose();
     const info = engine.replayLoad(text);
@@ -96,6 +111,7 @@ export function mountMenuClips(ctx: AppCtx, host: HTMLElement): () => void {
 
   function begin(next: Playing): void {
     playing = next;
+    onPlaying?.(true);
     credit.textContent = `${next.clip.map_name} · recorded by ${next.clip.recorder}`;
     credit.hidden = false;
   }
@@ -136,6 +152,7 @@ export function mountMenuClips(ctx: AppCtx, host: HTMLElement): () => void {
     if (p.tick >= p.info.end) {
       playing = null;
       credit.hidden = true;
+      onPlaying?.(false);
       startNext();
       return;
     }

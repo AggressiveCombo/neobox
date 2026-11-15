@@ -7,6 +7,8 @@ import type { Engine, ReplayInfo } from "../../engine";
 import { FrameLoop } from "../../local-loop";
 import type { Screen } from "../../state";
 import { h } from "../dom";
+import { page, pageHead, seg } from "../kit";
+import "./replay.css";
 
 const SPEEDS = [0.25, 0.5, 1, 2, 4];
 const JUMP_SECONDS = 5;
@@ -43,7 +45,7 @@ function clock(sec: number): string {
 }
 
 export const replayScreen: ScreenFactory = (ctx) => {
-  const root = h("div", { class: "screen offline" });
+  const root = h("div", { class: "offline" });
   let origin: Screen = "menu";
   let originKnown = false;
   let destroyed = false;
@@ -62,7 +64,7 @@ export const replayScreen: ScreenFactory = (ctx) => {
   let playBtn: HTMLButtonElement | null = null;
   let seekEl: HTMLInputElement | null = null;
   let timeEl: HTMLElement | null = null;
-  let speedBtns: HTMLButtonElement[] = [];
+  let speedSeg: { set(v: string): void } | null = null;
   // Picker-view status line (rebuilt by showPicker).
   let pickerMsg: HTMLElement | null = null;
 
@@ -133,7 +135,7 @@ export const replayScreen: ScreenFactory = (ctx) => {
 
   function syncControls(): void {
     if (playBtn) playBtn.textContent = playing ? "Pause" : "Play";
-    speedBtns.forEach((b, i) => b.setAttribute("aria-pressed", String(SPEEDS[i] === speed)));
+    speedSeg?.set(String(speed));
   }
 
   /** One rendered frame: advance the clock while playing, then draw. */
@@ -234,7 +236,7 @@ export const replayScreen: ScreenFactory = (ctx) => {
   /** The file picker and drop zone (no replay loaded). */
   function showPicker(message = ""): void {
     unload();
-    root.className = "screen offline";
+    root.className = "offline";
 
     const input: HTMLInputElement = h("input", {
       type: "file",
@@ -248,7 +250,7 @@ export const replayScreen: ScreenFactory = (ctx) => {
     const drop: HTMLElement = h(
       "label",
       {
-        class: "offline-drop",
+        class: "replay-drop",
         ondragover: (e: Event) => {
           e.preventDefault();
           drop.classList.add("drag-over");
@@ -262,20 +264,19 @@ export const replayScreen: ScreenFactory = (ctx) => {
         },
       },
       input,
-      h("strong", null, "Choose a .nbreplay file"),
-      h("span", null, "or drop it here"),
+      h("span", { class: "replay-drop-mark", "aria-hidden": "true" }),
+      h("strong", null, "Choose a .nbreplay file or drop it here"),
+      h("span", { class: "replay-drop-hint" }, "Replays saved from online matches, gzip or plain JSON."),
     );
-    pickerMsg = h("p", { class: message ? "offline-error" : "status" }, message);
+    pickerMsg = h("p", { class: message ? "offline-error" : "offline-status", role: "status" }, message);
 
     root.replaceChildren(
-      h(
-        "section",
-        { class: "panel" },
-        h("h1", { class: "wordmark" }, "Replay"),
-        h("p", { class: "credit" }, "Watch a replay saved from an online match. Nothing is sent to the server."),
+      page(
+        "offline-page",
+        pageHead({ title: "Replay", back: leave }),
+        h("p", { class: "lead" }, "Watch a replay saved from an online match. Nothing is sent to the server."),
         drop,
         pickerMsg,
-        h("div", { class: "actions" }, h("button", { type: "button", onclick: leave }, "Back")),
       ),
     );
   }
@@ -286,7 +287,7 @@ export const replayScreen: ScreenFactory = (ctx) => {
     const loaded = info;
     root.className = "offline playing";
 
-    playBtn = h("button", { type: "button", class: "primary", onclick: togglePlay }, "Play");
+    playBtn = h("button", { type: "button", class: "primary replay-play", onclick: togglePlay }, "Play");
     seekEl = h("input", {
       type: "range",
       min: String(loaded.first),
@@ -302,7 +303,7 @@ export const replayScreen: ScreenFactory = (ctx) => {
         dragging = false;
       },
     });
-    timeEl = h("span", { class: "offline-time" }, timeText());
+    timeEl = h("span", { class: "replay-time num" }, timeText());
 
     const followSel = h(
       "select",
@@ -319,9 +320,13 @@ export const replayScreen: ScreenFactory = (ctx) => {
 
     const stepBtn = (label: string, onclick: () => void): HTMLButtonElement =>
       h("button", { type: "button", onclick }, label);
-    speedBtns = SPEEDS.map((s) =>
-      h("button", { type: "button", "aria-pressed": "false", onclick: () => setSpeed(s) }, `${s}x`),
+    const speedGroup = seg(
+      "Speed",
+      SPEEDS.map((s) => ({ value: String(s), label: `${s}x` })),
+      String(speed),
+      (v) => setSpeed(Number(v)),
     );
+    speedSeg = speedGroup;
 
     const bar = h(
       "div",
@@ -334,20 +339,20 @@ export const replayScreen: ScreenFactory = (ctx) => {
       bar,
       h(
         "div",
-        { class: "offline-dock offline-overlay" },
-        h("div", { class: "offline-seek" }, playBtn, seekEl, timeEl),
+        { class: "offline-dock offline-overlay replay-dock" },
+        h("div", { class: "replay-transport" }, playBtn, seekEl, timeEl),
         h(
           "div",
-          { class: "offline-row" },
+          { class: "replay-controls" },
           h(
             "div",
-            { class: "offline-group", role: "group", "aria-label": "Jump and step" },
-            stepBtn("-5s", () => jump(-JUMP_SECONDS)),
-            stepBtn("‹ tick", () => step(-1)),
-            stepBtn("tick ›", () => step(1)),
-            stepBtn("+5s", () => jump(JUMP_SECONDS)),
+            { class: "replay-step", role: "group", "aria-label": "Jump and step" },
+            stepBtn("Back 5 s", () => jump(-JUMP_SECONDS)),
+            stepBtn("Step back", () => step(-1)),
+            stepBtn("Step forward", () => step(1)),
+            stepBtn("Forward 5 s", () => jump(JUMP_SECONDS)),
           ),
-          h("div", { class: "offline-group", role: "group", "aria-label": "Speed" }, ...speedBtns),
+          speedGroup.el,
         ),
       ),
     );

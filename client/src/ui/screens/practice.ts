@@ -8,8 +8,10 @@ import type { Engine } from "../../engine";
 import { FrameLoop } from "../../local-loop";
 import type { GameSettings, MatchStart } from "../../protocol";
 import type { Screen } from "../../state";
-import { h } from "../dom";
-import { touchControls } from "./hud";
+import { type Child, h } from "../dom";
+import { field, page, pageHead, seg } from "../kit";
+import { rotateGate, touchControls } from "./hud";
+import "./practice.css";
 
 const TICK_HZ = 30;
 
@@ -49,14 +51,14 @@ function newSeed(): number {
 /** Setup-view widgets that change with selection and loading. */
 interface SetupUi {
   list: HTMLElement;
-  presets: HTMLElement;
+  hint: HTMLElement;
   start: HTMLButtonElement;
   status: HTMLElement;
   code: HTMLInputElement;
 }
 
 export const practiceScreen: ScreenFactory = (ctx) => {
-  const root = h("div", { class: "screen offline" });
+  const root = h("div", { class: "offline" });
   let origin: Screen = "menu";
   let originKnown = false;
   let destroyed = false;
@@ -75,6 +77,7 @@ export const practiceScreen: ScreenFactory = (ctx) => {
   let rules: GameSettings = {};
   let names: ReadonlyMap<number, string> = new Map();
   let touch: { el: HTMLElement; destroy(): void } | null = null;
+  let rotate: { el: HTMLElement; destroy(): void } | null = null;
   let releaseTop: (() => void) | null = null;
 
   const loop = new FrameLoop(
@@ -102,6 +105,8 @@ export const practiceScreen: ScreenFactory = (ctx) => {
     running = false;
     touch?.destroy();
     touch = null;
+    rotate?.destroy();
+    rotate = null;
     releaseTop?.();
     releaseTop = null;
   }
@@ -139,9 +144,10 @@ export const practiceScreen: ScreenFactory = (ctx) => {
     }
   }
 
-  /** The playing view: touch controls under, Leave and Restart on top. */
+  /** The playing view: touch controls under, Leave and Restart on top, the portrait gate over all. */
   function showGame(): void {
     touch = touchControls(ctx);
+    rotate = rotateGate();
     root.className = "offline playing";
     const bar = h(
       "div",
@@ -150,15 +156,16 @@ export const practiceScreen: ScreenFactory = (ctx) => {
       h("span", { class: "offline-title" }, mapName),
       h("button", { type: "button", onclick: restart }, "Restart"),
     );
-    root.replaceChildren(touch.el, bar);
+    root.replaceChildren(touch.el, bar, rotate.el);
     releaseTop = ctx.reserveTop(bar);
     loop.start();
   }
 
+  /** The map rows: built-in maps, then a pasted code if it is not one of them (shown as the current pick, not a button). */
   function renderMaps(): void {
     if (!setup) return;
     const items: Node[] = [];
-    if (maps === null && !mapsError) items.push(h("p", { class: "status" }, "Loading maps…"));
+    if (maps === null && !mapsError) items.push(h("p", { class: "offline-status" }, "Loading maps…"));
     if (mapsError) items.push(h("p", { class: "offline-error" }, `Could not load maps: ${mapsError}`));
     for (const m of maps ?? []) {
       const selected = choice?.code === m.code;
@@ -174,45 +181,22 @@ export const practiceScreen: ScreenFactory = (ctx) => {
               renderMaps();
             },
           },
-          h("span", null, m.name),
-          h("small", null, "Built-in map"),
+          m.name,
         ),
       );
     }
     if (choice && !maps?.some((m) => m.code === choice?.code)) {
       items.push(
         h(
-          "button",
-          { type: "button", class: "offline-choice", "aria-pressed": "true" },
-          h("span", null, choice.name),
-          h("small", null, "Pasted map code"),
+          "div",
+          { class: "offline-choice", "aria-current": "true" },
+          choice.name,
+          h("span", { class: "practice-choice-note" }, "Pasted code"),
         ),
       );
     }
     setup.list.replaceChildren(...items);
     setup.start.disabled = !choice;
-  }
-
-  function renderPresets(): void {
-    if (!setup) return;
-    setup.presets.replaceChildren(
-      ...PRESETS.map((p) =>
-        h(
-          "button",
-          {
-            type: "button",
-            class: "offline-choice",
-            "aria-pressed": String(p.id === preset.id),
-            onclick: () => {
-              preset = p;
-              renderPresets();
-            },
-          },
-          h("span", null, p.label),
-          h("small", null, p.hint),
-        ),
-      ),
-    );
   }
 
   /** Validate a pasted map code with the engine, then select it. */
@@ -269,69 +253,71 @@ export const practiceScreen: ScreenFactory = (ctx) => {
     }
   }
 
-  /** The setup view: map list, paste field, rules presets, Start. */
+  /** The setup view: map tiles, paste field, rules, Start. */
   function showSetup(message = ""): void {
     stopGame();
     eng = null;
-    root.className = "screen offline";
+    root.className = "offline";
 
     const list = h("div", { class: "offline-list" });
-    const presets = h("div", { class: "offline-presets" });
     const code = h("input", {
       type: "text",
       placeholder: "Map code",
       autocomplete: "off",
       spellcheck: "false",
-      "aria-label": "Map code",
       onkeydown: (e: Event) => {
         if ((e as KeyboardEvent).key === "Enter") void useCode();
       },
     });
-    const status = h("p", { class: message ? "offline-error" : "status" }, message);
-    const startBtn = h(
-      "button",
-      { type: "button", class: "primary", onclick: () => void start() },
-      "Start",
+    const hint = h("p", { class: "field-hint" }, preset.hint);
+    const rulesSeg = seg(
+      "Rules",
+      PRESETS.map((p) => ({ value: p.id, label: p.label })),
+      preset.id,
+      (id) => {
+        const next = PRESETS.find((p) => p.id === id);
+        if (!next) return;
+        preset = next;
+        hint.textContent = next.hint;
+      },
     );
-    setup = { list, presets, start: startBtn, status, code };
+    const status = h("p", { class: message ? "offline-error" : "offline-status", role: "status" }, message);
+    const startBtn = h("button", { type: "button", class: "primary big block", onclick: () => void start() }, "Start");
+    setup = { list, hint, start: startBtn, status, code };
 
-    root.replaceChildren(
+    const content: Child[] = [
+      h("p", { class: "lead" }, "Play alone on a map. Nothing is sent to the server."),
       h(
-        "section",
-        { class: "panel" },
-        h("h1", { class: "wordmark" }, "Practice"),
-        h("p", { class: "credit" }, "Play alone on a map. Nothing is sent to the server."),
-        h("div", { class: "field" }, h("span", { class: "field-label" }, "Map"), list),
+        "div",
+        { class: "practice-grid" },
+        h("section", { class: "section practice-maps" }, h("h2", null, "Map"), list),
         h(
           "div",
-          { class: "field" },
-          h("span", { class: "field-label" }, "Or paste a map code"),
+          { class: "panel practice-side" },
           h(
             "div",
-            { class: "actions" },
-            code,
+            { class: "practice-code" },
+            field("Map code", code, "Or paste a map code to play it."),
             h("button", { type: "button", onclick: () => void useCode() }, "Use code"),
           ),
+          h("h2", null, "Rules"),
+          rulesSeg.el,
+          hint,
         ),
-        h("div", { class: "field" }, h("span", { class: "field-label" }, "Rules"), presets),
-        status,
-        h(
-          "div",
-          { class: "actions" },
-          h("button", { type: "button", onclick: exit }, "Back"),
-          startBtn,
-        ),
+        h("div", { class: "practice-actions" }, status, startBtn),
       ),
-    );
+    ];
+    root.replaceChildren(page("practice-page", pageHead({ title: "Practice", back: exit }), ...content));
 
     renderMaps();
-    renderPresets();
     if (maps === null && !mapsError) void loadMaps();
   }
 
   async function loadMaps(): Promise<void> {
     try {
       maps = await ctx.maps();
+      // Start is one tap away: the first built-in map is picked until the player chooses another.
+      choice ??= maps[0] ? { name: maps[0].name, code: maps[0].code } : null;
     } catch (err) {
       mapsError = errText(err);
     }

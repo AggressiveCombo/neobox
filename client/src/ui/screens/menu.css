@@ -1,47 +1,433 @@
-/* Main menu (ui/screens/menu.ts). Panel, button and link base styles come from style.css. */
+/* Home (ui/screens/menu.ts). Desktop: a two-column composition on the ground colour. The left
+   column holds the wordmark, the sentence, the name and Play, then the destinations as an index.
+   The right side is a giant turned square, cropped by the viewport edge; the clip plays inside it
+   (the GL view is masked to the square by menu.ts). Phone (<=600px): one column in flow. */
 
-/* Shared match clips fill the viewport behind the panel. Clicks pass through to the game. */
-.menu-backdrop {
-  position: fixed;
-  inset: 0;
-  z-index: 0;
-  overflow: hidden;
-  pointer-events: none;
+/* The home page is transparent so the GL view can show through the square. */
+.page.home {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 560px) minmax(0, 1fr);
+  grid-template-rows: auto auto auto auto auto;
+  align-content: start;
+  gap: 24px 48px;
+  min-height: 100%;
+  padding: 16px var(--margin) calc(24px + env(safe-area-inset-bottom));
+  background: transparent;
+  overflow: visible;
 }
 
-/* Keep the panel readable over the clips; the reserved bottom strip holds the clip credit. */
-.screen.menu {
+/* Top bar: account, news, music, fullscreen. */
+.home-top {
+  grid-column: 1 / -1;
+  grid-row: 1;
+  display: flex;
+  justify-content: flex-end;
+  align-items: flex-start;
+  position: relative;
+  z-index: 2;
+  min-height: 0;
+}
+
+.home-tools {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 8px;
+}
+
+.home-tools .home-level {
+  color: var(--muted);
+  font-size: var(--step-small);
+  font-variant-numeric: tabular-nums;
+  padding-inline: 4px;
+}
+
+.home-tool {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* A square marker: something new in the news. */
+.home-unread {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 8px;
+  height: 8px;
+  background: var(--ink);
+  box-shadow: 0 0 0 2px var(--surface);
+}
+
+.home-tools .avatar {
+  width: 24px;
+  height: 24px;
+  font-size: var(--step-small);
+}
+
+/* Left column: the copy and the name form. */
+.home-copy {
+  grid-column: 1;
+  grid-row: 2;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 16px;
   position: relative;
   z-index: 1;
-  margin-bottom: 3rem;
 }
 
-.screen.menu > .panel {
-  background: rgb(11 13 16 / 0.86);
+.home-title {
+  display: flex;
+  align-items: center;
+  gap: 0.16em;
+  font-size: var(--step-display);
+  font-weight: 500;
+  letter-spacing: -0.05em;
+  line-height: 0.9;
+}
+
+.home-title .mark {
+  width: 0.72em;
+  height: 0.72em;
+}
+
+.home-lead {
+  max-width: 34ch;
+  font-size: var(--step-lead);
+  line-height: 1.35;
 }
 
 .menu-online {
   color: var(--muted);
-  font-size: 14px;
+  font-size: var(--step-small);
   font-variant-numeric: tabular-nums;
 }
 
-.menu-makers {
+.home-form {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  width: 100%;
+  max-width: 460px;
+}
+
+.home-name {
+  max-width: 320px;
+}
+
+.home-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.home-actions button.big {
+  min-width: 180px;
+}
+
+.home-copy .status {
+  min-height: 0;
   color: var(--muted);
-  font-size: 13px;
-  overflow-wrap: anywhere;
+  font-size: var(--step-small);
 }
 
-.menu-news {
-  font-weight: 600;
+.home-copy .status:empty {
+  display: none;
 }
 
-.menu-tools {
+/* First-visit hint: a tone-step panel pointing at Training. */
+.home-hint {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  width: 100%;
+  max-width: 460px;
+  padding: 12px 12px 12px 16px;
+  background: var(--surface);
+}
+
+.home-hint p {
+  font-size: var(--step-small);
+}
+
+.home-hint button {
+  white-space: nowrap;
+}
+
+/* Right side: the square. Absolutely placed over the page, behind the copy. */
+.menu-art {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.menu-art * {
+  pointer-events: none;
+}
+
+.menu-square {
+  position: absolute;
+  top: 50%;
+  right: -14vw;
+  width: min(70vw, 1040px);
+  aspect-ratio: 1;
+  transform: translateY(-50%) rotate(var(--angle));
+  background: var(--accent);
+}
+
+/* Flat field: the mark sits in the middle, counter-rotated to stand upright. */
+.menu-square .mark {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 22%;
+  height: 22%;
+  transform: translate(-50%, -50%) rotate(calc(-1 * var(--angle)));
+  transition: opacity 260ms var(--ease);
+}
+
+/* Live: the clip shows through the square (menu.ts masks the GL view to it). */
+.menu-square.is-live {
+  background: transparent;
+}
+
+.menu-square.is-live .mark {
+  opacity: 0;
+}
+
+/* The clip credit, bottom-right of the art, over the clip. */
+.menu-credit {
+  position: absolute;
+  right: var(--margin);
+  bottom: 24px;
+  max-width: calc(100% - 2 * var(--margin));
+}
+
+/* Index: the destinations as large text rows. */
+.home-index {
+  grid-column: 1;
+  grid-row: 3;
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px;
+  column-gap: 16px;
+  width: 100%;
+  max-width: 560px;
+  position: relative;
+  z-index: 1;
 }
 
-.menu-tools button {
+.home-row {
+  display: flex;
+  flex-direction: column;
+}
+
+button.home-row-btn {
+  position: relative;
   width: 100%;
+  min-height: 52px;
+  padding: 8px 12px 8px 30px;
+  background: transparent;
+  color: var(--ink);
+  font-size: var(--step-lead);
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  justify-content: flex-start;
+  text-align: left;
+}
+
+button.home-row-btn::before {
+  content: "";
+  position: absolute;
+  left: 12px;
+  top: 50%;
+  width: 0;
+  height: 0;
+  background: var(--ink);
+  transform: translateY(-50%);
+  transition: width 140ms var(--ease), height 140ms var(--ease);
+}
+
+button.home-row-btn:hover:not(:disabled),
+button.home-row-btn:focus-visible {
+  background: var(--surface);
+}
+
+button.home-row-btn:hover:not(:disabled)::before,
+button.home-row-btn:focus-visible::before {
+  width: 10px;
+  height: 10px;
+}
+
+/* On desktop the description shows in the preview line below the index instead. */
+.home-row-desc {
+  display: none;
+}
+
+.home-preview {
+  grid-column: 1;
+  grid-row: 4;
+  min-height: 1.5em;
+  color: var(--muted);
+  font-size: var(--step-small);
+  position: relative;
+  z-index: 1;
+}
+
+.home-foot {
+  grid-column: 1 / -1;
+  grid-row: 5;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  color: var(--muted);
+  font-size: var(--step-small);
+  position: relative;
+  z-index: 1;
+}
+
+.home-foot .credit,
+.home-foot .menu-makers,
+.home-links {
+  font-size: var(--step-small);
+  color: var(--muted);
+}
+
+.home-links a {
+  color: var(--ink);
+}
+
+/* Touch devices: no hover, so descriptions sit under their row. */
+@media (hover: none) {
+  .home-row-desc {
+    display: block;
+    padding: 0 12px 12px 30px;
+    color: var(--muted);
+    font-size: var(--step-small);
+  }
+
+  .home-preview {
+    display: none;
+  }
+}
+
+/* Phone: one column in flow. Name and Play first, the square below, then the index. */
+@media (max-width: 600px) {
+  .page.home {
+    display: flex;
+    flex-direction: column;
+    gap: 24px;
+    padding: calc(12px + env(safe-area-inset-top)) var(--margin) calc(32px + env(safe-area-inset-bottom));
+  }
+
+  .page.home > * {
+    flex-shrink: 0;
+  }
+
+  /* Phone order: wordmark, copy and Play first; utilities after; then the art and index. */
+  .home-copy {
+    order: 0;
+  }
+
+  .home-top {
+    order: 1;
+  }
+
+  .menu-art,
+  .home-index,
+  .home-preview,
+  .home-foot {
+    order: 2;
+  }
+
+  .home-title {
+    font-size: 3.75rem;
+  }
+
+  .home-form,
+  .home-name,
+  .home-hint {
+    max-width: none;
+  }
+
+  .home-form {
+    width: 100%;
+  }
+
+  .home-name {
+    width: 100%;
+  }
+
+  .home-actions {
+    flex-direction: column;
+    width: 100%;
+  }
+
+  .home-actions button {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .home-hint {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .home-hint button {
+    width: 100%;
+  }
+
+  .home-tools {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    width: 100%;
+  }
+
+  .home-tools .home-level {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 48px;
+  }
+
+  .menu-art {
+    position: relative;
+    inset: auto;
+    height: 84vw;
+    max-height: 420px;
+    overflow: hidden;
+  }
+
+  .menu-square {
+    top: 50%;
+    right: auto;
+    left: 50%;
+    width: 58vw;
+    transform: translate(-50%, -50%) rotate(var(--angle));
+  }
+
+  .menu-credit {
+    right: 0;
+    bottom: 0;
+  }
+
+  .home-index {
+    grid-template-columns: minmax(0, 1fr);
+    max-width: none;
+  }
+
+  button.home-row-btn {
+    min-height: 48px;
+    font-size: var(--step-body);
+    font-weight: 500;
+  }
+
+  .home-foot {
+    margin-top: 8px;
+  }
 }

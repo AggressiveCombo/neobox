@@ -32,6 +32,7 @@ import {
   ipIn,
   geoServer,
   regionServers,
+  rtcServer,
 } from "./lib.mjs";
 import { writeFileSync, mkdtempSync } from "node:fs";
 import os from "node:os";
@@ -186,12 +187,19 @@ async function library(s) {
   const map = maps[0];
   const name = uniqueName("lib");
   const { page } = user;
+  const openMap = async (p, mapName) => {
+    await p.locator("ul[aria-label=maps] li").filter({ hasText: mapName }).first().locator(".map-card").click();
+    const dlg = p.getByRole("dialog", { name: mapName, exact: true });
+    await dlg.waitFor();
+    return dlg;
+  };
   await navTo(page, "Library");
   await page.getByRole("tab", { name: "Mine", exact: true }).or(button(page, "Mine")).first().click();
+  await page.getByRole("button", { name: "Upload a map", exact: true }).click();
   await page.getByPlaceholder("Map name", { exact: true }).fill(name);
   await page.getByLabel("map code", { exact: true }).fill(map.code);
-  await page.getByLabel("visibility", { exact: true }).selectOption("public");
-  await button(page, "Upload").click();
+  await page.getByRole("radiogroup", { name: "Visibility", exact: true }).getByRole("radio", { name: "Public", exact: true }).click();
+  await page.getByRole("button", { name: "Upload map", exact: true }).click();
   await page.locator("ul[aria-label=maps] li").filter({ hasText: name }).waitFor();
   // Not in public Browse until an admin approves it. The owner sees their own pending map
   // there too, so look from another visitor's browser.
@@ -219,20 +227,27 @@ async function library(s) {
   await button(page, "Browse").or(page.getByRole("tab", { name: "Browse", exact: true })).first().click();
   const card = page.locator("ul[aria-label=maps] li").filter({ hasText: name });
   await card.first().waitFor();
-  check(await card.getByRole("button", { name: "Upvote", exact: true }).isDisabled(), "the author can vote on their own map");
-  await card.getByRole("button", { name: "Star", exact: true }).click();
-  await card.getByRole("button", { name: "Starred", exact: true }).waitFor();
+  const dlg = await openMap(page, name);
+  check(await dlg.getByRole("button", { name: "Upvote", exact: true }).isDisabled(), "the author can vote on their own map");
+  await dlg.getByRole("button", { name: "Star", exact: true }).click();
+  await dlg.getByRole("button", { name: "Starred", exact: true }).waitFor();
+  await page.keyboard.press("Escape");
+  await dlg.waitFor({ state: "detached" });
 
   // Another account upvotes; the vote is still shown after a reload.
   const voter = await signedIn(s, "voter");
-  const vcard = () => voter.page.locator("ul[aria-label=maps] li").filter({ hasText: name });
   await navTo(voter.page, "Library");
-  await vcard().getByRole("button", { name: "Upvote", exact: true }).click();
-  await vcard().locator('button[aria-label="Upvote"][aria-pressed="true"]').waitFor();
+  let vote = await openMap(voter.page, name);
+  await vote.getByRole("button", { name: "Upvote", exact: true }).click();
+  await vote.locator('button[aria-pressed="true"]', { hasText: "Upvote" }).waitFor();
+  await vote.getByText("1 vote ·", { exact: false }).waitFor();
+  await voter.page.keyboard.press("Escape");
+  await vote.waitFor({ state: "detached" });
   await voter.page.reload();
   await navTo(voter.page, "Library");
-  await vcard().locator('button[aria-label="Upvote"][aria-pressed="true"]').waitFor();
-  await vcard().getByText("1 vote ·", { exact: false }).waitFor();
+  vote = await openMap(voter.page, name);
+  await vote.locator('button[aria-pressed="true"]', { hasText: "Upvote" }).waitFor();
+  await vote.getByText("1 vote ·", { exact: false }).waitFor();
 
   // A room host picks the approved map from the room's Library picker.
   await back(page).click();
@@ -290,11 +305,13 @@ async function roomLobby(s) {
   await button(host.page, "Lock teams").click();
   await button(host.page, "Unlock teams").waitFor();
 
-  await playerRow(host.page, extraName).getByRole("button", { name: "Kick", exact: true }).click();
+  await playerRow(host.page, extraName).getByRole("button", { name: `Actions for ${extraName}`, exact: true }).click();
+  await host.page.getByRole("menuitem", { name: "Kick", exact: true }).click();
   await playerRow(host.page, extraName).waitFor({ state: "detached" });
   await extra.page.getByText(/kicked/i).first().waitFor();
 
-  await playerRow(host.page, guestName).getByRole("button", { name: "Ban", exact: true }).click();
+  await playerRow(host.page, guestName).getByRole("button", { name: `Actions for ${guestName}`, exact: true }).click();
+  await host.page.getByRole("menuitem", { name: "Ban", exact: true }).click();
   await host.page.locator("li.room-ban").filter({ hasText: guestName }).waitFor();
   await host.page.locator("li.room-ban").filter({ hasText: guestName }).getByRole("button", { name: "Unban", exact: true }).click();
   await host.page.locator("li.room-ban").filter({ hasText: guestName }).waitFor({ state: "detached" });
@@ -577,6 +594,9 @@ async function phone(s) {
   await page.locator(".offline-list .offline-choice").first().click();
   await button(page, "Start").click();
   await page.locator(".offline.playing").waitFor();
+  // The phone is portrait here: the turn-sideways gate shows; play on anyway.
+  const anyway = page.getByRole("button", { name: "Play in portrait anyway", exact: true });
+  if (await anyway.isVisible()) await anyway.click();
   check(await page.locator(".hud-touch-layer").isVisible(), "touch controls are not visible on the phone");
   await waitForPixels(h, "phone practice canvas");
   await button(page, "Leave").click();
@@ -590,6 +610,60 @@ async function phone(s) {
   await page.locator("h1.room-title").waitFor();
   await expectNoOverflow(page, "room");
   return "menu, practice touch layer, room: no overflow";
+}
+
+/** A landscape phone joins a match and drives the touch stick and Jump with real touch events. */
+async function phoneLandscapeTouch(s) {
+  const roomName = uniqueName("touch room");
+  const host = await s.open("host", { name: uniqueName("host") });
+  const code = await createRoom(host, s.base, roomName, { isPublic: true });
+  const guest = await s.open("guest", { phone: true, name: uniqueName("touch") });
+  const { page } = guest;
+  await page.setViewportSize({ width: 844, height: 390 });
+  await joinByInvite(guest, s.base, code, roomName);
+  await dismissPhoneSplash(page);
+  await roomTitle(page, roomName).waitFor();
+  await startMatch(host, [guest]);
+  await page.locator(".hud-touch-layer").waitFor({ state: "visible" });
+  await waitForPixels(guest, "landscape canvas");
+  // Frames freeze during the start countdown; wait it out before touching the controls.
+  await sleep(4000);
+  await ensureProbe(page);
+  const cdp = await page.context().newCDPSession(page);
+  const send = (type, points) => cdp.send("Input.dispatchTouchEvent", { type, touchPoints: points });
+  const centre = async (selector) => {
+    const box = await page.locator(selector).boundingBox();
+    check(box && box.width > 0, `${selector} has no size`);
+    return { x: box.x + box.width / 2, y: box.y + box.height / 2, r: box.width / 2, box };
+  };
+
+  const vp = page.viewportSize();
+  const stick = await centre(".hud-stick");
+  const actions = await centre(".hud-actions");
+  check(stick.box.x + stick.box.width <= actions.box.x, "touch stick and action buttons overlap");
+  check(
+    stick.box.y + stick.box.height <= vp.height && actions.box.y + actions.box.height <= vp.height,
+    "touch controls run off the landscape screen",
+  );
+
+  // Thumb on the stick, slid right: the player moves, so the canvas keeps changing.
+  const beforeStick = await probeChanges(page);
+  await send("touchStart", [{ x: stick.x, y: stick.y }]);
+  await send("touchMove", [{ x: stick.x + stick.r * 0.8, y: stick.y }]);
+  await sleep(1000);
+  await send("touchEnd", []);
+  const moved = (await probeChanges(page)) - beforeStick;
+  check(moved > 5, `guest frames barely changed while holding the touch stick right (${moved} changes)`);
+
+  // Jump is a touch button of its own: holding it makes the player leap.
+  const jump = await centre(".hud-touch-jump");
+  const beforeJump = await probeChanges(page);
+  await send("touchStart", [{ x: jump.x, y: jump.y }]);
+  await sleep(400);
+  await send("touchEnd", []);
+  const jumped = (await probeChanges(page)) - beforeJump;
+  check(jumped > 5, `guest frames barely changed while holding Jump (${jumped} changes)`);
+  return `stick right: ${moved} frame changes; Jump: ${jumped} frame changes`;
 }
 
 async function latency(s) {
@@ -619,14 +693,14 @@ async function editor(s) {
   check(box && box.width > 100 && box.height > 100, "editor canvas has no size");
   const cx = box.x + box.width / 2;
   const cy = box.y + box.height / 2;
-  await button(page, "Box (W)").click();
+  await button(page, "Box").click();
   await page.mouse.move(cx - 80, cy - 50);
   await page.mouse.down();
   await page.mouse.move(cx, cy, { steps: 8 });
   await page.mouse.move(cx + 80, cy + 50, { steps: 8 });
   await page.mouse.up();
   check(await button(page, "Undo").isEnabled(), "box drawn does not enable Undo");
-  await button(page, "Select (Q)").click();
+  await button(page, "Select").click();
   await page.mouse.click(cx, cy);
   check(await button(page, "Delete").first().isEnabled(), "selecting does not enable Delete");
   await button(page, "Delete").first().click();
@@ -637,15 +711,15 @@ async function editor(s) {
 
   // Inside a body (the original's double-click): a circle drawn there joins the box's body.
   // (the redo above deleted the first box again: draw a fresh one)
-  await button(page, "Box (W)").click();
+  await button(page, "Box").click();
   await page.mouse.move(cx - 80, cy - 50);
   await page.mouse.down();
   await page.mouse.move(cx + 80, cy + 50, { steps: 8 });
   await page.mouse.up();
-  await button(page, "Select (Q)").click();
+  await button(page, "Select").click();
   await page.mouse.dblclick(cx, cy);
   await page.locator(".editor-scope").waitFor({ state: "visible" });
-  await button(page, "Circle (E)").click();
+  await button(page, "Circle").click();
   await page.mouse.move(cx + 20, cy);
   await page.mouse.down();
   await page.mouse.move(cx + 40, cy, { steps: 6 });
@@ -701,8 +775,9 @@ async function editor(s) {
   await canvas.waitFor({ state: "visible" });
   const name = uniqueName("edsave");
   await button(page, "Menu").click();
-  await page.getByLabel("Map name", { exact: true }).fill(name);
-  await button(page, "Save to library").click();
+  await page.getByRole("button", { name: "Save to library", exact: true }).click();
+  await page.getByRole("dialog").getByLabel("Map name", { exact: true }).fill(name);
+  await page.getByRole("dialog").getByRole("button", { name: "Upload", exact: true }).click();
   await page.getByText("Saved to your library").waitFor();
   return `drew/undo/delete, built-in, test play, share code in Practice and room (${name})`;
 }
@@ -823,6 +898,42 @@ async function regionAccount(s) {
   return "room on the New York node; roster shows Level 1";
 }
 
+/** An invite link opened by a signed-in player with no saved guest name joins the room once the account loads. */
+async function inviteSignedIn(s) {
+  const host = await s.open("ihost", { name: uniqueName("ih") });
+  const roomName = uniqueName("inv");
+  const code = await createRoom(host, s.base, roomName, { isPublic: false });
+  const name = uniqueName("iacc");
+  const acct = await s.open("iacct");
+  await signUp(acct, s.base, name);
+  await joinByInvite(acct, s.base, code, roomName);
+  await playerRow(host.page, name).waitFor();
+  return "a signed-in player without a saved guest name joined from the invite link";
+}
+
+/** WebRTC: with UDP offered, both players' game data moves to the data channel and the match runs. */
+async function rtcMatch(s) {
+  const m = await matchWithGuest(s, { clipboard: false });
+  const end = Date.now() + 15_000;
+  let transports = [];
+  for (;;) {
+    transports = (await adminRoom(s.base, m.code)).players.map((p) => p.transport);
+    if (transports.length === 2 && transports.every((t) => t === "udp")) break;
+    if (Date.now() > end) throw new Error(`transports stayed ${JSON.stringify(transports)}, expected udp for both`);
+    await sleep(250);
+  }
+  await waitForPixels(m.guest, "guest canvas");
+  // the start countdown freezes frames; then holding Right moves the guest
+  await sleep(4000);
+  const before = await probeChanges(m.guest.page);
+  await m.guest.page.keyboard.down("ArrowRight");
+  await sleep(1000);
+  await m.guest.page.keyboard.up("ArrowRight");
+  const moved = (await probeChanges(m.guest.page)) - before;
+  check(moved > 5, `guest frames barely changed over WebRTC (${moved} changes)`);
+  return `both players on udp; ${moved} frame changes while holding Right`;
+}
+
 export const scenarios = [
   { name: "menu", run: menu },
   { name: "settings", run: settings },
@@ -843,10 +954,13 @@ export const scenarios = [
   { name: "replay", run: replay },
   { name: "practice", run: practice },
   { name: "phone", run: phone },
+  { name: "phone landscape touch", run: phoneLandscapeTouch },
   { name: "input latency", run: latency },
   { name: "map editor", run: editor },
   { name: "map editor phone", run: editorPhone },
   { name: "geo room list", run: geoRoomList, topology: geoServer },
   { name: "regions", run: regionRooms, topology: regionServers },
   { name: "regions account", run: regionAccount, topology: regionServers },
+  { name: "invite signed in", run: inviteSignedIn },
+  { name: "webrtc match", run: rtcMatch, topology: rtcServer },
 ];

@@ -1,9 +1,9 @@
 // Production build: bundles index.html (and everything it imports from src/)
-// into dist/ and copies public/ next to it. dev/ is never imported here.
+// into dist/ (or $NEOBOX_CLIENT_OUT) and copies public/ next to it. dev/ is never imported here.
 import { cp, rm } from "node:fs/promises";
 
 const root = import.meta.dir;
-const out = `${root}/dist`;
+const out = process.env.NEOBOX_CLIENT_OUT || `${root}/dist`;
 
 await rm(out, { recursive: true, force: true });
 
@@ -13,6 +13,8 @@ const result = await Bun.build({
   minify: true,
   sourcemap: "linked",
   target: "browser",
+  // Fonts are served from public/fonts (also used by the server's admin page), not inlined.
+  external: ["/fonts/*"],
 });
 
 if (!result.success) {

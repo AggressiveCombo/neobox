@@ -4,7 +4,7 @@
 
 import { h } from "../dom";
 import type { AppCtx, ScreenFactory } from "../../ctx";
-import type { BuiltinMap } from "../../api";
+import { sendReport, type BuiltinMap } from "../../api";
 import type { AppState, ChatLine } from "../../state";
 import {
   GAME_MODES,
@@ -19,8 +19,8 @@ import type { MapMeta, PlayerInfo, RoomState } from "../../protocol";
 import { SETTINGS, formatValue, normalizeInput, readOnlyKeys } from "../../settings";
 import type { SettingDef } from "../../settings";
 import { drawMapPreview } from "../../render/preview";
-import { cssHex } from "../../render/geometry";
 import { openLibraryPicker } from "../library-picker";
+import { avatar, field, openModal, seg, uid, type SegOption } from "../kit";
 import {
   acceptFriend,
   errorText,
@@ -144,49 +144,15 @@ function recordsTable(rows: MapRecord[]): HTMLElement {
 
 /** The Fastest Times window for a library map. Close, Escape or the backdrop dismisses it. */
 function showFastestTimes(map: MapMeta): void {
-  const status = h("p", { class: "status", role: "status", "aria-live": "polite" }, "Fetching...");
+  const status = h("p", { class: "room-muted", role: "status", "aria-live": "polite" }, "Fetching...");
   const body = h("div", { class: "records-body" });
-  const closeBtn = h("button", { type: "button", onclick: () => dismiss() }, "Close");
-  const sheet = h(
-    "section",
-    { class: "picker-sheet records-sheet" },
-    h(
-      "header",
-      { class: "picker-head" },
-      h("div", null, h("h2", null, "Fastest Times"), h("p", { class: "row-sub" }, `${map.name} by ${map.author}`)),
-      closeBtn,
-    ),
-    status,
-    body,
-  );
-  const overlay: HTMLDivElement = h(
-    "div",
-    {
-      class: "picker-overlay",
-      role: "dialog",
-      "aria-modal": "true",
-      "aria-label": "Fastest Times",
-      onclick: (e: Event) => {
-        if (e.target === overlay) dismiss();
-      },
-    },
-    sheet,
-  );
-
-  function dismiss(): void {
-    window.removeEventListener("keydown", onKey);
-    overlay.remove();
-  }
-
-  function onKey(e: KeyboardEvent): void {
-    if (e.key === "Escape") dismiss();
-  }
-
-  window.addEventListener("keydown", onKey);
-  document.body.append(overlay);
+  const { dialog } = openModal({
+    title: "Fastest Times",
+    body: [h("p", { class: "room-muted" }, `${map.name} by ${map.author}`), status, body],
+  });
   listRecords(map.id).then(
     (rows) => {
-      if (!overlay.isConnected) return;
+      if (!dialog.isConnected) return;
       if (rows.length === 0) {
         status.textContent = "No Records";
         return;
@@ -195,7 +161,7 @@ function showFastestTimes(map: MapMeta): void {
       body.replaceChildren(recordsTable(rows));
     },
     (err: unknown) => {
-      if (overlay.isConnected) status.textContent = errorText(err);
+      if (dialog.isConnected) status.textContent = errorText(err);
     },
   );
 }
@@ -215,7 +181,7 @@ function chatLine(line: ChatLine, myId: number | null, text: string, onPlay: ((v
           "div",
           { class: "room-chat-suggest" },
           h("span", null, `suggests ${suggest.title}`),
-          onPlay ? h("button", { type: "button", class: "room-btn room-btn-small", onclick: () => onPlay(suggest.video) }, "Play on jukebox") : null,
+          onPlay ? h("button", { type: "button", class: "room-btn quiet", onclick: () => onPlay(suggest.video) }, "Play on jukebox") : null,
         )
       : null,
   );
@@ -254,6 +220,8 @@ export const roomScreen: ScreenFactory = (ctx: AppCtx) => {
   /** Friend relations with the signed-in viewer, by lowercase name; the roster shows them. */
   let relations = new Map<string, FriendState>();
   let relationsSeq = 0;
+  /** The roster player whose action menu is open, if any. */
+  let menuFor: number | null = null;
 
   /** Chat messages sent from this screen, oldest first; `historyAt` is -1 when not recalling. */
   const sentHistory: string[] = [];
@@ -332,44 +300,316 @@ export const roomScreen: ScreenFactory = (ctx: AppCtx) => {
     void run().then(() => ctx.toast(done), toastError).then(loadFriends);
   }
 
-  /** Friend controls for a signed-in player on the roster, shaped by the relation with the viewer. */
-  function friendControls(name: string): Node[] {
+  /** Friend chip on a roster row: a pending request to the viewer, or the friend badge. */
+  function friendChip(name: string): HTMLElement | null {
+    const rel = relations.get(name.toLowerCase());
+    if (rel === "incoming") {
+      return h("span", { class: "chip room-friend-request", title: "sent you a friend request", "aria-label": `${name} sent you a friend request` }, "Request");
+    }
+    return rel === "friend" ? h("span", { class: "chip", title: "friend" }, "Friend") : null;
+  }
+
+  /** Friend actions for a roster row's menu, shaped by the relation with the viewer. */
+  function friendMenuItems(name: string): HTMLElement[] {
     const rel = relations.get(name.toLowerCase());
     if (rel === undefined) {
-      return [
-        h(
-          "button",
-          { type: "button", class: "room-btn room-btn-small", onclick: () => friendAction(() => requestFriend(name), `Friend request sent to ${name}.`) },
-          "Add friend",
-        ),
-      ];
+      return [menuItem("Add friend", () => friendAction(() => requestFriend(name), `Friend request sent to ${name}.`))];
     }
     if (rel === "incoming") {
       return [
-        h("span", { class: "room-friend-request", title: "sent you a friend request", "aria-label": `${name} sent you a friend request` }, "!"),
-        h(
-          "button",
-          { type: "button", class: "room-btn room-btn-small", onclick: () => friendAction(() => acceptFriend(name), `You and ${name} are now friends.`) },
-          "Accept",
-        ),
-        h(
-          "button",
-          { type: "button", class: "room-btn room-btn-small", onclick: () => friendAction(() => removeFriend(name), `Declined ${name}'s request.`) },
-          "Decline",
-        ),
+        menuItem("Accept", () => friendAction(() => acceptFriend(name), `You and ${name} are now friends.`)),
+        menuItem("Decline", () => friendAction(() => removeFriend(name), `Declined ${name}'s request.`)),
       ];
     }
     if (rel === "friend") {
-      return [
-        h("span", { class: "room-badge is-friend", title: "friend" }, "Friend"),
-        h(
-          "button",
-          { type: "button", class: "room-btn room-btn-small", onclick: () => friendAction(() => removeFriend(name), `Removed ${name} from friends.`) },
-          "Remove",
-        ),
-      ];
+      return [menuItem("Remove friend", () => friendAction(() => removeFriend(name), `Removed ${name} from friends.`))];
     }
-    return [h("button", { type: "button", class: "room-btn room-btn-small", disabled: true }, "Request sent")];
+    return [menuItem("Request sent", null)];
+  }
+
+  /** Report a roster player: a reason and optional details, filed with this room's code. */
+  function openPlayerReport(p: PlayerInfo): void {
+    const room = st.room;
+    if (room === null) return;
+    type Reason = "Harassment" | "Offensive name" | "Cheating" | "Other";
+    const reasons: SegOption<Reason>[] = (["Harassment", "Offensive name", "Cheating", "Other"] as const).map((r) => ({ value: r, label: r }));
+    let reason: Reason = "Harassment";
+    let modal: { close(): void } | undefined;
+    let sending = false;
+    const formId = uid("report");
+    const details = h("textarea", { rows: 3, maxlength: 300, autocomplete: "off", spellcheck: "false" });
+    const formError = h("p", { class: "field-error", role: "alert" });
+    const send = h("button", { type: "submit", class: "primary", form: formId }, "Send report");
+    const cancel = h("button", { type: "button", onclick: () => modal?.close() }, "Cancel");
+    const form = h(
+      "form",
+      {
+        id: formId,
+        class: "modal-form",
+        onsubmit: async (e: Event) => {
+          e.preventDefault();
+          if (sending) return;
+          sending = true;
+          send.disabled = true;
+          formError.textContent = "";
+          const extra = details.value.trim();
+          try {
+            await sendReport({ kind: "player", room: room.code, player: p.id, reason: extra === "" ? reason : `${reason}: ${extra}` });
+            modal?.close();
+            ctx.toast(`Thanks. An admin will look at ${p.name}.`);
+          } catch (err: unknown) {
+            formError.textContent = errorText(err);
+          } finally {
+            sending = false;
+            send.disabled = false;
+          }
+        },
+      },
+      h("p", { class: "field-hint" }, `Tell an admin what ${p.name} did.`),
+      seg("Reason", reasons, reason, (v) => {
+        reason = v;
+      }).el,
+      field("Details (optional)", details),
+      formError,
+    );
+    modal = openModal({ title: `Report ${p.name}`, body: [form], actions: [cancel, send] });
+  }
+
+  /** Opens the roster action menu for a player (null closes it); `focusFirst` moves focus into it. */
+  function setMenu(id: number | null, focusFirst = false): void {
+    menuFor = id;
+    refreshPlayers();
+    if (focusFirst) playersBody.querySelector<HTMLElement>(".room-menu-item:not(:disabled)")?.focus();
+  }
+
+  const triggerOf = (id: number): HTMLElement | null =>
+    playersBody.querySelector<HTMLElement>(`.room-player-tools[data-player="${id}"] .room-more`);
+
+  /** Outside presses close the roster menu; presses on its own trigger or menu do not. */
+  function onMenuOutside(e: Event): void {
+    const target = e.target;
+    if (menuFor === null || !(target instanceof Element)) return;
+    if (target.closest(`.room-player-tools[data-player="${menuFor}"]`) !== null) return;
+    setMenu(null);
+  }
+
+  /** Escape closes the roster menu and returns focus to its trigger; arrows move between its items. */
+  function onMenuKey(e: KeyboardEvent): void {
+    if (menuFor === null) return;
+    if (e.key === "Escape") {
+      const id = menuFor;
+      setMenu(null);
+      triggerOf(id)?.focus();
+    } else if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      const items = Array.from(playersBody.querySelectorAll<HTMLElement>(".room-menu-item:not(:disabled)"));
+      if (items.length === 0) return;
+      e.preventDefault();
+      const at = items.indexOf(document.activeElement as HTMLElement);
+      const step = e.key === "ArrowDown" ? 1 : -1;
+      items[at === -1 ? 0 : (at + step + items.length) % items.length]?.focus();
+    }
+  }
+
+  /** One roster action-menu item. Choosing it closes the menu, then runs `run`; a null `run` leaves it disabled. */
+  function menuItem(label: string, run: (() => void) | null, opts: { role?: string; checked?: boolean; danger?: boolean } = {}): HTMLElement {
+    return h(
+      "button",
+      {
+        type: "button",
+        class: opts.danger ? "room-menu-item is-danger" : "room-menu-item",
+        role: opts.role ?? "menuitem",
+        "aria-checked": opts.checked === undefined ? undefined : String(opts.checked),
+        disabled: run === null,
+        onclick: () => {
+          setMenu(null);
+          run?.();
+        },
+      },
+      label,
+    );
+  }
+
+  /** Actions for one roster row: host controls (make host, team moves, kick, ban), friend actions, then Report. */
+  function rowMenuItems(p: PlayerInfo, host: boolean, teams: boolean): HTMLElement[] {
+    const items: HTMLElement[] = [];
+    if (host) {
+      items.push(menuItem("Make host", () => giveHost(p.id)));
+      for (const a of teams ? TEAM_ACTIONS_TEAMS : TEAM_ACTIONS_FFA) {
+        items.push(menuItem(a.label, () => moveTo(p.id, a.team), { role: "menuitemradio", checked: p.team === a.team }));
+      }
+    }
+    if (st.account !== null && p.account) items.push(...friendMenuItems(p.name));
+    if (host) {
+      items.push(menuItem("Kick", () => kick(p.id, false)));
+      items.push(menuItem("Ban", () => kick(p.id, true), { danger: true }));
+    }
+    items.push(menuItem("Report", () => openPlayerReport(p)));
+    return items;
+  }
+
+  /** One roster row: avatar, name with state chips, ping and status, and the action menu for other players. */
+  function playerRow(p: PlayerInfo, host: boolean, teams: boolean, typing: boolean): HTMLElement {
+    const isMe = p.id === st.myId;
+    const ping = p.ping_ms >= 0 ? `${p.ping_ms} ms` : "-";
+    const open = menuFor === p.id;
+    return h(
+      "li",
+      { class: isMe ? "room-player is-me" : "room-player" },
+      avatar(p.name, p.color),
+      h(
+        "div",
+        { class: "room-player-body" },
+        h(
+          "div",
+          { class: "room-player-line" },
+          h("span", { class: "room-player-name" }, p.name),
+          isMe ? h("span", { class: "chip" }, "You") : null,
+          p.host ? h("span", { class: "chip ink", title: "room host" }, "Host") : null,
+          p.account ? h("span", { class: "chip", title: "signed-in account" }, "Verified") : null,
+          h("span", { class: "chip room-level", title: p.level > 0 ? "account level" : "playing as a guest" }, p.level > 0 ? `Level ${p.level}` : "Guest"),
+          st.account !== null && p.account && !isMe ? friendChip(p.name) : null,
+        ),
+        h(
+          "div",
+          { class: "room-player-meta" },
+          h("span", { class: "room-ping" }, ping),
+          typing ? h("span", { class: "room-typing", "aria-label": `${p.name} is typing` }, "typing…") : null,
+          p.editing ? h("span", { class: "room-editing", title: "building a map" }, "editing") : null,
+          p.connected ? null : h("span", { class: "room-offline", title: "reconnecting" }, "Reconnecting"),
+        ),
+      ),
+      isMe
+        ? null
+        : h(
+            "div",
+            { class: "room-player-tools", "data-player": String(p.id) },
+            h(
+              "button",
+              {
+                type: "button",
+                class: "room-more",
+                "aria-label": `Actions for ${p.name}`,
+                "aria-haspopup": "menu",
+                "aria-expanded": open ? "true" : "false",
+                onclick: () => (open ? setMenu(null) : setMenu(p.id, true)),
+              },
+              "…",
+            ),
+            open ? h("div", { class: "room-menu", role: "menu", "aria-label": `Actions for ${p.name}` }, rowMenuItems(p, host, teams)) : null,
+          ),
+    );
+  }
+
+  /** Rebuilds the roster when anything it shows has changed. */
+  function refreshPlayers(): void {
+    const room = st.room;
+    if (room === null) return;
+    if (menuFor !== null && !room.players.some((p) => p.id === menuFor)) menuFor = null;
+    const mode = roomMode(room);
+    renderPlayers(
+      JSON.stringify([
+        room.players,
+        st.myId,
+        mode,
+        isHost(),
+        room.in_match,
+        room.starting,
+        st.account !== null,
+        activeTypers(),
+        Array.from(relations),
+        menuFor,
+      ]),
+    );
+  }
+
+  function buildPlayers(): Node[] {
+    const room = st.room;
+    if (room === null) return [];
+    const mode = roomMode(room);
+    const teams = mode !== null && isTeamMode(mode);
+    const host = isHost();
+    const typers = new Set(activeTypers());
+    const columns: { title: string; bucket: number; empty: string }[] = teams
+      ? [
+          { title: "Red", bucket: TEAM_RED, empty: "No one on Red" },
+          { title: "Blue", bucket: TEAM_BLUE, empty: "No one on Blue" },
+          { title: "Spectators", bucket: TEAM_SPECTATOR, empty: "No spectators" },
+        ]
+      : [
+          { title: "Players", bucket: TEAM_FFA, empty: "No players" },
+          { title: "Spectators", bucket: TEAM_SPECTATOR, empty: "No spectators" },
+        ];
+    const me = room.players.find((p) => p.id === st.myId);
+    const teamActions = teams ? TEAM_ACTIONS_TEAMS : TEAM_ACTIONS_FFA;
+    return [
+      ...columns.map((col) => {
+        const members = room.players.filter((p) => columnOf(p, teams) === col.bucket);
+        return h(
+          "section",
+          { class: "room-roster-group" },
+          h("h3", { class: "room-subtitle" }, `${col.title} (${members.length})`),
+          members.length === 0
+            ? h("p", { class: "room-muted" }, col.empty)
+            : h("ul", { class: "room-roster-list" }, members.map((p) => playerRow(p, host, teams, typers.has(p.id)))),
+        );
+      }),
+      h(
+        "div",
+        { class: "room-my-team" },
+        seg(
+          "Your team",
+          teamActions.map((a) => ({ value: String(a.team), label: a.label })),
+          String(me?.team ?? ""),
+          (v) => ctx.send({ t: "set_team", team: Number(v) }),
+        ).el,
+        h("button", { type: "button", class: "room-btn", onclick: openAppearance }, "Appearance"),
+      ),
+    ];
+  }
+
+  function buildMode(): Node[] {
+    const room = st.room;
+    if (room === null) return [];
+    const mode = roomMode(room);
+    if (!isHost()) return [h("p", { class: "room-mode-name" }, modeName(mode))];
+    return [
+      seg(
+        "Game mode",
+        GAME_MODES.map((m) => ({ value: String(m.id), label: m.name })),
+        String(mode),
+        (v) => setMode(Number(v)),
+      ).el,
+    ];
+  }
+
+  /** Host-only room controls: team lock, end the running match, and the ban list. */
+  function buildManage(): Node[] {
+    const room = st.room;
+    if (room === null || !isHost()) return [];
+    return [
+      h(
+        "div",
+        { class: "actions" },
+        h("button", { type: "button", class: "room-btn", onclick: () => setLock(!room.locked) }, room.locked ? "Unlock teams" : "Lock teams"),
+        h("button", { type: "button", class: "room-btn danger", disabled: !room.in_match, onclick: endMatch }, "End match"),
+      ),
+      h("p", { class: "room-muted" }, room.locked ? "Players cannot change team." : "Players can change team."),
+      h("h3", { class: "room-subtitle" }, "Bans"),
+      room.bans.length === 0
+        ? h("p", { class: "room-muted" }, "No one is banned.")
+        : h(
+            "ul",
+            { class: "room-bans" },
+            room.bans.map((name) =>
+              h(
+                "li",
+                { class: "room-ban" },
+                h("span", { class: "room-player-name" }, name),
+                h("button", { type: "button", class: "room-btn", onclick: () => unban(name) }, "Unban"),
+              ),
+            ),
+          ),
+    ];
   }
 
   /** Opens the appearance colour picker; the saved colour is kept locally and sent to the room. */
@@ -506,7 +746,7 @@ export const roomScreen: ScreenFactory = (ctx: AppCtx) => {
           "button",
           {
             type: "button",
-            class: "room-btn",
+            class: "room-menu-item",
             role: "menuitem",
             onclick: () => {
               ctx.send({ t: "chat", text });
@@ -661,6 +901,25 @@ export const roomScreen: ScreenFactory = (ctx: AppCtx) => {
   const header = h("header", { class: "room-header" });
   const notice = h("p", { class: "room-notice", role: "status" });
   const startNotice = h("div", { class: "room-starting", role: "status" });
+  const startButton = h("button", { type: "button", class: "room-btn primary", onclick: () => void start() }, "Start");
+  const dockStatus = h("p", { class: "room-dock-status", role: "status" });
+  const dock = h("footer", { class: "room-dock", "aria-label": "Match controls" }, dockStatus, h("div", { class: "room-dock-actions" }, startButton));
+
+  // Phone: one section at a time. Desktop shows every section and ignores the tab.
+  const tabNames = { players: "Players", match: "Match", chat: "Chat" } as const;
+  type TabId = keyof typeof tabNames;
+  const tabButtons = (Object.keys(tabNames) as TabId[]).map((id) =>
+    h(
+      "button",
+      { type: "button", role: "tab", class: "tab", "data-tab": id, "aria-selected": id === "players" ? "true" : "false", onclick: () => selectTab(id) },
+      tabNames[id],
+    ),
+  );
+  const tabBar = h("nav", { class: "tabs room-tabs", role: "tablist", "aria-label": "Room sections" }, tabButtons);
+  function selectTab(id: TabId): void {
+    root.dataset.tab = id;
+    for (const b of tabButtons) b.setAttribute("aria-selected", String(b.dataset.tab === id));
+  }
 
   const playersBody = h("div", { class: "room-players-body" });
   const renderPlayers = keyed(playersBody, buildPlayers);
@@ -702,7 +961,7 @@ export const roomScreen: ScreenFactory = (ctx: AppCtx) => {
     textarea,
     h(
       "div",
-      { class: "room-actions" },
+      { class: "actions" },
       h(
         "button",
         {
@@ -734,6 +993,7 @@ export const roomScreen: ScreenFactory = (ctx: AppCtx) => {
   const managePanel = h("section", { class: "room-panel room-manage" }, h("h2", { class: "room-panel-title" }, "Manage"), manageBody);
 
   const settingsBody = h("div", { class: "room-settings-body" });
+  let settingsOpen = false;
   const renderSettings = keyed(settingsBody, buildSettings);
   const settingsPanel = h("section", { class: "room-panel room-settings-panel" }, h("h2", { class: "room-panel-title" }, "Settings"), settingsBody);
 
@@ -765,10 +1025,11 @@ export const roomScreen: ScreenFactory = (ctx: AppCtx) => {
   const main = h(
     "div",
     { class: "room-main" },
-    h("div", { class: "room-col" }, playersPanel, modePanel, mapPanel),
-    h("div", { class: "room-col" }, chatPanel, managePanel, settingsPanel),
+    h("div", { class: "room-col room-col-roster" }, playersPanel),
+    h("div", { class: "room-col room-col-match" }, modePanel, mapPanel, managePanel, settingsPanel),
+    h("div", { class: "room-col room-col-chat" }, chatPanel),
   );
-  const root = h("div", { class: "room-screen" }, header, notice, startNotice, main);
+  const root = h("div", { class: "room-screen", "data-tab": "players" }, header, notice, startNotice, tabBar, main, dock);
 
   // Section builders. Each reads `st`, which is set before any render runs.
 
@@ -780,12 +1041,12 @@ export const roomScreen: ScreenFactory = (ctx: AppCtx) => {
         h("h1", { class: "room-title" }, room.name),
         h(
           "div",
-          { class: "room-heading-actions" },
+          { class: "actions" },
           // the lobby opened from the match menu: the match keeps running behind it
           st.inMatch
-            ? h("button", { type: "button", class: "room-btn room-btn-primary", onclick: () => ctx.store.set({ screen: "match" }) }, "Back to game")
+            ? h("button", { type: "button", class: "room-btn", onclick: () => ctx.store.set({ screen: "match" }) }, "Back to game")
             : null,
-          h("button", { type: "button", class: "room-btn", onclick: () => void shareInvite() }, "Invite"),
+          h("button", { type: "button", class: "room-btn", onclick: () => void shareInvite() }, "Copy invite link"),
           st.replayReady
             ? h(
                 "button",
@@ -808,52 +1069,6 @@ export const roomScreen: ScreenFactory = (ctx: AppCtx) => {
     ];
   }
 
-  /** Team picker for one player (host only): the team columns this mode uses. */
-  function teamSelect(p: PlayerInfo, teams: boolean): HTMLSelectElement {
-    const current = columnOf(p, teams);
-    const actions = teams ? TEAM_ACTIONS_TEAMS : TEAM_ACTIONS_FFA;
-    const select: HTMLSelectElement = h(
-      "select",
-      {
-        class: "room-team-select",
-        "aria-label": `team for ${p.name}`,
-        onchange: () => moveTo(p.id, Number(select.value)),
-      },
-      actions.map((a) => h("option", { value: String(a.team), selected: a.team === current }, a.label)),
-    );
-    return select;
-  }
-
-  function playerRow(p: PlayerInfo, host: boolean, teams: boolean, typing: boolean): HTMLElement {
-    const isMe = p.id === st.myId;
-    const ping = p.ping_ms >= 0 ? `${p.ping_ms} ms` : "-";
-    return h(
-      "li",
-      { class: isMe ? "room-player is-me" : "room-player" },
-      h("span", { class: "room-swatch", style: `background:${cssHex(p.color)}`, "aria-hidden": "true" }),
-      h("span", { class: "room-player-name" }, p.name),
-      isMe ? h("span", { class: "room-you" }, "you") : null,
-      p.host ? h("span", { class: "room-host", title: "room host" }, "host") : null,
-      p.account ? h("span", { class: "room-badge is-verified", title: "signed-in account" }, "verified") : null,
-      h("span", { class: "room-level", title: p.level > 0 ? "account level" : "playing as a guest" }, p.level > 0 ? `Level ${p.level}` : "Guest"),
-      typing ? h("span", { class: "room-typing", title: "typing", "aria-label": `${p.name} is typing` }, "...") : null,
-      p.editing ? h("span", { class: "room-editing", title: "building a map" }, "editing") : null,
-      p.connected ? null : h("span", { class: "room-badge is-offline", title: "reconnecting" }, "offline"),
-      h("span", { class: "room-ping" }, ping),
-      ...(st.account !== null && p.account && !isMe ? friendControls(p.name) : []),
-      host && !isMe
-        ? h(
-            "span",
-            { class: "room-player-actions" },
-            teamSelect(p, teams),
-            h("button", { type: "button", class: "room-btn room-btn-small", onclick: () => giveHost(p.id) }, "Make host"),
-            h("button", { type: "button", class: "room-btn room-btn-small", onclick: () => kick(p.id, false) }, "Kick"),
-            h("button", { type: "button", class: "room-btn room-btn-small room-btn-danger", onclick: () => kick(p.id, true) }, "Ban"),
-          )
-        : null,
-    );
-  }
-
   /** Ids of players whose typing signal is recent, sorted. Part of the roster key so the roster refreshes when it changes. */
   function activeTypers(): number[] {
     const now = performance.now();
@@ -861,160 +1076,6 @@ export const roomScreen: ScreenFactory = (ctx: AppCtx) => {
       .filter(([, at]) => now - at < TYPING_SHOW_MS)
       .map(([id]) => Number(id))
       .sort((a, b) => a - b);
-  }
-
-  /** Rebuilds the roster when anything it shows has changed. */
-  function refreshPlayers(): void {
-    const room = st.room;
-    if (room === null) return;
-    const mode = roomMode(room);
-    renderPlayers(
-      JSON.stringify([room.players, st.myId, mode, isHost(), room.in_match, room.starting, st.account !== null, activeTypers(), Array.from(relations)]),
-    );
-  }
-
-  function buildPlayers(): Node[] {
-    const room = st.room;
-    if (room === null) return [];
-    const mode = roomMode(room);
-    const teams = mode !== null && isTeamMode(mode);
-    const host = isHost();
-    const typers = new Set(activeTypers());
-    const columns: { title: string; bucket: number }[] = teams
-      ? [
-          { title: "Red", bucket: TEAM_RED },
-          { title: "Blue", bucket: TEAM_BLUE },
-          { title: "Spectators", bucket: TEAM_SPECTATOR },
-        ]
-      : [
-          { title: "Players", bucket: TEAM_FFA },
-          { title: "Spectators", bucket: TEAM_SPECTATOR },
-        ];
-    const me = room.players.find((p) => p.id === st.myId);
-    const actions = teams ? TEAM_ACTIONS_TEAMS : TEAM_ACTIONS_FFA;
-    return [
-      h(
-        "div",
-        { class: "room-columns" },
-        columns.map((col) => {
-          const members = room.players.filter((p) => columnOf(p, teams) === col.bucket);
-          return h(
-            "div",
-            { class: "room-column" },
-            h("h3", { class: "room-column-title" }, `${col.title} (${members.length})`),
-            members.length === 0
-              ? h("p", { class: "room-muted" }, "none")
-              : h("ul", { class: "room-list" }, members.map((p) => playerRow(p, host, teams, typers.has(p.id)))),
-          );
-        }),
-      ),
-      h(
-        "div",
-        { class: "room-actions" },
-        h("span", { class: "room-label" }, "Your team"),
-        actions.map((a) => {
-          const current = me?.team === a.team;
-          return h(
-            "button",
-            {
-              type: "button",
-              class: current ? "room-btn is-current" : "room-btn",
-              "aria-pressed": current ? "true" : "false",
-              onclick: () => ctx.send({ t: "set_team", team: a.team }),
-            },
-            a.label,
-          );
-        }),
-        h("button", { type: "button", class: "room-btn", onclick: openAppearance }, "Appearance"),
-      ),
-      ...(host
-        ? [
-            h(
-              "div",
-              { class: "room-actions" },
-              h(
-                "button",
-                {
-                  type: "button",
-                  class: "room-btn room-btn-primary",
-                  disabled: room.in_match || room.starting,
-                  onclick: start,
-                },
-                "Start",
-              ),
-            ),
-          ]
-        : []),
-    ];
-  }
-
-  function buildMode(): Node[] {
-    const room = st.room;
-    if (room === null) return [];
-    const mode = roomMode(room);
-    if (!isHost()) return [h("p", { class: "room-mode-name" }, modeName(mode))];
-    return [
-      h(
-        "div",
-        { class: "room-actions room-mode-buttons" },
-        GAME_MODES.map((m) => {
-          const current = m.id === mode;
-          return h(
-            "button",
-            {
-              type: "button",
-              class: current ? "room-btn is-current" : "room-btn",
-              "aria-pressed": current ? "true" : "false",
-              onclick: () => setMode(m.id),
-            },
-            m.name,
-          );
-        }),
-      ),
-    ];
-  }
-
-  /** Host-only room controls: team lock, end the running match, and the ban list. */
-  function buildManage(): Node[] {
-    const room = st.room;
-    if (room === null || !isHost()) return [];
-    return [
-      h(
-        "div",
-        { class: "room-actions" },
-        h(
-          "button",
-          {
-            type: "button",
-            class: room.locked ? "room-btn is-current" : "room-btn",
-            "aria-pressed": room.locked ? "true" : "false",
-            onclick: () => setLock(!room.locked),
-          },
-          room.locked ? "Unlock teams" : "Lock teams",
-        ),
-        h(
-          "button",
-          { type: "button", class: "room-btn room-btn-danger", disabled: !room.in_match, onclick: endMatch },
-          "End match",
-        ),
-      ),
-      h("p", { class: "room-muted" }, room.locked ? "Players cannot change team." : "Players can change team."),
-      h("h3", { class: "room-subtitle" }, "Bans"),
-      room.bans.length === 0
-        ? h("p", { class: "room-muted" }, "No bans.")
-        : h(
-            "ul",
-            { class: "room-list room-bans" },
-            room.bans.map((name) =>
-              h(
-                "li",
-                { class: "room-ban" },
-                h("span", { class: "room-player-name" }, name),
-                h("button", { type: "button", class: "room-btn room-btn-small", onclick: () => unban(name) }, "Unban"),
-              ),
-            ),
-          ),
-    ];
   }
 
   function settingRow(def: SettingDef, value: unknown, host: boolean): HTMLElement {
@@ -1083,12 +1144,30 @@ export const roomScreen: ScreenFactory = (ctx: AppCtx) => {
       nodes.push(
         h(
           "div",
-          { class: "room-actions" },
-          h("button", { type: "button", class: "room-btn", onclick: resetSettings }, "Reset settings"),
+          { class: "actions" },
+          h("button", { type: "button", onclick: resetSettings }, "Reset settings"),
         ),
       );
     }
-    return nodes;
+    // The match limits are read at a glance; the full list (editable for the host) sits behind the disclosure.
+    const limits = SETTINGS.filter((d) => d.group === "Match");
+    return [
+      h(
+        "dl",
+        { class: "room-facts room-limits" },
+        limits.map((def) => fact(def.label, show(room.settings[def.field]))),
+      ),
+      h(
+        "details",
+        {
+          class: "room-all-settings",
+          open: settingsOpen,
+          ontoggle: (e: Event) => (settingsOpen = (e.currentTarget as HTMLDetailsElement).open),
+        },
+        h("summary", null, "All settings"),
+        nodes,
+      ),
+    ];
   }
 
   function renderRoom(): void {
@@ -1096,6 +1175,7 @@ export const roomScreen: ScreenFactory = (ctx: AppCtx) => {
     const inNotice = room !== null && room.in_match && !st.inMatch;
     header.hidden = room === null;
     main.hidden = room === null;
+    dock.hidden = room === null || !isHost();
     notice.hidden = !inNotice;
     notice.textContent = inNotice ? "match in progress" : "";
     startNotice.hidden = room === null || !room.starting;
@@ -1110,6 +1190,8 @@ export const roomScreen: ScreenFactory = (ctx: AppCtx) => {
       h("span", null, "Match starting"),
       ...(host ? [h("button", { type: "button", class: "room-btn room-btn-small", onclick: abortStart }, "Abort start")] : []),
     );
+    startButton.disabled = room.in_match || room.starting;
+    dockStatus.textContent = room.starting ? "Match starting" : room.in_match ? "Match in progress" : "Ready when you are";
     refreshPlayers();
     renderMode(`${host}|${mode}`);
     mapName.textContent = room.map_name;
@@ -1164,6 +1246,9 @@ export const roomScreen: ScreenFactory = (ctx: AppCtx) => {
   // Typing signals expire on their own: refresh the roster when one does.
   const typingTimer = setInterval(refreshPlayers, TYPING_TICK_MS);
   const unsubPrefs = prefs.subscribe(renderChat);
+  // The roster's action menu closes on an outside press or Escape.
+  window.addEventListener("pointerdown", onMenuOutside, true);
+  window.addEventListener("keydown", onMenuKey);
 
   return {
     el: root,
@@ -1188,6 +1273,8 @@ export const roomScreen: ScreenFactory = (ctx: AppCtx) => {
       clearInterval(typingTimer);
       unsubPrefs();
       closeVoteMenu();
+      window.removeEventListener("pointerdown", onMenuOutside, true);
+      window.removeEventListener("keydown", onMenuKey);
       closeLibrary?.();
       closeLibrary = null;
       closePicker?.();

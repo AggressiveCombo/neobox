@@ -1,3 +1,6 @@
+/* Training hall lesson card (training.ts). A solid ground-colour card over the
+   game, below the top bar: progress as squares, the lesson, Next. */
+
 .training-lesson {
   position: absolute;
   left: 50%;
@@ -5,20 +8,65 @@
   top: 9.5rem;
   transform: translateX(-50%);
   display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: min(calc(100% - 16px), 40rem);
+  padding: 16px 18px;
+  background: var(--ground);
+  color: var(--ink);
+}
+
+@media (max-height: 500px) {
+  .training-lesson {
+    top: 5rem;
+  }
+}
+
+.training-progress {
+  display: flex;
   align-items: center;
-  gap: 0.75rem;
-  max-width: min(90vw, 40rem);
-  padding: 0.6rem 1rem;
-  border-radius: 0.5rem;
-  background: rgba(0, 0, 0, 0.6);
-  color: #fff;
+  gap: 10px;
+}
+
+.training-count {
+  color: var(--muted);
+  font-size: var(--step-small);
+  font-variant-numeric: tabular-nums;
+}
+
+.training-steps {
+  display: flex;
+  gap: 4px;
+}
+
+.training-step {
+  width: 10px;
+  height: 10px;
+  background: var(--surface-3);
+}
+
+.training-step.is-done {
+  background: var(--ink);
+}
+
+.training-step.is-current {
+  background: var(--surface-2);
+  box-shadow: inset 0 0 0 2px var(--ink);
 }
 
 .training-text {
   margin: 0;
-  line-height: 1.4;
+  font-size: var(--step-lead);
+  line-height: 1.45;
+}
+
+@media (max-width: 600px) {
+  .training-text {
+    font-size: var(--step-body);
+  }
 }
 
 .training-next {
-  flex: none;
+  align-self: flex-end;
+  min-width: 120px;
 }

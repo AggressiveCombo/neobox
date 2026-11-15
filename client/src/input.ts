@@ -88,9 +88,25 @@ function typingInField(): boolean {
   return el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || el instanceof HTMLSelectElement;
 }
 
+/** Touch input bits held by one source (the stick or the buttons). */
+class TouchMask {
+  private bits = 0;
+  set(bit: number, on: boolean): void {
+    this.bits = on ? this.bits | bit : this.bits & ~bit;
+  }
+  clear(): void {
+    this.bits = 0;
+  }
+  get(): number {
+    return this.bits;
+  }
+}
+
 export class Input {
   private keys = 0;
-  private touch = 0;
+  /** Stick and buttons have their own bits: Jump (UP) and the stick's up share a bit, so one must not clear the other. */
+  private stick = new TouchMask();
+  private buttons = new TouchMask();
   /** Physical keys currently down (bound or not), so bits stay right after a rebind. */
   private held = new Set<string>();
   private codeBits = buildCodeBits(prefs.value.keys);
@@ -166,17 +182,18 @@ export class Input {
     this.keys = m;
   }
 
-  /** Touch buttons call this with their bit. */
-  setTouch(bit: number, on: boolean): void {
-    this.touch = on ? this.touch | bit : this.touch & ~bit;
+  /** Touch controls call this: `source` is "stick" (movement) or "buttons" (action buttons). */
+  setTouch(source: "stick" | "buttons", bit: number, on: boolean): void {
+    (source === "stick" ? this.stick : this.buttons).set(bit, on);
   }
 
   clearTouch(): void {
-    this.touch = 0;
+    this.stick.clear();
+    this.buttons.clear();
   }
 
   mask(): number {
-    return this.keys | this.touch | readPad();
+    return this.keys | this.stick.get() | this.buttons.get() | readPad();
   }
 }
 

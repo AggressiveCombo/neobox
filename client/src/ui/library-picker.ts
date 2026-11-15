@@ -1,10 +1,11 @@
 // Map picker for a room's host: the library's tabs and map cards in a dialog. Picking a
-// map hands its code to `onPick` and closes the dialog; Escape or the backdrop closes it too.
+// map hands its code to `onPick` and closes the dialog; Escape or the scrim closes it too.
 
 import { errorText, LIBRARY_PAGE_SIZE, type LibraryMap } from "../account";
 import type { AppCtx } from "../ctx";
 import { h } from "./dom";
-import { loadTab, mapCode, mapLines, previewThumb, tabBar, type LibraryTab } from "./map-list";
+import { openModal } from "./kit";
+import { loadTab, mapCard, mapCode, tabBar, type LibraryTab } from "./map-list";
 
 const SEARCH_DELAY_MS = 300;
 
@@ -25,18 +26,18 @@ export function openLibraryPicker(ctx: AppCtx, onPick: (map: PickedMap) => void)
   let searchTimer: ReturnType<typeof setTimeout> | undefined;
 
   const status = h("p", { class: "status", role: "status", "aria-live": "polite" });
-  const tabsHost = h("div");
+  const tabsHost = h("div", { class: "picker-tabs" });
   const searchInput = h("input", {
     type: "search",
-    placeholder: "search maps",
+    placeholder: "Search maps",
     "aria-label": "search maps",
     autocomplete: "off",
     spellcheck: "false",
     maxlength: 50,
     oninput: onSearch,
   });
-  const toolbar = h("div", { class: "library-toolbar" }, searchInput);
-  const list = h("ul", { class: "picker-list", "aria-label": "maps" });
+  const toolbar = h("div", { class: "library-search" }, searchInput);
+  const grid = h("ul", { class: "map-grid", "aria-label": "maps" });
   const moreBtn = h(
     "button",
     {
@@ -50,40 +51,16 @@ export function openLibraryPicker(ctx: AppCtx, onPick: (map: PickedMap) => void)
     },
     "More maps",
   );
-  const closeBtn = h("button", { type: "button", onclick: () => dismiss() }, "Close");
-  const sheet = h(
-    "section",
-    { class: "picker-sheet" },
-    h("header", { class: "picker-head" }, h("h2", null, "Pick a map"), closeBtn),
-    tabsHost,
-    toolbar,
-    status,
-    list,
-    moreBtn,
-  );
-  const overlay: HTMLDivElement = h(
-    "div",
-    {
-      class: "picker-overlay",
-      role: "dialog",
-      "aria-modal": "true",
-      "aria-label": "Pick a map",
-      onclick: (e: Event) => {
-        if (e.target === overlay) dismiss();
-      },
+
+  const modal = openModal({
+    title: "Pick a map",
+    body: [tabsHost, toolbar, status, grid, moreBtn],
+    onclose: () => {
+      clearTimeout(searchTimer);
+      seq += 1;
     },
-    sheet,
-  );
-
-  function dismiss(): void {
-    clearTimeout(searchTimer);
-    window.removeEventListener("keydown", onKey);
-    overlay.remove();
-  }
-
-  function onKey(e: KeyboardEvent): void {
-    if (e.key === "Escape") dismiss();
-  }
+  });
+  modal.dialog.classList.add("map-picker");
 
   function onSearch(): void {
     clearTimeout(searchTimer);
@@ -104,14 +81,14 @@ export function openLibraryPicker(ctx: AppCtx, onPick: (map: PickedMap) => void)
     if (tab !== "browse" && ctx.store.state.account === null) {
       maps = [];
       more = false;
-      list.replaceChildren();
+      grid.replaceChildren();
       moreBtn.hidden = true;
       status.textContent = "Sign in to see these maps.";
       return;
     }
     status.textContent = "Loading…";
     try {
-      const got = await loadTab(tab, { sort: "new", q, page });
+      const got = await loadTab(tab, { sort: "hot", q, page });
       if (req !== seq) return;
       maps = append ? [...maps, ...got] : got;
       more = tab === "browse" && got.length === LIBRARY_PAGE_SIZE;
@@ -119,29 +96,16 @@ export function openLibraryPicker(ctx: AppCtx, onPick: (map: PickedMap) => void)
       if (req === seq) status.textContent = errorText(err);
       return;
     }
-    list.replaceChildren(...maps.map(item));
-    status.textContent = maps.length === 0 ? "No maps here." : "";
+    grid.replaceChildren(...maps.map((m) => mapCard(ctx, m, () => void pick(m))));
+    status.textContent = maps.length === 0 ? (q === "" ? "No maps here yet." : "No maps match that search.") : "";
     moreBtn.hidden = !more;
-  }
-
-  function item(map: LibraryMap): HTMLElement {
-    return h(
-      "li",
-      null,
-      h(
-        "button",
-        { type: "button", class: "map-card", onclick: () => void pick(map) },
-        previewThumb(ctx, map.id),
-        h("div", { class: "map-body" }, mapLines(map)),
-      ),
-    );
   }
 
   async function pick(map: LibraryMap): Promise<void> {
     status.textContent = "Loading map…";
     try {
       const code = await mapCode(map.id);
-      dismiss();
+      modal.close();
       onPick({ id: map.id, name: map.name, code });
     } catch (err) {
       status.textContent = errorText(err);
@@ -149,22 +113,19 @@ export function openLibraryPicker(ctx: AppCtx, onPick: (map: PickedMap) => void)
   }
 
   function paintTabs(): void {
-    tabsHost.replaceChildren(tabBar(tab, selectTab));
+    tabsHost.replaceChildren(
+      tabBar(tab, (next) => {
+        if (next === tab) return;
+        tab = next;
+        maps = [];
+        paintTabs();
+        reload();
+      }),
+    );
     toolbar.hidden = tab !== "browse";
   }
 
-  function selectTab(next: LibraryTab): void {
-    if (next === tab) return;
-    tab = next;
-    maps = [];
-    paintTabs();
-    reload();
-  }
-
-  document.body.append(overlay);
-  window.addEventListener("keydown", onKey);
   paintTabs();
   reload();
-  closeBtn.focus();
-  return dismiss;
+  return modal.close;
 }

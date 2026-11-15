@@ -1,4 +1,4 @@
-/* Floating jukebox panel: shows the room's YouTube player; mounted once on document.body. */
+/* Jukebox panel: the room's YouTube player, now-playing state and transport. Floats over the page, mounted once on document.body. */
 
 .jukebox {
   position: fixed;
@@ -8,39 +8,52 @@
   width: min(360px, calc(100vw - 32px));
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  padding: 10px;
-  border: 1px solid var(--border-strong);
-  border-radius: 8px;
+  gap: 16px;
+  padding: 16px;
   background: var(--surface);
-  color: var(--text);
-  box-shadow: 0 8px 24px rgb(0 0 0 / 0.35);
+  color: var(--ink);
+  box-shadow: var(--float-shadow);
 }
 
 .jukebox[hidden] {
   display: none;
 }
 
+/* On the panel's --surface, buttons step up one tone (as .panel does). */
+.jukebox button {
+  background: var(--surface-2);
+}
+
+.jukebox button:hover:not(:disabled) {
+  background: var(--surface-3);
+}
+
 .jukebox-head {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   justify-content: space-between;
-  gap: 8px;
+  gap: 12px;
   min-width: 0;
 }
 
 .jukebox-title {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  min-width: 0;
+  font-size: var(--step-body);
+  font-weight: 500;
 }
 
+.jukebox-head .chip {
+  flex: none;
+}
+
+/* The player is a 16:9 frame with square corners; the video is the only thing in it. */
 .jukebox-screen {
   aspect-ratio: 16 / 9;
   width: 100%;
   background: #000;
-  border-radius: 4px;
   overflow: hidden;
 }
 
@@ -52,29 +65,76 @@
 
 .jukebox-host {
   display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
+  flex-direction: column;
+  gap: 8px;
 }
 
-.jukebox-url {
-  flex: 1 1 160px;
+.jukebox-host[hidden] {
+  display: none;
+}
+
+.jukebox-add,
+.jukebox-transport {
+  display: flex;
+  gap: 8px;
   min-width: 0;
-  padding: 6px 8px;
-  border: 1px solid var(--border-strong);
-  border-radius: 4px;
-  background: var(--bg, transparent);
-  color: var(--text);
+}
+
+.jukebox-add button,
+.jukebox-transport button {
+  display: inline-flex;
+  flex: 1 1 0;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: var(--control);
+  padding: 0 12px;
+  white-space: nowrap;
+}
+
+/* The link field is a plain surface with the ink underline, like every text input. */
+.jukebox-url {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: var(--control);
+  padding: 0 12px;
+  border: 0;
+  border-bottom: 2px solid var(--line-strong);
+  border-radius: 0;
+  background: var(--surface-2);
+  color: var(--ink);
   font: inherit;
+  font-size: var(--step-small);
+}
+
+.jukebox-url:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 2px;
+}
+
+.jukebox svg {
+  flex: none;
+  width: 20px;
+  height: 20px;
+}
+
+.jukebox svg path {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linejoin: miter;
 }
 
 .jukebox-volume {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 12px;
   color: var(--muted);
-  font-size: 0.9em;
+  font-size: var(--step-small);
 }
 
 .jukebox-volume input {
   flex: 1;
+  min-width: 0;
+  accent-color: var(--ink);
 }

@@ -78,6 +78,25 @@ export function parseYouTubeId(text: string): string | null {
   return id !== null && VIDEO_ID_RE.test(id) ? id : null;
 }
 
+const ICON_PATHS = {
+  play: "M7 5l12 7-12 7z",
+  pause: "M8 5v14M16 5v14",
+  stop: "M6 6h12v12H6z",
+} as const;
+
+/** A 20px outline glyph in the current colour. */
+function icon(name: keyof typeof ICON_PATHS): SVGSVGElement {
+  const ns = "http://www.w3.org/2000/svg";
+  const svg = document.createElementNS(ns, "svg");
+  svg.setAttribute("viewBox", "0 0 24 24");
+  svg.setAttribute("aria-hidden", "true");
+  svg.setAttribute("focusable", "false");
+  const path = document.createElementNS(ns, "path");
+  path.setAttribute("d", ICON_PATHS[name]);
+  svg.append(path);
+  return svg;
+}
+
 function isHost(state: AppState): boolean {
   const room = state.room;
   return room !== null && room.quick === null && room.players.some((p) => p.id === state.myId && p.host);
@@ -96,7 +115,7 @@ export function mountJukebox(ctx: AppCtx): void {
   // YouTube replaces its target element with the player frame, so it gets its own node.
   const playerMount = h("div", { class: "jukebox-screen" });
   const title = h("strong", { class: "jukebox-title" });
-  const stateLine = h("span", { class: "row-sub", role: "status", "aria-live": "polite" });
+  const stateChip = h("span", { class: "chip", role: "status", "aria-live": "polite" });
 
   function applyVolume(): void {
     if (player === null) return;
@@ -180,19 +199,17 @@ export function mountJukebox(ctx: AppCtx): void {
   });
   const toggleBtn = h("button", {
     type: "button",
-    class: "room-btn",
     onclick: () => ctx.send({ t: "jukebox", action: current?.playing ? "pause" : "resume" }),
   });
   const hostRow = h(
     "div",
     { class: "jukebox-host" },
-    urlInput,
+    h("div", { class: "jukebox-add" }, urlInput, h("button", { type: "button", onclick: playLink }, icon("play"), "Play")),
     h(
       "div",
-      { class: "actions" },
-      h("button", { type: "button", class: "room-btn", onclick: playLink }, "Play"),
+      { class: "jukebox-transport" },
       toggleBtn,
-      h("button", { type: "button", class: "room-btn", onclick: () => ctx.send({ t: "jukebox", action: "stop" }) }, "Stop"),
+      h("button", { type: "button", onclick: () => ctx.send({ t: "jukebox", action: "stop" }) }, icon("stop"), "Stop"),
     ),
   );
   const volume = h("input", {
@@ -207,7 +224,7 @@ export function mountJukebox(ctx: AppCtx): void {
   const panel = h(
     "section",
     { class: "jukebox", "aria-label": "Jukebox", hidden: true },
-    h("header", { class: "jukebox-head" }, title, stateLine),
+    h("header", { class: "jukebox-head" }, title, stateChip),
     playerMount,
     hostRow,
     h("label", { class: "jukebox-volume" }, h("span", null, "Volume"), volume),
@@ -218,8 +235,9 @@ export function mountJukebox(ctx: AppCtx): void {
     panel.hidden = jb === null;
     if (jb === null) return;
     title.textContent = jb.title;
-    stateLine.textContent = jb.playing ? "Playing" : "Paused";
-    toggleBtn.textContent = jb.playing ? "Pause" : "Resume";
+    stateChip.textContent = jb.playing ? "Playing" : "Paused";
+    stateChip.className = jb.playing ? "chip ink" : "chip";
+    toggleBtn.replaceChildren(icon(jb.playing ? "pause" : "play"), jb.playing ? "Pause" : "Resume");
     hostRow.hidden = !isHost(state);
   }
 

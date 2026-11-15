@@ -1,175 +1,14 @@
-/* Account, friends and map library screens, and the room's map picker.
-   Shares the base controls (button, input, .field, .status) from style.css. */
+/* Friends screen and the row helpers shared with other screens.
+   Base controls, tabs, panels and empty states live in style.css. */
 
-.social-screen {
-  gap: 12px;
-}
-
-.social-screen.library-screen {
-  width: min(100%, 760px);
-}
-
-.social-head {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  min-width: 0;
-}
-
-.social-title {
-  margin: 0;
-  font-size: 1.3rem;
-  font-weight: 600;
-}
-
-.back {
-  align-self: flex-start;
-}
-
-.social-body {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-  min-width: 0;
-}
-
-.social-section,
-.social-form {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.social-form h2,
-.social-section h2 {
-  font-size: 15px;
-  font-weight: 600;
-}
-
-.actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-.social-check {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  color: var(--muted);
-}
-
-.social-check input {
-  width: 18px;
-  height: 18px;
-  accent-color: var(--accent);
-}
-
-.sign-in-prompt {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 12px;
-}
-
-.danger-zone {
-  padding-top: 16px;
-  border-top: 1px solid var(--border);
-}
-
-button.danger {
-  border-color: var(--danger);
-  color: #ffd7d7;
-}
-
-.social-screen select,
-.picker-sheet select {
-  min-height: 40px;
-  padding: 0 10px;
-  border-radius: 6px;
-  border: 1px solid var(--border-strong);
-  background: var(--surface-2);
-  color: var(--text);
-  font: inherit;
-}
-
-.social-form textarea {
-  width: 100%;
-  min-height: 110px;
-  padding: 10px;
-  resize: vertical;
-  border-radius: 6px;
-  border: 1px solid var(--border-strong);
-  background: var(--surface-2);
-  color: var(--text);
-  font: 13px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-}
-
-.social-form textarea::placeholder {
-  color: var(--placeholder);
-}
-
-.social-form input[type="file"] {
-  color: var(--muted);
-  font-size: 14px;
-}
-
-.field-error {
-  color: var(--danger);
-  font-size: 14px;
-  overflow-wrap: anywhere;
-}
-
-/* Friends */
-
-.friend-groups {
-  display: flex;
-  flex-direction: column;
-  gap: 20px;
-}
-
-.friend-section {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.friend-section h2 {
-  font-size: 13px;
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  color: var(--muted);
-}
-
-.friend-list,
-.map-list,
-.picker-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.friend-row {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px 12px;
-  padding: 10px 12px;
-  border-radius: var(--radius);
-  background: var(--surface-2);
-}
-
+/* Rows: a name with its status on the left, actions on the right. Also used by
+   the room, post-game, jukebox and colour picker for their small secondary lines. */
 .row-main {
   display: flex;
   flex: 1 1 10rem;
   flex-wrap: wrap;
   align-items: center;
-  gap: 4px 8px;
+  gap: 4px 10px;
   min-width: 0;
 }
 
@@ -179,255 +18,83 @@ button.danger {
 
 .row-sub {
   color: var(--muted);
-  font-size: 14px;
+  font-size: var(--step-small);
 }
 
 .row-actions {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
-}
-
-.dot {
-  flex: none;
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--placeholder);
-}
-
-.dot.online {
-  background: #3ddc84;
-}
-
-/* Library */
-
-.library-tabs {
-  display: flex;
-  gap: 4px;
-  border-bottom: 1px solid var(--border);
-}
-
-.tab {
-  padding: 8px 12px;
-  border: none;
-  border-bottom: 2px solid transparent;
-  border-radius: 0;
-  background: transparent;
-  color: var(--muted);
-}
-
-.tab[aria-selected="true"] {
-  color: var(--text);
-  border-bottom-color: var(--accent);
-}
-
-.library-toolbar {
-  display: flex;
-  flex-wrap: wrap;
   gap: 8px;
 }
 
-.library-toolbar input {
-  flex: 1 1 10rem;
+/* ------------------------------------------------------------- friends */
+
+.friends-page .page-inner {
+  max-width: 1040px;
+}
+
+.friends-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 340px) minmax(0, 1fr);
+  gap: 32px;
+  align-items: start;
+}
+
+.friends-main {
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
   min-width: 0;
 }
 
-.map-list {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
+.friend-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+}
+
+.friend-section {
   gap: 10px;
 }
 
-@media (min-width: 640px) {
-  .map-list {
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  }
-}
-
-.map-card {
-  display: flex;
-  gap: 12px;
-  min-width: 0;
-  padding: 10px;
-  border-radius: var(--radius);
-  border: 1px solid var(--border);
-  background: var(--surface-2);
-  color: inherit;
-  font: inherit;
-  text-align: left;
-}
-
-button.map-card {
-  width: 100%;
-  cursor: pointer;
-}
-
-.map-thumb {
-  flex: none;
-  display: grid;
-  place-items: center;
-  width: 96px;
-  height: 60px;
-  overflow: hidden;
-  border-radius: 6px;
-  background: var(--bg);
-}
-
-.map-thumb canvas {
-  display: block;
-  width: 100%;
-  height: 100%;
-}
-
-.thumb-missing {
-  color: var(--placeholder);
-  font-size: 12px;
-}
-
-.map-body {
-  display: flex;
-  flex: 1;
-  flex-direction: column;
-  gap: 6px;
-  min-width: 0;
-}
-
-.map-name {
-  font-weight: 600;
-  overflow-wrap: anywhere;
-}
-
-.map-meta {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 2px 10px;
-  color: var(--muted);
-  font-size: 13px;
-}
-
-.map-row {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px;
-}
-
-.map-row select {
-  min-height: 32px;
-  font-size: 14px;
-}
-
-.map-row button {
-  min-height: 32px;
-  padding: 0 10px;
-  font-size: 14px;
-}
-
-.vote.on,
-.fav.on {
-  border-color: var(--accent);
-  color: var(--accent);
-}
-
-.badge {
-  padding: 1px 8px;
-  border-radius: 999px;
-  border: 1px solid var(--border-strong);
-  color: var(--muted);
-  font-size: 12px;
-}
-
-.badge.approved {
-  color: #3ddc84;
-}
-
-.badge.pending {
-  color: #ffb84d;
-}
-
-.badge.rejected {
-  color: var(--danger);
-}
-
-.library-more {
-  align-self: center;
-}
-
-.map-preview {
-  width: 100%;
-  aspect-ratio: 16 / 9;
-  border-radius: var(--radius);
-  background: var(--bg);
-  overflow: hidden;
-}
-
-.map-preview canvas {
-  display: block;
-  width: 100%;
-  height: 100%;
-}
-
-/* Map picker: a centred dialog, full screen on phones. */
-
-.picker-overlay {
-  position: fixed;
-  inset: 0;
-  z-index: 5;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 24px 16px;
-  background: rgb(0 0 0 / 0.6);
-}
-
-.picker-sheet {
+.friend-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  width: min(100%, 680px);
-  max-height: 100%;
-  min-height: 0;
-  padding: 20px;
-  border-radius: 12px;
-  border: 1px solid var(--border);
-  background: var(--surface);
-  overflow: hidden;
 }
 
-.picker-head {
+.friend-row {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
+  gap: 10px 16px;
+  min-height: 56px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--line);
 }
 
-.picker-head h2 {
-  font-size: 1.1rem;
-  font-weight: 600;
+.friend-row:first-child {
+  border-top: 1px solid var(--line);
 }
 
-.picker-sheet .library-tabs {
+/* Presence: a square, ink when offline and green when online. */
+.dot {
   flex: none;
+  width: 10px;
+  height: 10px;
+  background: var(--line-strong);
 }
 
-.picker-sheet .picker-list {
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
+.dot.online {
+  background: var(--good);
 }
 
-@media (max-width: 600px) {
-  .picker-overlay {
-    padding: 0;
-  }
-
-  .picker-sheet {
-    width: 100%;
-    height: 100%;
-    max-height: none;
-    padding: 16px;
-    border: none;
-    border-radius: 0;
+@media (max-width: 760px) {
+  .friends-layout {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 24px;
   }
 }

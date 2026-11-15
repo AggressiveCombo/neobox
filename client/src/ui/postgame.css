@@ -1,17 +1,43 @@
-.postgame-sheet {
-  width: min(100%, 460px);
+/* Post-game: a reward in the game's type and square motif, shown in the game-over dialog. */
+
+.postgame {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  width: min(100%, 480px);
 }
 
+/* The placement is the hero: display size, one line in a row, "of 4" beside it. */
 .postgame-place {
-  font-size: 1.3rem;
-  font-weight: 600;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 12px;
+  margin: 0;
+  font-size: clamp(3.5rem, 2.5rem + 5vw, 6rem);
+  font-weight: 500;
+  line-height: 0.95;
+  letter-spacing: -0.04em;
+  color: var(--ink);
+}
+
+.postgame-of {
+  font-size: var(--step-lead);
+  letter-spacing: 0;
+  color: var(--muted);
 }
 
 .postgame-gain {
-  font-size: 2.2rem;
-  font-weight: 700;
-  font-variant-numeric: tabular-nums;
-  color: var(--accent);
+  margin: 0;
+  font-size: var(--step-lead);
+  font-weight: 500;
+  color: var(--ink);
+}
+
+.postgame-level {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
 
 .postgame-level-head {
@@ -19,53 +45,68 @@
   justify-content: space-between;
   align-items: baseline;
   gap: 8px;
-  font-variant-numeric: tabular-nums;
 }
 
-.postgame-bar {
-  height: 10px;
-  margin-top: 6px;
-  border-radius: 999px;
-  background: var(--border);
-  overflow: hidden;
+.postgame-level-range {
+  color: var(--muted);
 }
 
-.postgame-bar-fill {
-  display: block;
-  height: 100%;
-  width: 0;
-  border-radius: inherit;
-  background: var(--accent);
-  transition: width 900ms ease-out;
+/* The level-up moment: the logo's mark and the new level, entering once. */
+.postgame-levelup {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 4px 0 0;
+  font-size: var(--step-lead);
+  font-weight: 500;
+}
+
+.postgame-levelup[hidden] {
+  display: none;
+}
+
+.postgame-levelup.is-new {
+  animation: postgame-levelup 260ms var(--ease) both;
+}
+
+.postgame-levelup.is-new .mark {
+  animation: postgame-mark 420ms var(--ease) both;
+}
+
+@keyframes postgame-levelup {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes postgame-mark {
+  from {
+    transform: rotate(-120deg) scale(0.6);
+  }
+  to {
+    transform: none;
+  }
+}
+
+.postgame-note {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--step-small);
 }
 
 .postgame-vote {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-}
-
-.postgame-vote .actions {
-  display: flex;
+  align-items: flex-start;
   gap: 8px;
 }
 
-.postgame-vote button[aria-pressed="true"] {
-  border-color: var(--accent);
-  color: var(--accent);
-}
-
-.postgame-level-head.is-levelup {
-  animation: postgame-levelup 900ms ease-out;
-}
-
-@keyframes postgame-levelup {
-  0% {
-    color: var(--accent);
-    transform: scale(1.08);
-  }
-  100% {
-    color: inherit;
-    transform: none;
-  }
+.postgame-vote-q {
+  color: var(--muted);
+  font-size: var(--step-small);
 }

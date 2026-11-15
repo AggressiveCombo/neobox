@@ -17,25 +17,91 @@
 @import "./ui/screens/training.css";
 @import "./ui/menu-clips.css";
 
-:root {
-  color-scheme: dark;
-  --bg: #000000;
-  --surface: #0b0d10;
-  --surface-2: #14181d;
-  --surface-hover: #1b2128;
-  --border: #23292f;
-  --border-strong: #3a434c;
-  --text: #e8edf2;
-  --muted: #8a94a0;
-  --placeholder: #5b6570;
-  --accent: #0095ff;
-  --accent-strong: #0080ff;
-  --accent-text: #ffffff;
-  --danger: #ff5c5c;
-  --radius: 8px;
-  --panel-max: 420px;
-  --font: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+/* ------------------------------------------------------------------ type */
+
+@font-face {
+  font-family: "Hanken Grotesk";
+  font-style: normal;
+  font-weight: 300 800;
+  font-display: swap;
+  src: url("/fonts/hanken-grotesk-latin.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329,
+    U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
 }
+
+@font-face {
+  font-family: "Hanken Grotesk";
+  font-style: normal;
+  font-weight: 300 800;
+  font-display: swap;
+  src: url("/fonts/hanken-grotesk-latin-ext.woff2") format("woff2");
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF,
+    U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C4, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+
+/* ---------------------------------------------------------------- tokens */
+
+/*
+ * One ground, one ink, one accent. Surfaces are told apart by tone steps,
+ * never by shadows (only floating things cast one) or decorative borders.
+ * Every corner is square: the box is the motif (see DESIGN.md).
+ */
+:root {
+  color-scheme: light;
+  --ground: #f7f7f7;
+  --surface: #ebebeb;
+  --surface-2: #dfe2df;
+  --surface-3: #d2d7d3;
+  --ink: #0d2a1c;
+  --muted: #56625b;
+  --line: rgb(13 42 28 / 0.14);
+  --line-strong: rgb(13 42 28 / 0.34);
+  --accent: #f6e016;
+  --accent-hover: #ffe93a;
+  --accent-ink: #0d2a1c;
+  --danger: #b3261e;
+  --danger-ink: #ffffff;
+  --good: #1d7a43;
+  --scrim: rgb(13 42 28 / 0.55);
+  --float-shadow: 0 18px 48px rgb(13 42 28 / 0.22), 0 2px 6px rgb(13 42 28 / 0.12);
+  /* Over the game view: solid ink chips that read on any map colour. */
+  --hud: rgb(13 42 28 / 0.88);
+  --hud-ink: #f7f7f7;
+
+  --font: "Hanken Grotesk", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  /* Five sizes do all the work. */
+  --step-small: 0.875rem;
+  --step-body: 1rem;
+  --step-lead: clamp(1.1875rem, 1.05rem + 0.5vw, 1.5rem);
+  --step-head: clamp(1.75rem, 1.2rem + 2.2vw, 2.75rem);
+  --step-display: clamp(3.5rem, 1.6rem + 8vw, 9rem);
+
+  --margin: clamp(16px, 3vw, 40px);
+  --gap: 16px;
+  --control: 44px;
+  --ease: cubic-bezier(0.2, 0, 0, 1);
+  --fast: 140ms;
+  --tilt: -30deg;
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --ground: #0b1510;
+  --surface: #14211a;
+  --surface-2: #1c2c23;
+  --surface-3: #26382e;
+  --ink: #eef3ef;
+  --muted: #a3b3a9;
+  --line: rgb(238 243 239 / 0.14);
+  --line-strong: rgb(238 243 239 / 0.34);
+  --danger: #ff7a6e;
+  --danger-ink: #0b1510;
+  --good: #5fd08c;
+  --scrim: rgb(0 0 0 / 0.6);
+  --float-shadow: 0 18px 48px rgb(0 0 0 / 0.5), 0 2px 6px rgb(0 0 0 / 0.4);
+}
+
+/* ------------------------------------------------------------------ base */
 
 * {
   box-sizing: border-box;
@@ -51,23 +117,72 @@ body {
   width: 100%;
   height: 100%;
   overflow: hidden;
-  background: var(--bg);
-  color: var(--text);
+  background: var(--ground);
+  color: var(--ink);
   font-family: var(--font);
   font-size: 16px;
-  line-height: 1.4;
+  line-height: 1.45;
+  -webkit-font-smoothing: antialiased;
+  -webkit-text-size-adjust: 100%;
+  -webkit-tap-highlight-color: transparent;
 }
 
 h1,
 h2,
+h3,
 p,
-ul {
+ul,
+ol,
+figure,
+dl,
+dd {
   margin: 0;
 }
 
+h1,
+h2,
+h3 {
+  font-weight: 500;
+  letter-spacing: -0.02em;
+  line-height: 1.1;
+  text-wrap: balance;
+}
+
+h1 {
+  font-size: var(--step-head);
+  letter-spacing: -0.035em;
+}
+
+h2 {
+  font-size: var(--step-lead);
+}
+
+h3 {
+  font-size: var(--step-body);
+}
+
+p {
+  text-wrap: pretty;
+}
+
 a {
-  color: var(--accent);
+  color: inherit;
+  text-decoration-thickness: 1px;
   text-underline-offset: 3px;
+}
+
+a:hover {
+  text-decoration-thickness: 2px;
+}
+
+::selection {
+  background: var(--accent);
+  color: var(--accent-ink);
+}
+
+:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 2px;
 }
 
 /* Game surfaces: no text selection, no browser gestures on the canvas. */
@@ -97,264 +212,614 @@ a {
   pointer-events: none;
 }
 
-/* Screens: centred column; the container passes clicks through to the game
-   except where a screen element sits. */
+/*
+ * Screens mount into #ui, which lies over the game view and passes clicks
+ * through except where a screen element sits. A `.page` fills the viewport on
+ * the ground colour and scrolls; game screens stay transparent.
+ */
 #ui {
   position: fixed;
   inset: 0;
   z-index: 2;
   display: flex;
   overflow-y: auto;
-  padding: 24px 16px;
   pointer-events: none;
 }
 
 #ui > * {
-  margin: auto;
   pointer-events: auto;
 }
 
-.screen {
-  width: min(100%, var(--panel-max));
+/* ----------------------------------------------------------------- pages */
+
+.page {
+  width: 100%;
+  min-height: 100%;
+  background: var(--ground);
+  padding: 0 var(--margin) calc(48px + env(safe-area-inset-bottom));
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 32px;
 }
 
-.screen > .panel {
+.page-inner {
   width: 100%;
+  max-width: 1200px;
+  margin-inline: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 32px;
 }
 
+/* The page's top row: back, title, actions. */
+.page-head {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 72px;
+  padding-top: env(safe-area-inset-top);
+  background: var(--ground);
+}
+
+.page-head h1 {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.page-head .page-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+@media (max-width: 600px) {
+  .page-head {
+    flex-wrap: wrap;
+    row-gap: 4px;
+    padding-bottom: 8px;
+  }
+
+  .page-head .page-actions {
+    margin-left: auto;
+  }
+}
+
+.lead {
+  max-width: 60ch;
+  font-size: var(--step-lead);
+  line-height: 1.35;
+}
+
+.muted {
+  color: var(--muted);
+}
+
+.small {
+  font-size: var(--step-small);
+}
+
+.num {
+  font-variant-numeric: tabular-nums;
+}
+
+/* A block of the page: a heading and its content, on a tone step. */
 .panel {
   display: flex;
   flex-direction: column;
   gap: 16px;
-  padding: 28px;
-  border-radius: 12px;
+  padding: 24px;
   background: var(--surface);
-  border: 1px solid var(--border);
 }
 
-#toasts {
-  position: fixed;
-  left: 50%;
-  bottom: 24px;
-  z-index: 3;
-  transform: translateX(-50%);
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 8px;
-  width: min(92vw, 420px);
-  pointer-events: none;
+.panel > h2 {
+  font-size: var(--step-lead);
 }
 
-.toast {
-  max-width: 100%;
-  padding: 10px 14px;
-  border-radius: var(--radius);
-  background: var(--surface-2);
-  border: 1px solid var(--border-strong);
-  color: var(--text);
-  font-size: 14px;
-  box-shadow: 0 8px 24px rgb(0 0 0 / 0.5);
-  overflow-wrap: anywhere;
-  animation: toast-in 180ms ease-out;
-}
-
-.toast-error {
-  border-color: var(--danger);
-  color: #ffd7d7;
-}
-
-@keyframes toast-in {
-  from {
-    opacity: 0;
-    transform: translateY(6px);
-  }
-  to {
-    opacity: 1;
-    transform: none;
-  }
-}
-
-#boot {
-  position: fixed;
-  inset: 0;
-  z-index: 4;
-  display: grid;
-  place-items: center;
-  background: var(--bg);
-  color: var(--muted);
-  font-size: 14px;
-  letter-spacing: 0.04em;
-}
-
-/* Brand and typography */
-.brand {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-}
-
-.wordmark {
-  font-size: 32px;
-  font-weight: 700;
-  letter-spacing: -0.02em;
-}
-
-h2 {
-  font-size: 18px;
-  font-weight: 600;
-}
-
-.credit,
-.status,
-.empty-hint,
-.links {
-  color: var(--muted);
-  font-size: 14px;
-}
-
-.status {
-  min-height: 1.4em;
-}
-
-.links {
-  text-align: center;
-}
-
-.links-list {
-  padding-left: 18px;
-  color: var(--muted);
-  font-size: 14px;
-}
-
-/* Forms */
-.menu-form,
-.create-form {
+/* A section without a fill: heading, then content, separated by space. */
+.section {
   display: flex;
   flex-direction: column;
   gap: 12px;
 }
+
+.section > h2 {
+  font-size: var(--step-lead);
+}
+
+/* --------------------------------------------------------------- buttons */
+
+button,
+.button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: var(--control);
+  padding: 0 18px;
+  border: 0;
+  border-radius: 0;
+  background: var(--surface);
+  color: var(--ink);
+  font: inherit;
+  font-weight: 500;
+  line-height: 1.15;
+  text-align: center;
+  text-decoration: none;
+  cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
+  transition-property: background-color, color, transform, opacity;
+  transition-duration: var(--fast);
+  transition-timing-function: var(--ease);
+}
+
+button:hover:not(:disabled),
+.button:hover {
+  background: var(--surface-2);
+}
+
+button:active:not(:disabled),
+.button:active {
+  transform: scale(0.96);
+}
+
+button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* Inside a panel (already on --surface), plain buttons step up one tone. */
+.panel button:not(.primary, .danger, .quiet, .ink, .seg-option, .tab),
+.panel .button {
+  background: var(--surface-2);
+}
+
+.panel button:not(.primary, .danger, .quiet, .ink, .seg-option, .tab):hover:not(:disabled) {
+  background: var(--surface-3);
+}
+
+button.primary,
+.button.primary {
+  background: var(--accent);
+  color: var(--accent-ink);
+}
+
+button.primary:hover:not(:disabled),
+.button.primary:hover {
+  background: var(--accent-hover);
+}
+
+button.ink {
+  background: var(--ink);
+  color: var(--ground);
+}
+
+button.ink:hover:not(:disabled) {
+  background: var(--ink);
+  opacity: 0.88;
+}
+
+button.danger {
+  background: transparent;
+  color: var(--danger);
+  box-shadow: inset 0 0 0 2px var(--danger);
+}
+
+button.danger:hover:not(:disabled) {
+  background: var(--danger);
+  color: var(--danger-ink);
+}
+
+/* No fill until pointed at: toolbars, rows of secondary actions. */
+button.quiet {
+  background: transparent;
+}
+
+button.quiet:hover:not(:disabled) {
+  background: var(--surface);
+}
+
+button.big {
+  min-height: 64px;
+  padding: 0 28px;
+  font-size: var(--step-lead);
+}
+
+/* A square button holding one glyph; give it an aria-label. */
+button.icon {
+  width: var(--control);
+  padding: 0;
+}
+
+button.icon svg {
+  width: 20px;
+  height: 20px;
+  stroke: currentColor;
+  stroke-width: 2;
+  fill: none;
+}
+
+button.block {
+  width: 100%;
+}
+
+/* ----------------------------------------------------------------- forms */
 
 .field {
   display: flex;
   flex-direction: column;
   gap: 6px;
+  min-width: 0;
 }
 
 .field-label {
+  font-size: var(--step-small);
+  font-weight: 500;
+}
+
+.field-hint {
   color: var(--muted);
-  font-size: 13px;
+  font-size: var(--step-small);
+}
+
+.field-error {
+  color: var(--danger);
+  font-size: var(--step-small);
+}
+
+input[type="text"],
+input[type="password"],
+input[type="number"],
+input[type="search"],
+input[type="email"],
+input[type="url"],
+select,
+textarea {
+  width: 100%;
+  min-height: var(--control);
+  padding: 10px 14px;
+  border: 0;
+  border-radius: 0;
+  background: var(--surface);
+  color: var(--ink);
+  box-shadow: inset 0 -2px 0 var(--line-strong);
+  font: inherit;
+  transition-property: box-shadow, background-color;
+  transition-duration: var(--fast);
+}
+
+.panel input[type="text"],
+.panel input[type="password"],
+.panel input[type="number"],
+.panel input[type="search"],
+.panel input[type="email"],
+.panel input[type="url"],
+.panel select,
+.panel textarea {
+  background: var(--ground);
+}
+
+input:hover:not(:disabled),
+select:hover:not(:disabled),
+textarea:hover:not(:disabled) {
+  box-shadow: inset 0 -2px 0 var(--ink);
+}
+
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 0;
+  box-shadow: none;
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: var(--muted);
+  opacity: 1;
+}
+
+input:disabled,
+select:disabled,
+textarea:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+input[readonly] {
+  box-shadow: none;
+}
+
+select {
+  appearance: none;
+  padding-right: 40px;
+  background-image: linear-gradient(45deg, transparent 50%, currentColor 50%), linear-gradient(135deg, currentColor 50%, transparent 50%);
+  background-position: calc(100% - 20px) 50%, calc(100% - 14px) 50%;
+  background-size: 6px 6px;
+  background-repeat: no-repeat;
+  cursor: pointer;
+}
+
+textarea {
+  min-height: 96px;
+  resize: vertical;
+}
+
+/* Checkboxes: a square with a smaller filled square when on (box in a box). */
+input[type="checkbox"] {
+  appearance: none;
+  flex: none;
+  width: 22px;
+  height: 22px;
+  margin: 0;
+  border: 2px solid var(--ink);
+  border-radius: 0;
+  background: transparent;
+  display: inline-grid;
+  place-content: center;
+  cursor: pointer;
+}
+
+input[type="checkbox"]::before {
+  content: "";
+  width: 10px;
+  height: 10px;
+  background: var(--ink);
+  transform: scale(0);
+  transition: transform var(--fast) var(--ease);
+}
+
+input[type="checkbox"]:checked::before {
+  transform: scale(1);
+}
+
+/* Radios are boxes too: a square ring with a filled square when chosen. */
+input[type="radio"] {
+  appearance: none;
+  flex: none;
+  width: 20px;
+  height: 20px;
+  margin: 0;
+  border: 2px solid var(--ink);
+  border-radius: 0;
+  display: inline-grid;
+  place-content: center;
+  cursor: pointer;
+}
+
+input[type="radio"]::before {
+  content: "";
+  width: 8px;
+  height: 8px;
+  background: var(--ink);
+  transform: scale(0);
+  transition: transform var(--fast) var(--ease);
+}
+
+input[type="radio"]:checked::before {
+  transform: scale(1);
+}
+
+/* A checkbox with role="switch": square track, square knob. */
+input[type="checkbox"][role="switch"] {
+  width: 44px;
+  height: 24px;
+  place-content: center start;
+  padding: 2px;
+  background: transparent;
+  transition: background-color var(--fast) var(--ease);
+}
+
+input[type="checkbox"][role="switch"]::before {
+  width: 16px;
+  height: 16px;
+  transform: none;
+  transition: transform var(--fast) var(--ease), background-color var(--fast) var(--ease);
+}
+
+input[type="checkbox"][role="switch"]:checked {
+  background: var(--ink);
+}
+
+input[type="checkbox"][role="switch"]:checked::before {
+  background: var(--accent);
+  transform: translateX(20px);
+}
+
+.check-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
 }
 
 .check {
   display: flex;
   align-items: center;
-  gap: 8px;
-  font-size: 14px;
+  gap: 12px;
+  min-height: var(--control);
   cursor: pointer;
 }
 
-.check input {
-  width: 18px;
-  height: 18px;
-  margin: 0;
-  accent-color: var(--accent);
-}
-
-input[type="text"],
-input[type="password"],
-input[type="number"] {
+/* Sliders: a 4px ink track with a square thumb. */
+input[type="range"] {
+  appearance: none;
   width: 100%;
+  height: var(--control);
+  margin: 0;
+  background: transparent;
+  cursor: pointer;
+}
+
+input[type="range"]::-webkit-slider-runnable-track {
+  height: 4px;
+  background: var(--line-strong);
+}
+
+input[type="range"]::-moz-range-track {
+  height: 4px;
+  background: var(--line-strong);
+}
+
+input[type="range"]::-moz-range-progress {
+  height: 4px;
+  background: var(--ink);
+}
+
+input[type="range"]::-webkit-slider-thumb {
+  appearance: none;
+  width: 20px;
+  height: 20px;
+  margin-top: -8px;
+  border: 0;
+  border-radius: 0;
+  background: var(--ink);
+}
+
+input[type="range"]::-moz-range-thumb {
+  width: 20px;
+  height: 20px;
+  border: 0;
+  border-radius: 0;
+  background: var(--ink);
+}
+
+/* Segmented control: one choice of a few. The chosen option is ink. */
+.seg {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  padding: 2px;
+  background: var(--surface);
+}
+
+.panel .seg {
+  background: var(--ground);
+}
+
+.seg-option {
   min-height: 40px;
-  padding: 8px 12px;
-  border-radius: 6px;
-  border: 1px solid var(--border);
-  background: var(--bg);
-  color: var(--text);
-  font: inherit;
+  padding: 0 14px;
+  background: transparent;
 }
 
-input::placeholder {
-  color: var(--placeholder);
+.seg-option:hover:not(:disabled) {
+  background: var(--surface-2);
 }
 
-input:focus {
-  border-color: var(--accent);
+.seg-option[aria-checked="true"],
+.seg-option[aria-pressed="true"],
+.seg-option[aria-selected="true"] {
+  background: var(--ink);
+  color: var(--ground);
+}
+
+.seg-option[aria-checked="true"]:hover:not(:disabled),
+.seg-option[aria-pressed="true"]:hover:not(:disabled),
+.seg-option[aria-selected="true"]:hover:not(:disabled) {
+  background: var(--ink);
+}
+
+/* Tabs: words with a 3px ink bar under the current one. */
+.tabs {
+  display: flex;
+  gap: 4px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  box-shadow: inset 0 -1px 0 var(--line);
+}
+
+.tab {
+  flex: none;
+  min-height: var(--control);
+  padding: 0 14px;
+  background: transparent;
+  color: var(--muted);
+}
+
+.tab:hover:not(:disabled) {
+  background: transparent;
+  color: var(--ink);
+}
+
+.tab[aria-selected="true"] {
+  color: var(--ink);
+  box-shadow: inset 0 -3px 0 var(--ink);
 }
 
 .actions {
   display: flex;
   flex-wrap: wrap;
-  gap: 10px;
+  gap: 8px;
 }
 
-.menu-form .actions > button {
-  flex: 1 1 0;
-}
+/* ------------------------------------------------------- small pieces */
 
-/* Buttons */
-button {
-  min-height: 40px;
-  padding: 8px 16px;
-  border-radius: 6px;
-  border: 1px solid var(--border);
-  background: var(--surface-2);
-  color: var(--text);
-  font: inherit;
-  cursor: pointer;
-  transition: background-color 120ms ease, border-color 120ms ease, filter 120ms ease;
-}
-
-button:hover:not(:disabled) {
-  border-color: var(--border-strong);
-  background: var(--surface-hover);
-}
-
-button.primary {
-  border-color: var(--accent-strong);
-  background: linear-gradient(180deg, var(--accent), var(--accent-strong));
-  color: var(--accent-text);
-  font-weight: 600;
-}
-
-button.primary:hover:not(:disabled) {
-  filter: brightness(1.08);
-}
-
-input:disabled,
-button:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
-}
-
-/* Browser */
-.browser {
-  --panel-max: 680px;
-}
-
-.browser-header {
-  display: flex;
-  flex-wrap: wrap;
+/* A label set in a tone step: "Host", "Guest", "Level 4". Square, never a pill. */
+.chip {
+  display: inline-flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 12px;
+  gap: 6px;
+  min-height: 24px;
+  padding: 0 8px;
+  background: var(--surface-2);
+  color: var(--ink);
+  font-size: var(--step-small);
+  font-weight: 500;
+  line-height: 1;
+  white-space: nowrap;
 }
 
-.server-name {
-  font-size: 22px;
-  font-weight: 700;
-  overflow-wrap: anywhere;
+.chip.accent {
+  background: var(--accent);
+  color: var(--accent-ink);
 }
 
-.room-list {
+.chip.ink {
+  background: var(--ink);
+  color: var(--ground);
+}
+
+/* A player's square: their colour, their initial. */
+.avatar {
+  flex: none;
+  width: 32px;
+  height: 32px;
+  display: inline-grid;
+  place-items: center;
+  background: var(--avatar, var(--surface-3));
+  color: #0d2a1c;
+  font-weight: 500;
+  line-height: 1;
+}
+
+.avatar.small {
+  width: 16px;
+  height: 16px;
+  font-size: 0;
+}
+
+/* Keyboard key, shown in the text face inside a box. */
+.key {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 28px;
+  min-height: 28px;
+  padding: 0 8px;
+  background: var(--ground);
+  box-shadow: inset 0 0 0 2px var(--ink);
+  font-size: var(--step-small);
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+/* Lists whose bullets are small squares. */
+.boxed-list {
   list-style: none;
   padding: 0;
   display: flex;
@@ -362,123 +827,269 @@ button:disabled {
   gap: 8px;
 }
 
-.room-item {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
+.boxed-list > li {
+  position: relative;
+  padding-left: 22px;
 }
 
-.room-row {
+.boxed-list > li::before {
+  content: "";
+  position: absolute;
+  left: 2px;
+  top: 0.5em;
+  width: 8px;
+  height: 8px;
+  background: var(--ink);
+}
+
+/* Data tables: rules and alignment, numbers right-aligned. */
+table.data {
   width: 100%;
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 10px 14px;
-  text-align: left;
-}
-
-.room-name {
-  flex: 1;
-  min-width: 0;
-  font-weight: 600;
-  overflow-wrap: anywhere;
-}
-
-.room-map {
-  color: var(--muted);
-  font-size: 13px;
-}
-
-.room-count {
-  color: var(--muted);
-  font-size: 13px;
+  border-collapse: collapse;
   font-variant-numeric: tabular-nums;
 }
 
-.lock {
-  flex: none;
-  width: 14px;
-  height: 14px;
-  fill: currentColor;
+table.data th {
+  padding: 8px 12px;
+  color: var(--muted);
+  font-size: var(--step-small);
+  font-weight: 500;
+  text-align: left;
+  border-bottom: 1px solid var(--line-strong);
+}
+
+table.data td {
+  padding: 12px;
+  border-bottom: 1px solid var(--line);
+}
+
+table.data .r {
+  text-align: right;
+}
+
+/* Progress, e.g. experience: an ink track filled with the accent. */
+.meter {
+  height: 12px;
+  background: var(--surface-2);
+}
+
+.meter > span {
+  display: block;
+  height: 100%;
+  background: var(--ink);
+  transition: width 600ms var(--ease);
+}
+
+.empty {
+  padding: 32px 0;
   color: var(--muted);
 }
 
-.badge {
+/* ------------------------------------------------------------- the box */
+
+/* The mark: the logo's square, turned. */
+.mark {
   flex: none;
-  padding: 2px 8px;
-  border-radius: 999px;
-  border: 1px solid rgb(0 149 255 / 0.4);
-  background: rgb(0 149 255 / 0.15);
-  color: #7cc4ff;
-  font-size: 12px;
-  white-space: nowrap;
+  display: inline-block;
+  width: 28px;
+  height: 28px;
+  /* The logo's own tile colour in both themes. */
+  background: #0d2a1c;
+  position: relative;
 }
 
-.room-password {
+.mark::after {
+  content: "";
+  position: absolute;
+  inset: 22%;
+  background: var(--accent);
+  transform: rotate(var(--tilt));
+}
+
+.wordmark {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 22px;
+  font-weight: 500;
+  letter-spacing: -0.05em;
+  line-height: 1;
+  color: var(--ink);
+  text-decoration: none;
+}
+
+/* Loading: one box tipping over, again and again. */
+.loader {
+  display: inline-block;
+  width: 18px;
+  height: 18px;
+  background: var(--ink);
+  animation: box-tip 900ms var(--ease) infinite;
+  transform-origin: 100% 100%;
+}
+
+.loader.accent {
+  background: var(--accent);
+}
+
+@keyframes box-tip {
+  0% {
+    transform: translateX(-100%) rotate(0deg);
+  }
+  60%,
+  100% {
+    transform: translateX(-100%) rotate(90deg);
+  }
+}
+
+.loading-line {
   display: flex;
+  align-items: center;
+  gap: 16px;
+  color: var(--muted);
+}
+
+/* -------------------------------------------------- floating things */
+
+#toasts {
+  position: fixed;
+  left: 50%;
+  bottom: calc(24px + env(safe-area-inset-bottom));
+  z-index: 6;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
   gap: 8px;
-  padding-left: 14px;
+  width: min(calc(100vw - 32px), 460px);
+  pointer-events: none;
 }
 
-.room-password input {
-  flex: 1;
-  min-width: 0;
+.toast {
+  max-width: 100%;
+  padding: 12px 16px;
+  background: var(--ink);
+  color: var(--ground);
+  box-shadow: var(--float-shadow);
+  overflow-wrap: anywhere;
+  animation: rise-in 200ms var(--ease);
 }
 
-.room-password button {
-  flex: none;
+.toast-error {
+  background: var(--danger);
+  color: var(--danger-ink);
 }
 
-/* Small screens: full-width panels, larger tap targets */
-@media (max-width: 600px) {
-  #ui {
-    padding: 0;
-  }
+/* Modal dialogs (<dialog>): the ground colour, a scrim behind, a shadow because they float. */
+dialog.modal {
+  width: min(calc(100vw - 32px), 520px);
+  max-height: calc(100dvh - 32px);
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: var(--ground);
+  color: var(--ink);
+  box-shadow: var(--float-shadow);
+  overflow: auto;
+}
 
-  #ui > * {
-    margin-inline: 0;
-  }
+dialog.modal::backdrop {
+  background: var(--scrim);
+}
 
-  .screen,
-  .screen > .panel {
-    width: 100%;
-  }
+dialog.modal[open] {
+  animation: rise-in 220ms var(--ease);
+}
 
-  .panel {
-    padding: 20px;
-    border-radius: 0;
-    border-left: 0;
-    border-right: 0;
-  }
+dialog.modal:focus {
+  outline: none;
+}
 
-  .wordmark {
-    font-size: 28px;
-  }
+.modal-body {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 24px;
+}
 
-  button,
-  input[type="text"],
-  input[type="password"],
-  input[type="number"] {
-    min-height: 44px;
-  }
+.modal-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
 
-  .check input {
-    width: 22px;
-    height: 22px;
-  }
+.modal-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
 
-  .room-row {
-    min-height: 44px;
-  }
+/* Shown over every screen while the connection to a room is being restored. */
+.reconnect-banner {
+  position: fixed;
+  top: calc(12px + env(safe-area-inset-top));
+  left: 50%;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  max-width: calc(100% - 24px);
+  padding: 8px 8px 8px 16px;
+  transform: translateX(-50%);
+  background: var(--ink);
+  color: var(--ground);
+  box-shadow: var(--float-shadow);
+}
 
-  .room-password {
-    flex-direction: column;
-    padding-left: 0;
-  }
+.reconnect-banner button {
+  min-height: 36px;
+  background: var(--accent);
+  color: var(--accent-ink);
+}
 
-  #toasts {
-    bottom: 16px;
+#boot {
+  position: fixed;
+  inset: 0;
+  z-index: 7;
+  display: grid;
+  place-items: center;
+  background: var(--ground);
+}
+
+/* --------------------------------------------------------------- motion */
+
+@keyframes rise-in {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
   }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* Screen entrance: direct children of `.enter` rise in one after another. */
+.enter > * {
+  animation: rise-in 260ms var(--ease) both;
+}
+
+.enter > :nth-child(2) {
+  animation-delay: 60ms;
+}
+
+.enter > :nth-child(3) {
+  animation-delay: 120ms;
+}
+
+.enter > :nth-child(4) {
+  animation-delay: 180ms;
+}
+
+.enter > :nth-child(n + 5) {
+  animation-delay: 240ms;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -486,150 +1097,40 @@ button:disabled {
   *::before,
   *::after {
     animation-duration: 0.001ms !important;
+    animation-delay: 0ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.001ms !important;
     scroll-behavior: auto !important;
   }
 }
 
-/* Browser extras: quick play, code join, invite, room table head */
-.quick-row {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 10px;
-}
-
-.quick-row > button {
-  flex: none;
-}
-
-.code-join {
-  display: flex;
-  flex: 1 1 14rem;
-  gap: 8px;
-  min-width: 0;
-}
-
-.code-join input {
-  flex: 1;
-  min-width: 0;
-}
-
-.code-join button {
-  flex: none;
-}
-
-.invite-form {
-  border-color: var(--accent);
-}
-
-.room-head {
-  display: flex;
-  gap: 8px;
-  padding: 0 14px;
-  color: var(--muted);
-  font-size: 12px;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-}
-
-.room-head span:nth-child(1) {
-  flex: 1;
-  min-width: 0;
-}
-
-.room-head span:nth-child(2) {
-  flex: 0 0 6rem;
-}
-
-.room-head span:nth-child(3) {
-  flex: 0 0 8rem;
-}
-
-.room-head span:nth-child(4) {
-  flex: 0 0 5rem;
-  text-align: right;
-}
-
-.room-head span:nth-child(5) {
-  flex: 0 0 9rem;
-}
-
-.room-head span:nth-child(6) {
-  flex: 0 0 3.5rem;
-  text-align: right;
-}
-
-.room-row .room-mode,
-.room-row .room-map {
-  flex: 0 1 8rem;
-  min-width: 0;
-  overflow: hidden;
-  color: var(--muted);
-  font-size: 13px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.room-row .room-mode {
-  flex-basis: 6rem;
-}
-
-.room-row .room-count {
-  flex: 0 0 3.5rem;
-  text-align: right;
-}
+/* ---------------------------------------------------------------- phone */
 
 @media (max-width: 600px) {
-  .room-head {
-    display: none;
+  :root {
+    --control: 48px;
   }
 
-  .room-row {
-    flex-wrap: wrap;
+  .page {
+    gap: 24px;
   }
 
-  .room-row .room-name {
-    flex-basis: 100%;
+  .page-head {
+    min-height: 60px;
+  }
+
+  .panel {
+    padding: 20px 16px;
+    margin-inline: calc(var(--margin) * -1);
+  }
+
+  button.big {
+    min-height: 60px;
   }
 }
 
-/* Menu: account button and secondary links */
-.menu-links {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px;
-}
-
-.menu-links button {
-  width: 100%;
-}
-
-.menu-account {
-  font-weight: 600;
-}
-
-/* Shown over every screen while the connection to a room is being restored */
-.reconnect-banner {
-  position: fixed;
-  top: 12px;
-  left: 50%;
-  z-index: 3;
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  max-width: calc(100% - 24px);
-  padding: 8px 12px;
-  transform: translateX(-50%);
-  border: 1px solid var(--danger);
-  border-radius: var(--radius);
-  background: var(--surface);
-  color: var(--text);
-  font-size: 14px;
-}
-
-.reconnect-banner button {
-  min-height: 32px;
-  padding: 4px 10px;
+@media (pointer: coarse) {
+  :root {
+    --control: 48px;
+  }
 }

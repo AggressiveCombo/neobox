@@ -3,6 +3,7 @@
 // NEWS.length; a new entry at the top lights the menu's News button again.
 
 import { h } from "./dom";
+import { openModal } from "./kit";
 
 interface NewsEntry {
   /** ISO date (YYYY-MM-DD). */
@@ -12,6 +13,21 @@ interface NewsEntry {
 
 /** Newest first. Player-facing wording only. */
 const NEWS: NewsEntry[] = [
+  {
+    date: "2026-11-15",
+    items: [
+      "A new look everywhere: clearer screens, bigger type, and a light and a dark theme (Settings, Display; it follows your system by default).",
+      "The main menu plays a match inside the big square. Press Play straight away: you get a guest name you can change.",
+      "Rooms: the players are front and centre, the host's settings fold away under All settings, and on phones the lobby has Players, Match and Chat tabs with Start always at the bottom.",
+      "Phones: play in landscape with a separate Jump button; in portrait the game asks you to turn your phone, and can switch to full screen.",
+      "The match HUD shows your connection: ping, and whether it runs over UDP or the slower fallback.",
+      "Report a player from the room, or a map from the library. Reports go to the moderators.",
+      "Map library: maps show as a grid; open one for its details, votes, Fastest Times and Report.",
+      "Room links now show the room's name, map and player count when you paste them in chat apps.",
+      "Add neobox to your home screen to play it like an app.",
+      "A privacy page explains what neobox stores and why (About, Privacy).",
+    ],
+  },
   {
     date: "2026-11-15",
     items: [
@@ -97,62 +113,30 @@ export function hasUnreadNews(): boolean {
 export function openNews(): () => void {
   writeSeen(NEWS.length);
   let index = 0;
-  let open = true;
-
-  const body = h("div", { class: "news-body" });
+  const list = h("div", { class: "news-body" });
   const counter = h("span", { class: "news-count", "aria-live": "polite" });
   const prev = h("button", { type: "button", onclick: () => show(index - 1) }, "Previous");
   const next = h("button", { type: "button", class: "primary", onclick: () => show(index + 1) }, "Next");
-  const close = h("button", { type: "button", class: "news-close", "aria-label": "Close", onclick: () => closeNews() }, "×");
-
-  const dialog = h(
-    "div",
-    { class: "panel news-dialog", role: "dialog", "aria-modal": "true", "aria-labelledby": "news-title" },
-    h("header", { class: "news-head" }, h("h2", { id: "news-title" }, "Update news"), close),
-    body,
-    h("footer", { class: "news-nav" }, prev, counter, next),
-  );
-  const backdrop = h(
-    "div",
-    {
-      class: "news-backdrop",
-      onclick: (e: Event) => {
-        if (e.target === backdrop) closeNews();
-      },
-    },
-    dialog,
-  );
+  const done = h("button", { type: "button", onclick: () => close() }, "Close");
 
   function show(i: number): void {
     index = Math.min(NEWS.length - 1, Math.max(0, i));
     const entry = NEWS[index];
-    body.replaceChildren(
+    list.replaceChildren(
       h("time", { class: "news-date", datetime: entry.date }, entry.date),
-      h(
-        "ul",
-        { class: "news-list" },
-        entry.items.map((text) => h("li", null, text)),
-      ),
+      h("ul", { class: "news-list boxed-list" }, entry.items.map((text) => h("li", null, text))),
     );
-    counter.textContent = `${index + 1} / ${NEWS.length}`;
+    counter.textContent = `${index + 1} of ${NEWS.length}`;
     prev.disabled = index === 0;
     next.disabled = index === NEWS.length - 1;
   }
 
-  function onKey(e: KeyboardEvent): void {
-    if (e.key === "Escape") closeNews();
-  }
-
-  function closeNews(): void {
-    if (!open) return;
-    open = false;
-    window.removeEventListener("keydown", onKey);
-    backdrop.remove();
-  }
-
+  const { close } = openModal({
+    title: "Update news",
+    body: [list, h("div", { class: "news-pager" }, prev, counter, next)],
+    actions: [done],
+  });
   show(0);
-  document.body.append(backdrop);
-  window.addEventListener("keydown", onKey);
-  close.focus();
-  return closeNews;
+  return () => close();
 }
+

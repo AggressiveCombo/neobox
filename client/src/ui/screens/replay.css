@@ -1,0 +1,172 @@
+/* Replay viewer (replay.ts): the file drop zone, and the player's transport
+   (play, seek, time), step and speed controls under the picture. The dock and
+   top bar backgrounds come from offline.css (.offline-overlay). */
+
+.replay-page .page-inner {
+  max-width: 720px;
+}
+
+/* The drop zone is a whole label around the file input: any click or drop
+   opens or fills the file input. The input itself is kept focusable but hidden. */
+.replay-drop {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  min-height: 240px;
+  padding: 32px 24px;
+  background: var(--surface);
+  color: var(--ink);
+  text-align: center;
+  cursor: pointer;
+}
+
+.replay-drop:hover {
+  background: var(--surface-2);
+}
+
+.replay-drop.drag-over {
+  background: var(--surface-3);
+  box-shadow: inset 0 0 0 2px var(--ink);
+}
+
+.replay-drop:focus-within {
+  outline: 2px solid var(--ink);
+  outline-offset: 3px;
+}
+
+.replay-drop input[type="file"] {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.replay-drop-mark {
+  display: grid;
+  place-items: center;
+  width: 56px;
+  height: 56px;
+  background: var(--surface-3);
+  color: var(--ink);
+  font-size: 1.75rem;
+  line-height: 1;
+}
+
+.replay-drop-mark::before {
+  content: "\2193";
+}
+
+.replay-drop strong {
+  font-size: var(--step-lead);
+  font-weight: 600;
+}
+
+.replay-drop-hint {
+  color: var(--muted);
+  font-size: var(--step-small);
+}
+
+/* Player dock: transport on top, step and speed below. */
+.replay-dock {
+  gap: 14px;
+  padding: 16px var(--margin) calc(16px + env(safe-area-inset-bottom));
+}
+
+.replay-transport {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.replay-play {
+  flex: none;
+  min-width: 112px;
+  min-height: var(--control);
+  font-size: var(--step-lead);
+}
+
+.replay-transport input[type="range"] {
+  flex: 1;
+  min-width: 0;
+}
+
+.replay-time {
+  flex: none;
+  min-width: 15ch;
+  text-align: right;
+  white-space: nowrap;
+  font-size: var(--step-small);
+  font-variant-numeric: tabular-nums;
+}
+
+.replay-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.replay-step {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.replay-step button {
+  min-height: var(--control);
+  padding: 0 14px;
+}
+
+.replay-controls .seg-option {
+  min-height: var(--control);
+}
+
+@media (max-width: 600px) {
+  .replay-dock {
+    gap: 12px;
+  }
+
+  .replay-transport {
+    flex-wrap: wrap;
+  }
+
+  .replay-transport input[type="range"] {
+    order: 3;
+    flex-basis: 100%;
+    height: var(--control);
+  }
+
+  .replay-time {
+    margin-left: auto;
+  }
+
+  .replay-controls {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .replay-step {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .replay-step button {
+    padding: 0 6px;
+  }
+
+  .replay-controls .seg {
+    display: flex;
+    width: 100%;
+  }
+
+  .replay-controls .seg-option {
+    flex: 1;
+  }
+}

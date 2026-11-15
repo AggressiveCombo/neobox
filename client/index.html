@@ -3,10 +3,23 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
-    <meta name="theme-color" content="#000000" />
+    <meta name="theme-color" content="#f7f7f7" />
+    <!-- share:start -->
     <meta name="description" content="neobox is a fan-made spiritual successor to Hitbox.io, created by Chaz. Not affiliated." />
+    <meta property="og:title" content="neobox" />
+    <meta property="og:description" content="Free physics platform-fighter in your browser" />
     <title>neobox</title>
+    <!-- share:end -->
+    <meta property="og:type" content="website" />
+    <meta property="og:image" content="/og.png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <link rel="icon" type="image/png" sizes="192x192" href="./public/icons/icon-192.png" />
     <link rel="icon" type="image/svg+xml" href="./public/logo.svg" />
+    <link rel="icon" type="image/png" sizes="512x512" href="./public/icons/icon-512.png" />
+    <link rel="apple-touch-icon" href="./public/icons/apple-touch-icon.png" />
+    <link rel="manifest" href="./public/manifest.webmanifest" />
     <link rel="stylesheet" href="./src/style.css" />
   </head>
   <body>
@@ -14,7 +27,7 @@
     <canvas id="overlay"></canvas>
     <div id="ui"></div>
     <div id="toasts" aria-live="polite"></div>
-    <div id="boot">loading…</div>
+    <div id="boot" role="status" aria-label="Loading neobox"><div style="display: flex; flex-direction: column; align-items: center; gap: 28px"><span class="mark" style="width: 56px; height: 56px" aria-hidden="true"></span><span class="loader" aria-hidden="true"></span></div></div>
     <script type="module" src="./src/main.ts"></script>
   </body>
 </html>

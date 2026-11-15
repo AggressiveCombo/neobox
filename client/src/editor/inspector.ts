@@ -1,5 +1,6 @@
 // Side panel: the fields of the selected entity, or the map settings when
-// nothing is selected. Every field change is one undoable commit.
+// nothing is selected. Every field change is one undoable commit. Fields are
+// grouped under headings.
 
 import { h } from "../ui/dom";
 import {
@@ -46,6 +47,9 @@ interface Field {
   options?: readonly Option[];
 }
 
+/** A heading and the fields under it. */
+type Group = [string, Field[]];
+
 const MOTION: Option[] = [
   { value: 0, label: "Static" },
   { value: 1, label: "Kinematic" },
@@ -77,99 +81,166 @@ const OBJECTIVE_TARGETS: Option[] = [
 /** Capture zones A to G, stored as 0 to 6. */
 const ZONES: Option[] = ["A", "B", "C", "D", "E", "F", "G"].map((label, value) => ({ value, label }));
 
-const BODY_FIELDS: Field[] = [
-  { key: "2", label: "X", kind: "num", step: 0.5 },
-  { key: "3", label: "Y", kind: "num", step: 0.5 },
-  { key: "4", label: "Angle (deg)", kind: "num", step: 1, deg: true },
-  { key: "14", label: "Motion", kind: "select", options: MOTION },
-  { key: "6", label: "Start velocity X", kind: "num", step: 0.5 },
-  { key: "7", label: "Start velocity Y", kind: "num", step: 0.5 },
-  { key: "5", label: "Start spin (rad/s)", kind: "num", step: 0.1 },
-  { key: "8", label: "Density", kind: "num", step: 0.1, min: 0 },
-  { key: "9", label: "Bounce", kind: "num", step: 0.05, min: 0 },
-  { key: "10", label: "Friction", kind: "num", step: 0.05, min: 0 },
-  { key: "11", label: "Linear damping", kind: "num", step: 0.05, min: 0 },
-  { key: "12", label: "Angular damping", kind: "num", step: 0.05, min: 0 },
-  { key: "13", label: "Kills players", kind: "bool" },
-  { key: "15", label: "Wrap", kind: "bool" },
-  { key: "17", label: "Force X", kind: "num", step: 0.5 },
-  { key: "18", label: "Force Y", kind: "num", step: 0.5 },
-  { key: "19", label: "Torque", kind: "num", step: 0.5 },
-  { key: "20", label: "Damage", kind: "num", step: 1, min: 0 },
-  { key: "21", label: "Dynamic threshold", kind: "num", step: 0.1, min: 0 },
-  { key: "22", label: "Removal threshold", kind: "num", step: 0.1, min: 0 },
-  { key: "23", label: "Scenery (no physics)", kind: "bool" },
-  { key: "24", label: "Z index", kind: "num", step: 1 },
-  { key: "55", label: "Parallax", kind: "num", step: 0.05 },
-  { key: "56", label: "Lifetime (ticks, -1 = forever)", kind: "num", step: 1 },
-  { key: "25", label: "Group", kind: "select", options: GROUPS },
-  { key: "26", label: "Collides with group A", kind: "bool" },
-  { key: "27", label: "Collides with group B", kind: "bool" },
-  { key: "28", label: "Collides with group C", kind: "bool" },
-  { key: "29", label: "Collides with group D", kind: "bool" },
-  { key: "30", label: "Players", kind: "select", options: PASS },
-  { key: "65", label: "Projectiles", kind: "select", options: PASS },
-  { key: "32", label: "Freeze players", kind: "bool" },
-  { key: "43", label: "No jump", kind: "bool" },
-  { key: "45", label: "Bullet", kind: "bool" },
-  { key: "50", label: "Invisible", kind: "bool" },
-  { key: "57", label: "Fixed rotation", kind: "bool" },
-  { key: "60", label: "Immune to abilities", kind: "bool" },
-  { key: "61", label: "Objective", kind: "select", options: OBJECTIVES },
-  { key: "62", label: "Objective target", kind: "select", options: OBJECTIVE_TARGETS },
-  { key: "36", label: "Pinned", kind: "bool" },
-  { key: "37", label: "Pin X", kind: "num", step: 0.5 },
-  { key: "38", label: "Pin Y", kind: "num", step: 0.5 },
-  { key: "39", label: "Force zone", kind: "bool" },
-  { key: "40", label: "Zone X", kind: "num", step: 0.5 },
-  { key: "41", label: "Zone Y", kind: "num", step: 0.5 },
-  { key: "31", label: "Race checkpoint (0 = none, highest = finish)", kind: "num", step: 1, min: 0 },
-  { key: "34", label: "Race object", kind: "bool" },
-];
-
-const JOINT_FIELDS: Field[] = [
-  { key: "5", label: "Kind", kind: "select", options: JOINT_KINDS },
-  { key: "6", label: "Bodies collide", kind: "bool" },
-  { key: "9", label: "Frequency", kind: "num", step: 0.1, min: 0 },
-  { key: "10", label: "Damping", kind: "num", step: 0.05, min: 0 },
-  { key: "11", label: "Length", kind: "num", step: 0.5, min: 0 },
-  { key: "12", label: "Motor speed", kind: "num", step: 0.5 },
-  { key: "13", label: "Max motor force", kind: "num", step: 1, min: 0 },
-  { key: "16", label: "Motor mode", kind: "select", options: MOTOR_MODES },
-  { key: "17", label: "Latched", kind: "bool" },
-];
-
-const TURRET_FIELDS: Field[] = [
-  {
-    key: "9",
-    label: "Team",
-    kind: "select",
-    options: [
-      { value: 1, label: "Free for all" },
-      { value: 2, label: "Red" },
-      { value: 3, label: "Blue" },
+const BODY_GROUPS: Group[] = [
+  [
+    "Position",
+    [
+      { key: "2", label: "X", kind: "num", step: 0.5 },
+      { key: "3", label: "Y", kind: "num", step: 0.5 },
+      { key: "4", label: "Angle (deg)", kind: "num", step: 1, deg: true },
+      { key: "14", label: "Motion", kind: "select", options: MOTION },
+      { key: "15", label: "Wrap", kind: "bool" },
     ],
-  },
-  { key: "7", label: "Health", kind: "num", step: 1, min: 1 },
-  { key: "24", label: "Max health", kind: "num", step: 1, min: 1 },
-  { key: "10", label: "Fire interval (ticks)", kind: "num", step: 1, min: 1 },
-  { key: "11", label: "Range", kind: "num", step: 0.5, min: 0 },
+  ],
+  [
+    "Start motion",
+    [
+      { key: "6", label: "Start velocity X", kind: "num", step: 0.5 },
+      { key: "7", label: "Start velocity Y", kind: "num", step: 0.5 },
+      { key: "5", label: "Start spin (rad/s)", kind: "num", step: 0.1 },
+    ],
+  ],
+  [
+    "Material",
+    [
+      { key: "8", label: "Density", kind: "num", step: 0.1, min: 0 },
+      { key: "9", label: "Bounce", kind: "num", step: 0.05, min: 0 },
+      { key: "10", label: "Friction", kind: "num", step: 0.05, min: 0 },
+      { key: "11", label: "Linear damping", kind: "num", step: 0.05, min: 0 },
+      { key: "12", label: "Angular damping", kind: "num", step: 0.05, min: 0 },
+      { key: "57", label: "Fixed rotation", kind: "bool" },
+    ],
+  ],
+  [
+    "Forces",
+    [
+      { key: "17", label: "Force X", kind: "num", step: 0.5 },
+      { key: "18", label: "Force Y", kind: "num", step: 0.5 },
+      { key: "19", label: "Torque", kind: "num", step: 0.5 },
+      { key: "21", label: "Dynamic threshold", kind: "num", step: 0.1, min: 0 },
+      { key: "22", label: "Removal threshold", kind: "num", step: 0.1, min: 0 },
+    ],
+  ],
+  [
+    "Appearance",
+    [
+      { key: "24", label: "Z index", kind: "num", step: 1 },
+      { key: "55", label: "Parallax", kind: "num", step: 0.05 },
+      { key: "50", label: "Invisible", kind: "bool" },
+      { key: "23", label: "Scenery (no physics)", kind: "bool" },
+      { key: "56", label: "Lifetime (ticks, -1 = forever)", kind: "num", step: 1 },
+    ],
+  ],
+  [
+    "Gameplay",
+    [
+      { key: "13", label: "Kills players", kind: "bool" },
+      { key: "20", label: "Damage", kind: "num", step: 1, min: 0 },
+      { key: "32", label: "Freeze players", kind: "bool" },
+      { key: "43", label: "No jump", kind: "bool" },
+      { key: "45", label: "Bullet", kind: "bool" },
+      { key: "60", label: "Immune to abilities", kind: "bool" },
+      { key: "31", label: "Race checkpoint (0 = none, highest = finish)", kind: "num", step: 1, min: 0 },
+      { key: "34", label: "Race object", kind: "bool" },
+    ],
+  ],
+  [
+    "Objective",
+    [
+      { key: "61", label: "Objective", kind: "select", options: OBJECTIVES },
+      { key: "62", label: "Objective target", kind: "select", options: OBJECTIVE_TARGETS },
+    ],
+  ],
+  [
+    "Collisions",
+    [
+      { key: "30", label: "Players", kind: "select", options: PASS },
+      { key: "65", label: "Projectiles", kind: "select", options: PASS },
+      { key: "25", label: "Group", kind: "select", options: GROUPS },
+      { key: "26", label: "Collides with group A", kind: "bool" },
+      { key: "27", label: "Collides with group B", kind: "bool" },
+      { key: "28", label: "Collides with group C", kind: "bool" },
+      { key: "29", label: "Collides with group D", kind: "bool" },
+    ],
+  ],
+  [
+    "Pinning and zones",
+    [
+      { key: "36", label: "Pinned", kind: "bool" },
+      { key: "37", label: "Pin X", kind: "num", step: 0.5 },
+      { key: "38", label: "Pin Y", kind: "num", step: 0.5 },
+      { key: "39", label: "Force zone", kind: "bool" },
+      { key: "40", label: "Zone X", kind: "num", step: 0.5 },
+      { key: "41", label: "Zone Y", kind: "num", step: 0.5 },
+    ],
+  ],
 ];
 
-/** The turret's bullet (sim keys 12 to 23). */
-const BULLET_FIELDS: Field[] = [
-  { key: "12", label: "Bullet speed", kind: "num", step: 0.5, min: 0 },
-  { key: "13", label: "Bullet size", kind: "num", step: 0.1, min: 0 },
-  { key: "14", label: "Bullet density", kind: "num", step: 0.1, min: 0 },
-  { key: "15", label: "Bullet friction", kind: "num", step: 0.05, min: 0 },
-  { key: "16", label: "Bullet bounce", kind: "num", step: 0.05, min: 0 },
-  { key: "17", label: "Bullet life (ticks)", kind: "num", step: 1, min: 0 },
-  { key: "18", label: "Bullet damage", kind: "num", step: 1, min: 0 },
-  { key: "19", label: "Bullet turn rate", kind: "num", step: 0.1 },
-  { key: "20", label: "Explosion radius", kind: "num", step: 0.5, min: 0 },
-  { key: "21", label: "Bullets bounce", kind: "bool" },
-  { key: "22", label: "Bullet shape", kind: "num", step: 1, min: 0 },
-  { key: "23", label: "Bullet linear damping", kind: "num", step: 0.05, min: 0 },
+const JOINT_GROUPS: Group[] = [
+  [
+    "Joint",
+    [
+      { key: "5", label: "Kind", kind: "select", options: JOINT_KINDS },
+      { key: "6", label: "Bodies collide", kind: "bool" },
+      { key: "17", label: "Latched", kind: "bool" },
+    ],
+  ],
+  [
+    "Spring",
+    [
+      { key: "9", label: "Frequency", kind: "num", step: 0.1, min: 0 },
+      { key: "10", label: "Damping", kind: "num", step: 0.05, min: 0 },
+      { key: "11", label: "Length", kind: "num", step: 0.5, min: 0 },
+    ],
+  ],
+  [
+    "Motor",
+    [
+      { key: "12", label: "Motor speed", kind: "num", step: 0.5 },
+      { key: "13", label: "Max motor force", kind: "num", step: 1, min: 0 },
+      { key: "16", label: "Motor mode", kind: "select", options: MOTOR_MODES },
+    ],
+  ],
+];
+
+/** The turret, then its bullet (sim keys 12 to 23). */
+const TURRET_GROUPS: Group[] = [
+  [
+    "Turret",
+    [
+      {
+        key: "9",
+        label: "Team",
+        kind: "select",
+        options: [
+          { value: 1, label: "Free for all" },
+          { value: 2, label: "Red" },
+          { value: 3, label: "Blue" },
+        ],
+      },
+      { key: "7", label: "Health", kind: "num", step: 1, min: 1 },
+      { key: "24", label: "Max health", kind: "num", step: 1, min: 1 },
+      { key: "10", label: "Fire interval (ticks)", kind: "num", step: 1, min: 1 },
+      { key: "11", label: "Range", kind: "num", step: 0.5, min: 0 },
+    ],
+  ],
+  [
+    "Bullet",
+    [
+      { key: "12", label: "Bullet speed", kind: "num", step: 0.5, min: 0 },
+      { key: "13", label: "Bullet size", kind: "num", step: 0.1, min: 0 },
+      { key: "14", label: "Bullet density", kind: "num", step: 0.1, min: 0 },
+      { key: "15", label: "Bullet friction", kind: "num", step: 0.05, min: 0 },
+      { key: "16", label: "Bullet bounce", kind: "num", step: 0.05, min: 0 },
+      { key: "17", label: "Bullet life (ticks)", kind: "num", step: 1, min: 0 },
+      { key: "18", label: "Bullet damage", kind: "num", step: 1, min: 0 },
+      { key: "19", label: "Bullet turn rate", kind: "num", step: 0.1 },
+      { key: "20", label: "Explosion radius", kind: "num", step: 0.5, min: 0 },
+      { key: "21", label: "Bullets bounce", kind: "bool" },
+      { key: "22", label: "Bullet shape", kind: "num", step: 1, min: 0 },
+      { key: "23", label: "Bullet linear damping", kind: "num", step: 0.05, min: 0 },
+    ],
+  ],
 ];
 
 const SPAWN_FIELDS: Field[] = [
@@ -201,32 +272,52 @@ const CAP_FIELDS: Field[] = [
   { key: "7", label: "Capture time (ticks)", kind: "num", step: 1, min: 1 },
 ];
 
-const MAP_FIELDS: Field[] = [
-  { key: "3", label: "Screen width", kind: "num", step: 1, min: 1, max: 100 },
-  {
-    key: "4",
-    label: "Snap",
-    kind: "select",
-    options: [
-      { value: 0, label: "Off" },
-      { value: 0.5, label: "0.5" },
-      { value: 1, label: "1" },
-      { value: 2, label: "2" },
-      { value: 5, label: "5" },
-      { value: 10, label: "10" },
+const MAP_GROUPS: Group[] = [
+  [
+    "Screen",
+    [
+      { key: "3", label: "Screen width", kind: "num", step: 1, min: 1, max: 100 },
+      {
+        key: "4",
+        label: "Snap",
+        kind: "select",
+        options: [
+          { value: 0, label: "Off" },
+          { value: 0.5, label: "0.5" },
+          { value: 1, label: "1" },
+          { value: 2, label: "2" },
+          { value: 5, label: "5" },
+          { value: 10, label: "10" },
+        ],
+      },
     ],
-  },
-  { key: "18", label: "Gravity", kind: "num", step: 1 },
-  { key: "19", label: "Wrap players", kind: "bool" },
-  { key: "15", label: "Arena width", kind: "num", step: 1, min: 0 },
-  { key: "16", label: "Arena height", kind: "num", step: 1, min: 0 },
-  { key: "12", label: "Background top colour", kind: "colour" },
-  { key: "17", label: "Background bottom colour", kind: "colour" },
-  { key: "9", label: "Background image", kind: "num", step: 1, min: 0 },
-  { key: "10", label: "Background scale", kind: "num", step: 0.1, min: 0 },
-  { key: "7", label: "Background offset X", kind: "num", step: 1 },
-  { key: "8", label: "Background offset Y", kind: "num", step: 1 },
-  { key: "11", label: "Background parallax", kind: "num", step: 0.05, min: 0 },
+  ],
+  [
+    "Physics",
+    [
+      { key: "18", label: "Gravity", kind: "num", step: 1 },
+      { key: "19", label: "Wrap players", kind: "bool" },
+    ],
+  ],
+  [
+    "Arena",
+    [
+      { key: "15", label: "Arena width", kind: "num", step: 1, min: 0 },
+      { key: "16", label: "Arena height", kind: "num", step: 1, min: 0 },
+    ],
+  ],
+  [
+    "Background",
+    [
+      { key: "12", label: "Background top colour", kind: "colour" },
+      { key: "17", label: "Background bottom colour", kind: "colour" },
+      { key: "9", label: "Background image", kind: "num", step: 1, min: 0 },
+      { key: "10", label: "Background scale", kind: "num", step: 0.1, min: 0 },
+      { key: "7", label: "Background offset X", kind: "num", step: 1 },
+      { key: "8", label: "Background offset Y", kind: "num", step: 1 },
+      { key: "11", label: "Background parallax", kind: "num", step: 0.05, min: 0 },
+    ],
+  ],
 ];
 
 const SPAWN_TEAMS: Option[] = [
@@ -313,6 +404,18 @@ function fieldRow(f: Field, value: Value, apply: Apply): HTMLElement {
   return h("label", { class: "field" }, h("span", { class: "field-label" }, f.label), input);
 }
 
+/** Field rows under their headings. `item` is read through `defaults`; `set` gets each change. */
+function fieldGroups(gs: readonly Group[], item: Obj, defaults: Obj, set: (f: Field, v: Value) => void): HTMLElement[] {
+  return gs.map(([title, fs]) =>
+    h(
+      "section",
+      { class: "inspector-group" },
+      h("h3", null, title),
+      ...fs.map((f) => fieldRow(f, readField(item, f, defaults), (v) => set(f, v))),
+    ),
+  );
+}
+
 export interface InspectorOpts {
   doc: Obj;
   sel: readonly Ref[];
@@ -341,7 +444,7 @@ export function renderInspector(o: InspectorOpts): HTMLElement {
     return h(
       "div",
       { class: "inspector" },
-      h("p", { class: "inspector-title" }, `${sel.length} selected`),
+      h("h2", { class: "inspector-title" }, `${sel.length} selected`),
       h("p", { class: "hint" }, "Drag to move them, or use the arrow keys."),
       ...merge,
       h("button", { type: "button", class: "danger", onclick: o.remove }, "Delete"),
@@ -351,19 +454,19 @@ export function renderInspector(o: InspectorOpts): HTMLElement {
   const item = getList(doc, ref.kind)[ref.i];
   if (!item) return mapSettings(doc, o.commit);
   const apply = (patch: Obj): void => o.commit(patchEntity(doc, ref, patch));
-  const fields = (fs: Field[], defaults: Obj): HTMLElement[] =>
-    fs.map((f) => fieldRow(f, readField(item, f, defaults), (v) => apply({ [f.key]: stored(f, v) })));
+  const setField = (f: Field, v: Value): void => apply({ [f.key]: stored(f, v) });
+  const fields = (fs: Field[], defaults: Obj): HTMLElement[] => fs.map((f) => fieldRow(f, readField(item, f, defaults), (v) => setField(f, v)));
 
   const children: (Node | string | false | null | undefined)[] = [
     // bodies go by their map id: the id joints and grapple points refer to
-    h("p", { class: "inspector-title" }, ref.kind === "body" ? `Body ${num(item, "1", ref.i)}` : `${kindLabel(ref.kind)} ${ref.i + 1}`),
+    h("h2", { class: "inspector-title" }, ref.kind === "body" ? `Body ${num(item, "1", ref.i)}` : `${kindLabel(ref.kind)} ${ref.i + 1}`),
   ];
   if (ref.kind === "body") {
-    children.push(...fields(BODY_FIELDS, BODY_DEFAULTS), shapesBlock(doc, ref.i, o.commit));
+    children.push(...fieldGroups(BODY_GROUPS, item, BODY_DEFAULTS, setField), shapesBlock(doc, ref.i, o.commit));
   } else if (ref.kind === "joint") {
     children.push(
       h("p", { class: "hint" }, `Joins ${anchorName(num(item, "7", -1))} and ${anchorName(num(item, "8", -1))}`),
-      ...fields(JOINT_FIELDS, JOINT_DEFAULTS),
+      ...fieldGroups(JOINT_GROUPS, item, JOINT_DEFAULTS, setField),
     );
   } else if (ref.kind === "spawn") {
     const team = flag(item, "6", false) ? 1 : flag(item, "7", false) ? 2 : 0;
@@ -375,7 +478,7 @@ export function renderInspector(o: InspectorOpts): HTMLElement {
       }),
     );
   } else if (ref.kind === "turret") {
-    children.push(...fields(TURRET_FIELDS, TURRET_DEFAULTS), ...fields(BULLET_FIELDS, TURRET_DEFAULTS));
+    children.push(...fieldGroups(TURRET_GROUPS, item, TURRET_DEFAULTS, setField));
   } else if (ref.kind === "grapple") {
     const attach: Field = {
       key: "4",
@@ -404,7 +507,7 @@ function scopeInspector(doc: Obj, bi: number, body: Obj, shapes: readonly number
     return h(
       "div",
       { class: "inspector" },
-      h("p", { class: "inspector-title" }, `Body ${num(body, "1", bi)}`),
+      h("h2", { class: "inspector-title" }, `Body ${num(body, "1", bi)}`),
       h("p", { class: "hint" }, "Click a shape to select it, or draw one with a shape tool."),
       shapesBlock(doc, bi, commit),
     );
@@ -414,7 +517,7 @@ function scopeInspector(doc: Obj, bi: number, body: Obj, shapes: readonly number
     return h(
       "div",
       { class: "inspector" },
-      h("p", { class: "inspector-title" }, `${shapes.length} shapes selected`),
+      h("h2", { class: "inspector-title" }, `${shapes.length} shapes selected`),
       h("p", { class: "hint" }, "Drag to move them, or use the arrow keys."),
       del,
     );
@@ -423,7 +526,7 @@ function scopeInspector(doc: Obj, bi: number, body: Obj, shapes: readonly number
   return h(
     "div",
     { class: "inspector" },
-    h("p", { class: "inspector-title" }, `Shape ${si + 1} in body ${num(body, "1", bi)}`),
+    h("h2", { class: "inspector-title" }, `Shape ${si + 1} in body ${num(body, "1", bi)}`),
     shapeBlock(doc, bi, body, si, asObj(list(body, "s")[si] ?? {}), commit),
     del,
   );
@@ -434,9 +537,9 @@ function shapesBlock(doc: Obj, bodyIdx: number, commit: (next: Obj) => void): HT
   const body = getList(doc, "body")[bodyIdx] ?? {};
   const shapes = list(body, "s");
   return h(
-    "div",
-    { class: "inspector-shapes" },
-    h("p", { class: "field-label" }, `Shapes (${shapes.length})`),
+    "section",
+    { class: "inspector-group inspector-shapes" },
+    h("h3", null, `Shapes (${shapes.length})`),
     ...shapes.map((s, si) => shapeBlock(doc, bodyIdx, body, si, asObj(s), commit)),
   );
 }
@@ -496,16 +599,13 @@ function shapeBlock(doc: Obj, bodyIdx: number, body: Obj, si: number, shape: Obj
 /** Map-wide settings, shown when nothing is selected. */
 function mapSettings(doc: Obj, commit: (next: Obj) => void): HTMLElement {
   const set = asObj(doc.set);
-  const rows = MAP_FIELDS.map((f) =>
-    fieldRow(f, readField(set, f, SETTINGS_DEFAULTS), (v) =>
-      commit({ ...doc, set: withField(set, f.key, stored(f, v), SETTINGS_DEFAULTS) }),
-    ),
-  );
   return h(
     "div",
     { class: "inspector" },
-    h("p", { class: "inspector-title" }, "Map"),
+    h("h2", { class: "inspector-title" }, "Map"),
     h("p", { class: "hint" }, `${getList(doc, "body").length} bodies, ${getList(doc, "joint").length} joints. Select an item to edit it.`),
-    ...rows,
+    ...fieldGroups(MAP_GROUPS, set, SETTINGS_DEFAULTS, (f, v) =>
+      commit({ ...doc, set: withField(set, f.key, stored(f, v), SETTINGS_DEFAULTS) }),
+    ),
   );
 }

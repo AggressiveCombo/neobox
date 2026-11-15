@@ -1,46 +1,83 @@
-// Appearance colour picker: preset swatches and a custom colour input in a dialog. Saving
-// hands the colour (0xRRGGBB) to `onSave`; Cancel, Escape or the backdrop close without saving.
+// Appearance colour picker: a grid of preset colour squares and a custom colour input in a dialog.
+// Saving hands the colour (0xRRGGBB) to `onSave`; Cancel, Escape or the scrim close without saving.
 
 import { cssHex } from "../render/geometry";
 import { h } from "./dom";
+import { openModal } from "./kit";
 
 /** Preset appearance colours. Pale and dark ends are included so every background stays readable. */
-const PRESETS: readonly number[] = [
-  0xe53935, 0xff7043, 0xffb300, 0x7cb342, 0x26a69a, 0x29b6f6, 0x1e88e5, 0x3949ab, 0x8e24aa, 0xec407a, 0xf5f5f5, 0x9e9e9e, 0x5d4037, 0x1b1b1b,
+const PRESETS: readonly { color: number; name: string }[] = [
+  { color: 0xe53935, name: "Red" },
+  { color: 0xff7043, name: "Orange" },
+  { color: 0xffb300, name: "Amber" },
+  { color: 0x7cb342, name: "Green" },
+  { color: 0x26a69a, name: "Teal" },
+  { color: 0x29b6f6, name: "Light blue" },
+  { color: 0x1e88e5, name: "Blue" },
+  { color: 0x3949ab, name: "Dark blue" },
+  { color: 0x8e24aa, name: "Purple" },
+  { color: 0xec407a, name: "Pink" },
+  { color: 0xf5f5f5, name: "White" },
+  { color: 0x9e9e9e, name: "Grey" },
+  { color: 0x5d4037, name: "Brown" },
+  { color: 0x1b1b1b, name: "Black" },
 ];
+
+const STEP: Record<string, number> = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 };
 
 /** Open the colour picker over the current screen. Returns a function that closes it. */
 export function openColorPicker(initial: number, onSave: (color: number) => void): () => void {
   let chosen = initial;
 
   const preview = h("span", { class: "color-preview", "aria-hidden": "true" });
+  const colorName = h("span", { class: "color-name", "aria-live": "polite" });
   const custom = h("input", {
     type: "color",
     class: "color-custom",
-    "aria-label": "custom colour",
     value: cssHex(initial),
     oninput: () => select(Number.parseInt(custom.value.slice(1), 16)),
   });
-  const swatches = PRESETS.map((c) =>
+  const swatches: HTMLButtonElement[] = PRESETS.map(({ color, name }) =>
     h("button", {
       type: "button",
+      role: "radio",
       class: "color-swatch",
-      "aria-label": cssHex(c),
-      "aria-pressed": "false",
-      style: `background:${cssHex(c)}`,
-      onclick: () => select(c),
+      "aria-label": name,
+      "aria-checked": "false",
+      style: `background:${cssHex(color)}`,
+      onclick: () => select(color),
     }),
   );
 
-  /** Mark `color` as the chosen one: preview, custom input and preset pressed states follow it. */
-  function select(color: number): void {
-    chosen = color;
-    preview.style.background = cssHex(color);
-    custom.value = cssHex(color);
-    swatches.forEach((el, i) => el.setAttribute("aria-pressed", String(PRESETS[i] === color)));
+  /** Arrow keys move the choice around the grid, as in any radio group. */
+  function onGridKey(e: Event): void {
+    if (!(e instanceof KeyboardEvent)) return;
+    const step = STEP[e.key];
+    if (step === undefined) return;
+    e.preventDefault();
+    const at = swatches.indexOf(document.activeElement as HTMLButtonElement);
+    const next = (Math.max(0, at) + step + swatches.length) % swatches.length;
+    select(PRESETS[next].color);
+    swatches[next].focus();
   }
 
-  const closeBtn = h("button", { type: "button", onclick: () => dismiss() }, "Cancel");
+  /** Mark `color` as the chosen one: preview, name, custom input and the radio states follow it. */
+  function select(color: number): void {
+    chosen = color;
+    const hex = cssHex(color);
+    preview.style.background = hex;
+    custom.value = hex;
+    const index = PRESETS.findIndex((p) => p.color === color);
+    colorName.textContent = index >= 0 ? PRESETS[index].name : `Custom ${hex}`;
+    swatches.forEach((el, i) => {
+      const on = i === index;
+      el.setAttribute("aria-checked", String(on));
+      // Roving tabindex: the grid is one tab stop, on the chosen colour (or the first when custom).
+      el.tabIndex = on || (index < 0 && i === 0) ? 0 : -1;
+    });
+  }
+
+  const cancelBtn = h("button", { type: "button", onclick: () => close() }, "Cancel");
   const saveBtn = h(
     "button",
     {
@@ -48,45 +85,31 @@ export function openColorPicker(initial: number, onSave: (color: number) => void
       class: "primary",
       onclick: () => {
         onSave(chosen);
-        dismiss();
+        close();
       },
     },
     "Save colour",
   );
-  const sheet = h(
-    "section",
-    { class: "picker-sheet color-sheet" },
-    h("header", { class: "picker-head" }, h("h2", null, "Appearance colour"), closeBtn),
-    h("div", { class: "color-preview-row" }, preview, h("span", { class: "row-sub" }, "Your colour in rooms")),
-    h("div", { class: "color-swatches" }, swatches),
-    h("label", { class: "color-custom-row" }, h("span", null, "Custom"), custom),
-    h("div", { class: "actions" }, saveBtn),
-  );
-  const overlay: HTMLDivElement = h(
-    "div",
-    {
-      class: "picker-overlay",
-      role: "dialog",
-      "aria-modal": "true",
-      "aria-label": "Appearance colour",
-      onclick: (e: Event) => {
-        if (e.target === overlay) dismiss();
-      },
-    },
-    sheet,
-  );
 
-  function dismiss(): void {
-    window.removeEventListener("keydown", onKey);
-    overlay.remove();
-  }
-
-  function onKey(e: KeyboardEvent): void {
-    if (e.key === "Escape") dismiss();
-  }
+  const { close } = openModal({
+    title: "Appearance colour",
+    body: [
+      h(
+        "div",
+        { class: "color-picker" },
+        h(
+          "div",
+          { class: "color-preview-row" },
+          preview,
+          h("div", { class: "color-preview-text" }, colorName, h("span", { class: "muted small" }, "Your colour in rooms")),
+        ),
+        h("div", { class: "color-swatches", role: "radiogroup", "aria-label": "Colour", onkeydown: onGridKey }, swatches),
+        h("label", { class: "color-custom-row" }, "Custom colour", custom),
+      ),
+    ],
+    actions: [cancelBtn, saveBtn],
+  });
 
   select(initial);
-  window.addEventListener("keydown", onKey);
-  document.body.append(overlay);
-  return dismiss;
+  return close;
 }

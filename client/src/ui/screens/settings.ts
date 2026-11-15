@@ -1,13 +1,15 @@
-// Settings: controls, audio, graphics, accessibility and touch. Every change is
-// written to prefs at once (persisted, and read live by the rest of the app).
+// Settings: controls, sound, display, touch and chat on one page. The section list
+// beside them (a row of buttons on phones) jumps to a section. Every change is written
+// to prefs at once (persisted, and read live by the rest of the app).
 
 import type { ScreenFactory } from "../../ctx";
 import { GAMEPAD_LABELS, RESERVED_KEYS, keyLabel } from "../../input";
-import { ACTIONS, DEFAULT_KEYS, prefs, type Action, type KeyBindings, type Palette } from "../../prefs";
+import { ACTIONS, DEFAULT_PREFS, THEMES, prefs, type Action, type KeyBindings, type Palette, type Theme } from "../../prefs";
 import { PALETTES, cssHex } from "../../render/geometry";
 import type { Screen } from "../../state";
 import { openColorPicker } from "../color-picker";
 import { h, type Child } from "../dom";
+import { openModal, page, pageHead, seg, toggle } from "../kit";
 
 const PALETTE_LABELS: Record<Palette, string> = {
   default: "Default",
@@ -15,6 +17,8 @@ const PALETTE_LABELS: Record<Palette, string> = {
   protanopia: "Protanopia (red-blind)",
   tritanopia: "Tritanopia (blue-blind)",
 };
+
+const THEME_LABELS: Record<Theme, string> = { system: "System", light: "Light", dark: "Dark" };
 
 interface Slot {
   action: Action;
@@ -27,6 +31,16 @@ interface Conflict extends Slot {
   others: Action[];
 }
 
+/** The sections, in page order. The id names the section element. */
+const SECTIONS = [
+  { id: "controls", label: "Controls" },
+  { id: "touch", label: "Touch" },
+  { id: "sound", label: "Sound" },
+  { id: "display", label: "Display" },
+  { id: "chat", label: "Chat" },
+] as const;
+type SectionId = (typeof SECTIONS)[number]["id"];
+
 function labelOf(action: Action): string {
   return ACTIONS.find((a) => a.action === action)?.label ?? action;
 }
@@ -35,6 +49,7 @@ function slotKey(action: Action, index: number): string {
   return `${action}:${index}`;
 }
 
+/** A 0..100 (or other range) slider with its current value shown beside the label. */
 function rangeField(
   label: string,
   min: number,
@@ -42,7 +57,7 @@ function rangeField(
   step: number,
   onChange: (v: number) => void,
 ): { el: HTMLElement; set(v: number): void } {
-  const out = h("output", { class: "settings-value" });
+  const out = h("output", { class: "settings-value num" });
   const input = h("input", {
     type: "range",
     min,
@@ -57,7 +72,7 @@ function rangeField(
     },
   });
   return {
-    el: h("div", { class: "settings-field" }, h("div", { class: "settings-field-head" }, h("span", null, label), out), input),
+    el: h("div", { class: "settings-field" }, h("div", { class: "settings-field-head" }, h("span", { class: "field-label" }, label), out), input),
     set(v) {
       input.value = String(v);
       out.textContent = `${v}%`;
@@ -65,14 +80,17 @@ function rangeField(
   };
 }
 
-function checkField(
+/** An on/off switch (kit's toggle) with a setter for outside changes. */
+function switchField(
   label: string,
   hint: string | null,
   onChange: (on: boolean) => void,
 ): { el: HTMLElement; set(on: boolean): void } {
-  const box = h("input", { type: "checkbox", onchange: () => onChange(box.checked) });
+  const el = toggle(label, false, onChange, hint ?? undefined);
+  const box = el.querySelector("input");
+  if (!box) throw new Error("toggle without a switch");
   return {
-    el: h("label", { class: "check settings-check" }, box, h("span", { class: "settings-check-body" }, h("span", null, label), hint ? h("small", { class: "settings-hint" }, hint) : null)),
+    el,
     set(on) {
       box.checked = on;
     },
@@ -107,17 +125,22 @@ export const settingsScreen: ScreenFactory = (ctx) => {
     ACTIONS.flatMap(({ action, label }) => [h("dt", null, label), h("dd", null, GAMEPAD_LABELS[action])]),
   );
 
-  // Audio, graphics and touch inputs; refresh() keeps them in step with prefs.
+  // Sound
   const volume = rangeField("Volume", 0, 100, 1, (v) => prefs.set({ volume: v / 100 }));
-  const muted = checkField("Mute all sound", null, (on) => prefs.set({ muted: on }));
-  const musicMuted = checkField("Mute menu music", null, (on) => prefs.set({ musicMuted: on }));
+  const muted = switchField("Mute all sound", null, (on) => prefs.set({ muted: on }));
+  const musicMuted = switchField("Mute menu music", null, (on) => prefs.set({ musicMuted: on }));
   const jukebox = rangeField("Jukebox volume", 0, 100, 1, (v) => prefs.set({ jukeboxVolume: v / 100 }));
-  const filterProfanity = checkField("Filter profanity", "Masks rude words in other players' chat.", (on) =>
-    prefs.set({ filterProfanity: on }),
+
+  // Display
+  const themeSeg = seg(
+    "Theme",
+    THEMES.map((value) => ({ value, label: THEME_LABELS[value] })),
+    prefs.value.theme,
+    (v) => prefs.set({ theme: v }),
   );
   const scale = rangeField("Render scale", 50, 100, 5, (v) => prefs.set({ renderScale: v / 100 }));
-  const antialias = checkField("Anti-aliasing", "Smooths edges. Takes effect after a reload.", (on) => prefs.set({ antialias: on }));
-  const stats = checkField("Show stats", "Ping, FPS and rollbacks. Same as F3.", (on) => {
+  const antialias = switchField("Anti-aliasing", "Smooths edges. Takes effect after a reload.", (on) => prefs.set({ antialias: on }));
+  const stats = switchField("Show stats", "Ping, FPS and rollbacks. Same as F3.", (on) => {
     prefs.set({ showStats: on });
     store.set({ showStats: on });
   });
@@ -125,7 +148,8 @@ export const settingsScreen: ScreenFactory = (ctx) => {
   const paletteGroup = h(
     "fieldset",
     { class: "palette-group" },
-    h("legend", { class: "settings-legend" }, "Colour palette"),
+    h("legend", { class: "field-label" }, "Colour palette"),
+    h("p", { class: "field-hint" }, "Pick one that keeps red and blue teams apart for you."),
     (Object.keys(PALETTE_LABELS) as Palette[]).map((name) => {
       const info = PALETTES[name];
       const radio = h("input", { type: "radio", name: "palette", value: name, onchange: () => prefs.set({ palette: name }) });
@@ -150,13 +174,9 @@ export const settingsScreen: ScreenFactory = (ctx) => {
       );
     }),
   );
-  const touchSize = rangeField("Control size", 70, 150, 5, (v) => prefs.set({ touchScale: v / 100 }));
-  const leftHanded = checkField("Left-handed layout", "Movement stick on the right, buttons on the left.", (on) =>
-    prefs.set({ touchLeftHanded: on }),
-  );
 
   const colorSwatch = h("span", { class: "swatch", "aria-hidden": "true" });
-  const colorNote = h("p", { class: "settings-hint" });
+  const colorNote = h("p", { class: "field-hint" });
   /** The colour picker opened from this screen, closed again when the screen is left. */
   let closePicker: (() => void) | null = null;
   const chooseColor = h(
@@ -171,6 +191,23 @@ export const settingsScreen: ScreenFactory = (ctx) => {
     "Choose colour",
   );
   const autoColor = h("button", { type: "button", onclick: () => prefs.set({ color: null }) }, "Automatic");
+
+  // Touch: a small drawing of the on-screen controls that follows the size and side.
+  const touchSize = rangeField("Control size", 70, 150, 5, (v) => prefs.set({ touchScale: v / 100 }));
+  const leftHanded = switchField("Left-handed layout", "Movement stick on the right, buttons on the left.", (on) =>
+    prefs.set({ touchLeftHanded: on }),
+  );
+  const touchPreview = h(
+    "div",
+    { class: "touch-preview", "aria-hidden": "true" },
+    h("span", { class: "touch-stick" }),
+    h("span", { class: "touch-buttons" }, h("span"), h("span"), h("span"), h("span")),
+  );
+
+  // Chat
+  const filterProfanity = switchField("Filter profanity", "Masks rude words in other players' chat.", (on) =>
+    prefs.set({ filterProfanity: on }),
+  );
 
   function syncColor(): void {
     const color = prefs.value.color;
@@ -240,12 +277,38 @@ export const settingsScreen: ScreenFactory = (ctx) => {
     prefs.set({ keys: { ...prefs.value.keys, [action]: prefs.value.keys[action].filter((_, j) => j !== index) } });
   }
 
-  function resetKeys(): void {
+  /** Every setting back to its default, after the player confirms. */
+  function resetAll(): void {
     stopCapture();
     conflict = null;
-    notice = { text: "Controls reset to the defaults.", error: false };
-    prefs.set({ keys: DEFAULT_KEYS });
-    renderControls();
+    notice = null;
+    prefs.set({ ...DEFAULT_PREFS });
+    store.set({ showStats: DEFAULT_PREFS.showStats });
+    ctx.toast("Settings reset to the defaults.");
+  }
+
+  function confirmReset(): void {
+    const modal = openModal({
+      title: "Reset settings?",
+      body: [
+        h("p", null, "Controls, sound, display, touch and chat go back to the defaults. Your account and your friends are not changed."),
+      ],
+      actions: [
+        h("button", { type: "button", onclick: () => modal.close() }, "Cancel"),
+        h(
+          "button",
+          {
+            type: "button",
+            class: "danger",
+            onclick: () => {
+              modal.close();
+              resetAll();
+            },
+          },
+          "Reset everything",
+        ),
+      ],
+    });
   }
 
   function bindRow(action: Action, label: string): HTMLElement {
@@ -260,7 +323,7 @@ export const settingsScreen: ScreenFactory = (ctx) => {
           "button",
           {
             type: "button",
-            class: busy ? "bind-slot is-capturing" : "bind-slot",
+            class: busy ? "key bind-slot is-capturing" : "key bind-slot",
             "data-slot": slotKey(action, index),
             "aria-label": `${label} key ${index + 1}: ${keyLabel(code)}. Change`,
             onclick: () => void bind(action, index),
@@ -372,6 +435,7 @@ export const settingsScreen: ScreenFactory = (ctx) => {
 
   function refresh(): void {
     const p = prefs.value;
+    themeSeg.set(p.theme);
     volume.set(Math.round(p.volume * 100));
     muted.set(p.muted);
     scale.set(Math.round(p.renderScale * 100));
@@ -380,6 +444,8 @@ export const settingsScreen: ScreenFactory = (ctx) => {
     for (const [name, radio] of paletteRadios) radio.checked = name === p.palette;
     touchSize.set(Math.round(p.touchScale * 100));
     leftHanded.set(p.touchLeftHanded);
+    touchPreview.style.setProperty("--touch-scale", String(p.touchScale));
+    touchPreview.classList.toggle("is-left", p.touchLeftHanded);
     musicMuted.set(p.musicMuted);
     jukebox.set(Math.round(p.jukeboxVolume * 100));
     filterProfanity.set(p.filterProfanity);
@@ -392,64 +458,90 @@ export const settingsScreen: ScreenFactory = (ctx) => {
     store.set({ screen: ended ? (store.state.room ? "room" : "menu") : returnTo });
   }
 
-  const el = h(
-    "div",
-    { class: "screen settings-screen" },
-    h(
-      "header",
-      { class: "settings-header" },
-      h("button", { type: "button", class: "settings-back", onclick: back }, "Back"),
-      h("h1", { class: "settings-heading" }, "Settings"),
+  const bodies = new Map<SectionId, HTMLElement>();
+  function section(id: SectionId, title: string, hint: string | null, ...content: Child[]): HTMLElement {
+    const el = h(
+      "section",
+      { class: "panel settings-section", "aria-labelledby": `settings-${id}-title`, "data-section": id },
+      h("h2", { id: `settings-${id}-title` }, title),
+      hint ? h("p", { class: "field-hint" }, hint) : null,
+      ...content,
+    );
+    bodies.set(id, el);
+    return el;
+  }
+
+  const sectionNav = h(
+    "nav",
+    { class: "settings-nav", "aria-label": "Settings sections" },
+    SECTIONS.map(({ id, label }) =>
+      h(
+        "button",
+        {
+          type: "button",
+          class: "quiet settings-nav-item",
+          onclick: () => bodies.get(id)?.scrollIntoView({ block: "start" }),
+        },
+        label,
+      ),
     ),
     h(
-      "section",
-      { class: "panel" },
-      h("h2", null, "Controls"),
-      h("p", { class: "settings-hint" }, "Click a key to change it. Each action takes up to three keys."),
-      noticeEl,
-      bindList,
-      h("h3", { class: "settings-sub" }, "Gamepad (fixed)"),
-      gamepad,
-      h("div", { class: "actions" }, h("button", { type: "button", onclick: resetKeys }, "Reset to defaults")),
+      "button",
+      { type: "button", class: "quiet settings-nav-item", onclick: () => store.set({ screen: "account" }) },
+      "Account",
     ),
+  );
+
+  const el = page(
+    "settings-page",
+    pageHead({ title: "Settings", back }),
     h(
-      "section",
-      { class: "panel" },
-      h("h2", null, "Audio"),
-      volume.el,
-      muted.el,
-      musicMuted.el,
-      jukebox.el,
-    ),
-    h(
-      "section",
-      { class: "panel" },
-      h("h2", null, "Graphics"),
-      scale.el,
-      h("p", { class: "settings-hint" }, "Lower is faster on weak devices."),
-      antialias.el,
-      stats.el,
-    ),
-    h("section", { class: "panel" }, h("h2", null, "Accessibility"), paletteGroup),
-    h(
-      "section",
-      { class: "panel" },
-      h("h2", null, "Touch"),
-      touchSize.el,
-      leftHanded.el,
-    ),
-    h(
-      "section",
-      { class: "panel" },
-      h("h2", null, "Chat"),
-      filterProfanity.el,
-    ),
-    h(
-      "section",
-      { class: "panel" },
-      h("h2", null, "Appearance"),
-      h("div", { class: "actions" }, colorSwatch, chooseColor, autoColor),
-      colorNote,
+      "div",
+      { class: "settings-layout" },
+      sectionNav,
+      h(
+        "div",
+        { class: "settings-body" },
+        section(
+          "controls",
+          "Controls",
+          "Click a key to change it. Each action takes up to three keys.",
+          noticeEl,
+          bindList,
+          h("h3", { class: "settings-sub" }, "Gamepad (fixed)"),
+          gamepad,
+        ),
+        section(
+          "touch",
+          "Touch",
+          "The on-screen controls on phones and tablets.",
+          touchSize.el,
+          touchPreview,
+          leftHanded.el,
+        ),
+        section("sound", "Sound", null, volume.el, muted.el, musicMuted.el, jukebox.el),
+        section(
+          "display",
+          "Display",
+          null,
+          h("div", { class: "settings-group" }, h("span", { class: "field-label" }, "Theme"), themeSeg.el),
+          h("p", { class: "field-hint" }, "Follow the system, or always light or dark. Applies at once."),
+          scale.el,
+          h("p", { class: "field-hint" }, "Lower is faster on weak devices."),
+          antialias.el,
+          stats.el,
+          paletteGroup,
+          h("div", { class: "settings-group" }, h("span", { class: "field-label" }, "Your colour"), colorSwatch, chooseColor, autoColor),
+          colorNote,
+        ),
+        section("chat", "Chat", null, filterProfanity.el),
+        h(
+          "section",
+          { class: "settings-reset" },
+          h("p", { class: "field-hint" }, "Changes save as you make them."),
+          h("button", { type: "button", class: "danger", onclick: confirmReset }, "Reset to defaults"),
+        ),
+      ),
     ),
   );
 

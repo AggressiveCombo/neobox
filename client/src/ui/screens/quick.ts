@@ -1,15 +1,16 @@
-// Quick play, as the original's quick menu: one card per mode of the server's rotation
+// Quick play, as the original's quick menu: one tile per mode of the server's rotation
 // (/api/rotation, the original's maps2.json), with its title, the players online in it
 // (refreshed every 30 s like playercount.json), its description and a carousel of its map
-// rotation. Clicking a card (not its arrows) finds a match. Not connected yet: the name is
-// sent with the connect and the mode is kept in state.intent, so app.ts starts quick play
-// once the server welcomes us.
+// rotation. Play starts a match in that mode. Not connected yet: the name is sent with the
+// connect and the mode is kept in state.intent, so app.ts starts quick play once the server
+// welcomes us.
 
-import type { ScreenFactory } from "../../ctx";
 import { fetchQuickModes, fetchStats, type QuickMode } from "../../api";
+import type { ScreenFactory } from "../../ctx";
 import { MAX_NAME_LEN, NAME_RE } from "../../protocol";
 import type { AppState } from "../../state";
 import { h } from "../dom";
+import { field, loading, page, pageHead } from "../kit";
 import { previewCode } from "../map-list";
 import { readStoredName, sanitizeName, writeStoredName } from "./menu";
 
@@ -48,7 +49,8 @@ export const quickScreen: ScreenFactory = (ctx) => {
   let destroyed = false;
 
   const account = store.state.account;
-  const status = h("p", { class: "status", role: "status", "aria-live": "polite" });
+  const status = h("p", { class: "quick-status", role: "status", "aria-live": "polite" });
+  const waitBox = h("div", { class: "quick-wait" });
 
   const nameInput = h("input", {
     type: "text",
@@ -56,20 +58,14 @@ export const quickScreen: ScreenFactory = (ctx) => {
     maxlength: MAX_NAME_LEN,
     autocomplete: "nickname",
     spellcheck: "false",
-    "aria-label": "name",
     value: account?.name ?? (store.state.name || readStoredName()),
     readonly: account !== null,
     oninput: () => sync(),
   });
-  const nameField = h(
-    "label",
-    { class: "field" },
-    h("span", { class: "field-label" }, "Name"),
-    nameInput,
-  );
+  const nameField = field("Name", nameInput);
 
   const cards = new Map<string, Card>();
-  const cardBox = h("div", { class: "quick-cards" }, h("p", { class: "quick-loading" }, "Loading…"));
+  const cardBox = h("div", { class: "quick-cards" }, h("p", { class: "muted" }, "Loading…"));
 
   /** A map preview of the carousel; `code` drawn into a fresh canvas. */
   function thumb(map: QuickMode["maps"][number]): HTMLElement {
@@ -89,48 +85,64 @@ export const quickScreen: ScreenFactory = (ctx) => {
   function carousel(mode: QuickMode): HTMLElement | null {
     const maps = mode.maps;
     if (maps.length === 0) return null;
-    if (maps.length === 1) return h("div", { class: "quick-maps" }, h("div", { class: "quick-thumbs" }, thumb(maps[0]!)));
+    const caption = h("p", { class: "quick-map-name", "aria-live": "polite" });
+    if (maps.length === 1) {
+      const only = h("div", { class: "quick-thumbs" }, thumb(maps[0]!));
+      only.children[0]?.classList.add("quick-thumb-mid");
+      caption.textContent = maps[0]!.author ? `${maps[0]!.name} by ${maps[0]!.author}` : maps[0]!.name;
+      return h("div", { class: "quick-maps" }, only, caption);
+    }
     let at = 0;
     const thumbs = h("div", { class: "quick-thumbs" });
     const draw = (): void => {
       const n = maps.length;
       thumbs.replaceChildren(thumb(maps[(at + n - 1) % n]!), thumb(maps[at]!), thumb(maps[(at + 1) % n]!));
       thumbs.children[1]?.classList.add("quick-thumb-mid");
+      const current = maps[at]!;
+      caption.textContent = current.author ? `${current.name} by ${current.author}` : current.name;
     };
-    const step = (d: number) => (e: Event): void => {
-      e.stopPropagation();
+    const step = (d: number) => (): void => {
       at = (at + d + maps.length) % maps.length;
       draw();
     };
     draw();
     return h(
       "div",
-      { class: "quick-maps" },
-      h("button", { type: "button", class: "quick-arrow", "aria-label": `Previous ${mode.title} map`, onclick: step(-1) }, "‹"),
-      thumbs,
-      h("button", { type: "button", class: "quick-arrow", "aria-label": `Next ${mode.title} map`, onclick: step(1) }, "›"),
+      { class: "quick-carousel" },
+      h(
+        "div",
+        { class: "quick-maps" },
+        h("button", { type: "button", class: "quick-arrow", "aria-label": `Previous ${mode.title} map`, onclick: step(-1) }, "‹"),
+        thumbs,
+        h("button", { type: "button", class: "quick-arrow", "aria-label": `Next ${mode.title} map`, onclick: step(1) }, "›"),
+      ),
+      caption,
     );
   }
 
   function buildCards(modes: QuickMode[]): void {
     cards.clear();
     if (modes.length === 0) {
-      cardBox.replaceChildren(h("p", { class: "quick-loading" }, "This server has no quick play."));
+      cardBox.replaceChildren(h("p", { class: "muted" }, "This server has no quick play."));
       return;
     }
     cardBox.replaceChildren(
       ...modes.map((mode) => {
-        const count = h("span", { class: "quick-count" }, "");
-        const pick = h(
+        const count = h("p", { class: "quick-count num" }, "");
+        const playButton = h(
           "button",
-          { type: "button", class: "quick-choose", onclick: (e: Event) => { e.stopPropagation(); choose(mode.id); } },
-          h("span", { class: "quick-title" }, mode.title),
-          count,
-          h("span", { class: "quick-text" }, mode.description),
+          { type: "button", class: "primary big quick-choose", onclick: () => choose(mode.id) },
+          `Play ${mode.title}`,
         );
-        // like the original's card, a click anywhere on it but the arrows picks the mode
-        const el = h("div", { class: "quick-card", onclick: () => { if (!pick.disabled) pick.click(); } }, pick, carousel(mode));
-        cards.set(mode.id, { el, choose: pick, count });
+        const el = h(
+          "article",
+          { class: "quick-card" },
+          h("div", { class: "quick-card-head" }, h("h2", null, mode.title), count),
+          h("p", { class: "quick-text" }, mode.description),
+          carousel(mode),
+          playButton,
+        );
+        cards.set(mode.id, { el, choose: playButton, count });
         return el;
       }),
     );
@@ -145,10 +157,25 @@ export const quickScreen: ScreenFactory = (ctx) => {
       card.choose.disabled = !valid || waiting;
       card.el.classList.toggle("disabled", card.choose.disabled);
     }
+    renderStatus();
   }
 
   function renderCounts(): void {
-    for (const [id, card] of cards) card.count.textContent = `${counts?.[id] ?? 0} players online`;
+    for (const [id, card] of cards) card.count.replaceChildren(h("span", { class: "quick-count-num num" }, String(counts?.[id] ?? 0)), " players online");
+  }
+
+  /** While matching: the loader and Cancel. Otherwise the connection state after an attempt. */
+  function renderStatus(state?: AppState): void {
+    if (waiting) {
+      waitBox.replaceChildren(
+        loading("Finding a room…"),
+        h("button", { type: "button", class: "quiet", onclick: () => cancel() }, "Cancel"),
+      );
+      status.textContent = "";
+      return;
+    }
+    waitBox.replaceChildren();
+    status.textContent = attempted ? statusText(state ?? store.state) : "";
   }
 
   async function refresh(): Promise<void> {
@@ -164,7 +191,6 @@ export const quickScreen: ScreenFactory = (ctx) => {
   function choose(queue: string): void {
     waiting = true;
     sawConnecting = false;
-    status.textContent = "Finding a match...";
     sync();
     if (store.state.connection === "open") {
       ctx.quickPlay(queue);
@@ -183,44 +209,45 @@ export const quickScreen: ScreenFactory = (ctx) => {
     ctx.play(name);
   }
 
+  function cancel(): void {
+    if (!waiting) return;
+    waiting = false;
+    ctx.disconnect();
+    store.set({ intent: null });
+    sync();
+  }
+
   function back(): void {
     if (waiting) {
-      waiting = false;
-      ctx.disconnect();
-      store.set({ intent: null });
-      status.textContent = "";
-      sync();
+      cancel();
       return;
     }
     store.set({ screen: store.state.connection === "open" ? "browse" : "menu" });
   }
-
-  const backBtn = h("button", { type: "button", class: "quick-back", onclick: () => back() }, "Back");
 
   void quickModes().then(
     (modes) => {
       if (!destroyed) buildCards(modes);
     },
     () => {
-      if (!destroyed) cardBox.replaceChildren(h("p", { class: "quick-loading" }, "Could not load quick play. Try again later."));
+      if (!destroyed) cardBox.replaceChildren(h("p", { class: "muted" }, "Could not load quick play. Try again later."));
     },
   );
   void refresh();
   const timer = window.setInterval(() => void refresh(), REFRESH_MS);
 
-  const el = h(
-    "div",
-    { class: "screen quick" },
-    h(
-      "section",
-      { class: "panel quick-panel" },
-      h("header", { class: "quick-head" }, h("h1", null, "Quick play")),
-      account ? null : nameField,
-      cardBox,
-      status,
-      h("div", { class: "actions" }, backBtn),
-    ),
+  const head = pageHead({ title: "Quick play", back: () => back() });
+  const el = page(
+    "quick",
+    head,
+    h("p", { class: "lead" }, "Jump into a room that is already running. Pick a mode and you are matched with other players."),
+    account ? null : nameField,
+    cardBox,
+    waitBox,
+    status,
   );
+
+  renderStatus();
 
   return {
     el,
@@ -230,13 +257,12 @@ export const quickScreen: ScreenFactory = (ctx) => {
       if (waiting && sawConnecting && state.connection === "closed") {
         waiting = false;
       }
-      if (waiting) status.textContent = "Finding a match...";
-      else status.textContent = attempted ? statusText(state) : "";
       if (state.account && !nameInput.readOnly) {
         nameInput.value = state.account.name;
         nameInput.readOnly = true;
       }
       sync();
+      renderStatus(state);
     },
     destroy() {
       destroyed = true;

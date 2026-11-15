@@ -1,5 +1,5 @@
 // Shared pieces of the map library UI: cached map codes, lazily drawn preview
-// thumbnails and the per-tab queries. The library screen and the room's map picker use them.
+// thumbnails, map cards and the tab strips. The library screen and the room's map picker use them.
 
 import {
   getMap,
@@ -14,28 +14,28 @@ import {
 } from "../account";
 import type { AppCtx } from "../ctx";
 import { drawMapPreview } from "../render/preview";
-import { h } from "./dom";
+import { h, type Child } from "./dom";
 
 export type LibraryTab = "browse" | "mine" | "favourites";
 
 export const SORT_LABELS: Record<LibrarySort, string> = {
-  new: "Newest",
   hot: "Hot",
   top: "Top rated",
+  new: "New",
   plays: "Most played",
   picks: "Staff picks",
 };
 
 export const STATUS_LABELS: Record<MapStatus, string> = {
-  pending: "awaiting approval",
-  approved: "approved",
-  rejected: "rejected",
+  pending: "Awaiting approval",
+  approved: "Approved",
+  rejected: "Rejected",
 };
 
 export const VISIBILITY_LABELS: Record<Visibility, string> = {
-  public: "public",
-  unlisted: "unlisted",
-  private: "private",
+  public: "Public",
+  unlisted: "Unlisted",
+  private: "Private",
 };
 
 /** Map codes by id, fetched once per page load (a map's code never changes). */
@@ -88,7 +88,7 @@ async function drawThumb(box: Element, ctx: AppCtx, id: number): Promise<void> {
     await ctx.engine();
     drawMapPreview(canvas, ctx.wasm.mapPreview(code));
   } catch {
-    box.replaceChildren(h("span", { class: "thumb-missing" }, "no preview"));
+    box.replaceChildren(h("span", { class: "thumb-missing" }, "No preview"));
   }
 }
 
@@ -96,8 +96,8 @@ async function drawThumb(box: Element, ctx: AppCtx, id: number): Promise<void> {
  * A preview thumbnail for map `id`. The code is fetched and drawn only once the
  * thumbnail scrolls near the viewport, so long lists stay cheap.
  */
-export function previewThumb(ctx: AppCtx, id: number): HTMLElement {
-  const box = h("div", { class: "map-thumb" }, h("canvas", { "aria-hidden": "true" }));
+export function previewThumb(ctx: AppCtx, id: number, class_ = "map-thumb"): HTMLElement {
+  const box = h("span", { class: class_ }, h("canvas", { "aria-hidden": "true" }));
   waiting.set(box, { ctx, id });
   observer ??= new IntersectionObserver(onVisible, { rootMargin: "200px" });
   observer.observe(box);
@@ -115,45 +115,69 @@ export async function previewCode(ctx: AppCtx, canvas: HTMLCanvasElement, code: 
   }
 }
 
-/** Status line for a map: visibility, plus approval state for public maps. */
+/** Visibility and approval state of one of your own maps, e.g. "Public · Awaiting approval". */
 export function mapState(map: LibraryMap): string {
   const parts = [VISIBILITY_LABELS[map.visibility]];
   if (map.visibility === "public") parts.push(STATUS_LABELS[map.status]);
   return parts.join(" · ");
 }
 
-/** The library's tab strip (browse, mine, favourites). */
-export function tabBar(current: LibraryTab, onSelect: (tab: LibraryTab) => void): HTMLElement {
-  const tabs: [LibraryTab, string][] = [
-    ["browse", "Browse"],
-    ["mine", "Mine"],
-    ["favourites", "Favourites"],
-  ];
+/** "1 vote", "2 plays": a count with its word. */
+export function plural(n: number, word: string): string {
+  return `${n} ${word}${n === 1 ? "" : "s"}`;
+}
+
+/** A row of tabs (`.tabs`): one `tab` is selected. `label` names the tablist. */
+export function tabStrip<T extends string>(
+  label: string,
+  items: readonly (readonly [T, string])[],
+  current: T,
+  onSelect: (value: T) => void,
+): HTMLElement {
   return h(
     "div",
-    { class: "library-tabs", role: "tablist" },
-    tabs.map(([tab, label]) =>
+    { class: "tabs", role: "tablist", "aria-label": label },
+    items.map(([value, text]) =>
       h(
         "button",
-        { type: "button", class: "tab", role: "tab", "aria-selected": tab === current ? "true" : "false", onclick: () => onSelect(tab) },
-        label,
+        {
+          type: "button",
+          class: "tab",
+          role: "tab",
+          "aria-selected": value === current ? "true" : "false",
+          onclick: () => onSelect(value),
+        },
+        text,
       ),
     ),
   );
 }
 
-function count(n: number, word: string): string {
-  return `${n} ${word}${n === 1 || n === -1 ? "" : "s"}`;
+/** The library's tab strip (browse, mine, favourites). */
+export function tabBar(current: LibraryTab, onSelect: (tab: LibraryTab) => void): HTMLElement {
+  return tabStrip(
+    "Library",
+    [
+      ["browse", "Browse"],
+      ["mine", "Mine"],
+      ["favourites", "Favourites"],
+    ] as const,
+    current,
+    onSelect,
+  );
 }
 
-/** The text lines of a map card: name, then author and counts, then visibility state. */
-export function mapLines(map: LibraryMap): HTMLElement[] {
-  const lines: HTMLElement[] = [
+/**
+ * A map as a card: the square preview, then name, author, votes and plays. A staff pick
+ * gets a chip; `withState` adds the visibility and approval state (your own maps).
+ */
+export function mapCard(ctx: AppCtx, map: LibraryMap, onOpen: () => void, withState = false): HTMLElement {
+  const lines: Child[] = [
     h("span", { class: "map-name" }, map.name),
-    h("span", { class: "map-meta" }, `by ${map.author} · ${count(map.votes, "vote")} · ${count(map.plays, "play")}`),
-    h("span", { class: "map-meta" }, mapState(map)),
+    h("span", { class: "map-meta" }, `by ${map.author}`),
+    h("span", { class: "map-stats num" }, `${plural(map.votes, "vote")} · ${plural(map.plays, "play")}`),
   ];
-  if (map.pick) lines.push(h("span", { class: "map-pick" }, "Staff pick"));
-  if (map.description !== "") lines.push(h("span", { class: "map-desc" }, map.description));
-  return lines;
+  if (map.pick) lines.push(h("span", { class: "chip" }, "Staff pick"));
+  if (withState) lines.push(h("span", { class: "map-state" }, mapState(map)));
+  return h("li", null, h("button", { type: "button", class: "map-card", onclick: onOpen }, previewThumb(ctx, map.id), h("span", { class: "map-body" }, lines)));
 }

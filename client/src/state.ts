@@ -6,6 +6,7 @@ import type { NetStatus, Transport } from "./net";
 export type Screen =
   | "menu"
   | "about"
+  | "privacy"
   | "browse"
   | "quick"
   | "room"

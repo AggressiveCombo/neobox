@@ -25,6 +25,8 @@ const TYPING_SEND_MS = 1000;
 const TYPING_TICK_MS = 1000;
 /** How long the quick-play XP popup stays up. */
 const XP_SHOW_MS = 3000;
+/** Ping above this turns the connection chip red. */
+const BAD_PING_MS = 150;
 
 /** Own chat lines (most recent last), recalled with Up/Down. Kept for the session only. */
 const SENT_HISTORY_MAX = 50;
@@ -43,6 +45,7 @@ const STICK_DEAD = 0.3;
 const STICK_SECTOR = 2.414;
 
 const ACTIONS: TouchSpec[] = [
+  { bit: BIT.UP, area: "jump", label: "Jump", aria: "Jump" },
   { bit: BIT.PUSH, area: "push", label: "Push", aria: "Push X" },
   { bit: BIT.ROCKET, area: "rocket", label: "Rocket", aria: "Rocket Z" },
   { bit: BIT.BAT, area: "bat", label: "Bat", aria: "Bat C" },
@@ -84,7 +87,7 @@ function touchButton(ctx: AppCtx, spec: TouchSpec): HTMLButtonElement {
     spec.label,
   );
   const press = (on: boolean): void => {
-    ctx.input.setTouch(spec.bit, on);
+    ctx.input.setTouch("buttons", spec.bit, on);
     btn.classList.toggle("hud-on", on);
   };
   btn.addEventListener("pointerdown", (e: PointerEvent) => {
@@ -116,10 +119,10 @@ function touchStick(ctx: AppCtx): HTMLElement {
     const on = dist > radius * STICK_DEAD;
     const horizontal = on && Math.abs(dx) * STICK_SECTOR >= Math.abs(dy);
     const vertical = on && Math.abs(dy) * STICK_SECTOR >= Math.abs(dx);
-    ctx.input.setTouch(BIT.LEFT, horizontal && dx < 0);
-    ctx.input.setTouch(BIT.RIGHT, horizontal && dx > 0);
-    ctx.input.setTouch(BIT.UP, vertical && dy < 0);
-    ctx.input.setTouch(BIT.DOWN, vertical && dy > 0);
+    ctx.input.setTouch("stick", BIT.LEFT, horizontal && dx < 0);
+    ctx.input.setTouch("stick", BIT.RIGHT, horizontal && dx > 0);
+    ctx.input.setTouch("stick", BIT.UP, vertical && dy < 0);
+    ctx.input.setTouch("stick", BIT.DOWN, vertical && dy > 0);
     const k = dist > radius ? radius / dist : 1;
     knob.style.transform = `translate(${dx * k}px, ${dy * k}px)`;
     pad.classList.toggle("hud-on", on);
@@ -151,12 +154,89 @@ function touchStick(ctx: AppCtx): HTMLElement {
   return pad;
 }
 
+/** Phones and tablets: a coarse pointer or any touch point. */
+export function isTouchDevice(): boolean {
+  return matchMedia("(pointer: coarse)").matches || navigator.maxTouchPoints > 0;
+}
+
+/** Full screen, then the landscape lock where the browser allows it (Android Chrome). */
+export async function goLandscape(): Promise<void> {
+  if (document.fullscreenElement === null) {
+    try {
+      await document.documentElement.requestFullscreen();
+    } catch {
+      return;
+    }
+  }
+  try {
+    // `lock` is missing from the TypeScript DOM lib; Android Chrome has it.
+    await (screen.orientation as ScreenOrientation & { lock(o: "landscape"): Promise<void> }).lock("landscape");
+  } catch {
+    // unsupported, or not fullscreen: the phone keeps its orientation
+  }
+}
+
+// Leaving fullscreen releases the orientation lock.
+document.addEventListener("fullscreenchange", () => {
+  if (document.fullscreenElement === null) screen.orientation?.unlock?.();
+});
+
+/**
+ * Portrait gate for game screens on touch devices: asks for landscape, offers
+ * full screen, and can be dismissed for this screen. It comes back after the
+ * phone has been landscape again.
+ */
+export function rotateGate(): { el: HTMLElement; destroy(): void } {
+  const portrait = matchMedia("(orientation: portrait)");
+  const coarse = matchMedia("(pointer: coarse)");
+  let dismissed = false;
+  const sync = (): void => {
+    if (!portrait.matches) dismissed = false;
+    el.hidden = !(coarse.matches && portrait.matches && !dismissed);
+  };
+  const full = h(
+    "button",
+    { type: "button", class: "primary", hidden: !document.fullscreenEnabled, onclick: () => void goLandscape() },
+    "Full screen",
+  );
+  const anyway = h(
+    "button",
+    {
+      type: "button",
+      onclick: () => {
+        dismissed = true;
+        sync();
+      },
+    },
+    "Play in portrait anyway",
+  );
+  const el: HTMLElement = h(
+    "div",
+    { class: "hud-rotate", role: "dialog", "aria-label": "Turn your phone sideways", hidden: true },
+    h("div", { class: "hud-rotate-icon", "aria-hidden": "true" }),
+    h("h2", null, "Turn your phone sideways"),
+    h("p", null, "Matches play in landscape. Turn the phone, or go full screen to keep it locked there."),
+    h("div", { class: "hud-rotate-actions" }, full, anyway),
+  );
+  portrait.addEventListener("change", sync);
+  coarse.addEventListener("change", sync);
+  sync();
+  return {
+    el,
+    destroy() {
+      portrait.removeEventListener("change", sync);
+      coarse.removeEventListener("change", sync);
+      el.remove();
+    },
+  };
+}
+
 /**
  * Movement stick and action buttons, sized and handed by the touch prefs (live).
  * Feeds ctx.input. The offline test-play screens reuse it outside a match.
  */
 export function touchControls(ctx: AppCtx): { el: HTMLElement; destroy(): void } {
-  const touchCapable = matchMedia("(pointer: coarse)").matches || navigator.maxTouchPoints > 0;
+  const touchCapable = isTouchDevice();
   const el = h(
     "div",
     { class: "hud-touch-layer", hidden: !touchCapable },
@@ -216,10 +296,13 @@ export const hudScreen: HudFactory = (ctx) => {
   let xpTimer: number | undefined;
   let typingLine = "";
 
-  // Touch controls.
+  // Touch controls. The Chat button sits in the top-right bar (shown on touch devices).
   const touch = touchControls(ctx);
-  const chatBtn = h("button", { type: "button", class: "hud-chat-btn", "aria-label": "Chat", onclick: () => (chatOpen ? closeChat() : openChat()) }, "Chat");
-  touch.el.append(chatBtn);
+  const chatBtn = h(
+    "button",
+    { type: "button", class: "hud-chat-btn", "aria-expanded": "false", hidden: !isTouchDevice(), onclick: () => (chatOpen ? closeChat() : openChat()) },
+    "Chat",
+  );
 
   // Spectator: a click on the arena follows the next player. Hidden unless spectating.
   const spectateLayer = h("div", { class: "hud-spectate", hidden: true, onclick: () => spectateStep(1) });
@@ -243,6 +326,10 @@ export const hudScreen: HudFactory = (ctx) => {
     rollbacks: statRow("Rollbacks"),
   };
   const statsEl = h("div", { class: "hud-stats" }, ...Object.values(statsRows).map((r) => r.el));
+  // Connection chip: transport and ping; only its colour changes when the ping is bad.
+  const linkKind = h("span", { class: "hud-link-kind" });
+  const linkPing = h("span");
+  const linkEl = h("span", { class: "hud-link", title: "Connection" }, linkKind, linkPing);
 
   // Scoreboard.
   const tbody = h("tbody");
@@ -356,9 +443,11 @@ export const hudScreen: HudFactory = (ctx) => {
   }
 
   function toggleFullscreen(): void {
-    const request = document.fullscreenElement !== null ? document.exitFullscreen() : document.documentElement.requestFullscreen();
-    // refused without a user gesture or when already in the state asked for
-    request.catch(() => undefined);
+    if (document.fullscreenElement !== null) {
+      document.exitFullscreen().catch(() => undefined);
+    } else {
+      void goLandscape();
+    }
   }
 
   async function signOut(): Promise<void> {
@@ -375,6 +464,9 @@ export const hudScreen: HudFactory = (ctx) => {
   document.addEventListener("fullscreenchange", syncMenu);
 
   const endBtn = h("button", { type: "button", class: "hud-end", hidden: true, onclick: endMatch }, "End match");
+  const barLeft = h("div", { class: "hud-bar hud-bar-left" }, menuBtn, linkEl, menuPanel);
+  const barRight = h("div", { class: "hud-bar hud-bar-right" }, chatBtn, endBtn, leaveBtn);
+  const rotate = rotateGate();
   const el = h(
     "div",
     { class: "hud-root" },
@@ -383,13 +475,12 @@ export const hudScreen: HudFactory = (ctx) => {
     scoresEl,
     topLeftEl,
     xpEl,
-    menuBtn,
-    menuPanel,
-    leaveBtn,
-    endBtn,
+    barLeft,
+    barRight,
     connEl,
     matchingEl,
     spectateLabelEl,
+    rotate.el,
   );
 
   function renderStats(s: Stats): void {
@@ -399,6 +490,12 @@ export const hudScreen: HudFactory = (ctx) => {
     statsRows.rtt.value.textContent = `${Math.round(s.rttMs)} ms`;
     statsRows.predDepth.value.textContent = `${s.predDepth} ticks`;
     statsRows.rollbacks.value.textContent = `${s.rollbacksPerSec.toFixed(1)}/s`;
+  }
+
+  function renderLink(s: Stats): void {
+    linkKind.textContent = s.transport === "udp" ? "UDP" : "WS";
+    linkPing.textContent = s.pingMs < 0 ? "- ms" : `${Math.round(s.pingMs)} ms`;
+    linkEl.classList.toggle("hud-link-bad", s.pingMs > BAD_PING_MS);
   }
 
   function renderScores(state: AppState): void {
@@ -503,6 +600,7 @@ export const hudScreen: HudFactory = (ctx) => {
   function openChat(): void {
     chatOpen = true;
     chatForm.hidden = false;
+    chatBtn.setAttribute("aria-expanded", "true");
     chatInput.focus();
   }
 
@@ -512,6 +610,7 @@ export const hudScreen: HudFactory = (ctx) => {
     chatInput.value = "";
     chatInput.blur();
     chatForm.hidden = true;
+    chatBtn.setAttribute("aria-expanded", "false");
   }
 
   function sendChat(): void {
@@ -597,6 +696,7 @@ export const hudScreen: HudFactory = (ctx) => {
     }
     if (!same("showStats")) statsEl.hidden = !state.showStats;
     if (state.showStats && (!same("showStats") || !same("stats"))) renderStats(state.stats);
+    if (!same("stats")) renderLink(state.stats);
     if (!same("showScores")) scoresEl.hidden = !state.showScores;
     if (state.showScores && (!same("showScores") || !same("room"))) renderScores(state);
     if (!same("chat") || !same("room")) renderChat(state.chat);
@@ -643,6 +743,7 @@ export const hudScreen: HudFactory = (ctx) => {
       clearInterval(typingTimer);
       clearTimeout(xpTimer);
       touch.destroy();
+      rotate.destroy();
       chatInput.blur();
       latestScene = null;
       setPlayerColors(new Map());

@@ -29,6 +29,7 @@ import { libraryScreen } from "./ui/screens/library";
 import { editorScreen } from "./ui/screens/editor";
 import { quickScreen } from "./ui/screens/quick";
 import { trainingScreen } from "./ui/screens/training";
+import { privacyScreen } from "./ui/screens/privacy";
 import { mountJukebox } from "./ui/jukebox";
 import { showPostGame } from "./ui/postgame";
 import { prefs } from "./prefs";
@@ -40,6 +41,7 @@ import { showToast } from "./ui/toast";
 const SCREEN_FACTORIES: Record<Exclude<Screen, "match">, ScreenFactory> = {
   menu: menuScreen,
   about: aboutScreen,
+  privacy: privacyScreen,
   browse: browserScreen,
   quick: quickScreen,
   room: roomScreen,

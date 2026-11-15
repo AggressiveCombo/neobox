@@ -1,112 +1,108 @@
-/* Quick play screen (ui/screens/quick.ts). Panel and button base styles come from style.css. */
-
-.quick-panel {
-  width: min(100%, 720px);
-  gap: 14px;
-}
-
-.quick-head h1 {
-  margin: 0;
-  font-size: 26px;
-}
+/* Quick play screen (ui/screens/quick.ts). Page, button, field and loader base styles come from style.css;
+   the map thumbnails (.map-thumb) from library.css. */
 
 .quick-cards {
   display: grid;
-  grid-template-columns: 1fr;
-  gap: 12px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 24px;
+  align-items: stretch;
 }
 
-.quick-loading {
+.quick-cards > .muted {
   margin: 0;
-  color: var(--muted);
 }
 
+/* One tile per mode: a panel with the title, the players playing now, the rules and the maps. */
 .quick-card {
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  padding: 12px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--surface-2);
-  cursor: pointer;
-  transition: border-color 120ms ease, background-color 120ms ease, transform 100ms ease;
-}
-
-.quick-card:hover:not(.disabled) {
-  border-color: var(--border-strong);
-  background: var(--surface-hover);
-  transform: scale(1.02);
+  gap: 20px;
+  min-width: 0;
+  padding: 24px;
+  background: var(--surface);
+  transition: opacity var(--fast) var(--ease);
 }
 
 .quick-card.disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
+  opacity: 0.6;
 }
 
-.quick-choose {
+.quick-card-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px 16px;
+}
+
+.quick-card-head h2 {
+  margin: 0;
+  font-size: var(--step-head);
+  font-weight: 500;
+  line-height: 1.05;
+  overflow-wrap: anywhere;
+}
+
+/* The players playing now: a big tabular number over a small caption. */
+.quick-count {
   display: flex;
   flex-direction: column;
-  align-items: flex-start;
-  gap: 4px;
-  width: 100%;
-  min-height: 0;
-  padding: 0;
-  border: 0;
-  background: none;
-  text-align: left;
-}
-
-.quick-choose:hover:not(:disabled) {
-  background: none;
-}
-
-.quick-choose:disabled {
-  opacity: 1;
-}
-
-.quick-title {
-  font-size: 18px;
-  font-weight: 700;
-}
-
-.quick-text {
+  align-items: flex-end;
+  margin: 0;
+  font-size: var(--step-small);
+  line-height: 1.2;
   color: var(--muted);
-  font-size: 14px;
-  line-height: 1.4;
-}
-
-.quick-count {
-  color: var(--accent);
-  font-size: 13px;
   font-variant-numeric: tabular-nums;
 }
 
+.quick-count-num {
+  color: var(--ink);
+  font-size: var(--step-display);
+  font-weight: 500;
+  line-height: 0.9;
+}
+
+.quick-text {
+  margin: 0;
+  color: var(--ink);
+}
+
+/* The rotation: prev and next beside the current map, which sits in the middle. */
+.quick-carousel,
 .quick-maps {
   display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+
+.quick-carousel > .quick-maps {
+  flex-direction: row;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
 }
 
 .quick-thumbs {
   display: grid;
-  flex: 1;
-  grid-template-columns: 1fr 1.3fr 1fr;
+  flex: 1 1 auto;
+  grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr) minmax(0, 0.8fr);
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   min-width: 0;
 }
 
 .quick-thumbs:has(> :only-child) {
-  grid-template-columns: 1fr;
+  grid-template-columns: minmax(0, 1fr);
   justify-items: center;
 }
 
+.quick-thumbs:has(> :only-child) > * {
+  width: min(100%, 320px);
+}
+
 .quick-thumb {
-  width: 100%;
-  height: auto;
-  aspect-ratio: 16 / 10;
-  opacity: 0.7;
+  opacity: 0.5;
+  transition: opacity var(--fast) var(--ease), transform var(--fast) var(--ease);
 }
 
 .quick-thumb-mid,
@@ -116,15 +112,90 @@
 
 .quick-arrow {
   flex: none;
-  min-width: 32px;
-  min-height: 32px;
+  width: 48px;
+  min-width: 48px;
+  height: 48px;
   padding: 0;
-  font-size: 20px;
+  font-size: 1.5rem;
   line-height: 1;
 }
 
-@media (min-width: 640px) {
+.quick-map-name {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--step-small);
+  text-align: center;
+  overflow-wrap: anywhere;
+}
+
+.quick-choose {
+  width: 100%;
+  margin-top: auto;
+}
+
+.quick-choose:disabled {
+  opacity: 1;
+}
+
+/* Matching: the tipping box, the status line and Cancel, in one strip. */
+.quick-wait {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 16px 20px;
+  margin-top: 24px;
+  padding: 20px 24px;
+  background: var(--surface);
+}
+
+.quick-wait:empty {
+  display: none;
+}
+
+.quick-wait .loader {
+  width: 28px;
+  height: 28px;
+}
+
+.quick-status {
+  min-height: 1.4em;
+  margin: 16px 0 0;
+  color: var(--muted);
+  font-size: var(--step-small);
+}
+
+@media (max-width: 900px) {
   .quick-cards {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* Phone: one tile under the other, a full-width play button and comfortable thumbnails. */
+@media (max-width: 600px) {
+  .quick-card {
+    padding: 16px;
+    gap: 16px;
+  }
+
+  .quick-count-num {
+    font-size: 3.5rem;
+  }
+
+  .quick-card-head {
+    align-items: flex-end;
+  }
+
+  .quick-thumbs {
+    gap: 6px;
+  }
+
+  .quick-arrow {
+    width: 44px;
+    min-width: 44px;
+    height: 44px;
+  }
+
+  .quick-wait {
+    padding: 16px;
   }
 }

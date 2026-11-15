@@ -1,71 +1,39 @@
-/* Update news modal (ui/news.ts). Panels and buttons come from style.css. */
-
-.news-backdrop {
-  position: fixed;
-  inset: 0;
-  z-index: 10;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 16px;
-  background: rgb(0 0 0 / 0.6);
-}
-
-.news-dialog {
-  width: min(100%, 520px);
-  max-height: 100%;
-  overflow-y: auto;
-  padding: 20px 24px;
-  gap: 14px;
-}
-
-.news-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-}
-
-.news-close {
-  min-width: 40px;
-  padding: 4px 10px;
-  font-size: 20px;
-  line-height: 1;
-}
+/* Update news dialog (ui/news.ts). Built on openModal: dialog.modal, .modal-body, .modal-actions. */
 
 .news-body {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
+  display: grid;
+  gap: var(--gap);
+  min-height: 12rem;
+  max-height: min(56dvh, 460px);
+  overflow-y: auto;
 }
 
 .news-date {
   color: var(--muted);
-  font-size: 13px;
+  font-size: var(--step-small);
   font-variant-numeric: tabular-nums;
 }
 
 .news-list {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding-left: 20px;
-  line-height: 1.45;
+  display: grid;
+  gap: 14px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: var(--step-body);
+  line-height: 1.5;
 }
 
-.news-nav {
+.news-pager {
   display: flex;
   align-items: center;
-  gap: 10px;
-}
-
-.news-nav > button {
-  flex: 1 1 0;
+  justify-content: space-between;
+  gap: var(--gap);
+  margin-top: var(--gap);
 }
 
 .news-count {
-  flex: none;
   color: var(--muted);
-  font-size: 14px;
+  font-size: var(--step-small);
   font-variant-numeric: tabular-nums;
 }

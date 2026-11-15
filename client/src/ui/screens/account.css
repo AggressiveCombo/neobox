@@ -1,29 +1,141 @@
-/* Level and XP progress on the account card. */
+/* Account screen: sign in or create (guest) and the profile, forms and danger zone (member). */
+
+.account-page .page-inner {
+  max-width: 1040px;
+}
+
+.account-guest {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 420px);
+  gap: 32px;
+  align-items: start;
+}
+
+.account-pitch {
+  gap: 20px;
+}
+
+.account-pitch .boxed-list {
+  gap: 10px;
+}
+
+.account-form {
+  gap: 16px;
+}
+
+.account-form .field-error:empty {
+  display: none;
+}
+
+.account-member {
+  display: grid;
+  grid-template-columns: minmax(0, 300px) minmax(0, 1fr);
+  gap: 32px;
+  align-items: start;
+}
+
+.account-profile {
+  gap: 24px;
+  position: sticky;
+  top: 88px;
+}
+
+.account-id {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  min-width: 0;
+}
+
+.account-id .avatar {
+  width: 72px;
+  height: 72px;
+  font-size: 32px;
+}
+
+/* No colour of its own yet (a guest-side name): a tone square with ink text. */
+.account-id .avatar:not([style]) {
+  background: var(--surface-3);
+  color: var(--ink);
+}
+
+.account-name {
+  font-size: var(--step-lead);
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}
+
+.account-forms {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  min-width: 0;
+}
 
 .account-level {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 8px;
 }
 
-.account-level-head {
+/* The level is the profile's headline number. */
+.account-level-num {
+  font-size: clamp(40px, 6vw, 64px);
+  font-weight: 500;
+  line-height: 1;
+  letter-spacing: -0.02em;
+}
+
+.account-level .meter {
+  height: 10px;
+}
+
+.account-page .actions {
+  align-items: center;
+}
+
+/* Destructive, but at rest it is a tone panel like the others: the red is in the title and the button. */
+.danger-panel {
+  gap: 16px;
+}
+
+.danger-panel h2 {
+  color: var(--danger);
+}
+
+.sign-in-prompt {
   display: flex;
-  justify-content: space-between;
-  align-items: baseline;
-  margin: 0;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 16px;
+  max-width: 640px;
 }
 
-.account-level-bar {
-  height: 8px;
-  border-radius: 999px;
-  background: var(--surface-2);
-  overflow: hidden;
+@media (max-width: 860px) {
+  .account-guest,
+  .account-member {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 24px;
+  }
+
+  /* On a phone the sign-in form comes first; the pitch follows it. */
+  .account-guest > .account-form {
+    order: -1;
+  }
+
+  .account-profile {
+    position: static;
+  }
 }
 
-.account-level-fill {
-  display: block;
-  height: 100%;
-  width: 0;
-  background: var(--accent);
-  transition: width 0.4s ease;
+@media (max-width: 600px) {
+  .account-form,
+  .danger-panel,
+  .account-profile {
+    padding: 20px;
+  }
+
+  .account-level-num {
+    font-size: 48px;
+  }
 }

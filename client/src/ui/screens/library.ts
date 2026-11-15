@@ -1,112 +1,126 @@
-// Map library: browse public maps, your own maps (upload, visibility, delete) and
-// favourites. Maps can be voted on, starred and copied as a code for practice or a room.
-// Browsing works signed out; the other tabs and voting need an account.
+// Map library: browse public maps (hot, top rated, new, most played, staff picks), your own
+// maps (upload, edit, delete) and favourites. A map opens in a dialog with its Fastest Times,
+// where it can be voted on, starred, copied, reported, or played in a room. Browsing works
+// signed out; the other tabs and voting need an account.
 
 import {
   deleteMap,
   errorText,
-  LIBRARY_PAGE_SIZE,
   favouriteMap,
   getMap,
+  LIBRARY_PAGE_SIZE,
   listMakers,
+  listRecords,
   returnScreen,
   updateMap,
   uploadMap,
   voteMap,
   type LibraryMap,
   type LibrarySort,
-  type MakerScore,
+  type MapRecord,
   type Visibility,
 } from "../../account";
+import { sendReport } from "../../api";
 import type { AppCtx, ScreenFactory } from "../../ctx";
 import type { AppState } from "../../state";
 import { h, type Child } from "../dom";
+import { field, openModal, page, pageHead, seg, uid, type SegOption } from "../kit";
 import {
   SORT_LABELS,
   VISIBILITY_LABELS,
   loadTab,
+  mapCard,
   mapCode,
-  mapLines,
+  mapState,
+  plural,
   previewCode,
   previewThumb,
   tabBar,
+  tabStrip,
   type LibraryTab,
 } from "../map-list";
 import { signInPrompt } from "./account";
 
 const SEARCH_DELAY_MS = 300;
 const PREVIEW_DELAY_MS = 300;
-const SORTS: LibrarySort[] = ["new", "hot", "top", "plays", "picks"];
-const VISIBILITIES: Visibility[] = ["public", "unlisted", "private"];
+const ROOM_WAIT_MS = 15_000;
+const ROOM_MAX_PLAYERS = 8;
+const TICKS_PER_SECOND = 30;
+const SORTS: readonly (readonly [LibrarySort, string])[] = (["hot", "top", "new", "plays", "picks"] as const).map(
+  (s) => [s, SORT_LABELS[s]] as const,
+);
+const VISIBILITY_OPTIONS: SegOption<Visibility>[] = (["public", "unlisted", "private"] as const).map((v) => ({
+  value: v,
+  label: VISIBILITY_LABELS[v],
+}));
+
+type ReportReason = "Offensive" | "Broken" | "Stolen" | "Other";
+const REPORT_OPTIONS: SegOption<ReportReason>[] = (["Offensive", "Broken", "Stolen", "Other"] as const).map((r) => ({
+  value: r,
+  label: r,
+}));
+
+/** The map dialog: the map as last fetched, and the element its counts and actions are painted into. */
+interface Detail {
+  id: number;
+  map: LibraryMap;
+  info: HTMLElement;
+  close(): void;
+}
+
+/** The Fastest Times table, fastest first. */
+function recordsTable(rows: MapRecord[]): HTMLElement {
+  return h(
+    "table",
+    { class: "data" },
+    h(
+      "thead",
+      null,
+      h("tr", null, h("th", { scope: "col" }, "Rank"), h("th", { scope: "col" }, "Name"), h("th", { scope: "col" }, "Time"), h("th", { scope: "col" }, "Date")),
+    ),
+    h(
+      "tbody",
+      null,
+      rows.map((r) =>
+        h(
+          "tr",
+          null,
+          h("td", { class: "num" }, String(r.rank)),
+          h("td", null, r.name),
+          h("td", { class: "num" }, (r.ticks / TICKS_PER_SECOND).toFixed(2) + " s"),
+          h("td", null, new Date(r.date * 1000).toLocaleDateString()),
+        ),
+      ),
+    ),
+  );
+}
+
+/** A room name the server accepts (letters, digits, spaces, underscores; 15 characters), from a map name. */
+function roomName(mapName: string): string {
+  const clean = mapName.replace(/[^A-Za-z0-9 _]/g, "").trim().slice(0, 15).trim();
+  return clean === "" ? "Library room" : clean;
+}
 
 export const libraryScreen: ScreenFactory = (ctx) => {
   const { store } = ctx;
   let tab: LibraryTab = "browse";
-  let sort: LibrarySort = "new";
+  let sort: LibrarySort = "hot";
   let q = "";
-  let page = 0;
+  let pageNo = 0;
   let more = false;
   let maps: LibraryMap[] = [];
   let seq = 0;
   let busy = false;
+  let detail: Detail | null = null;
   let searchTimer: ReturnType<typeof setTimeout> | undefined;
   let previewTimer: ReturnType<typeof setTimeout> | undefined;
 
   const status = h("p", { class: "status", role: "status", "aria-live": "polite" });
-  const tabsHost = h("div");
+  const emptyBox = h("div", { class: "library-empty", hidden: true });
+  const scopeHost = h("div");
+  const sortHost = h("div", { class: "library-sorts" });
   const gate = h("div", { hidden: true });
 
-  // Upload form (own maps)
-  const nameInput = h("input", {
-    type: "text",
-    placeholder: "Map name",
-    "aria-label": "map name",
-    autocomplete: "off",
-    spellcheck: "false",
-  });
-  const descInput = h("textarea", {
-    rows: 2,
-    maxlength: 300,
-    placeholder: "What is the map about? (optional)",
-    "aria-label": "map description",
-    autocomplete: "off",
-    spellcheck: "false",
-  });
-  const codeInput = h("textarea", {
-    rows: 3,
-    placeholder: "Paste a map code",
-    "aria-label": "map code",
-    autocomplete: "off",
-    spellcheck: "false",
-    oninput: onCodeInput,
-  });
-  const visSelect = h(
-    "select",
-    { "aria-label": "visibility" },
-    VISIBILITIES.map((v) => h("option", { value: v }, VISIBILITY_LABELS[v])),
-  );
-  const previewCanvas = h("canvas", { "aria-hidden": "true" });
-  const previewBox = h("div", { class: "map-preview", hidden: true }, previewCanvas);
-  const formError = h("p", { class: "field-error", role: "alert" });
-  const uploadForm = h(
-    "form",
-    { class: "social-form upload-form", hidden: true, onsubmit: onUpload },
-    h("h2", null, "Upload a map"),
-    h("label", { class: "field" }, h("span", { class: "field-label" }, "Name"), nameInput),
-    h("label", { class: "field" }, h("span", { class: "field-label" }, "Description"), descInput),
-    h("label", { class: "field" }, h("span", { class: "field-label" }, "Map code"), codeInput),
-    previewBox,
-    formError,
-    h("label", { class: "field" }, h("span", { class: "field-label" }, "Visibility"), visSelect),
-    h(
-      "p",
-      { class: "status" },
-      "Public maps appear in the library once an admin approves them.",
-    ),
-    h("div", { class: "actions" }, h("button", { type: "submit", class: "primary" }, "Upload")),
-  );
-
-  // Browse controls
   const searchInput = h("input", {
     type: "search",
     placeholder: "Search maps",
@@ -116,25 +130,11 @@ export const libraryScreen: ScreenFactory = (ctx) => {
     maxlength: 50,
     oninput: onSearch,
   });
-  const sortSelect = h(
-    "select",
-    { "aria-label": "sort maps", onchange: onSort },
-    SORTS.map((s) => h("option", { value: s }, SORT_LABELS[s])),
-  );
-  const toolbar = h("div", { class: "library-toolbar" }, searchInput, sortSelect);
+  const searchWrap = h("div", { class: "library-search" }, searchInput);
+  const uploadBtn = h("button", { type: "button", class: "primary", onclick: () => openUpload() }, "Upload a map");
+  const toolbar = h("div", { class: "library-toolbar" }, searchWrap, uploadBtn);
 
-  // Top makers this week (browse tab only)
-  const makersList = h("ol", { class: "library-makers-list" });
-  const makersStatus = h("p", { class: "status" });
-  const makers = h(
-    "section",
-    { class: "library-makers", "aria-label": "top makers this week", hidden: true },
-    h("h2", null, "Top makers this week"),
-    makersStatus,
-    makersList,
-  );
-
-  const list = h("ul", { class: "map-list", "aria-label": "maps" });
+  const grid = h("ul", { class: "map-grid", "aria-label": "maps" });
   const moreBtn = h(
     "button",
     {
@@ -142,16 +142,22 @@ export const libraryScreen: ScreenFactory = (ctx) => {
       class: "library-more",
       hidden: true,
       onclick: () => {
-        page += 1;
+        pageNo += 1;
         void load(true);
       },
     },
     "More maps",
   );
 
-  function needsSignIn(): boolean {
-    return tab !== "browse" && store.state.account === null;
-  }
+  const makersList = h("ol", { class: "library-makers-list" });
+  const makersStatus = h("p", { class: "status" });
+  const makers = h(
+    "section",
+    { class: "library-makers panel", "aria-label": "top makers this week", hidden: true },
+    h("h2", null, "Top makers this week"),
+    makersStatus,
+    makersList,
+  );
 
   function needAccount(what: string): boolean {
     if (store.state.account !== null) return false;
@@ -160,13 +166,16 @@ export const libraryScreen: ScreenFactory = (ctx) => {
   }
 
   function paintChrome(): void {
-    tabsHost.replaceChildren(tabBar(tab, selectTab));
-    const signedOut = needsSignIn();
-    toolbar.hidden = tab !== "browse";
-    makers.hidden = tab !== "browse";
-    uploadForm.hidden = tab !== "mine" || signedOut;
-    list.hidden = signedOut;
-    moreBtn.hidden = true;
+    scopeHost.replaceChildren(tabBar(tab, selectTab));
+    const browse = tab === "browse";
+    const signedOut = tab !== "browse" && store.state.account === null;
+    sortHost.replaceChildren(tabStrip("Sort maps", SORTS, sort, selectSort));
+    sortHost.hidden = !browse;
+    searchWrap.hidden = !browse;
+    uploadBtn.hidden = tab !== "mine" || signedOut;
+    toolbar.hidden = searchWrap.hidden && uploadBtn.hidden;
+    makers.hidden = !browse;
+    grid.hidden = signedOut;
     gate.hidden = !signedOut;
     if (signedOut) {
       const text = tab === "mine" ? "Sign in to see and upload your maps." : "Sign in to see your favourite maps.";
@@ -184,6 +193,13 @@ export const libraryScreen: ScreenFactory = (ctx) => {
     reload();
   }
 
+  function selectSort(next: LibrarySort): void {
+    if (next === sort) return;
+    sort = next;
+    paintChrome();
+    reload();
+  }
+
   function onSearch(): void {
     clearTimeout(searchTimer);
     searchTimer = setTimeout(() => {
@@ -193,13 +209,8 @@ export const libraryScreen: ScreenFactory = (ctx) => {
     }, SEARCH_DELAY_MS);
   }
 
-  function onSort(): void {
-    sort = sortSelect.value as LibrarySort;
-    reload();
-  }
-
   function reload(): void {
-    page = 0;
+    pageNo = 0;
     void load(false);
   }
 
@@ -207,9 +218,7 @@ export const libraryScreen: ScreenFactory = (ctx) => {
     try {
       const got = await listMakers();
       makersList.replaceChildren(
-        ...got.map((m) =>
-          h("li", null, h("span", { class: "maker-name" }, m.name), h("span", { class: "maker-score" }, String(m.score))),
-        ),
+        ...got.map((m) => h("li", null, h("span", { class: "maker-name" }, m.name), h("span", { class: "maker-score num" }, String(m.score)))),
       );
       makersStatus.textContent = got.length === 0 ? "Nobody has earned votes or plays this week yet." : "";
     } catch (err) {
@@ -219,16 +228,18 @@ export const libraryScreen: ScreenFactory = (ctx) => {
 
   async function load(append: boolean): Promise<void> {
     const req = ++seq;
-    if (needsSignIn()) {
+    if (tab !== "browse" && store.state.account === null) {
       maps = [];
       more = false;
-      list.replaceChildren();
+      grid.replaceChildren();
+      emptyBox.hidden = true;
       status.textContent = "";
       return;
     }
     status.textContent = "Loading…";
+    emptyBox.hidden = true;
     try {
-      const got = await loadTab(tab, { sort, q, page });
+      const got = await loadTab(tab, { sort, q, page: pageNo });
       if (req !== seq) return;
       more = tab === "browse" && got.length === LIBRARY_PAGE_SIZE;
       maps = append ? [...maps, ...got] : got;
@@ -240,14 +251,17 @@ export const libraryScreen: ScreenFactory = (ctx) => {
   }
 
   function emptyText(): string {
-    if (tab === "mine") return "You have not uploaded any maps yet.";
-    if (tab === "favourites") return "No favourites yet. Star a map to keep it here.";
-    return q === "" ? "No maps yet." : "No maps match that search.";
+    if (tab === "mine") return "You have not uploaded any maps yet. Upload one; it shows in Browse once an admin approves it.";
+    if (tab === "favourites") return "No favourites yet. Open a map and star it to keep it here.";
+    return q === "" ? "No maps yet. Maps show here once an admin approves them." : `No maps match "${q}".`;
   }
 
   function paintList(): void {
-    list.replaceChildren(...maps.map(card));
-    status.textContent = maps.length === 0 ? emptyText() : "";
+    grid.replaceChildren(...maps.map((m) => mapCard(ctx, m, () => openDetail(m), tab === "mine")));
+    status.textContent = "";
+    const empty = maps.length === 0;
+    emptyBox.replaceChildren(...(empty ? [h("p", null, emptyText())] : []));
+    emptyBox.hidden = !empty;
     moreBtn.hidden = !more;
   }
 
@@ -257,21 +271,27 @@ export const libraryScreen: ScreenFactory = (ctx) => {
     const keep = tab !== "favourites" || fresh.favourite === true;
     maps = maps.flatMap((m) => (m.id !== id ? [m] : keep ? [fresh] : []));
     paintList();
+    if (detail?.id === id) {
+      detail.map = fresh;
+      paintInfo();
+    }
   }
 
   /** Run a map action, then show the map's new state. Failures go to a toast. */
-  async function act(run: () => Promise<void>, id: number): Promise<void> {
+  async function act(run: () => Promise<void>, id: number): Promise<boolean> {
     try {
       await run();
       await refresh(id);
+      return true;
     } catch (err) {
       ctx.toast(errorText(err), "error");
+      return false;
     }
   }
 
   async function vote(map: LibraryMap, v: 1 | -1): Promise<void> {
     if (needAccount("vote")) return;
-    const next: -1 | 0 | 1 = map.my_vote === v ? 0 : v;
+    const next = map.my_vote === v ? 0 : v;
     await act(() => voteMap(map.id, next), map.id);
   }
 
@@ -291,168 +311,343 @@ export const libraryScreen: ScreenFactory = (ctx) => {
     }
   }
 
-  async function removeMap(map: LibraryMap): Promise<void> {
-    if (!confirm(`Delete "${map.name}"? This cannot be undone.`)) return;
-    try {
-      await deleteMap(map.id);
-      maps = maps.filter((m) => m.id !== map.id);
-      paintList();
-      ctx.toast("Map deleted.");
-    } catch (err) {
-      ctx.toast(errorText(err), "error");
-    }
-  }
 
-  async function editDescription(map: LibraryMap): Promise<void> {
-    const text = prompt(`Describe "${map.name}" in up to 300 characters.`, map.description);
-    if (text === null || text.trim() === map.description) return;
-    await act(() => updateMap(map.id, { description: text.trim() }), map.id);
-  }
-
-  function visibilitySelect(map: LibraryMap): HTMLSelectElement {
-    const select: HTMLSelectElement = h(
-      "select",
-      {
-        "aria-label": "visibility",
-        onchange: () => void act(() => updateMap(map.id, { visibility: select.value as Visibility }), map.id),
+  /** The Fastest Times of a library map: the table, or "No Records" before anyone has raced it. */
+  function recordsSection(id: number): HTMLElement {
+    const text = h("p", { class: "status", role: "status", "aria-live": "polite" }, "Fetching…");
+    const body = h("div");
+    const section = h("section", { class: "map-records" }, h("h3", null, "Fastest Times"), text, body);
+    listRecords(id).then(
+      (rows) => {
+        if (!section.isConnected) return;
+        if (rows.length === 0) {
+          text.textContent = "No Records";
+          return;
+        }
+        text.textContent = "";
+        body.replaceChildren(recordsTable(rows));
       },
-      VISIBILITIES.map((v) => h("option", { value: v, selected: v === map.visibility }, VISIBILITY_LABELS[v])),
+      (err: unknown) => {
+        if (section.isConnected) text.textContent = errorText(err);
+      },
     );
-    return select;
+    return section;
   }
 
-  function card(map: LibraryMap): HTMLElement {
+  /** The play action for the room the viewer is in: the host sets the map; a new room is made otherwise. */
+  function roomAction(map: LibraryMap): HTMLElement | null {
+    const { room, myId } = store.state;
+    if (room !== null) {
+      const host = room.quick === null && room.players.some((p) => p.id === myId && p.host);
+      if (!host) return h("p", { class: "status" }, "Only the room's host can change the room's map.");
+      return h("button", { type: "button", class: "primary", onclick: () => useInRoom(map) }, "Use in my room");
+    }
+    return h("button", { type: "button", class: "primary", onclick: () => playInNewRoom(map) }, "Play in a new room");
+  }
+
+  function useInRoom(map: LibraryMap): void {
+    ctx.send({ t: "set_library_map", id: map.id });
+    detail?.close();
+    ctx.toast(`${map.name} is the room's map.`);
+    store.set({ screen: returnScreen(store.state) });
+  }
+
+  function playInNewRoom(map: LibraryMap): void {
+    // The server answers with the new room's state, which moves the app to the room screen;
+    // the map is set then. Give up waiting if the room never arrives.
+    const unsubscribe = store.subscribe((s) => {
+      if (s.room === null) return;
+      clearTimeout(timer);
+      unsubscribe();
+      ctx.send({ t: "set_library_map", id: map.id });
+    });
+    const timer = setTimeout(unsubscribe, ROOM_WAIT_MS);
+    ctx.send({ t: "create_room", name: roomName(map.name), password: null, max_players: ROOM_MAX_PLAYERS, public: true });
+    detail?.close();
+  }
+
+  function openDetail(map: LibraryMap): void {
+    const info = h("div", { class: "map-info" });
+    const body: Child[] = [previewThumb(ctx, map.id, "detail-thumb"), info];
+    if (store.state.account?.name === map.author) body.push(ownSection(map));
+    body.push(recordsSection(map.id));
+    const modal = openModal({
+      title: map.name,
+      body,
+      onclose: () => {
+        detail = null;
+      },
+    });
+    modal.dialog.classList.add("map-dialog");
+    detail = { id: map.id, map, info, close: modal.close };
+    paintInfo();
+  }
+
+  /** The counts, description, actions and report link of the open map. Repainted after every change. */
+  function paintInfo(): void {
+    if (detail === null) return;
+    const { map, info } = detail;
+    const own = store.state.account?.name === map.author;
     const up = map.my_vote === 1;
     const down = map.my_vote === -1;
     const starred = map.favourite === true;
     // the server refuses votes on your own map
-    const own = store.state.account?.name === map.author;
     const voteTitle = own ? "You can't vote on your own map" : undefined;
-    const actions: Child[] = [
+    info.replaceChildren(
+      h("p", { class: "map-byline" }, `by ${map.author}`, map.pick ? h("span", { class: "chip" }, "Staff pick") : null),
+      ...(own ? [h("p", { class: "map-state" }, mapState(map))] : []),
+      h("p", { class: "map-desc" }, map.description !== "" ? map.description : "No description."),
+      h("p", { class: "map-stats num" }, `${plural(map.votes, "vote")} · ${plural(map.plays, "play")}`),
       h(
-        "button",
-        {
-          type: "button",
-          class: up ? "vote on" : "vote",
-          "aria-pressed": up ? "true" : "false",
-          "aria-label": "Upvote",
-          disabled: own,
-          title: voteTitle,
-          onclick: () => void vote(map, 1),
-        },
-        "▲",
+        "div",
+        { class: "map-actions" },
+        h(
+          "button",
+          {
+            type: "button",
+            "aria-pressed": up ? "true" : "false",
+            disabled: own,
+            title: voteTitle,
+            onclick: () => void vote(map, 1),
+          },
+          "Upvote",
+        ),
+        h(
+          "button",
+          {
+            type: "button",
+            "aria-pressed": down ? "true" : "false",
+            disabled: own,
+            title: voteTitle,
+            onclick: () => void vote(map, -1),
+          },
+          "Downvote",
+        ),
+        h(
+          "button",
+          { type: "button", "aria-pressed": starred ? "true" : "false", onclick: () => void toggleFavourite(map) },
+          starred ? "Starred" : "Star",
+        ),
+        h("button", { type: "button", onclick: () => void copyCode(map) }, "Copy code"),
       ),
-      h(
-        "button",
-        {
-          type: "button",
-          class: down ? "vote on" : "vote",
-          "aria-pressed": down ? "true" : "false",
-          "aria-label": "Downvote",
-          disabled: own,
-          title: voteTitle,
-          onclick: () => void vote(map, -1),
-        },
-        "▼",
-      ),
-      h(
-        "button",
-        {
-          type: "button",
-          class: starred ? "fav on" : "fav",
-          "aria-pressed": starred ? "true" : "false",
-          onclick: () => void toggleFavourite(map),
-        },
-        starred ? "Starred" : "Star",
-      ),
-      h("button", { type: "button", onclick: () => void copyCode(map) }, "Copy code"),
-    ];
-    if (tab === "mine") {
-      actions.push(
-        h("button", { type: "button", onclick: () => void editDescription(map) }, "Edit description"),
-        visibilitySelect(map),
-        h("button", { type: "button", class: "danger", onclick: () => void removeMap(map) }, "Delete"),
-      );
-    }
-    return h(
-      "li",
-      null,
-      h(
-        "article",
-        { class: "map-card" },
-        previewThumb(ctx, map.id),
-        h("div", { class: "map-body" }, mapLines(map), h("div", { class: "map-row" }, actions)),
-      ),
+      h("div", { class: "map-play" }, roomAction(map)),
+      ...(own ? [] : [h("button", { type: "button", class: "quiet map-report", onclick: () => openReport(map) }, "Report map")]),
     );
   }
 
-  function onCodeInput(): void {
-    clearTimeout(previewTimer);
-    previewTimer = setTimeout(() => {
-      previewTimer = undefined;
-      void showPreview();
-    }, PREVIEW_DELAY_MS);
-  }
-
-  async function showPreview(): Promise<void> {
-    const code = codeInput.value.trim();
-    previewBox.hidden = code === "";
-    if (code === "") {
-      formError.textContent = "";
-      return;
-    }
-    formError.textContent = (await previewCode(ctx, previewCanvas, code)) ?? "";
-  }
-
-  async function onUpload(e: Event): Promise<void> {
-    e.preventDefault();
-    if (busy) return;
-    const name = nameInput.value.trim();
-    const code = codeInput.value.trim();
-    if (name === "" || code === "") {
-      formError.textContent = "Give the map a name and paste its code.";
-      return;
-    }
-    busy = true;
-    formError.textContent = "";
-    try {
-      const visibility = visSelect.value as Visibility;
-      await uploadMap({ name, description: descInput.value.trim(), code, visibility });
-      nameInput.value = "";
-      descInput.value = "";
-      codeInput.value = "";
-      previewBox.hidden = true;
-      ctx.toast(visibility === "public" ? "Map uploaded. It shows once an admin approves it." : "Map uploaded.");
-      if (tab === "mine") reload();
-    } catch (err) {
-      formError.textContent = errorText(err);
-    } finally {
-      busy = false;
-    }
-  }
-
-  const back = h(
-    "button",
-    { type: "button", class: "back", onclick: () => store.set({ screen: returnScreen(store.state) }) },
-    "Back",
-  );
-
-  const el = h(
-    "div",
-    { class: "screen social-screen library-screen" },
-    h(
+  /** Owner's controls: description, visibility, save and delete. */
+  function ownSection(map: LibraryMap): HTMLElement {
+    let visibility = map.visibility;
+    const desc = h("textarea", {
+      rows: 3,
+      maxlength: 300,
+      placeholder: "What is the map about? (optional)",
+      autocomplete: "off",
+      spellcheck: "false",
+    });
+    desc.value = map.description;
+    const visSeg = seg("Visibility", VISIBILITY_OPTIONS, map.visibility, (v) => {
+      visibility = v;
+    });
+    const save = h(
+      "button",
+      {
+        type: "button",
+        onclick: async () => {
+          const patch: { description?: string; visibility?: Visibility } = {};
+          const text = desc.value.trim();
+          if (text !== map.description) patch.description = text;
+          if (visibility !== map.visibility) patch.visibility = visibility;
+          if (Object.keys(patch).length === 0) {
+            ctx.toast("No changes to save.");
+            return;
+          }
+          if (await act(() => updateMap(map.id, patch), map.id)) ctx.toast("Map saved.");
+        },
+      },
+      "Save changes",
+    );
+    const remove = h(
+      "button",
+      {
+        type: "button",
+        class: "danger",
+        onclick: async () => {
+          if (!confirm(`Delete "${map.name}"? This cannot be undone.`)) return;
+          try {
+            await deleteMap(map.id);
+            maps = maps.filter((m) => m.id !== map.id);
+            paintList();
+            detail?.close();
+            ctx.toast("Map deleted.");
+          } catch (err) {
+            ctx.toast(errorText(err), "error");
+          }
+        },
+      },
+      "Delete map",
+    );
+    return h(
       "section",
-      { class: "panel" },
-      h("header", { class: "social-head" }, back, h("h1", { class: "social-title" }, "Library")),
-      tabsHost,
-      gate,
-      makers,
-      uploadForm,
-      toolbar,
-      status,
-      list,
-      moreBtn,
-    ),
+      { class: "map-owner", "aria-label": "Edit your map" },
+      h("h3", null, "Edit your map"),
+      field("Description", desc),
+      h("div", { class: "field" }, h("span", { class: "field-label" }, "Visibility"), visSeg.el),
+      h("p", { class: "field-hint" }, "Public maps show in Browse once an admin approves them."),
+      h("div", { class: "actions" }, save, remove),
+    );
+  }
+
+  function openReport(map: LibraryMap): void {
+    let reason: ReportReason = "Offensive";
+    let modal: { close(): void } | undefined;
+    let sending = false;
+    const formId = uid("report");
+    const details = h("textarea", { rows: 3, maxlength: 300, autocomplete: "off", spellcheck: "false" });
+    const formError = h("p", { class: "field-error", role: "alert" });
+    const send = h("button", { type: "submit", class: "primary", form: formId }, "Send report");
+    const cancel = h("button", { type: "button", onclick: () => modal?.close() }, "Cancel");
+    const form = h(
+      "form",
+      {
+        id: formId,
+        class: "modal-form",
+        onsubmit: async (e: Event) => {
+          e.preventDefault();
+          if (sending) return;
+          sending = true;
+          send.disabled = true;
+          formError.textContent = "";
+          const extra = details.value.trim();
+          try {
+            await sendReport({ kind: "map", map: map.id, reason: extra === "" ? reason : `${reason}: ${extra}` });
+            modal?.close();
+            ctx.toast("Thanks. An admin will look at this map.");
+          } catch (err) {
+            formError.textContent = errorText(err);
+          } finally {
+            sending = false;
+            send.disabled = false;
+          }
+        },
+      },
+      h("p", { class: "field-hint" }, `Tell an admin what is wrong with "${map.name}".`),
+      h("div", { class: "field" }, h("span", { class: "field-label" }, "Reason"), seg("Reason", REPORT_OPTIONS, reason, (v) => {
+        reason = v;
+      }).el),
+      field("Details (optional)", details),
+      formError,
+    );
+    modal = openModal({ title: "Report map", body: [form], actions: [cancel, send] });
+  }
+
+  function openUpload(): void {
+    if (needAccount("upload maps")) return;
+    let visibility: Visibility = "public";
+    let modal: { close(): void } | undefined;
+    const formId = uid("upload");
+    const nameInput = h("input", {
+      type: "text",
+      placeholder: "Map name",
+      "aria-label": "map name",
+      autocomplete: "off",
+      spellcheck: "false",
+    });
+    const descInput = h("textarea", {
+      rows: 2,
+      maxlength: 300,
+      placeholder: "What is the map about? (optional)",
+      autocomplete: "off",
+      spellcheck: "false",
+    });
+    const codeInput = h("textarea", {
+      rows: 4,
+      placeholder: "Paste a map code",
+      "aria-label": "map code",
+      autocomplete: "off",
+      spellcheck: "false",
+      oninput: onCodeInput,
+    });
+    const previewCanvas = h("canvas", { "aria-hidden": "true" });
+    const previewBox = h("div", { class: "map-preview", hidden: true }, previewCanvas);
+    const formError = h("p", { class: "field-error", role: "alert" });
+    const submit = h("button", { type: "submit", class: "primary", form: formId }, "Upload map");
+    const cancel = h("button", { type: "button", onclick: () => modal?.close() }, "Cancel");
+
+    function onCodeInput(): void {
+      clearTimeout(previewTimer);
+      previewTimer = setTimeout(() => {
+        previewTimer = undefined;
+        void showPreview();
+      }, PREVIEW_DELAY_MS);
+    }
+
+    async function showPreview(): Promise<void> {
+      const code = codeInput.value.trim();
+      previewBox.hidden = code === "";
+      if (code === "") {
+        formError.textContent = "";
+        return;
+      }
+      formError.textContent = (await previewCode(ctx, previewCanvas, code)) ?? "";
+    }
+
+    async function onUpload(e: Event): Promise<void> {
+      e.preventDefault();
+      if (busy) return;
+      const name = nameInput.value.trim();
+      const code = codeInput.value.trim();
+      if (name === "" || code === "") {
+        formError.textContent = "Give the map a name and paste its code.";
+        return;
+      }
+      busy = true;
+      submit.disabled = true;
+      formError.textContent = "";
+      try {
+        await uploadMap({ name, description: descInput.value.trim(), code, visibility });
+        modal?.close();
+        ctx.toast(visibility === "public" ? "Map uploaded. It shows once an admin approves it." : "Map uploaded.");
+        if (tab === "mine") reload();
+      } catch (err) {
+        formError.textContent = errorText(err);
+      } finally {
+        busy = false;
+        submit.disabled = false;
+      }
+    }
+
+    const form = h(
+      "form",
+      { id: formId, class: "modal-form", onsubmit: onUpload },
+      field("Name", nameInput),
+      field("Description", descInput),
+      field("Map code", codeInput),
+      previewBox,
+      h("div", { class: "field" }, h("span", { class: "field-label" }, "Visibility"), seg("Visibility", VISIBILITY_OPTIONS, visibility, (v) => {
+        visibility = v;
+      }).el),
+      h("p", { class: "field-hint" }, "Public maps show in Browse once an admin approves them."),
+      formError,
+    );
+    modal = openModal({
+      title: "Upload a map",
+      body: [form],
+      actions: [cancel, submit],
+      onclose: () => clearTimeout(previewTimer),
+    });
+  }
+
+  const el = page(
+    "library-page",
+    pageHead({ title: "Library", back: () => store.set({ screen: returnScreen(store.state) }) }),
+    scopeHost,
+    gate,
+    sortHost,
+    toolbar,
+    status,
+    emptyBox,
+    h("div", { class: "library-layout" }, h("div", { class: "library-main" }, grid, moreBtn), makers),
   );
 
   paintChrome();
@@ -462,14 +657,17 @@ export const libraryScreen: ScreenFactory = (ctx) => {
   return {
     el,
     update(state: AppState, prev: AppState) {
-      if (state.account?.id === prev.account?.id) return;
-      paintChrome();
-      reload();
+      if (state.account?.id !== prev.account?.id) {
+        paintChrome();
+        reload();
+      }
+      if (detail !== null && state.room !== prev.room) paintInfo();
     },
     destroy() {
       clearTimeout(searchTimer);
       clearTimeout(previewTimer);
       seq += 1;
+      detail?.close();
       el.remove();
     },
   };

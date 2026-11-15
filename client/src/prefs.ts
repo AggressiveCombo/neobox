@@ -33,6 +33,9 @@ export const DEFAULT_KEYS: KeyBindings = {
 /** Team/player colour sets: "default", or palettes that stay distinct for colour-blind players. */
 export type Palette = "default" | "deuteranopia" | "protanopia" | "tritanopia";
 
+export type Theme = "system" | "light" | "dark";
+export const THEMES: readonly Theme[] = ["system", "light", "dark"];
+
 export interface Prefs {
   keys: KeyBindings;
   /** 0..1 */
@@ -57,6 +60,8 @@ export interface Prefs {
   filterProfanity: boolean;
   /** Jukebox volume (0..1), on top of the master volume. */
   jukeboxVolume: number;
+  /** Colour theme of the menus: follow the system, or always light or dark. */
+  theme: Theme;
 }
 
 export const DEFAULT_PREFS: Prefs = {
@@ -73,6 +78,7 @@ export const DEFAULT_PREFS: Prefs = {
   musicMuted: false,
   filterProfanity: true,
   jukeboxVolume: 0.5,
+  theme: "system",
 };
 
 const STORAGE_KEY = "neobox.prefs";
@@ -108,6 +114,7 @@ export function sanitizePrefs(raw: unknown): Prefs {
     musicMuted: typeof o.musicMuted === "boolean" ? o.musicMuted : DEFAULT_PREFS.musicMuted,
     filterProfanity: typeof o.filterProfanity === "boolean" ? o.filterProfanity : DEFAULT_PREFS.filterProfanity,
     jukeboxVolume: clamp(o.jukeboxVolume, 0, 1, DEFAULT_PREFS.jukeboxVolume),
+    theme: THEMES.includes(o.theme as Theme) ? (o.theme as Theme) : DEFAULT_PREFS.theme,
   };
 }
 

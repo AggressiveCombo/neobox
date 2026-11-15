@@ -1,47 +1,47 @@
-/* Settings screen. Panels and buttons come from style.css. */
+/* Settings: a section list beside the sections. On phones the list is a row of
+   choices above one column. */
 
-.settings-screen {
-  gap: 12px;
-  padding-bottom: 24px;
+.settings-page .settings-layout {
+  display: grid;
+  gap: 16px;
+  align-items: start;
 }
 
-.settings-header {
+.settings-nav {
   display: flex;
-  align-items: center;
-  gap: 12px;
+  gap: 4px;
+  margin: 0 calc(var(--margin) * -1);
+  padding: 0 var(--margin);
+  overflow-x: auto;
+  scrollbar-width: none;
 }
 
-.settings-heading {
-  font-size: 20px;
-  font-weight: 600;
+.settings-nav::-webkit-scrollbar {
+  display: none;
 }
 
-.settings-back {
-  min-width: 44px;
+.settings-nav-item {
+  flex: 0 0 auto;
 }
 
-.settings-hint {
-  color: var(--muted);
-  font-size: 13px;
+.settings-body {
+  display: grid;
+  gap: 24px;
+  min-width: 0;
+}
+
+.settings-section {
+  scroll-margin-top: 88px;
 }
 
 .settings-sub {
-  margin-top: 4px;
-  color: var(--muted);
-  font-size: 13px;
-  font-weight: 600;
-}
-
-.settings-legend {
-  color: var(--muted);
-  font-size: 13px;
-  padding: 0;
-  margin-bottom: 6px;
+  margin: 8px 0 0;
+  font-size: var(--step-body);
 }
 
 .settings-notice {
-  min-height: 1.4em;
-  font-size: 14px;
+  min-height: 1.5em;
+  margin: 0;
   color: var(--muted);
 }
 
@@ -49,68 +49,60 @@
   color: var(--danger);
 }
 
-.settings-field {
+.settings-group {
   display: flex;
-  flex-direction: column;
-  gap: 6px;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+}
+
+/* Sliders: a label and its value on one line, the slider below. */
+.settings-field {
+  display: grid;
+  gap: 8px;
 }
 
 .settings-field-head {
   display: flex;
-  justify-content: space-between;
   align-items: baseline;
-  font-size: 15px;
+  justify-content: space-between;
+  gap: 16px;
 }
 
 .settings-value {
   color: var(--muted);
-  font-variant-numeric: tabular-nums;
 }
 
 .settings-range {
   width: 100%;
-  min-height: 40px;
-  margin: 0;
-  accent-color: var(--accent);
 }
 
-.settings-check {
-  align-items: flex-start;
-}
-
-.settings-check-body {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.settings-check-body small {
-  color: var(--muted);
-  font-size: 13px;
-}
-
-/* Controls */
-
+/* Controls: one row per action, its keys as boxes. */
 .bind-list {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
+  display: grid;
 }
 
 .bind-row {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  padding-bottom: 10px;
-  border-bottom: 1px solid var(--border);
+  display: grid;
+  gap: 8px;
+  padding: 12px 0;
+  border-top: 1px solid var(--line);
 }
 
-.bind-row:last-child {
-  border-bottom: 0;
+.bind-row:first-child {
+  border-top: 0;
+  padding-top: 0;
+}
+
+@media (min-width: 600px) {
+  .bind-row {
+    grid-template-columns: 9rem minmax(0, 1fr);
+    align-items: center;
+  }
 }
 
 .bind-label {
-  font-size: 15px;
+  font-weight: 500;
 }
 
 .bind-keys {
@@ -122,144 +114,212 @@
 
 .bind-key {
   display: inline-flex;
-  align-items: center;
+  align-items: stretch;
 }
 
 .bind-slot {
-  min-width: 96px;
-  border-radius: 6px 0 0 6px;
-  font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
-  font-size: 14px;
-}
-
-.bind-remove {
-  min-width: 40px;
-  padding: 8px 10px;
-  border-radius: 0 6px 6px 0;
-  margin-left: -1px;
-  color: var(--muted);
-}
-
-.bind-add,
-.bind-cancel {
-  font-size: 14px;
-}
-
-.bind-none {
-  color: var(--muted);
-  font-size: 14px;
+  min-height: var(--control);
+  min-width: 5.5rem;
+  padding: 0 12px;
 }
 
 .bind-slot.is-capturing,
 .bind-add.is-capturing {
-  border-color: var(--accent);
-  color: var(--accent);
+  background: var(--accent);
+  color: var(--accent-ink);
+  box-shadow: inset 0 0 0 2px var(--ink);
+}
+
+.bind-remove {
+  min-width: var(--control);
+  min-height: var(--control);
+  padding: 0;
+  background: transparent;
+  font-size: var(--step-lead);
+  line-height: 1;
+}
+
+.bind-add,
+.bind-cancel {
+  min-height: var(--control);
+}
+
+.bind-none {
+  color: var(--muted);
+  align-self: center;
 }
 
 .bind-conflict {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 10px 12px;
-  border: 1px solid var(--danger);
-  border-radius: var(--radius);
-  font-size: 14px;
+  display: grid;
+  gap: 12px;
+  padding: 16px;
+  background: var(--ground);
+  box-shadow: inset 4px 0 0 var(--danger);
 }
 
+.bind-conflict p {
+  margin: 0;
+}
+
+/* The gamepad mapping: a fixed list of terms. */
 .settings-pad {
   display: grid;
-  grid-template-columns: auto 1fr;
-  gap: 6px 14px;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 8px 24px;
   margin: 0;
-  font-size: 14px;
 }
 
 .settings-pad dt {
-  color: var(--text);
+  color: var(--muted);
 }
 
 .settings-pad dd {
   margin: 0;
-  color: var(--muted);
 }
 
-/* Accessibility: palette choice with team and FFA swatches */
-
+/* Palettes: a radio, a name, and the team colours as squares. */
 .palette-group {
-  display: flex;
-  flex-direction: column;
+  display: grid;
   gap: 8px;
-  min-width: 0;
   margin: 0;
   padding: 0;
   border: 0;
+  min-width: 0;
+}
+
+.palette-group > legend {
+  padding: 0;
+  margin-bottom: 4px;
 }
 
 .palette-option {
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 10px 12px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--surface-2);
+  min-height: var(--control);
+  padding: 8px 12px;
+  background: var(--ground);
   cursor: pointer;
 }
 
+.palette-option:hover {
+  background: var(--surface-2);
+}
+
 .palette-option:has(input:checked) {
-  border-color: var(--accent);
+  box-shadow: inset 0 0 0 2px var(--ink);
 }
 
 .palette-option input {
-  width: 18px;
-  height: 18px;
-  margin: 0;
-  flex: none;
-  accent-color: var(--accent);
+  flex: 0 0 auto;
 }
 
 .palette-body {
   display: flex;
-  flex-direction: column;
-  gap: 6px;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 16px;
+  flex: 1 1 auto;
   min-width: 0;
-}
-
-.palette-name {
-  font-size: 15px;
 }
 
 .palette-swatches {
   display: flex;
-  flex-wrap: wrap;
   align-items: center;
   gap: 4px;
 }
 
 .swatch {
   display: inline-block;
-  width: 14px;
-  height: 14px;
-  border-radius: 50%;
-  border: 1px solid var(--border-strong);
+  width: 20px;
+  height: 20px;
+  flex: 0 0 auto;
+  box-shadow: inset 0 0 0 1px var(--line-strong);
 }
 
 .swatch-gap {
-  width: 6px;
+  width: 8px;
 }
 
-@media (max-width: 600px) {
-  .bind-slot {
-    min-height: 44px;
+/* Touch: the controls drawn at the chosen size, on the chosen side. */
+.touch-preview {
+  --touch-scale: 1;
+  position: relative;
+  height: 128px;
+  background: var(--ground);
+  overflow: hidden;
+}
+
+.touch-stick,
+.touch-buttons {
+  position: absolute;
+  bottom: 16px;
+  width: calc(56px * var(--touch-scale));
+  height: calc(56px * var(--touch-scale));
+}
+
+.touch-stick {
+  left: 16px;
+  box-shadow: inset 0 0 0 2px var(--ink);
+}
+
+.touch-buttons {
+  right: 16px;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  width: calc(124px * var(--touch-scale));
+  height: calc(124px * var(--touch-scale));
+  bottom: 12px;
+}
+
+.touch-buttons > span {
+  background: var(--surface-2);
+  box-shadow: inset 0 0 0 2px var(--ink);
+}
+
+.touch-preview.is-left .touch-stick {
+  left: auto;
+  right: 16px;
+}
+
+.touch-preview.is-left .touch-buttons {
+  right: auto;
+  left: 16px;
+}
+
+.settings-reset {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding-top: 8px;
+}
+
+.settings-reset .field-hint {
+  margin: 0;
+}
+
+@media (min-width: 900px) {
+  .settings-page .settings-layout {
+    grid-template-columns: 200px minmax(0, 1fr);
+    gap: 40px;
   }
 
-  .bind-remove,
-  .bind-add,
-  .bind-cancel {
-    min-height: 44px;
+  .settings-nav {
+    flex-direction: column;
+    position: sticky;
+    top: 88px;
+    gap: 8px;
+    margin: 0;
+    padding: 0;
+    overflow: visible;
   }
 
-  .settings-range {
-    min-height: 44px;
+  .settings-nav-item {
+    justify-content: flex-start;
+    text-align: left;
   }
 }

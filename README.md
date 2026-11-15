@@ -82,15 +82,21 @@ This is why I have set up some goals that I believe will make the project an imp
   save any finished match as a replay and watch it with pause, speed and
   seeking; learn the controls in the training hall; practise alone on any
   map without a server.
-* **Your settings.** Key rebinding, volume, menu music, render scale and
-  anti-aliasing, colour-blind palettes, touch control size and a left-handed
-  layout.
+* **Your settings.** Key rebinding, volume, menu music, a light and a dark
+  theme (following the system by default), render scale and anti-aliasing,
+  colour-blind palettes, touch control size and a left-handed layout.
 * **Runs everywhere.** WebGPU renderer with a WebGL2 fallback, dynamic
-  resolution, any refresh rate; keyboard, gamepad and full touch controls;
-  iOS Safari included.
+  resolution, any refresh rate; keyboard, gamepad and full touch controls
+  laid out for phones in landscape; iOS Safari included. Installable to the
+  home screen, and room links show the room's name, map and players when
+  shared in chat apps.
+* **Safe to run in public.** Players report other players and maps (with the
+  room's recent chat as evidence), and a privacy page states what the server
+  keeps.
 * **Admin interface.** Live rooms, players, tick rate, latency, bandwidth,
   match state and logs, kick/ban/close controls, the map approval queue,
-  staff picks and recorded clips (`/admin`).
+  staff picks, recorded clips, player and map reports, and account passwords
+  (`/admin`).
 
 ## Layout
 
@@ -131,8 +137,9 @@ bash deploy/build.sh && (cd client && bun run e2e)   # browser end-to-end suite 
 
 * **Chaz**, creator of Hitbox.io, whose game this project pays tribute to.
 * Box2D by Erin Catto; Box2DFlash/box2dweb ports by their authors.
-* Third-party music and data (menu music, emoji names, the profanity word
-  list) are listed in [CREDITS.md](CREDITS.md).
+* Third-party music, type and data (menu music, the Hanken Grotesk
+  typeface, emoji names, the profanity word list, flags) are listed in
+  [CREDITS.md](CREDITS.md).
 
 ## Licence
 

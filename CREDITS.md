@@ -12,6 +12,14 @@ Third-party assets shipped with neobox, with their authors, licences and source 
 - Source: https://opengameart.org/content/menu-loop-0 (WAV file `menu_loop_0.wav`)
 - Changes: transcoded to 44.1 kHz stereo MP3 at 128 kb/s, loudness-normalised to -16 LUFS integrated, 3 s fade-out at the end.
 
+## Fonts
+
+### Typeface: `client/public/fonts/hanken-grotesk-*.woff2`
+
+- Typeface: Hanken Grotesk (variable, weights 300-800), Copyright 2021 The Hanken Grotesk Project Authors
+- Licence: SIL Open Font License 1.1, https://openfontlicense.org (copy in `client/public/fonts/LICENSE-hanken-grotesk.txt`)
+- Source: https://github.com/marcologous/hanken-grotesk (the latin and latin-ext WOFF2 subsets served by Google Fonts)
+
 ## Images
 
 ### Country flags: `client/public/flags/`

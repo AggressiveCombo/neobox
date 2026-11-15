@@ -2,7 +2,10 @@
 
 import type { ScreenFactory } from "../../ctx";
 import { h } from "../dom";
-import { logoImg } from "../logo";
+import { page, pageHead } from "../kit";
+import { openNews } from "../news";
+import { privacyLink } from "./privacy";
+import "./info.css";
 
 export const CREDIT_LINE = "neobox is a fan-made spiritual successor to Hitbox.io, created by Chaz. Not affiliated.";
 export const REPO_URL = "https://github.com/AggressiveCombo/neobox";
@@ -26,6 +29,14 @@ export const THIRD_PARTY: AssetCredit[] = [
     licence: "CC0 1.0 (public domain dedication)",
     licenceUrl: "https://creativecommons.org/publicdomain/zero/1.0/",
     sourceUrl: "https://opengameart.org/content/menu-loop-0",
+  },
+  {
+    asset: "Typeface",
+    title: "Hanken Grotesk",
+    author: "the Hanken Grotesk Project Authors",
+    licence: "SIL Open Font License 1.1",
+    licenceUrl: "https://openfontlicense.org",
+    sourceUrl: "https://github.com/marcologous/hanken-grotesk",
   },
   {
     asset: "Chat emoji names",
@@ -62,49 +73,52 @@ export const THIRD_PARTY: AssetCredit[] = [
 ];
 
 export const aboutScreen: ScreenFactory = (ctx) => {
-  const el = h(
-    "div",
-    { class: "screen about" },
+  const head = pageHead({ title: "About neobox", back: () => ctx.store.set({ screen: "menu" }) });
+  const el = page(
+    "about",
+    head,
     h(
-      "section",
-      { class: "panel" },
-      h("header", { class: "brand" }, logoImg(64), h("h1", { class: "wordmark" }, "About neobox")),
-      h("p", { class: "credit" }, CREDIT_LINE),
+      "div",
+      { class: "info-grid" },
       h(
-        "p",
-        null,
-        "The game is original work. No Hitbox.io assets, images, sounds, fonts or texts are used.",
-      ),
-      h(
-        "p",
-        null,
-        "neobox is free software licensed under the GNU Affero General Public License, version 3 or later (AGPL-3.0-or-later).",
-      ),
-      h(
-        "ul",
-        { class: "links-list" },
-        h("li", null, h("a", { href: REPO_URL, target: "_blank", rel: "noopener" }, "Source code")),
-        h("li", null, h("a", { href: LICENSE_URL, target: "_blank", rel: "noopener" }, "AGPL-3.0-or-later license text")),
-      ),
-      h("p", null, "Third-party assets:"),
-      h(
-        "ul",
-        { class: "links-list" },
-        THIRD_PARTY.map((c) =>
-          h(
-            "li",
-            null,
-            `${c.asset}: "${c.title}" by ${c.author}, licensed ${c.licence}. `,
-            h("a", { href: c.sourceUrl, target: "_blank", rel: "noopener" }, "Source page"),
-            " / ",
-            h("a", { href: c.licenceUrl, target: "_blank", rel: "noopener" }, "Licence"),
-          ),
+        "section",
+        { class: "info-main" },
+        h("p", { class: "info-lead" }, "neobox is a free game of square fighters batting each other off floating maps. It runs in the browser: no install, and guests can play."),
+        h("p", null, CREDIT_LINE),
+        h("p", null, "The game is original work. No Hitbox.io assets, images, sounds, fonts or texts are used."),
+        h("p", null, "neobox is free software licensed under the GNU Affero General Public License, version 3 or later (AGPL-3.0-or-later)."),
+        h(
+          "ul",
+          { class: "info-links" },
+          h("li", null, h("a", { href: REPO_URL, target: "_blank", rel: "noopener" }, "Source code")),
+          h("li", null, h("a", { href: LICENSE_URL, target: "_blank", rel: "noopener" }, "AGPL-3.0-or-later licence text")),
+        ),
+        h(
+          "div",
+          { class: "info-actions" },
+          h("button", { type: "button", onclick: () => openNews() }, "News"),
+          privacyLink(ctx.store),
         ),
       ),
       h(
-        "div",
-        { class: "actions" },
-        h("button", { type: "button", onclick: () => ctx.store.set({ screen: "menu" }) }, "Back"),
+        "section",
+        { class: "info-credits" },
+        h("h2", null, "Third-party assets"),
+        h(
+          "ul",
+          { class: "boxed-list" },
+          THIRD_PARTY.map((c) =>
+            h(
+              "li",
+              null,
+              h("strong", null, c.asset),
+              `: "${c.title}" by ${c.author}, licensed ${c.licence}. `,
+              h("a", { href: c.sourceUrl, target: "_blank", rel: "noopener" }, "Source page"),
+              " · ",
+              h("a", { href: c.licenceUrl, target: "_blank", rel: "noopener" }, "Licence"),
+            ),
+          ),
+        ),
       ),
     ),
   );

@@ -8,21 +8,22 @@ import { keyLabel } from "../../input";
 import { type Action, prefs } from "../../prefs";
 import { FrameLoop } from "../../local-loop";
 import type { Screen } from "../../state";
-import { h } from "../dom";
-import { touchControls } from "./hud";
+import { type Child, h } from "../dom";
+import { page, pageHead } from "../kit";
+import { rotateGate, touchControls } from "./hud";
 
 const TICK_HZ = 30;
 /** Endless game mode id, the same one practice uses (lives would strand a player). */
 const ENDLESS = 6;
 
-/** Label for the first key bound to a game action, as the player set it in Settings. */
-function keyName(action: Action): string {
+/** The key bound to a game action, as the player set it in Settings. */
+function keyName(action: Action): Child {
   const code = prefs.value.keys[action][0];
-  return code === undefined ? "an unbound key" : keyLabel(code);
+  return h("span", { class: "key" }, code === undefined ? "an unbound key" : keyLabel(code));
 }
 
-/** Lesson texts, one per step, worded with the player's current bindings. */
-function lessonTexts(): string[] {
+/** Lesson texts, one per step, worded with the player's current bindings (keys are `.key` boxes). */
+function lessons(): Child[][] {
   const left = keyName("left");
   const right = keyName("right");
   const jump = keyName("up");
@@ -31,13 +32,23 @@ function lessonTexts(): string[] {
   const bat = keyName("bat");
   const grab = keyName("grab");
   return [
-    `Run with ${left} and ${right}. Jump with ${jump}, and press it again in the air for a second jump. Jump off walls too.`,
-    `Keep holding ${jump} after a jump to rise higher. Your marker turns yellow while the second jump is ready.`,
-    `Landing on top of a dummy takes it out. Try it on the dummy that stands still.`,
-    `Hold ${push} to push hard: a dummy shoved into a wall or off the edge is out.`,
-    `Hold ${bat} and let go to swing the bat; it aims by itself. Hold ${rocket} and steer with ${left} and ${right} to aim a rocket.`,
-    `The bar above each name is stamina: abilities spend it and everyone can see it. Hold ${grab} next to a moving object to hang on.`,
-    `Abilities combine, and objects move too. Mix them until you can hit the dummies at will, then Finish.`,
+    ["Run with ", left, " and ", right, ". Jump with ", jump, ", and press it again in the air for a second jump. Jump off walls too."],
+    ["Keep holding ", jump, " after a jump to rise higher. Your marker turns yellow while the second jump is ready."],
+    ["Landing on top of a dummy takes it out. Try it on the dummy that stands still."],
+    ["Hold ", push, " to push hard: a dummy shoved into a wall or off the edge is out."],
+    [
+      "Hold ",
+      bat,
+      " and let go to swing the bat; it aims by itself. Hold ",
+      rocket,
+      " and steer with ",
+      left,
+      " and ",
+      right,
+      " to aim a rocket.",
+    ],
+    ["The bar above each name is stamina: abilities spend it and everyone can see it. Hold ", grab, " next to a moving object to hang on."],
+    ["Abilities combine, and objects move too. Mix them until you can hit the dummies at will, then Finish."],
   ];
 }
 
@@ -61,9 +72,13 @@ export const trainingScreen: ScreenFactory = (ctx) => {
   let lesson = 0;
   let names: ReadonlyMap<number, string> = new Map();
   let touch: { el: HTMLElement; destroy(): void } | null = null;
+  let rotate: { el: HTMLElement; destroy(): void } | null = null;
   let lessonEl: HTMLElement | null = null;
+  let countEl: HTMLElement | null = null;
+  let stepEls: HTMLElement[] = [];
   let nextBtn: HTMLButtonElement | null = null;
   let releaseTop: (() => void) | null = null;
+  let mapCode = "";
 
   const loop = new FrameLoop(
     (dt) => frame(dt),
@@ -90,6 +105,8 @@ export const trainingScreen: ScreenFactory = (ctx) => {
     running = false;
     touch?.destroy();
     touch = null;
+    rotate?.destroy();
+    rotate = null;
     releaseTop?.();
     releaseTop = null;
   }
@@ -128,8 +145,6 @@ export const trainingScreen: ScreenFactory = (ctx) => {
     running = true;
   }
 
-  let mapCode = "";
-
   /** The training map as a map code, from the bundled training.json (`{name, map}` like maps/*.json). */
   async function loadMapCode(): Promise<string> {
     const res = await fetch("/training.json");
@@ -139,25 +154,32 @@ export const trainingScreen: ScreenFactory = (ctx) => {
     return ctx.wasm.mapEncode(JSON.stringify(map));
   }
 
+  /** A plain page (loading, errors) with the hall's head and Back. */
+  function showPage(...content: Child[]): void {
+    root.className = "offline";
+    root.replaceChildren(page("offline-page", pageHead({ title: "Training hall", back: leave }), ...content));
+  }
+
   function showMessage(message: string): void {
     stopGame();
-    root.className = "offline";
-    root.replaceChildren(
-      h("p", { class: "offline-error" }, message),
-      h("button", { type: "button", onclick: leave }, "Back"),
-    );
+    showPage(h("p", { class: "offline-error" }, message));
   }
 
   function renderLesson(): void {
-    if (!lessonEl || !nextBtn) return;
-    const texts = lessonTexts();
+    if (!lessonEl || !nextBtn || !countEl) return;
+    const texts = lessons();
     const last = lesson === texts.length - 1;
-    lessonEl.textContent = `${lesson + 1}/${texts.length}  ${texts[lesson]}`;
+    lessonEl.replaceChildren(h("span", null, ...texts[lesson]));
+    countEl.textContent = `${lesson + 1} of ${texts.length}`;
+    stepEls.forEach((step, i) => {
+      step.classList.toggle("is-done", i < lesson);
+      step.classList.toggle("is-current", i === lesson);
+    });
     nextBtn.textContent = last ? "Finish" : "Next";
   }
 
   function next(): void {
-    if (lesson < lessonTexts().length - 1) {
+    if (lesson < lessons().length - 1) {
       lesson += 1;
       renderLesson();
       return;
@@ -176,11 +198,14 @@ export const trainingScreen: ScreenFactory = (ctx) => {
     }
   }
 
-  /** The playing view: touch controls under, lesson panel and controls on top. */
+  /** The playing view: touch controls under, the top bar, and the lesson card. */
   function showGame(): void {
     touch = touchControls(ctx);
-    lessonEl = h("p", { class: "training-text" });
-    nextBtn = h("button", { type: "button", class: "training-next", onclick: next });
+    rotate = rotateGate();
+    lessonEl = h("p", { class: "training-text", "aria-live": "polite" });
+    countEl = h("span", { class: "training-count" });
+    stepEls = lessons().map(() => h("span", { class: "training-step", "aria-hidden": "true" }));
+    nextBtn = h("button", { type: "button", class: "primary training-next", onclick: next });
     root.className = "offline playing";
     const bar = h(
       "div",
@@ -189,15 +214,21 @@ export const trainingScreen: ScreenFactory = (ctx) => {
       h("span", { class: "offline-title" }, "Training hall"),
       h("button", { type: "button", onclick: replayTutorial }, "Replay tutorial"),
     );
-    root.replaceChildren(touch.el, bar, h("div", { class: "training-lesson" }, lessonEl, nextBtn));
+    const card = h(
+      "section",
+      { class: "training-lesson", "aria-label": "Lesson" },
+      h("div", { class: "training-progress" }, h("span", { class: "training-steps" }, ...stepEls), countEl),
+      lessonEl,
+      nextBtn,
+    );
+    root.replaceChildren(touch.el, bar, card, rotate.el);
     releaseTop = ctx.reserveTop(bar);
     renderLesson();
     loop.start();
   }
 
   async function start(): Promise<void> {
-    root.className = "offline";
-    root.replaceChildren(h("p", { class: "status" }, "Loading the training hall…"));
+    showPage(h("p", { class: "offline-status" }, "Loading the training hall…"));
     let engine: Engine;
     try {
       [engine, mapCode] = await Promise.all([ctx.engine(), loadMapCode()]);
