@@ -49,6 +49,8 @@ This is why I have set up some goals that I believe will make the project an imp
   [DEVIATIONS.md](DEVIATIONS.md).
 * **Hitbox.io maps work.** Paste a map code or load a map file in the lobby,
   pick one from the map library, or make your own in the map editor.
+  Checkpoint races from the 2023 heav.io builds work too, with a Fastest
+  Times board per library map.
 * **Low latency netcode.** Deterministic 30 Hz simulation with client-side
   prediction and rollback; the server stamps inputs, so there is no host
   advantage and no desync from frame-rate differences. Game data travels

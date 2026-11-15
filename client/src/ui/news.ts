@@ -13,6 +13,19 @@ interface NewsEntry {
 /** Newest first. Player-facing wording only. */
 const NEWS: NewsEntry[] = [
   {
+    date: "2026-11-15",
+    items: [
+      "Quick play works like hitbox.io's: Sweaty Bois (up to 4 players, last one standing, win a map twice) and Team Madness (8 players in teams with a shared pool of 50 lives), each with its map rotation and the week's best-rated library maps. Browse a mode's maps with the arrows on its card.",
+      "Quick play skips rooms you have already been in, and tells you while it is still matching you with other players.",
+      "New custom rooms start in lives mode with 5 lives on Simple Arena 1.",
+      "Checkpoint races are back: touch numbered checkpoints in order, return to your last checkpoint when you die, and reach the highest one to finish. Map makers set them in the editor (Race checkpoint, Race object).",
+      "Fastest Times: with /set recordMode true, finishing a library map saves your best time. See the board with the Fastest Times button in the room.",
+      "Vote on the room's map from its vote counts.",
+      "Bodies that become dynamic when damaged now do so.",
+      "In matches: damage bars on breakable bodies, a flashing square where you will respawn, grab lines, the bat and the rocket launcher with their charge, movement trails, and a highlight on your player when you press an action key during the countdown.",
+    ],
+  },
+  {
     date: "2026-11-14",
     items: [
       "Experience and levels: finish games to earn XP. The game-over panel shows your placement, the XP you gained and your progress to the next level.",
