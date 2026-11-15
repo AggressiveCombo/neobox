@@ -5,17 +5,21 @@
 //! (`/admin`). Configuration comes from environment variables (see
 //! `hub::Config` and DEPLOY.md).
 
+mod backend;
 mod admin;
 mod api;
 mod clips;
+mod cluster;
 mod award;
 mod conn;
 mod emoji;
+mod geo;
 mod hub;
 mod logbuf;
 mod maps;
 mod room;
 mod rtc;
+mod ticket;
 mod youtube;
 
 use axum::extract::{ConnectInfo, State, WebSocketUpgrade};
@@ -82,19 +86,35 @@ async fn main() {
     let static_dir = cfg.static_dir.clone();
     let bind = cfg.bind.clone();
     let rtc = start_rtc(&cfg).await;
-    let store = open_store(&cfg.data);
+    if cfg.main_url.is_some() && (cfg.cluster_secret.is_empty() || cfg.public_url.is_empty()) {
+        tracing::error!("a regional node (NEOBOX_MAIN) needs NEOBOX_CLUSTER_SECRET and NEOBOX_PUBLIC_URL");
+        std::process::exit(1);
+    }
+    let store = if cfg.main_url.is_some() { None } else { Some(open_store(&cfg.data)) };
     let hub = Hub::new(cfg, maps, rtc, store);
     spawn_housekeeping(hub.clone());
+    cluster::spawn_heartbeat(hub.clone());
 
     let files = ServeDir::new(&static_dir).fallback(ServeFile::new(static_dir.join("index.html")));
-    let app = Router::new()
-        .route("/ws", get(ws))
-        .route("/api/maps", get(map_list))
-        .route("/healthz", get(|| async { "ok" }))
-        .merge(admin::router())
-        .merge(api::router())
-        .merge(clips::router())
-        .fallback_service(files)
+    // A regional node serves the game, `/healthz` and `/internal`; everything else goes to the main server.
+    let routes = if hub.cfg.main_url.is_some() {
+        Router::new()
+            .route("/ws", get(ws))
+            .route("/healthz", get(|| async { "ok" }))
+            .merge(cluster::router())
+            .fallback(cluster::to_main)
+    } else {
+        Router::new()
+            .route("/ws", get(ws))
+            .route("/api/maps", get(map_list))
+            .route("/healthz", get(|| async { "ok" }))
+            .merge(admin::router())
+            .merge(api::router())
+            .merge(clips::router())
+            .merge(cluster::router())
+            .fallback_service(files)
+    };
+    let app = routes
         .layer(SetResponseHeaderLayer::if_not_present(header::X_CONTENT_TYPE_OPTIONS, HeaderValue::from_static("nosniff")))
         .layer(SetResponseHeaderLayer::if_not_present(header::REFERRER_POLICY, HeaderValue::from_static("same-origin")))
         .layer(SetResponseHeaderLayer::if_not_present(header::CONTENT_SECURITY_POLICY, HeaderValue::from_static(CSP)))
@@ -155,7 +175,9 @@ fn spawn_housekeeping(hub: Arc<Hub>) {
             hub.admin_login.prune();
             hub.account_login.prune();
             hub.uploads.prune();
-            let store = hub.store.clone();
+            // a monthly database update replaces the file; pick it up within a minute
+            hub.geo.refresh();
+            let Some(store) = hub.store().cloned() else { continue };
             match tokio::task::spawn_blocking(move || store.prune_expired_sessions()).await {
                 Ok(Ok(_)) => {}
                 Ok(Err(e)) => tracing::warn!("cannot prune sessions: {e}"),

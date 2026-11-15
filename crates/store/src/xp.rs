@@ -14,7 +14,7 @@ const HOUR: i64 = 3600;
 const DAY: i64 = 24 * HOUR;
 
 /// Which cap cut a grant short.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum XpLimit {
     /// The hourly cap.
     Short,
@@ -23,7 +23,7 @@ pub enum XpLimit {
 }
 
 /// Result of [`Store::grant_xp`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct XpGrant {
     /// Experience actually added.
     pub granted: u32,

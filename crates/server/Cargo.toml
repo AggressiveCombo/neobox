@@ -23,6 +23,9 @@ rand = "0.9"
 futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
 str0m = { version = "0.25", default-features = false, features = ["rust-crypto"] }
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
+maxminddb = { version = "0.33.0", features = ["mmap"] }
+hmac = "0.13"
+sha2 = "0.11.1"
 
 [target.'cfg(windows)'.dependencies]
 nu-ansi-term = "0.50"

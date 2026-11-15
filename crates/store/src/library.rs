@@ -134,7 +134,7 @@ pub struct MapDetail {
 }
 
 /// What a room needs to play a map.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct RoomMap {
     pub id: i64,
     pub name: String,

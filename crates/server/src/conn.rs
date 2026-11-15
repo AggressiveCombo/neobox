@@ -1,6 +1,8 @@
 //! One WebSocket connection: identification, room routing, I/O.
 
-use crate::hub::{AccountRef, ConnInfo, ConnStats, Hub, Out, RoomHandle};
+use crate::geo::distance_km;
+use crate::cluster::{self, Site};
+use crate::hub::{AccountRef, ConnInfo, ConnStats, Hub, Out, Presence, RoomHandle};
 use crate::room::{json, RoomCmd};
 use axum::extract::ws::{close_code, CloseFrame, Message, Utf8Bytes, WebSocket};
 use futures_util::{SinkExt, StreamExt};
@@ -42,10 +44,7 @@ pub async fn serve(hub: Arc<Hub>, mut socket: WebSocket, ip: IpAddr, account: Op
     }
     hub.conns.fetch_add(1, Ordering::Relaxed);
     let conn_id = hub.next_conn.fetch_add(1, Ordering::Relaxed);
-    // friends see the account online while any of its sockets is open
-    let presence = account.as_ref().map(|a| hub.presence(a.id));
     run(&hub, socket, ip, conn_id, account).await;
-    drop(presence);
     hub.conns.fetch_sub(1, Ordering::Relaxed);
     let mut per_ip = hub.ip_conns.lock().unwrap();
     if let Some(n) = per_ip.get_mut(&ip) {
@@ -65,6 +64,8 @@ struct Session {
     ip: IpAddr,
     conn_id: u64,
     account: Option<AccountRef>,
+    /// Keeps the signed-in account online while this socket is open.
+    presence: Option<Presence>,
     /// data received on the WebRTC channel
     rtc_in: mpsc::UnboundedSender<Vec<u8>>,
 }
@@ -121,6 +122,7 @@ impl Session {
         let code = self.hub.new_code();
         let room = crate::room::spawn(self.hub.clone(), code.clone(), name, password.clone(), max_players, public, quick);
         self.hub.rooms.lock().unwrap().insert(code, room.clone());
+        self.hub.beat.notify_one();
         // the creator knows the password
         self.enter(room, password, None).await;
     }
@@ -128,7 +130,8 @@ impl Session {
     /// Names of this account's friends by account id (empty for guests).
     fn friend_names(&self) -> HashMap<i64, String> {
         let Some(a) = &self.account else { return HashMap::new() };
-        match self.hub.store.friends(a.id) {
+        let Some(store) = self.hub.store() else { return HashMap::new() };
+        match store.friends(a.id) {
             Ok(list) => {
                 list.into_iter().filter(|f| f.state == FriendState::Friend).map(|f| (f.account.id, f.account.name)).collect()
             }
@@ -139,21 +142,39 @@ impl Session {
         }
     }
 
+    /// The viewer's coordinates, when geolocation knows them.
+    fn viewer_coords(&self) -> Option<(f64, f64)> {
+        self.hub.geo.lookup(self.ip).and_then(|v| v.coords)
+    }
+
     /// Join the fullest quick-play room of `queue` with a free slot (the
-    /// oldest on a tie), or open a new one.
+    /// oldest on a tie) on any server, or open a new one on the nearest.
     async fn quick_play(&mut self, queue: Option<String>) {
         let queue = queue.unwrap_or_else(|| QUICK_QUEUES[0].0.to_string());
         let Some(&(id, _)) = QUICK_QUEUES.iter().find(|(id, _)| *id == queue) else {
             return self.error("bad_queue", "Unknown quick-play queue");
         };
-        let best = self
-            .hub
-            .summaries()
+        // each room with the node that runs it (`None`: this server)
+        let mut rooms: Vec<(crate::room::RoomSummary, Option<cluster::NodeInfo>)> =
+            self.hub.summaries().into_iter().map(|r| (r, None)).collect();
+        for node in cluster::live_nodes(&self.hub) {
+            rooms.extend(node.rooms.iter().map(|r| (r.clone(), Some(node.clone()))));
+        }
+        let best = rooms
             .into_iter()
-            .filter(|r| r.quick.as_deref() == Some(id) && r.players.len() < r.max_players as usize)
-            .max_by_key(|r| (r.players.len(), std::cmp::Reverse(r.created_ms)));
-        if let Some(r) = best.and_then(|r| self.hub.room(&r.code)) {
-            return self.enter(r, None, None).await;
+            .filter(|(r, _)| r.quick.as_deref() == Some(id) && r.players.len() < r.max_players as usize)
+            .max_by_key(|(r, _)| (r.players.len(), std::cmp::Reverse(r.created_ms)));
+        match best {
+            Some((r, Some(node))) => {
+                let then = ClientMsg::JoinRoom { room: r.code, password: None, resume: None };
+                return self.send(&ServerMsg::Redirect { url: node.url, then: Box::new(then) });
+            }
+            Some((r, None)) => {
+                if let Some(room) = self.hub.room(&r.code) {
+                    return self.enter(room, None, None).await;
+                }
+            }
+            None => {}
         }
         let title = match id {
             "teams" => "Quick play: Teams",
@@ -161,7 +182,13 @@ impl Session {
             _ => "Quick play: Free for all",
         };
         let max = QUICK_ROOM_PLAYERS.min(self.hub.cfg.max_players);
-        self.create_room(title.into(), None, max, true, Some(id.to_string())).await;
+        match cluster::nearest_site(&self.hub, self.viewer_coords()) {
+            Site::Node(node) => {
+                let then = ClientMsg::QuickPlay { queue: Some(id.to_string()) };
+                self.send(&ServerMsg::Redirect { url: node.url, then: Box::new(then) });
+            }
+            Site::Local => self.create_room(title.into(), None, max, true, Some(id.to_string())).await,
+        }
     }
 
     async fn text(&mut self, text: &str) {
@@ -170,7 +197,13 @@ impl Session {
             Err(_) => return self.error("bad_message", "Malformed message"),
         };
         match msg {
-            ClientMsg::Hello { version, name, color } => {
+            ClientMsg::Hello { version, name, color, ticket } => {
+                let (account, xp) = match self.hello_account(ticket.as_deref()).await {
+                    Ok(found) => found,
+                    Err(()) => return self.error("bad_ticket", "Sign in again"),
+                };
+                self.account = account;
+                self.presence = self.account.as_ref().map(|a| self.hub.presence(a.id));
                 // signed in: the account name is the player name
                 let name = match &self.account {
                     Some(a) => a.name.clone(),
@@ -183,6 +216,7 @@ impl Session {
                     return self.error("invalid_playername", "Names are 1-15 letters, digits, spaces or underscores");
                 }
                 self.info = Some(ConnInfo {
+                    xp,
                     name: name.clone(),
                     out: self.out.clone(),
                     stats: self.stats.clone(),
@@ -196,17 +230,30 @@ impl Session {
                     version: PROTOCOL_VERSION,
                     server: format!("neobox {}", env!("CARGO_PKG_VERSION")),
                     rtc: self.hub.rtc.is_some(),
+                    region: self.hub.cfg.region.clone(),
                 });
             }
             _ if self.info.is_none() => self.error("no_hello", "Say hello first"),
             ClientMsg::ListRooms => {
                 let friends = self.friend_names();
-                let rooms = self
+                let coords = self.viewer_coords();
+                let viewer = self.hub.geo.lookup(self.ip);
+                let local_distance = coords.zip(self.hub.cfg.location).map(|(a, b)| distance_km(a, b));
+                let mut found: Vec<(crate::room::RoomSummary, String, Option<u32>)> = self
                     .hub
                     .summaries()
                     .into_iter()
-                    .filter(|r| r.public)
-                    .map(|r| RoomInfo {
+                    .map(|r| (r, self.hub.cfg.region.clone(), local_distance))
+                    .collect();
+                for node in cluster::live_nodes(&self.hub) {
+                    let d = coords.zip(node.location).map(|(a, b)| distance_km(a, b));
+                    let region = node.region;
+                    found.extend(node.rooms.into_iter().map(|r| (r, region.clone(), d)));
+                }
+                let rooms = found
+                    .into_iter()
+                    .filter(|(r, _, _)| r.public)
+                    .map(|(r, region, distance)| RoomInfo {
                         friends: r.players.iter().filter_map(|p| p.account.and_then(|a| friends.get(&a).cloned())).collect(),
                         code: r.code,
                         name: r.name,
@@ -218,16 +265,31 @@ impl Session {
                         mode: r.game_mode,
                         quick: r.quick,
                         jukebox: r.jukebox,
+                        region,
+                        distance,
+                        country: r.host_country,
                     })
                     .collect();
-                self.send(&ServerMsg::Rooms { rooms });
+                self.send(&ServerMsg::Rooms { rooms, country: viewer.and_then(|v| v.country) });
             }
             ClientMsg::CreateRoom { name, password, max_players, public } => {
-                self.create_room(name, password, max_players, public, None).await;
+                match cluster::nearest_site(&self.hub, self.viewer_coords()) {
+                    Site::Node(node) => {
+                        let then = ClientMsg::CreateRoom { name, password, max_players, public };
+                        self.send(&ServerMsg::Redirect { url: node.url, then: Box::new(then) });
+                    }
+                    Site::Local => self.create_room(name, password, max_players, public, None).await,
+                }
             }
             ClientMsg::JoinRoom { room, password, resume } => match self.hub.room(&room) {
                 Some(r) => self.enter(r, password, resume).await,
-                None => self.error("room_not_found", "Room not found"),
+                None => match cluster::node_with_room(&self.hub, &room) {
+                    Some(node) => {
+                        let then = ClientMsg::JoinRoom { room, password, resume };
+                        self.send(&ServerMsg::Redirect { url: node.url, then: Box::new(then) });
+                    }
+                    None => self.error("room_not_found", "Room not found"),
+                },
             },
             ClientMsg::QuickPlay { queue } => self.quick_play(queue).await,
             ClientMsg::LeaveRoom => {
@@ -271,6 +333,22 @@ impl Session {
             let _ = self.out.send(Out::Binary(pong));
         }
     }
+
+    /// Who a hello claims to be. On a game node the ticket names the
+    /// signed-in account (a bad or expired ticket is refused; no ticket is a
+    /// guest). On the main server the session cookie does, and XP comes from the store.
+    async fn hello_account(&self, ticket: Option<&str>) -> Result<(Option<AccountRef>, Option<u64>), ()> {
+        if self.hub.cfg.main_url.is_some() {
+            let Some(t) = ticket else { return Ok((None, None)) };
+            let (account, xp) = crate::ticket::verify(&self.hub.cfg.cluster_secret, t, crate::ticket::now()).ok_or(())?;
+            return Ok((Some(account), Some(xp)));
+        }
+        let xp = match &self.account {
+            Some(a) => self.hub.backend.account_xp(a.id).await.ok(),
+            None => None,
+        };
+        Ok((self.account.clone(), xp))
+    }
 }
 
 async fn run(hub: &Arc<Hub>, socket: WebSocket, ip: IpAddr, conn_id: u64, account: Option<AccountRef>) {
@@ -278,7 +356,9 @@ async fn run(hub: &Arc<Hub>, socket: WebSocket, ip: IpAddr, conn_id: u64, accoun
     let (out_tx, mut out_rx) = mpsc::unbounded_channel::<Out>();
     let (rtc_tx, mut rtc_rx) = mpsc::unbounded_channel::<Vec<u8>>();
     let stats = Arc::new(ConnStats::default());
-    let mut s = Session { hub: hub.clone(), info: None, room: None, out: out_tx, stats: stats.clone(), ip, conn_id, account, rtc_in: rtc_tx };
+    // friends see the account online while any of its sockets is open
+    let presence = account.as_ref().map(|a| hub.presence(a.id));
+    let mut s = Session { hub: hub.clone(), info: None, room: None, out: out_tx, stats: stats.clone(), ip, conn_id, account, presence, rtc_in: rtc_tx };
     let started = Instant::now();
     let writer_stats = stats.clone();
     let writer_hub = hub.clone();

@@ -133,7 +133,7 @@ impl Client {
         }
         let (ws, _) = tokio_tungstenite::connect_async(req).await.expect("connect");
         let mut c = Client { ws };
-        c.send(&ClientMsg::Hello { version: PROTOCOL_VERSION, name: name.into(), color: None }).await;
+        c.send(&ClientMsg::Hello { version: PROTOCOL_VERSION, name: name.into(), color: None, ticket: None }).await;
         c.until("welcome", |m| matches!(m, ServerMsg::Welcome { .. }).then_some(Ok(()))).await.unwrap();
         c
     }

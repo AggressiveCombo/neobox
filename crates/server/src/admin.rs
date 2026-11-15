@@ -2,6 +2,7 @@
 //! tick rate, latency, bandwidth, match state, logs and map review.
 
 use crate::api::{db, Fail, MapDetailJson, MapJson};
+use crate::cluster;
 use crate::hub::Hub;
 use crate::room::{AdminCmd, RoomCmd};
 use axum::body::Body;
@@ -136,21 +137,38 @@ async fn state(State(hub): State<Arc<Hub>>, headers: HeaderMap) -> Response {
     if !authorized(&hub, &headers) {
         return StatusCode::UNAUTHORIZED.into_response();
     }
-    let rooms = hub.summaries();
-    let players: usize = rooms.iter().map(|r| r.players.len()).sum();
+    let mut rooms: Vec<(String, crate::room::RoomSummary)> =
+        hub.summaries().into_iter().map(|r| (hub.cfg.region.clone(), r)).collect();
+    let mut conns = hub.conns.load(std::sync::atomic::Ordering::Relaxed);
+    for node in cluster::live_nodes(&hub) {
+        conns += node.conns;
+        let region = node.region;
+        rooms.extend(node.rooms.into_iter().map(|r| (region.clone(), r)));
+    }
+    let players: usize = rooms.iter().map(|(_, r)| r.players.len()).sum();
+    let rooms_json: Vec<serde_json::Value> = rooms
+        .iter()
+        .map(|(region, r)| {
+            let mut v = serde_json::to_value(r).unwrap_or_default();
+            if let Some(o) = v.as_object_mut() {
+                o.insert("region".into(), region.clone().into());
+            }
+            v
+        })
+        .collect();
     Json(serde_json::json!({
         "server": {
             "version": env!("CARGO_PKG_VERSION"),
             "uptime_s": hub.started.elapsed().as_secs(),
-            "connections": hub.conns.load(std::sync::atomic::Ordering::Relaxed),
+            "connections": conns,
             "rooms": rooms.len(),
             "players": players,
             "max_rooms": hub.cfg.max_rooms,
             "max_players": hub.cfg.max_players,
-            "bytes_in_per_s": rooms.iter().map(|r| r.bytes_in_per_s).sum::<u64>(),
-            "bytes_out_per_s": rooms.iter().map(|r| r.bytes_out_per_s).sum::<u64>(),
+            "bytes_in_per_s": rooms.iter().map(|(_, r)| r.bytes_in_per_s).sum::<u64>(),
+            "bytes_out_per_s": rooms.iter().map(|(_, r)| r.bytes_out_per_s).sum::<u64>(),
         },
-        "rooms": rooms,
+        "rooms": rooms_json,
         "maps": hub.maps.iter().map(|m| &m.name).collect::<Vec<_>>(),
     }))
     .into_response()
@@ -193,7 +211,13 @@ async fn room_cmd(State(hub): State<Arc<Hub>>, headers: HeaderMap, Path(code): P
             let _ = r.tx.send(RoomCmd::Admin(cmd));
             "ok".into_response()
         }
-        None => StatusCode::NOT_FOUND.into_response(),
+        None => match cluster::node_with_room(&hub, &code) {
+            Some(node) => match cluster::forward_admin(&hub, &node, &code, cmd).await {
+                Ok(()) => "ok".into_response(),
+                Err(e) => (StatusCode::BAD_GATEWAY, e).into_response(),
+            },
+            None => StatusCode::NOT_FOUND.into_response(),
+        },
     }
 }
 

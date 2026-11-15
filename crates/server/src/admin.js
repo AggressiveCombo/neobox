@@ -41,7 +41,7 @@ function renderState(st) {
   for (const r of st.rooms) {
     const tr = document.createElement("tr");
     if (r.code === selected) tr.className = "sel";
-    tr.innerHTML = `<td><b>${esc(r.code)}</b></td><td>${esc(r.name)}${r.password ? " 🔒" : ""}${r.public ? "" : " <span class=muted>(private)</span>"}</td><td>${r.players.length}/${r.max_players}</td><td>${r.in_match ? "<span class=pill>match " + fmtTime(r.match_seconds) + "</span>" : "lobby"}</td><td>${r.tick}</td><td>${r.tick_hz}</td><td>${r.step_avg_us.toFixed(0)} / ${r.step_max_us.toFixed(0)}</td><td>${fmtBytes(r.bytes_in_per_s)} / ${fmtBytes(r.bytes_out_per_s)}</td><td>${esc(r.map_name)}</td>`;
+    tr.innerHTML = `<td><b>${esc(r.code)}</b></td><td>${esc(r.region || "")}</td><td>${esc(r.name)}${r.password ? " 🔒" : ""}${r.public ? "" : " <span class=muted>(private)</span>"}</td><td>${r.players.length}/${r.max_players}</td><td>${r.in_match ? "<span class=pill>match " + fmtTime(r.match_seconds) + "</span>" : "lobby"}</td><td>${r.tick}</td><td>${r.tick_hz}</td><td>${r.step_avg_us.toFixed(0)} / ${r.step_max_us.toFixed(0)}</td><td>${fmtBytes(r.bytes_in_per_s)} / ${fmtBytes(r.bytes_out_per_s)}</td><td>${esc(r.map_name)}</td>`;
     tr.onclick = () => { selected = r.code; renderState(lastState); };
     tb.appendChild(tr);
   }

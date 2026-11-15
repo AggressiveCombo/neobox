@@ -2,6 +2,7 @@
 //! blocking threads: the store holds a mutex and hashes passwords.
 
 use crate::admin::client_ip;
+use crate::cluster;
 use crate::hub::{AccountRef, Hub};
 use axum::body::Bytes;
 use axum::extract::{ConnectInfo, DefaultBodyLimit, Path, Query, State};
@@ -14,7 +15,7 @@ use neobox_store::{
     Account, Error, FriendState, MapDetail, MapSummary, Sort, Status, Store, Visibility, MAX_CODE_BYTES, SESSION_TTL,
 };
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
@@ -27,6 +28,7 @@ const PAGE_SIZE: usize = 24;
 pub fn router() -> Router<Arc<Hub>> {
     Router::new()
         .route("/api/stats", get(stats))
+        .route("/api/ticket", get(ticket))
         .route("/api/account/me", get(me))
         .route("/api/account/register", post(register))
         .route("/api/account/login", post(login))
@@ -86,7 +88,9 @@ pub(crate) async fn db<T: Send + 'static>(
     hub: &Hub,
     f: impl FnOnce(&Store) -> neobox_store::Result<T> + Send + 'static,
 ) -> Result<T, Fail> {
-    let store = hub.store.clone();
+    let Some(store) = hub.store().cloned() else {
+        return Err(Error::Internal("this server keeps no accounts".into()).into());
+    };
     let r = tokio::task::spawn_blocking(move || f(&store)).await.map_err(|e| Error::Internal(e.to_string()))?;
     Ok(r?)
 }
@@ -104,9 +108,12 @@ fn secure_request(hub: &Hub, headers: &HeaderMap) -> bool {
     hub.cfg.trust_proxy && headers.get("x-forwarded-proto").and_then(|v| v.to_str().ok()) == Some("https")
 }
 
-fn session_cookie(hub: &Hub, headers: &HeaderMap, value: &str, max_age: i64) -> String {
+/// `max_age`: seconds the browser keeps the cookie; `None` keeps it only until
+/// the browser closes (a sign-in without "Stay signed in").
+fn session_cookie(hub: &Hub, headers: &HeaderMap, value: &str, max_age: Option<i64>) -> String {
     let secure = if secure_request(hub, headers) { "; Secure" } else { "" };
-    format!("{COOKIE}={value}; Path=/; HttpOnly; SameSite=Lax; Max-Age={max_age}{secure}")
+    let max_age = max_age.map(|s| format!("; Max-Age={s}")).unwrap_or_default();
+    format!("{COOKIE}={value}; Path=/; HttpOnly; SameSite=Lax{max_age}{secure}")
 }
 
 /// The account of the request's session cookie; 401 for guests.
@@ -120,8 +127,10 @@ async fn viewer(hub: &Hub, headers: &HeaderMap) -> Option<i64> {
     signed_in(hub, headers).await.ok().map(|a| a.id)
 }
 
-/// The account behind a WebSocket upgrade's session cookie, if any.
+/// The account behind a WebSocket upgrade's session cookie, if any. Game nodes
+/// keep no sessions (signed-in players bring a ticket), so they never look.
 pub async fn socket_account(hub: &Hub, headers: &HeaderMap) -> Option<AccountRef> {
+    hub.store()?;
     signed_in(hub, headers).await.ok().map(|a| AccountRef { id: a.id, name: a.name })
 }
 
@@ -135,17 +144,18 @@ fn attempt(hub: &Hub, headers: &HeaderMap, peer: SocketAddr) -> Result<(), Fail>
 }
 
 /// Start a session for `acc`; answers with its cookie and the account.
-async fn sign_in(hub: &Hub, headers: &HeaderMap, acc: Account) -> Result<Response, Fail> {
+/// `remember`: the cookie outlives the browser session.
+async fn sign_in(hub: &Hub, headers: &HeaderMap, acc: Account, remember: bool) -> Result<Response, Fail> {
     let id = acc.id;
     let token = db(hub, move |s| s.create_session(id)).await?;
     let xp = db(hub, move |s| s.account_xp(id)).await?;
-    let cookie = session_cookie(hub, headers, &token, SESSION_TTL);
+    let cookie = session_cookie(hub, headers, &token, remember.then_some(SESSION_TTL));
     Ok(([(header::SET_COOKIE, cookie)], Json(AccountJson::new(acc, xp))).into_response())
 }
 
 /// Clear the session cookie.
 fn signed_out(hub: &Hub, headers: &HeaderMap) -> Response {
-    ([(header::SET_COOKIE, session_cookie(hub, headers, "", 0))], StatusCode::NO_CONTENT).into_response()
+    ([(header::SET_COOKIE, session_cookie(hub, headers, "", Some(0)))], StatusCode::NO_CONTENT).into_response()
 }
 
 #[derive(Serialize)]
@@ -180,7 +190,12 @@ struct StatsJson {
 
 /// Connections, rooms and players in quick-play queues, for the lobby.
 async fn stats(State(hub): State<Arc<Hub>>) -> Json<StatsJson> {
-    let rooms = hub.summaries();
+    let mut rooms = hub.summaries();
+    let mut online = hub.conns.load(Ordering::Relaxed);
+    for node in cluster::live_nodes(&hub) {
+        online += node.conns;
+        rooms.extend(node.rooms);
+    }
     let mut quick = QuickCounts { ffa: 0, teams: 0, lives: 0 };
     for room in &rooms {
         let players = room.players.len();
@@ -191,7 +206,7 @@ async fn stats(State(hub): State<Arc<Hub>>) -> Json<StatsJson> {
             _ => {}
         }
     }
-    Json(StatsJson { online: hub.conns.load(Ordering::Relaxed), rooms: rooms.len(), quick })
+    Json(StatsJson { online, rooms: rooms.len(), quick })
 }
 
 // Accounts
@@ -210,6 +225,22 @@ async fn me(State(hub): State<Arc<Hub>>, headers: HeaderMap) -> Result<Json<Opti
 struct Credentials {
     name: String,
     password: String,
+    /// "Stay signed in" (off unless asked, like the original).
+    #[serde(default)]
+    remember: bool,
+}
+
+/// A short-lived ticket naming the signed-in account, for regional game nodes.
+async fn ticket(State(hub): State<Arc<Hub>>, headers: HeaderMap) -> Result<Json<serde_json::Value>, Fail> {
+    if hub.cfg.cluster_secret.is_empty() {
+        return Err(Error::NotFound.into());
+    }
+    let account = signed_in(&hub, &headers).await?;
+    let id = account.id;
+    let xp = db(&hub, move |s| s.account_xp(id)).await?;
+    let who = AccountRef { id, name: account.name };
+    let token = crate::ticket::issue(&hub.cfg.cluster_secret, &who, xp, crate::ticket::now());
+    Ok(Json(serde_json::json!({ "ticket": token })))
 }
 
 async fn register(
@@ -220,7 +251,7 @@ async fn register(
 ) -> Result<Response, Fail> {
     attempt(&hub, &headers, peer)?;
     let acc = db(&hub, move |s| s.register(&b.name, &b.password)).await?;
-    sign_in(&hub, &headers, acc).await
+    sign_in(&hub, &headers, acc, b.remember).await
 }
 
 async fn login(
@@ -231,7 +262,7 @@ async fn login(
 ) -> Result<Response, Fail> {
     attempt(&hub, &headers, peer)?;
     let acc = db(&hub, move |s| s.login(&b.name, &b.password)).await?;
-    sign_in(&hub, &headers, acc).await
+    sign_in(&hub, &headers, acc, b.remember).await
 }
 
 async fn logout(State(hub): State<Arc<Hub>>, headers: HeaderMap) -> Result<Response, Fail> {
@@ -245,6 +276,9 @@ async fn logout(State(hub): State<Arc<Hub>>, headers: HeaderMap) -> Result<Respo
 struct PasswordBody {
     old: String,
     new: String,
+    /// Whether this browser's session was "Stay signed in" (the client remembers its choice).
+    #[serde(default)]
+    remember: bool,
 }
 
 /// Signing out every session on a password change, so this one is issued again.
@@ -252,7 +286,7 @@ async fn change_password(State(hub): State<Arc<Hub>>, headers: HeaderMap, Json(b
     let acc = signed_in(&hub, &headers).await?;
     let id = acc.id;
     db(&hub, move |s| s.change_password(id, &b.old, &b.new)).await?;
-    sign_in(&hub, &headers, acc).await
+    sign_in(&hub, &headers, acc, b.remember).await
 }
 
 #[derive(Deserialize)]
@@ -300,14 +334,16 @@ struct FriendJson {
 async fn friends(State(hub): State<Arc<Hub>>, headers: HeaderMap) -> Result<Json<Vec<FriendJson>>, Fail> {
     let me = signed_in(&hub, &headers).await?.id;
     let list = db(&hub, move |s| s.friends(me)).await?;
+    let nodes = cluster::live_nodes(&hub);
     let mut rooms: HashMap<i64, RoomRef> = HashMap::new();
-    for r in hub.summaries() {
+    for r in hub.summaries().into_iter().chain(nodes.iter().flat_map(|n| n.rooms.iter().cloned())) {
         for p in r.players.iter().filter(|p| p.connected) {
             if let Some(id) = p.account {
                 rooms.entry(id).or_insert_with(|| RoomRef { code: r.code.clone(), name: r.name.clone() });
             }
         }
     }
+    let node_online: HashSet<i64> = nodes.iter().flat_map(|n| n.online.iter().copied()).collect();
     let out = list
         .into_iter()
         .map(|f| {
@@ -320,7 +356,7 @@ async fn friends(State(hub): State<Arc<Hub>>, headers: HeaderMap) -> Result<Json
                     FriendState::Incoming => "incoming",
                     FriendState::Outgoing => "outgoing",
                 },
-                online: is_friend && hub.is_online(id),
+                online: is_friend && (hub.is_online(id) || node_online.contains(&id)),
                 room: if is_friend { rooms.get(&id).cloned() } else { None },
             }
         })

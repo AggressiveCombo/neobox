@@ -7,7 +7,7 @@ use base64::Engine;
 use neobox_net::*;
 use neobox_sim::start::Outcome;
 use neobox_sim::{GameSettings, MapData};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
 use std::net::IpAddr;
 use std::sync::atomic::Ordering;
@@ -15,6 +15,8 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tokio::sync::{mpsc, oneshot};
 use tracing::{info, warn};
+use crate::backend::{MapAction, MapCommandBody};
+use neobox_store::{RoomMap, XpGrant};
 
 /// Longest map code accepted from clients (characters).
 pub const MAX_MAP_CODE: usize = 2 * 1024 * 1024;
@@ -60,9 +62,23 @@ pub enum RoomCmd {
     Suggested { from: u32, name: String, video: String, title: String },
     /// The title of the jukebox video arrived.
     JukeboxTitle { video: String, title: String },
+    /// An award's store answer arrived.
+    XpGranted { player: u32, award: PendingAward, result: Result<XpGrant, String> },
+    /// A map vote or favourite change was applied; `done` is the notice on success.
+    MapCommandDone { player: u32, done: &'static str, refresh: bool, result: Result<(), String> },
+    /// The current map's library entry was reloaded.
+    MapMetaLoaded { result: Result<RoomMap, String> },
+    /// A map the host asked for arrived from the library.
+    LibraryMapLoaded { player: u32, map: i64, result: Result<RoomMap, String> },
 }
 
-#[derive(Debug, Clone, serde::Deserialize)]
+/// An award waiting for the store's answer.
+pub struct PendingAward {
+    pub placement: i32,
+    pub quick: bool,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "action", rename_all = "snake_case")]
 pub enum AdminCmd {
     Close,
@@ -77,7 +93,7 @@ pub enum AdminCmd {
     Unban { name: String },
 }
 
-#[derive(Clone, Debug, Serialize, Default)]
+#[derive(Clone, Debug, Serialize, Deserialize, Default)]
 pub struct PlayerSummary {
     pub id: u32,
     pub name: String,
@@ -89,7 +105,7 @@ pub struct PlayerSummary {
     pub bytes_out_per_s: u64,
     pub margin_ticks: f64,
     /// "udp" (WebRTC data channel) or "ws"
-    pub transport: &'static str,
+    pub transport: String,
     pub input_mask: u8,
     /// False while the slot is held for a reconnect.
     pub connected: bool,
@@ -99,7 +115,7 @@ pub struct PlayerSummary {
     pub account: Option<i64>,
 }
 
-#[derive(Clone, Debug, Serialize, Default)]
+#[derive(Clone, Debug, Serialize, Deserialize, Default)]
 pub struct RoomSummary {
     pub code: String,
     pub name: String,
@@ -126,6 +142,8 @@ pub struct RoomSummary {
     pub quick: Option<String>,
     /// The jukebox video, if any.
     pub jukebox: Option<JukeboxInfo>,
+    /// Country of the host's address (ISO alpha-2), when geolocation knows it.
+    pub host_country: Option<String>,
 }
 
 /// A banned player: the name listed in the room and the keys that block
@@ -257,6 +275,10 @@ pub struct Room {
     locked: bool,
     bans: Vec<Ban>,
     game: Option<Game>,
+    /// Account grants still in flight: the match's end waits for them.
+    pending_xp: usize,
+    /// Why the match ended, held until its experience is in.
+    finishing: Option<String>,
     summary: Arc<Mutex<RoomSummary>>,
     created: u64,
     closed: bool,
@@ -278,7 +300,18 @@ pub fn spawn(
     quick: Option<String>,
 ) -> RoomHandle {
     let (tx, rx) = mpsc::unbounded_channel();
-    let summary = Arc::new(Mutex::new(RoomSummary { code: code.clone(), name: name.clone(), ..RoomSummary::default() }));
+    // Filled in completely once a second; the room list (and a node's
+    // "room created" heartbeat) must see whether it is public right away.
+    let summary = Arc::new(Mutex::new(RoomSummary {
+        code: code.clone(),
+        name: name.clone(),
+        public,
+        password: password.is_some(),
+        max_players: max_players.clamp(1, hub.cfg.max_players),
+        quick: quick.clone(),
+        created_ms: now_ms(),
+        ..RoomSummary::default()
+    }));
     let map = hub.maps.first().cloned();
     let mut settings = GameSettings::default();
     if let Some(&(_, mode)) = quick.as_deref().and_then(|q| QUICK_QUEUES.iter().find(|(id, _)| *id == q)) {
@@ -319,6 +352,8 @@ pub fn spawn(
         locked: false,
         bans: Vec::new(),
         game: None,
+        pending_xp: 0,
+        finishing: None,
         summary: summary.clone(),
         created: now_ms(),
         closed: false,
@@ -429,6 +464,7 @@ impl Room {
             p.send(Out::Text(json(&ServerMsg::Left)));
         }
         self.hub.rooms.lock().unwrap().remove(&self.code);
+        self.hub.beat.notify_one();
         info!(room = %self.code, "room closed");
     }
 
@@ -456,6 +492,23 @@ impl Room {
                 });
                 let _ = reply.send(frame);
             }
+            RoomCmd::XpGranted { player, award, result } => self.xp_granted(player, award, result),
+            RoomCmd::MapCommandDone { player, done, refresh, result } => match result {
+                Ok(()) => {
+                    self.notice(player, done);
+                    if refresh {
+                        self.refresh_map_meta();
+                    }
+                }
+                Err(e) => self.notice(player, &e),
+            },
+            RoomCmd::MapMetaLoaded { result } => {
+                if let Ok(m) = result {
+                    self.map_meta = Some(map_meta_of(&m));
+                    self.broadcast_room();
+                }
+            }
+            RoomCmd::LibraryMapLoaded { player, map, result } => self.library_map_loaded(player, map, result),
             RoomCmd::Suggested { from, name, video, title } => {
                 let m = json(&ServerMsg::Suggest { from, name, video, title });
                 for p in &self.players {
@@ -550,7 +603,7 @@ impl Room {
         };
         let token = new_token();
         info!(room = %self.code, player = id, name = %conn.name, ip = %conn.ip, "join");
-        let xp = conn.account.as_ref().map(|a| self.hub.store.account_xp(a.id).unwrap_or(0));
+        let xp = conn.xp;
         let color = conn.color.unwrap_or(DEFAULT_COLORS[id as usize % DEFAULT_COLORS.len()]);
         let name = conn.name.clone();
         self.players.push(RPlayer {
@@ -830,31 +883,36 @@ impl Room {
         let Some(map) = self.map_meta.as_ref().map(|m| m.id) else {
             return self.notice(id, "This map is not in the map library");
         };
-        let store = &self.hub.store;
-        let (result, done) = match word {
-            "upvote" => (store.vote(account, map, 1), "You voted for this map"),
-            "downvote" => (store.vote(account, map, -1), "You voted against this map"),
-            "fav" | "fave" => (store.favourite(account, map, true), "Map added to your favourites"),
-            _ => (store.favourite(account, map, false), "Map removed from your favourites"),
+        let action = match word {
+            "upvote" => MapAction::Up,
+            "downvote" => MapAction::Down,
+            "fav" | "fave" => MapAction::Fav,
+            _ => MapAction::Unfav,
         };
-        match result {
-            Ok(()) => {
-                self.notice(id, done);
-                if word.ends_with("vote") {
-                    self.refresh_map_meta();
-                }
-            }
-            Err(e) => self.notice(id, &e.to_string()),
-        }
+        let done = match action {
+            MapAction::Up => "You voted for this map",
+            MapAction::Down => "You voted against this map",
+            MapAction::Fav => "Map added to your favourites",
+            MapAction::Unfav => "Map removed from your favourites",
+        };
+        let hub = self.hub.clone();
+        let tx = self.tx.clone();
+        let refresh = word.ends_with("vote");
+        tokio::spawn(async move {
+            let result = hub.backend.map_command(MapCommandBody { account, map, action }).await;
+            let _ = tx.send(RoomCmd::MapCommandDone { player: id, done, refresh, result });
+        });
     }
 
     /// Reloads the library entry of the current map (vote counts changed).
     fn refresh_map_meta(&mut self) {
         let Some(id) = self.map_meta.as_ref().map(|m| m.id) else { return };
-        if let Ok(m) = self.hub.store.map_meta(id, None) {
-            self.map_meta = Some(map_meta_of(&m));
-            self.broadcast_room();
-        }
+        let hub = self.hub.clone();
+        let tx = self.tx.clone();
+        tokio::spawn(async move {
+            let result = hub.backend.room_map(id, None).await;
+            let _ = tx.send(RoomCmd::MapMetaLoaded { result });
+        });
     }
 
     fn message(&mut self, id: u32, msg: ClientMsg) {
@@ -1029,21 +1087,12 @@ impl Room {
                     return self.error(id, "in_match", "Wait for the match to end");
                 }
                 let viewer = self.player(id).and_then(|p| p.account.as_ref()).map(|a| a.id);
-                let found = match self.hub.store.map_meta(map, viewer) {
-                    Ok(m) => m,
-                    Err(e) => return self.error(id, "bad_map", &format!("Could not load the map: {e}")),
-                };
-                if let Err(e) = MapData::from_code(&found.code) {
-                    return self.error(id, "bad_map", &format!("Could not load the map: {e}"));
-                }
-                if let Err(e) = self.hub.store.record_play(map) {
-                    warn!(room = %self.code, map, "could not count the play: {e}");
-                }
-                self.map_meta = Some(map_meta_of(&found));
-                self.map_name = found.name.chars().take(60).collect();
-                self.map_code = found.code;
-                self.system_chat(&format!("Map changed to {}", self.map_name));
-                self.broadcast_room();
+                let hub = self.hub.clone();
+                let tx = self.tx.clone();
+                tokio::spawn(async move {
+                    let result = hub.backend.room_map(map, viewer).await;
+                    let _ = tx.send(RoomCmd::LibraryMapLoaded { player: id, map, result });
+                });
             }
             ClientMsg::GetMap => {
                 self.to(id, &ServerMsg::MapCode { code: self.map_code.clone(), name: self.map_name.clone() });
@@ -1214,6 +1263,9 @@ impl Room {
 
     fn start_match(&mut self) {
         self.starting = None;
+        if self.finishing.is_some() {
+            return;
+        }
         if let Some(hz) = self.next_tick_hz.take() {
             self.tick_hz = hz;
         }
@@ -1275,15 +1327,27 @@ impl Room {
     }
 
     fn end_match(&mut self, reason: &str) {
-        if self.game.take().is_some() {
-            info!(room = %self.code, reason, "match end");
-            let m = json(&ServerMsg::MatchEnd { reason: reason.into() });
-            for p in self.players.iter_mut() {
-                p.in_match = false;
-                p.send(Out::Text(m.clone()));
-            }
-            self.broadcast_room();
+        if self.game.take().is_none() {
+            return;
         }
+        info!(room = %self.code, reason, "match end");
+        // the end waits for in-flight awards, so each player hears its experience before the match ends
+        self.finishing = Some(reason.into());
+        self.send_match_end();
+    }
+
+    /// Tell everyone the match ended, once no award is still in flight.
+    fn send_match_end(&mut self) {
+        if self.pending_xp > 0 {
+            return;
+        }
+        let Some(reason) = self.finishing.take() else { return };
+        let m = json(&ServerMsg::MatchEnd { reason });
+        for p in self.players.iter_mut() {
+            p.in_match = false;
+            p.send(Out::Text(m.clone()));
+        }
+        self.broadcast_room();
     }
 
     fn frame(&mut self, id: u32, frame: ClientFrame) {
@@ -1357,36 +1421,83 @@ impl Room {
                 r.map(|(place, xp)| (p.id, place, xp))
             })
             .collect();
-        let mut levels_changed = false;
         for (id, placement, xp) in awards {
             let Some(p) = self.players.iter_mut().find(|p| p.id == id) else { continue };
-            let msg = match &p.account {
-                Some(a) => match self.hub.store.grant_xp(a.id, xp) {
-                    Ok(grant) => {
-                        levels_changed |= p.xp.map(level_of) != Some(level_of(grant.total));
-                        p.xp = Some(grant.total);
-                        XpAward {
-                            placement,
-                            gained: grant.granted,
-                            xp: Some(grant.total),
-                            level: level_of(grant.total),
-                            limit: grant.limit.map(|l| if l == neobox_store::XpLimit::Short { "short" } else { "long" }.to_string()),
-                            quick,
-                        }
-                    }
-                    Err(e) => {
-                        warn!(room = %self.code, player = id, "could not grant experience: {e}");
-                        continue;
-                    }
-                },
+            match &p.account {
+                Some(a) => {
+                    let (hub, tx, account) = (self.hub.clone(), self.tx.clone(), a.id);
+                    self.pending_xp += 1;
+                    let pending = PendingAward { placement, quick };
+                    tokio::spawn(async move {
+                        let result = hub.backend.grant_xp(account, xp).await;
+                        let _ = tx.send(RoomCmd::XpGranted { player: id, award: pending, result });
+                    });
+                }
                 // guests keep their (capped) experience in their browser
-                None => XpAward { placement, gained: xp, xp: None, level: 0, limit: None, quick },
-            };
-            p.text(&ServerMsg::Xp(msg));
+                None => p.text(&ServerMsg::Xp(XpAward { placement, gained: xp, xp: None, level: 0, limit: None, quick })),
+            }
         }
+    }
+
+    /// The store answered an account's award: record it, then end the match if nothing is left in flight.
+    fn xp_granted(&mut self, id: u32, award: PendingAward, result: Result<XpGrant, String>) {
+        self.pending_xp -= 1;
+        self.record_xp(id, award, result);
+        self.send_match_end();
+    }
+
+    /// Record an account's new XP and tell the player.
+    fn record_xp(&mut self, id: u32, award: PendingAward, result: Result<XpGrant, String>) {
+        let Some(p) = self.players.iter_mut().find(|p| p.id == id) else { return };
+        let grant = match result {
+            Ok(g) => g,
+            Err(e) => {
+                warn!(room = %self.code, player = id, "could not grant experience: {e}");
+                return;
+            }
+        };
+        let levels_changed = p.xp.map(level_of) != Some(level_of(grant.total));
+        p.xp = Some(grant.total);
+        let msg = XpAward {
+            placement: award.placement,
+            gained: grant.granted,
+            xp: Some(grant.total),
+            level: level_of(grant.total),
+            limit: grant.limit.map(|l| if l == neobox_store::XpLimit::Short { "short" } else { "long" }.to_string()),
+            quick: award.quick,
+        };
+        p.text(&ServerMsg::Xp(msg));
         if levels_changed {
             self.broadcast_room();
         }
+    }
+
+    /// A library map the host asked for arrived: check the host may still change the map, then use it.
+    fn library_map_loaded(&mut self, id: u32, map: i64, result: Result<RoomMap, String>) {
+        if !self.is_host(id) {
+            return self.error(id, "not_host", "Only the host can change the map");
+        }
+        if self.game.is_some() {
+            return self.error(id, "in_match", "Wait for the match to end");
+        }
+        let found = match result {
+            Ok(m) => m,
+            Err(e) => return self.error(id, "bad_map", &format!("Could not load the map: {e}")),
+        };
+        if let Err(e) = MapData::from_code(&found.code) {
+            return self.error(id, "bad_map", &format!("Could not load the map: {e}"));
+        }
+        let hub = self.hub.clone();
+        tokio::spawn(async move {
+            if let Err(e) = hub.backend.record_play(map).await {
+                warn!(map, "could not count the play: {e}");
+            }
+        });
+        self.map_meta = Some(map_meta_of(&found));
+        self.map_name = found.name.chars().take(60).collect();
+        self.map_code = found.code;
+        self.system_chat(&format!("Map changed to {}", self.map_name));
+        self.broadcast_room();
     }
 
     fn run_ticks(&mut self) {
@@ -1612,7 +1723,7 @@ impl Room {
                 bytes_in_per_s: p.rate.0,
                 bytes_out_per_s: p.rate.1,
                 margin_ticks: p.margin16 as f64 / 16.0,
-                transport: if p.live().is_some_and(|c| c.stats.udp.load(Ordering::Relaxed)) { "udp" } else { "ws" },
+                transport: (if p.live().is_some_and(|c| c.stats.udp.load(Ordering::Relaxed)) { "udp" } else { "ws" }).to_string(),
                 input_mask: mask(p.id),
                 connected: p.live().is_some(),
                 connected_s: p.live().map_or(0, |c| c.connected.elapsed().as_secs()),
@@ -1620,7 +1731,10 @@ impl Room {
                 account: p.account.as_ref().map(|a| a.id),
             })
             .collect();
-        self.summary.lock().unwrap().players = players;
+        let host_country = self.host.and_then(|h| self.players.iter().find(|p| p.id == h)).and_then(|p| self.hub.geo.country(p.ip));
+        let mut s = self.summary.lock().unwrap();
+        s.players = players;
+        s.host_country = host_country;
     }
 }
 

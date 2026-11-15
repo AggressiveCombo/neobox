@@ -10,6 +10,7 @@ use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicUsize, Ordering}
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use neobox_store::Store;
+use crate::backend::{Backend, Remote};
 use tokio::sync::mpsc;
 
 #[derive(Clone, Debug)]
@@ -34,6 +35,20 @@ pub struct Config {
     pub rtc_bind: Option<SocketAddr>,
     /// Address browsers reach `rtc_bind` at (the server's public IP).
     pub rtc_public: Option<SocketAddr>,
+    /// MaxMind-format city database for distances and flags (`NEOBOX_GEOIP`); `None`: off.
+    pub geoip: Option<PathBuf>,
+    /// This server's region name shown in the room list (`NEOBOX_REGION`; empty: single server).
+    pub region: String,
+    /// This server's latitude and longitude (`NEOBOX_LOCATION`, `"lat,lon"`).
+    pub location: Option<(f64, f64)>,
+    /// Base URL browsers reach this server at (`NEOBOX_PUBLIC_URL`, e.g. `https://eu.example.org`).
+    pub public_url: String,
+    /// Base URL of the main server (`NEOBOX_MAIN`). Set only on regional game
+    /// nodes; without it this server is the main server.
+    pub main_url: Option<String>,
+    /// Shared secret of the main server and its game nodes (`NEOBOX_CLUSTER_SECRET`;
+    /// empty on the main server: no nodes accepted).
+    pub cluster_secret: String,
 }
 
 impl Config {
@@ -55,6 +70,12 @@ impl Config {
                 v => v.parse().ok(),
             },
             rtc_public: std::env::var("NEOBOX_RTC_PUBLIC").ok().and_then(|v| v.parse().ok()),
+            geoip: std::env::var("NEOBOX_GEOIP").ok().filter(|v| !v.is_empty()).map(PathBuf::from),
+            region: var("NEOBOX_REGION", "").trim().to_string(),
+            location: std::env::var("NEOBOX_LOCATION").ok().and_then(|v| crate::geo::parse_location(&v)),
+            public_url: var("NEOBOX_PUBLIC_URL", "").trim().trim_end_matches('/').to_string(),
+            main_url: std::env::var("NEOBOX_MAIN").ok().map(|v| v.trim().trim_end_matches('/').to_string()).filter(|v| !v.is_empty()),
+            cluster_secret: var("NEOBOX_CLUSTER_SECRET", ""),
         }
     }
 }
@@ -97,6 +118,8 @@ pub struct ConnInfo {
     pub account: Option<AccountRef>,
     /// Appearance colour the player chose (`None`: the room assigns one).
     pub color: Option<u32>,
+    /// The account's XP as the ticket or main server gave it (`None`: guest or unknown).
+    pub xp: Option<u64>,
 }
 
 /// A signed-in account as rooms see it.
@@ -150,12 +173,23 @@ pub struct Hub {
     pub uploads: Limiter<i64>,
     /// Signed-in accounts with an open WebSocket, with the number of sockets.
     pub online: Mutex<HashMap<i64, usize>>,
-    pub store: Arc<Store>,
+    /// Regional game nodes that beat at this (main) server, by public URL.
+    pub nodes: Mutex<HashMap<String, crate::cluster::NodeInfo>>,
+    /// Wakes the heartbeat early: a room was created or closed.
+    pub beat: tokio::sync::Notify,
+    pub backend: Backend,
     pub rtc: Option<RtcHub>,
+    pub geo: crate::geo::Geo,
 }
 
 impl Hub {
-    pub fn new(cfg: Config, maps: Vec<BuiltinMap>, rtc: Option<RtcHub>, store: Store) -> Arc<Hub> {
+    pub fn new(cfg: Config, maps: Vec<BuiltinMap>, rtc: Option<RtcHub>, store: Option<Store>) -> Arc<Hub> {
+        let cfg_geoip = cfg.geoip.clone();
+        let backend = match (&cfg.main_url, store) {
+            (Some(main), _) => Backend::Remote(Remote::new(main.clone(), cfg.cluster_secret.clone())),
+            (None, Some(store)) => Backend::Local(Arc::new(store)),
+            (None, None) => panic!("the main server needs a store"),
+        };
         Arc::new(Hub {
             cfg,
             maps,
@@ -169,13 +203,20 @@ impl Hub {
             account_login: Limiter::new(5, Duration::from_secs(60)),
             uploads: Limiter::new(10, Duration::from_secs(3600)),
             online: Mutex::new(HashMap::new()),
-            store: Arc::new(store),
+            nodes: Mutex::new(HashMap::new()),
+            beat: tokio::sync::Notify::new(),
+            backend,
             rtc,
+            geo: crate::geo::Geo::open(cfg_geoip),
         })
     }
 
     pub fn room(&self, code: &str) -> Option<RoomHandle> {
         self.rooms.lock().unwrap().get(&code.to_ascii_uppercase()).cloned()
+    }
+
+    pub fn store(&self) -> Option<&Arc<Store>> {
+        self.backend.store()
     }
 
     pub fn summaries(&self) -> Vec<RoomSummary> {
@@ -193,7 +234,7 @@ impl Hub {
         loop {
             let mut r = rand::rng();
             let code: String = (0..6).map(|_| CHARS[r.random_range(0..CHARS.len())] as char).collect();
-            if !rooms.contains_key(&code) {
+            if !rooms.contains_key(&code) && !self.nodes.lock().unwrap().values().any(|n| n.rooms.iter().any(|r| r.code == code)) {
                 return code;
             }
         }
