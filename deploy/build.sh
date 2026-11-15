@@ -25,4 +25,6 @@ mkdir -p dist-server
 cp target/release/neobox-server dist-server/
 cp -r client/dist dist-server/client
 cp -r maps dist-server/maps
+cp deploy/geoip-update.sh dist-server/
+chmod +x dist-server/geoip-update.sh
 echo "done: dist-server/"

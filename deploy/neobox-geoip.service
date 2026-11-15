@@ -1,0 +1,17 @@
+# Geolocation database update (distances and flags in the room list).
+# Copy with neobox-geoip.timer to /etc/systemd/system/, then
+# `systemctl enable --now neobox-geoip.timer`.
+[Unit]
+Description=neobox geolocation database update
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=neobox
+StateDirectory=neobox
+ExecStart=/opt/neobox/geoip-update.sh /var/lib/neobox/dbip-city-lite.mmdb
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true

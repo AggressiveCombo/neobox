@@ -4,3 +4,8 @@ neobox.aggressivecombo.com {
 	encode zstd gzip
 	reverse_proxy 127.0.0.1:8080
 }
+
+# On a regional game node's own server, its block instead (the node's name):
+#us.neobox.aggressivecombo.com {
+#	reverse_proxy 127.0.0.1:8080
+#}
