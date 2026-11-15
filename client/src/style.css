@@ -1,3 +1,4 @@
+@import "./ui/phone-splash.css";
 @import "./ui/screens/room.css";
 @import "./ui/screens/hud.css";
 @import "./ui/screens/settings.css";
@@ -547,10 +548,15 @@ button:disabled {
 }
 
 .room-head span:nth-child(4) {
-  flex: 0 0 9rem;
+  flex: 0 0 5rem;
+  text-align: right;
 }
 
 .room-head span:nth-child(5) {
+  flex: 0 0 9rem;
+}
+
+.room-head span:nth-child(6) {
   flex: 0 0 3.5rem;
   text-align: right;
 }
