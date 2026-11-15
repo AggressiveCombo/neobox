@@ -20,11 +20,13 @@ mod maps;
 mod room;
 mod rotation;
 mod rtc;
+mod share;
 mod ticket;
 mod youtube;
 
 use axum::extract::{ConnectInfo, State, WebSocketUpgrade};
 use axum::http::{header, HeaderMap, HeaderValue};
+use axum::middleware;
 use axum::response::IntoResponse;
 use axum::routing::get;
 use axum::{Json, Router};
@@ -87,11 +89,11 @@ async fn main() {
     let rotation = rotation::Rotation::load(&cfg.maps_dir.join("rotation").join("maps2.json"));
     let static_dir = cfg.static_dir.clone();
     let bind = cfg.bind.clone();
-    let rtc = start_rtc(&cfg).await;
     if cfg.main_url.is_some() && (cfg.cluster_secret.is_empty() || cfg.public_url.is_empty()) {
         tracing::error!("a regional node (NEOBOX_MAIN) needs NEOBOX_CLUSTER_SECRET and NEOBOX_PUBLIC_URL");
         std::process::exit(1);
     }
+    let rtc = start_rtc(&cfg).await;
     let store = if cfg.main_url.is_some() { None } else { Some(open_store(&cfg.data)) };
     let hub = Hub::new(cfg, maps, rotation, rtc, store);
     spawn_housekeeping(hub.clone());
@@ -115,6 +117,7 @@ async fn main() {
             .merge(clips::router())
             .merge(cluster::router())
             .fallback_service(files)
+            .layer(middleware::from_fn_with_state(hub.clone(), share::preview))
     };
     let app = routes
         .layer(SetResponseHeaderLayer::if_not_present(header::X_CONTENT_TYPE_OPTIONS, HeaderValue::from_static("nosniff")))
@@ -177,6 +180,7 @@ fn spawn_housekeeping(hub: Arc<Hub>) {
             hub.admin_login.prune();
             hub.account_login.prune();
             hub.uploads.prune();
+            hub.reports.prune();
             // a monthly database update replaces the file; pick it up within a minute
             hub.geo.refresh();
             let Some(store) = hub.store().cloned() else { continue };

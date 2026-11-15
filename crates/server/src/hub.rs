@@ -67,9 +67,21 @@ impl Config {
             default_tick_hz: 30.0,
             rtc_bind: match var("NEOBOX_RTC_BIND", "0.0.0.0:3478").as_str() {
                 "off" | "" => None,
-                v => v.parse().ok(),
+                v => match v.parse() {
+                    Ok(addr) => Some(addr),
+                    Err(_) => {
+                        tracing::warn!("NEOBOX_RTC_BIND={v} is not ip:port; WebRTC is off");
+                        None
+                    }
+                },
             },
-            rtc_public: std::env::var("NEOBOX_RTC_PUBLIC").ok().and_then(|v| v.parse().ok()),
+            rtc_public: std::env::var("NEOBOX_RTC_PUBLIC").ok().and_then(|v| match v.parse() {
+                Ok(addr) => Some(addr),
+                Err(_) => {
+                    tracing::warn!("NEOBOX_RTC_PUBLIC={v} is not ip:port; the public address is detected");
+                    None
+                }
+            }),
             geoip: std::env::var("NEOBOX_GEOIP").ok().filter(|v| !v.is_empty()).map(PathBuf::from),
             region: var("NEOBOX_REGION", "").trim().to_string(),
             location: std::env::var("NEOBOX_LOCATION").ok().and_then(|v| crate::geo::parse_location(&v)),
@@ -156,6 +168,9 @@ pub struct BuiltinMap {
     pub code: String,
 }
 
+/// Characters of a room code (see `Hub::new_code`).
+pub const ROOM_CODE_CHARS: &[u8] = b"ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+
 pub struct Hub {
     pub cfg: Config,
     pub maps: Vec<BuiltinMap>,
@@ -171,6 +186,8 @@ pub struct Hub {
     pub account_login: Limiter<IpAddr>,
     /// Map uploads per account.
     pub uploads: Limiter<i64>,
+    /// Report submissions per address.
+    pub reports: Limiter<IpAddr>,
     /// Signed-in accounts with an open WebSocket, with the number of sockets.
     pub online: Mutex<HashMap<i64, usize>>,
     /// Regional game nodes that beat at this (main) server, by public URL.
@@ -212,6 +229,7 @@ impl Hub {
             admin_login: Limiter::new(5, Duration::from_secs(60)),
             account_login: Limiter::new(5, Duration::from_secs(60)),
             uploads: Limiter::new(10, Duration::from_secs(3600)),
+            reports: Limiter::new(10, Duration::from_secs(3600)),
             online: Mutex::new(HashMap::new()),
             nodes: Mutex::new(HashMap::new()),
             beat: tokio::sync::Notify::new(),
@@ -241,11 +259,10 @@ impl Hub {
     /// A fresh 6-character room code.
     pub fn new_code(&self) -> String {
         use rand::Rng;
-        const CHARS: &[u8] = b"ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
         let rooms = self.rooms.lock().unwrap();
         loop {
             let mut r = rand::rng();
-            let code: String = (0..6).map(|_| CHARS[r.random_range(0..CHARS.len())] as char).collect();
+            let code: String = (0..6).map(|_| ROOM_CODE_CHARS[r.random_range(0..ROOM_CODE_CHARS.len())] as char).collect();
             if !rooms.contains_key(&code) && !self.nodes.lock().unwrap().values().any(|n| n.rooms.iter().any(|r| r.code == code)) {
                 return code;
             }

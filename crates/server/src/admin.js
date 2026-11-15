@@ -18,7 +18,7 @@ async function api(path, body) {
   return r;
 }
 function showLogin() { $("#app").hidden = true; $("#login").hidden = false; $("#pw").focus(); }
-function showApp() { $("#login").hidden = true; $("#app").hidden = false; loadClips(true); }
+function showApp() { $("#login").hidden = true; $("#app").hidden = false; loadClips(true); loadReports(true); loadAccounts(); }
 
 $("#loginform").onsubmit = async (e) => {
   e.preventDefault();
@@ -41,7 +41,7 @@ function renderState(st) {
   for (const r of st.rooms) {
     const tr = document.createElement("tr");
     if (r.code === selected) tr.className = "sel";
-    tr.innerHTML = `<td><b>${esc(r.code)}</b></td><td>${esc(r.region || "")}</td><td>${esc(r.name)}${r.password ? " 🔒" : ""}${r.public ? "" : " <span class=muted>(private)</span>"}</td><td>${r.players.length}/${r.max_players}</td><td>${r.in_match ? "<span class=pill>match " + fmtTime(r.match_seconds) + "</span>" : "lobby"}</td><td>${r.tick}</td><td>${r.tick_hz}</td><td>${r.step_avg_us.toFixed(0)} / ${r.step_max_us.toFixed(0)}</td><td>${fmtBytes(r.bytes_in_per_s)} / ${fmtBytes(r.bytes_out_per_s)}</td><td>${esc(r.map_name)}</td>`;
+    tr.innerHTML = `<td><b>${esc(r.code)}</b></td><td>${esc(r.region || "")}</td><td>${esc(r.name)}${r.password ? " 🔒" : ""}${r.public ? "" : " <span class=muted>(private)</span>"}</td><td class="num">${r.players.length}/${r.max_players}</td><td>${r.in_match ? "<span class=pill>match " + fmtTime(r.match_seconds) + "</span>" : "lobby"}</td><td class="num">${r.tick}</td><td class="num">${r.tick_hz}</td><td class="num">${r.step_avg_us.toFixed(0)} / ${r.step_max_us.toFixed(0)}</td><td class="num">${fmtBytes(r.bytes_in_per_s)} / ${fmtBytes(r.bytes_out_per_s)}</td><td>${esc(r.map_name)}</td>`;
     tr.onclick = () => { selected = r.code; renderState(lastState); };
     tb.appendChild(tr);
   }
@@ -86,7 +86,7 @@ function renderRoom(r) {
   ptb.innerHTML = "";
   for (const p of r.players) {
     const tr = document.createElement("tr");
-    tr.innerHTML = `<td>${p.id}</td><td>${esc(p.name)}${p.host ? " <span class=pill>host</span>" : ""}</td><td class="t${p.team}">${teamName[p.team] || p.team}</td><td>${p.ping_ms} ms <span class=muted>${esc(p.transport)}</span></td><td>${p.margin_ticks.toFixed(2)}</td><td>${fmtBytes(p.bytes_in_per_s)} / ${fmtBytes(p.bytes_out_per_s)}</td><td>${maskText(p.input_mask)}</td><td>${fmtTime(p.connected_s)}</td><td class="muted">${esc(p.ip)}</td><td></td>`;
+    tr.innerHTML = `<td class="num">${p.id}</td><td>${esc(p.name)}${p.host ? " <span class=pill>host</span>" : ""}</td><td class="t${p.team}">${teamName[p.team] || p.team}</td><td class="num">${p.ping_ms} ms <span class=muted>${esc(p.transport)}</span></td><td class="num">${p.margin_ticks.toFixed(2)}</td><td class="num">${fmtBytes(p.bytes_in_per_s)} / ${fmtBytes(p.bytes_out_per_s)}</td><td>${maskText(p.input_mask)}</td><td>${fmtTime(p.connected_s)}</td><td class="muted">${esc(p.ip)}</td><td></td>`;
     const actions = tr.lastChild;
     const mk = (label, body, cls) => { const b = document.createElement("button"); b.textContent = label; if (cls) b.className = cls; b.onclick = () => cmd(r.code, body); actions.appendChild(b); };
     mk("Host", { action: "set_host", player: p.id });
@@ -112,7 +112,7 @@ function renderMaps(maps) {
   $("#nomaps").hidden = maps.length > 0;
   for (const m of maps) {
     const tr = document.createElement("tr");
-    tr.innerHTML = `<td><b>${esc(m.name)}</b></td><td>${esc(m.author)}</td><td>${esc(m.created)}</td><td>${m.size} B</td><td></td>`;
+    tr.innerHTML = `<td><b>${esc(m.name)}</b></td><td>${esc(m.author)}</td><td>${esc(m.created)}</td><td class="num">${m.size} B</td><td></td>`;
     const actions = tr.lastChild;
     const mk = (label, fn, cls) => { const b = document.createElement("button"); b.textContent = label; if (cls) b.className = cls; b.onclick = fn; actions.appendChild(b); };
     mk("Copy code", () => copyMapCode(m));
@@ -204,7 +204,7 @@ async function loadClips(reset) {
     const tb = $("#clips tbody");
     for (const c of clips) {
       const tr = document.createElement("tr");
-      tr.innerHTML = `<td>${esc(c.recorder)}</td><td>${esc(c.map_name)}</td><td>${esc(new Date(c.created * 1000).toISOString())}</td><td>${c.size} B</td><td></td>`;
+      tr.innerHTML = `<td>${esc(c.recorder)}</td><td>${esc(c.map_name)}</td><td>${esc(new Date(c.created * 1000).toISOString())}</td><td class="num">${c.size} B</td><td></td>`;
       const del = document.createElement("button");
       del.textContent = "Delete";
       del.className = "bad";
@@ -223,6 +223,87 @@ async function deleteClip(id) {
   loadClips(true);
 }
 $("#clipmore").onclick = () => loadClips(false);
+
+// Reports from players, newest first; "More" pages on from the last id shown.
+const REPORT_PAGE = 25;
+let repCursor = null;
+async function errorText(r) { return (await r.json().catch(() => ({}))).error || "HTTP " + r.status; }
+async function loadReports(reset) {
+  if (reset) { repCursor = null; $("#reports tbody").innerHTML = ""; $("#repdetail").textContent = ""; }
+  const q = new URLSearchParams();
+  if ($("#repstatus").value) q.set("status", $("#repstatus").value);
+  if (repCursor !== null) q.set("before", repCursor);
+  try {
+    const r = await api("/admin/api/reports?" + q);
+    if (!r.ok) { $("#repmsg").textContent = "Could not load reports: " + (await errorText(r)) + "."; return; }
+    const reports = await r.json();
+    const tb = $("#reports tbody");
+    for (const rep of reports) {
+      const tr = document.createElement("tr");
+      const subject = rep.kind === "player" ? (rep.player ? rep.player.name : "(left the room)") : rep.map.name;
+      tr.innerHTML = `<td>${esc(rep.kind)}</td><td>${esc(subject)}</td><td>${esc(rep.reason)}</td><td>${esc(rep.reporter.name)}</td><td>${esc(rep.room_code || "-")}</td><td>${esc(new Date(rep.created * 1000).toISOString())}</td><td></td>`;
+      const actions = tr.lastChild;
+      const mk = (label, fn, cls) => { const b = document.createElement("button"); b.textContent = label; if (cls) b.className = cls; b.onclick = fn; actions.appendChild(b); };
+      mk("Evidence", () => showReport(rep));
+      if (rep.status === "open") { mk("Resolve", () => setReportStatus(rep, "resolved")); mk("Dismiss", () => setReportStatus(rep, "dismissed")); }
+      else mk("Reopen", () => setReportStatus(rep, "open"));
+      mk("Delete", () => { if (confirm("Delete report " + rep.id + " for good?")) deleteReport(rep); }, "bad");
+      tb.appendChild(tr);
+      repCursor = rep.id;
+    }
+    $("#norep").hidden = tb.children.length > 0;
+    $("#repmore").disabled = reports.length < REPORT_PAGE;
+  } catch (_) {}
+}
+function showReport(rep) {
+  const who = (p) => p.name + " (" + (p.account === null ? "guest" : "account " + p.account) + ", " + p.ip + ")";
+  const lines = ["Reason: " + rep.reason, "Reporter: " + who(rep.reporter)];
+  if (rep.player) lines.push("Player: " + who(rep.player));
+  if (rep.map) lines.push("Map: " + rep.map.name + " by " + rep.map.author + (rep.map.id === null ? " (built in)" : " (library " + rep.map.id + ")"));
+  lines.push("Room: " + rep.room_name + " (" + rep.room_code + ")", "Chat:");
+  for (const c of rep.chat) lines.push("  " + new Date(c.at * 1000).toISOString() + " " + c.name + ": " + c.text);
+  $("#repdetail").textContent = lines.join("\n");
+}
+async function setReportStatus(rep, status) {
+  const r = await api("/admin/api/reports/" + rep.id + "/status", { status });
+  $("#repmsg").textContent = r.ok ? "Report " + rep.id + " is now " + status + "." : "Could not update report " + rep.id + ": " + (await errorText(r)) + ".";
+  loadReports(true);
+}
+async function deleteReport(rep) {
+  const r = await api("/admin/api/reports/" + rep.id + "/delete", {});
+  $("#repmsg").textContent = r.ok ? "Deleted report " + rep.id + "." : "Could not delete report " + rep.id + ": " + (await errorText(r)) + ".";
+  loadReports(true);
+}
+$("#repstatus").onchange = () => loadReports(true);
+$("#repmore").onclick = () => loadReports(false);
+
+// Accounts: search by name, newest first; set a new password for a locked-out player.
+async function loadAccounts() {
+  try {
+    const r = await api("/admin/api/accounts?q=" + encodeURIComponent($("#accq").value));
+    if (!r.ok) { $("#accmsg").textContent = "Could not search accounts: " + (await errorText(r)) + "."; return; }
+    const accounts = await r.json();
+    const tb = $("#accounts tbody");
+    tb.innerHTML = "";
+    for (const a of accounts) {
+      const tr = document.createElement("tr");
+      tr.innerHTML = `<td><b>${esc(a.name)}</b></td><td class="num">${a.xp}</td><td>${esc(new Date(a.created * 1000).toISOString())}</td><td></td>`;
+      const set = document.createElement("button");
+      set.textContent = "Set password";
+      set.onclick = () => setPassword(a);
+      tr.lastChild.appendChild(set);
+      tb.appendChild(tr);
+    }
+    $("#noacc").hidden = accounts.length > 0;
+  } catch (_) {}
+}
+async function setPassword(a) {
+  const password = prompt("New password for " + a.name + ". Its sessions are signed out.");
+  if (!password) return;
+  const r = await api("/admin/api/accounts/" + a.id + "/password", { password });
+  $("#accmsg").textContent = r.ok ? "Password of " + a.name + " set." : "Could not set the password of " + a.name + ": " + (await errorText(r)) + ".";
+}
+$("#accq").oninput = () => loadAccounts();
 
 async function refresh() {
   if ($("#app").hidden) return;

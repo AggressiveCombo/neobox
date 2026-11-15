@@ -11,10 +11,11 @@ mod clips;
 mod friends;
 mod library;
 mod records;
+mod reports;
 mod session;
 mod xp;
 
-pub use account::{Account, MAX_PREFS_BYTES};
+pub use account::{Account, AccountSummary, MAX_PREFS_BYTES};
 pub use clips::{ClipSummary, MAX_CLIPS, MAX_CLIP_BYTES};
 pub use friends::{Friend, FriendState, MAX_FRIENDS, MAX_INCOMING_REQUESTS, MAX_OUTGOING_REQUESTS};
 pub use library::{
@@ -24,6 +25,7 @@ pub use library::{
 pub use session::{MAX_SESSIONS_PER_ACCOUNT, SESSION_TTL};
 pub use xp::{XP_PER_DAY, XP_PER_HOUR, XpGrant, XpLimit};
 pub use records::{Record, MAX_RECORDS};
+pub use reports::{NewReport, Report, ReportChat, ReportKind, ReportStatus, ReportedMap, ReportedPlayer, Reporter, MAX_REASON_CHARS, MAX_REPORT_CHAT};
 
 use rusqlite::{Connection, ErrorCode};
 use std::path::Path;
@@ -185,6 +187,31 @@ CREATE TABLE records (
     PRIMARY KEY (map_id, account_id)
 );
 CREATE INDEX records_rank ON records (map_id, ticks, at);
+"#, r#"
+-- Reports from players about other players or maps, kept with the evidence
+-- captured when they were filed. Admins resolve or dismiss them.
+CREATE TABLE reports (
+    id INTEGER PRIMARY KEY,
+    kind TEXT NOT NULL CHECK (kind IN ('player', 'map')),
+    status TEXT NOT NULL CHECK (status IN ('open', 'resolved', 'dismissed')),
+    reason TEXT NOT NULL,
+    reporter_account INTEGER REFERENCES accounts (id) ON DELETE SET NULL,
+    reporter_name TEXT NOT NULL,
+    reporter_ip TEXT NOT NULL,
+    room_code TEXT NOT NULL,
+    room_name TEXT NOT NULL,
+    player_id INTEGER,
+    player_name TEXT,
+    player_account INTEGER,
+    player_ip TEXT,
+    map_id INTEGER,
+    map_name TEXT,
+    map_author TEXT,
+    chat TEXT NOT NULL,
+    created INTEGER NOT NULL,
+    resolved INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX reports_status ON reports (status, id);
 "#];
 
 impl Store {

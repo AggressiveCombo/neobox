@@ -36,7 +36,7 @@ function errorMessage(text: string, status: number): string {
 }
 
 /** One JSON request. Empty success bodies resolve to undefined; non-JSON bodies to their text. */
-async function request<T>(method: string, path: string, body?: unknown, keepalive = false): Promise<T> {
+export async function request<T>(method: string, path: string, body?: unknown, keepalive = false): Promise<T> {
   const headers: Record<string, string> = { accept: "application/json" };
   let payload: string | undefined;
   if (body !== undefined) {

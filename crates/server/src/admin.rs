@@ -11,7 +11,7 @@ use axum::http::{header, HeaderMap, StatusCode};
 use axum::response::{Html, IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
-use neobox_store::Verdict;
+use neobox_store::{ReportStatus, Verdict};
 use serde::{Deserialize, Serialize};
 use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
@@ -44,6 +44,11 @@ pub fn router() -> Router<Arc<Hub>> {
         .route("/admin/api/maps/{id}/pick", post(pick_map))
         .route("/admin/api/clips", get(admin_clips))
         .route("/admin/api/clips/{id}/delete", post(admin_delete_clip))
+        .route("/admin/api/reports", get(reports))
+        .route("/admin/api/reports/{id}/status", post(report_status))
+        .route("/admin/api/reports/{id}/delete", post(report_delete))
+        .route("/admin/api/accounts", get(accounts))
+        .route("/admin/api/accounts/{id}/password", post(account_password))
 }
 
 async fn page() -> impl IntoResponse {
@@ -363,5 +368,72 @@ async fn admin_delete_clip(State(hub): State<Arc<Hub>>, headers: HeaderMap, Path
         return Ok(StatusCode::UNAUTHORIZED.into_response());
     }
     db(&hub, move |s| s.delete_clip(id)).await?;
+    Ok(StatusCode::NO_CONTENT.into_response())
+}
+
+// Reports and accounts
+
+#[derive(Deserialize)]
+struct ReportsQuery {
+    status: Option<ReportStatus>,
+    before: Option<i64>,
+}
+
+/// Reports newest first, a page at a time; `status` filters, `before` is the last id seen.
+async fn reports(State(hub): State<Arc<Hub>>, headers: HeaderMap, Query(q): Query<ReportsQuery>) -> Result<Response, Fail> {
+    if !authorized(&hub, &headers) {
+        return Ok(StatusCode::UNAUTHORIZED.into_response());
+    }
+    let list = db(&hub, move |s| s.reports(q.status, q.before, ADMIN_PAGE_SIZE)).await?;
+    Ok(Json(list).into_response())
+}
+
+#[derive(Deserialize)]
+struct ReportStatusBody {
+    status: ReportStatus,
+}
+
+async fn report_status(State(hub): State<Arc<Hub>>, headers: HeaderMap, Path(id): Path<i64>, Json(b): Json<ReportStatusBody>) -> Result<Response, Fail> {
+    if !authorized(&hub, &headers) {
+        return Ok(StatusCode::UNAUTHORIZED.into_response());
+    }
+    db(&hub, move |s| s.set_report_status(id, b.status)).await?;
+    Ok(StatusCode::NO_CONTENT.into_response())
+}
+
+async fn report_delete(State(hub): State<Arc<Hub>>, headers: HeaderMap, Path(id): Path<i64>) -> Result<Response, Fail> {
+    if !authorized(&hub, &headers) {
+        return Ok(StatusCode::UNAUTHORIZED.into_response());
+    }
+    db(&hub, move |s| s.delete_report(id)).await?;
+    Ok(StatusCode::NO_CONTENT.into_response())
+}
+
+#[derive(Deserialize)]
+struct AccountsQuery {
+    q: Option<String>,
+}
+
+/// Accounts whose name contains `q`, newest first, for the admin search.
+async fn accounts(State(hub): State<Arc<Hub>>, headers: HeaderMap, Query(q): Query<AccountsQuery>) -> Result<Response, Fail> {
+    if !authorized(&hub, &headers) {
+        return Ok(StatusCode::UNAUTHORIZED.into_response());
+    }
+    let query = q.q.unwrap_or_default();
+    let found = db(&hub, move |s| s.find_accounts(&query, ADMIN_PAGE_SIZE)).await?;
+    Ok(Json(found).into_response())
+}
+
+#[derive(Deserialize)]
+struct PasswordSetBody {
+    password: String,
+}
+
+/// Set an account's password without the old one; its sessions are signed out.
+async fn account_password(State(hub): State<Arc<Hub>>, headers: HeaderMap, Path(id): Path<i64>, Json(b): Json<PasswordSetBody>) -> Result<Response, Fail> {
+    if !authorized(&hub, &headers) {
+        return Ok(StatusCode::UNAUTHORIZED.into_response());
+    }
+    db(&hub, move |s| s.admin_set_password(id, &b.password)).await?;
     Ok(StatusCode::NO_CONTENT.into_response())
 }

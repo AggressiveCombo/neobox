@@ -20,6 +20,17 @@ pub struct Account {
     pub name: String,
 }
 
+/// An account as the admin account search lists it.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct AccountSummary {
+    pub id: i64,
+    pub name: String,
+    /// Experience total.
+    pub xp: u64,
+    /// Unix seconds.
+    pub created: i64,
+}
+
 /// Reads `id, name` (in that order).
 pub(crate) fn account_row(r: &Row<'_>) -> rusqlite::Result<Account> {
     Ok(Account { id: r.get(0)?, name: r.get(1)? })
@@ -159,6 +170,43 @@ impl Store {
             .query_row("SELECT password_hash FROM accounts WHERE id = ?1", [id], |r| r.get::<_, String>(0))
             .optional()?
             .ok_or(Error::NotFound)
+    }
+
+    /// Set an account's password without the old one. Admin action only. Every
+    /// session of the account is signed out, so the player must sign in again.
+    pub fn admin_set_password(&self, id: i64, password: &str) -> Result<()> {
+        check_password(password)?;
+        let hash = hash_password(password)?;
+        let mut db = self.db();
+        let tx = db.transaction()?;
+        let n = tx.execute("UPDATE accounts SET password_hash = ?1 WHERE id = ?2", params![hash, id])?;
+        if n == 0 {
+            return Err(Error::NotFound);
+        }
+        tx.execute("DELETE FROM sessions WHERE account_id = ?1", params![id])?;
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// Accounts whose name contains `query` (ignoring case), newest first; every
+    /// account when `query` is empty. Admin search only.
+    pub fn find_accounts(&self, query: &str, limit: usize) -> Result<Vec<AccountSummary>> {
+        let escaped = query.chars().take(40).collect::<String>().to_ascii_lowercase();
+        let escaped = escaped.replace('\\', "\\\\").replace('%', "\\%").replace('_', "\\_");
+        let db = self.db();
+        let mut stmt = db.prepare(
+            "SELECT id, name, xp, created FROM accounts WHERE name_key LIKE ?1 ESCAPE '\\' \
+             ORDER BY created DESC, id DESC LIMIT ?2",
+        )?;
+        let rows = stmt.query_map(params![format!("%{escaped}%"), limit as i64], |r| {
+            Ok(AccountSummary {
+                id: r.get(0)?,
+                name: r.get(1)?,
+                xp: r.get::<_, i64>(2)?.max(0) as u64,
+                created: r.get(3)?,
+            })
+        })?;
+        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
     }
 
     /// The saved preferences document, or `{}` if none was saved.
@@ -321,5 +369,40 @@ mod tests {
         let over = format!(r#"{{"x":"{pad}a"}}"#);
         assert!(matches!(s.set_prefs(a.id, &over), Err(Error::Invalid(_))));
         assert_eq!(s.set_prefs(999, "{}"), Err(Error::NotFound));
+    }
+
+    #[test]
+    fn admin_password_reset_signs_every_session_out() {
+        let s = store();
+        let id = s.register("forgetful", PASSWORD).unwrap().id;
+        let token = s.create_session(id).unwrap();
+        let other = s.create_session(id).unwrap();
+        assert!(s.session_account(&token).unwrap().is_some());
+        s.admin_set_password(id, "new password").unwrap();
+        assert!(s.session_account(&token).unwrap().is_none());
+        assert!(s.session_account(&other).unwrap().is_none());
+        assert!(s.login("forgetful", "new password").is_ok());
+        assert_eq!(s.login("forgetful", PASSWORD), Err(Error::BadLogin));
+    }
+
+    #[test]
+    fn admin_password_reset_checks_length_and_account() {
+        let s = store();
+        let id = raw_account(&s, "ghost");
+        assert!(matches!(s.admin_set_password(id, "short"), Err(Error::Invalid(_))));
+        assert_eq!(s.admin_set_password(id + 99, "long enough"), Err(Error::NotFound));
+    }
+
+    #[test]
+    fn account_search_matches_names_literally() {
+        let s = store();
+        raw_account(&s, "Ada_1");
+        raw_account(&s, "adam");
+        raw_account(&s, "Bob");
+        let names = |q: &str| s.find_accounts(q, 10).unwrap().into_iter().map(|a| a.name).collect::<Vec<_>>();
+        assert_eq!(names("ad"), vec!["adam", "Ada_1"]);
+        assert_eq!(names("_"), vec!["Ada_1"]);
+        assert_eq!(names("%"), Vec::<String>::new());
+        assert_eq!(names(""), vec!["Bob", "adam", "Ada_1"]);
     }
 }

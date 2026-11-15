@@ -12,7 +12,8 @@ use axum::routing::{get, post};
 use axum::{Json, Router};
 use neobox_net::level_of;
 use neobox_store::{
-    Account, Error, FriendState, MapDetail, MapSummary, Record, Sort, Status, Store, Visibility, MAX_CODE_BYTES, SESSION_TTL,
+    Account, Error, FriendState, MapDetail, MapSummary, NewReport, Record, ReportKind, ReportedMap, Reporter, Sort, Status, Store, Visibility,
+    MAX_CODE_BYTES, SESSION_TTL,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
@@ -50,6 +51,7 @@ pub fn router() -> Router<Arc<Hub>> {
         .route("/api/library/{id}/favourite", post(library_favourite))
         .route("/api/library/{id}/play", post(library_play))
         .route("/api/library/{id}/records", get(library_records))
+        .route("/api/report", post(report))
         .layer(DefaultBodyLimit::max(MAX_CODE_BYTES + 64 * 1024))
 }
 
@@ -655,4 +657,80 @@ async fn library_favourite(
 async fn library_play(State(hub): State<Arc<Hub>>, Path(id): Path<i64>) -> Result<StatusCode, Fail> {
     db(&hub, move |s| s.record_play(id)).await?;
     Ok(StatusCode::NO_CONTENT)
+}
+
+// Reports
+
+/// A report from the client: a player in a room, or a map. A map is named by
+/// the room it is played in, or by its library id for a report made outside
+/// any room.
+#[derive(Deserialize)]
+#[serde(tag = "kind", rename_all = "lowercase")]
+enum ReportBody {
+    Player { room: String, player: u32, reason: String },
+    Map { room: Option<String>, map: Option<i64>, reason: String },
+}
+
+/// File a report on a player or a map, with the evidence the room's server keeps
+/// or the library's record of the map. Guests may report; each address is limited
+/// in how many it files.
+async fn report(
+    State(hub): State<Arc<Hub>>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    Json(b): Json<ReportBody>,
+) -> Result<StatusCode, Fail> {
+    let ip = client_ip(&hub, &headers, peer);
+    if !hub.reports.allow(ip) {
+        return Err(Fail::new(StatusCode::TOO_MANY_REQUESTS, "Too many reports, try again later"));
+    }
+    let reporter = match signed_in(&hub, &headers).await {
+        Ok(acc) => Reporter { account: Some(acc.id), name: acc.name, ip: ip.to_string() },
+        Err(_) => Reporter { account: None, name: "Guest".to_string(), ip: ip.to_string() },
+    };
+    let report = match b {
+        ReportBody::Player { room, player, reason } => room_report(&hub, &room, Some(player), reason, reporter).await?,
+        ReportBody::Map { room: Some(room), map: None, reason } => room_report(&hub, &room, None, reason, reporter).await?,
+        ReportBody::Map { room: None, map: Some(map), reason } => library_map_report(&hub, map, reason, reporter).await?,
+        ReportBody::Map { .. } => {
+            return Err(Fail::new(StatusCode::BAD_REQUEST, "A map report names either a room or a library map"));
+        }
+    };
+    db(&hub, move |s| s.create_report(&report)).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// A report on a player or the map of a room, from the room's own evidence.
+async fn room_report(hub: &Hub, room: &str, player: Option<u32>, reason: String, reporter: Reporter) -> Result<NewReport, Fail> {
+    let ev = cluster::room_evidence(hub, room, player)
+        .await
+        .map_err(|e| {
+            error!("report evidence: {e}");
+            Fail::new(StatusCode::BAD_GATEWAY, "The room's server did not answer")
+        })?
+        .ok_or_else(|| Fail::new(StatusCode::NOT_FOUND, "That room is closed"))?;
+    let (kind, player) = match player {
+        Some(_) => {
+            let player = ev.player.ok_or_else(|| Fail::new(StatusCode::NOT_FOUND, "That player left the room"))?;
+            (ReportKind::Player, Some(player))
+        }
+        None => (ReportKind::Map, None),
+    };
+    Ok(NewReport { kind, reason, reporter, room_code: ev.room_code, room_name: ev.room_name, player, map: Some(ev.map), chat: ev.chat })
+}
+
+/// A report on a library map, made from outside any room. The map is named as the library has it.
+async fn library_map_report(hub: &Hub, id: i64, reason: String, reporter: Reporter) -> Result<NewReport, Fail> {
+    let viewer = reporter.account;
+    let map = db(hub, move |s| s.map_meta(id, viewer)).await?;
+    Ok(NewReport {
+        kind: ReportKind::Map,
+        reason,
+        reporter,
+        room_code: String::new(),
+        room_name: String::new(),
+        player: None,
+        map: Some(ReportedMap { id: Some(map.id), name: map.name, author: map.author }),
+        chat: Vec::new(),
+    })
 }

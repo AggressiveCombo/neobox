@@ -1,5 +1,7 @@
 // Plain HTTP helpers for the server's JSON endpoints.
 
+import { request } from "./account";
+
 export interface BuiltinMap {
   name: string;
   code: string;
@@ -98,4 +100,15 @@ export async function fetchTicket(): Promise<string | null> {
   } catch {
     return null;
   }
+}
+
+/** A report filed from inside a room (a player, or the room's map), or on a library map from outside any room. */
+export type ReportInput =
+  | { kind: "player"; room: string; player: number; reason: string }
+  | { kind: "map"; room: string; reason: string }
+  | { kind: "map"; map: number; reason: string };
+
+/** POST /api/report. Resolves once the server has stored the report; errors carry the server's message. */
+export async function sendReport(input: ReportInput): Promise<void> {
+  await request<void>("POST", "/api/report", input);
 }

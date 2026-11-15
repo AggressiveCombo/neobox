@@ -16,7 +16,7 @@ use std::time::{Duration, Instant};
 use tokio::sync::{mpsc, oneshot};
 use tracing::{info, warn};
 use crate::backend::{MapAction, MapCommandBody, RecordBody};
-use neobox_store::{RoomMap, XpGrant};
+use neobox_store::{ReportChat, ReportedMap, ReportedPlayer, RoomMap, XpGrant, MAX_REPORT_CHAT};
 
 /// Longest map code accepted from clients (characters).
 pub const MAX_MAP_CODE: usize = 2 * 1024 * 1024;
@@ -60,6 +60,8 @@ pub enum RoomCmd {
     Frame { player: u32, frame: ClientFrame },
     Admin(AdminCmd),
     View { reply: oneshot::Sender<Option<Vec<u8>>> },
+    /// What a report keeps of the room; `player` is the one reported.
+    Evidence { player: Option<u32>, reply: oneshot::Sender<Evidence> },
     /// The title of a suggested video arrived (fetched off the room task).
     Suggested { from: u32, name: String, video: String, title: String },
     /// The title of the jukebox video arrived.
@@ -288,10 +290,29 @@ pub struct Room {
     summary: Arc<Mutex<RoomSummary>>,
     created: u64,
     closed: bool,
+    /// The last chat lines, kept for reports.
+    chat_log: VecDeque<ReportChat>,
 }
 
 fn now_ms() -> u64 {
     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0)
+}
+
+/// What a report keeps of a room. Nodes send it to the main server as JSON.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct Evidence {
+    pub room_code: String,
+    pub room_name: String,
+    pub player: Option<ReportedPlayer>,
+    pub map: ReportedMap,
+    pub chat: Vec<ReportChat>,
+}
+
+/// Ask a room task for its evidence. `None` once the room has closed.
+pub async fn gather_evidence(room: &RoomHandle, player: Option<u32>) -> Option<Evidence> {
+    let (reply, rx) = oneshot::channel();
+    room.tx.send(RoomCmd::Evidence { player, reply }).ok()?;
+    rx.await.ok()
 }
 
 /// How a new room starts.
@@ -379,6 +400,7 @@ pub fn spawn(
         summary: summary.clone(),
         created: now_ms(),
         closed: false,
+        chat_log: VecDeque::new(),
     };
     let handle = RoomHandle { tx, summary };
     tokio::spawn(room.run(rx));
@@ -510,6 +532,9 @@ impl Room {
             RoomCmd::Msg { player, msg } => self.message(player, msg),
             RoomCmd::Frame { player, frame } => self.frame(player, frame),
             RoomCmd::Admin(a) => self.admin(a),
+            RoomCmd::Evidence { player, reply } => {
+                let _ = reply.send(self.evidence(player));
+            }
             RoomCmd::View { reply } => {
                 let frame = self.game.as_ref().map(|g| {
                     let mut fb = neobox_wasm::frame::FrameBuilder::default();
@@ -562,6 +587,30 @@ impl Room {
 
     fn player_mut(&mut self, id: u32) -> Option<&mut RPlayer> {
         self.players.iter_mut().find(|p| p.id == id)
+    }
+
+    /// What a report keeps of this room: the reported player (if still here), the map and the recent chat.
+    fn evidence(&self, player: Option<u32>) -> Evidence {
+        let player = player.and_then(|id| self.player(id)).map(|p| ReportedPlayer {
+            id: p.id as i64,
+            name: p.name.clone(),
+            account: p.account.as_ref().map(|a| a.id),
+            ip: p.ip.to_string(),
+        });
+        let map = ReportedMap {
+            id: self.map_meta.as_ref().map(|m| m.id),
+            name: self.map_name.clone(),
+            author: self.map_meta.as_ref().map(|m| m.author.clone()).unwrap_or_default(),
+        };
+        Evidence { room_code: self.code.clone(), room_name: self.name.clone(), player, map, chat: self.chat_log.iter().cloned().collect() }
+    }
+
+    /// Keep a chat line for the reports that may cite it.
+    fn keep_chat(&mut self, name: &str, text: &str) {
+        if self.chat_log.len() >= MAX_REPORT_CHAT {
+            self.chat_log.pop_front();
+        }
+        self.chat_log.push_back(ReportChat { name: name.into(), text: text.into(), at: (now_ms() / 1000) as i64 });
     }
 
     fn is_host(&self, id: u32) -> bool {
@@ -978,6 +1027,7 @@ impl Room {
                     return;
                 }
                 let text = emoji::replace_shortcodes(&text);
+                self.keep_chat(&name, &text);
                 let m = json(&ServerMsg::Chat { from: Some(id), name, text });
                 for q in &self.players {
                     q.send(Out::Text(m.clone()));

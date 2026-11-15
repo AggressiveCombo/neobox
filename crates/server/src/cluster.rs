@@ -6,7 +6,7 @@
 use crate::backend::{Backend, MapCommandBody, RecordBody, XpBody};
 use crate::geo::distance_km;
 use crate::hub::Hub;
-use crate::room::{AdminCmd, RoomCmd, RoomSummary};
+use crate::room::{gather_evidence, AdminCmd, Evidence, RoomCmd, RoomSummary};
 use axum::extract::{Path, Query, State};
 use axum::http::{header, HeaderMap, StatusCode, Uri};
 use axum::response::{IntoResponse, Redirect, Response};
@@ -133,6 +133,7 @@ pub fn router() -> Router<Arc<Hub>> {
         .route("/internal/maps/{id}", get(room_map))
         .route("/internal/maps/{id}/play", post(record_play))
         .route("/internal/admin", post(admin))
+        .route("/internal/evidence", post(evidence))
 }
 
 async fn heartbeat(State(hub): State<Arc<Hub>>, headers: HeaderMap, Json(b): Json<Beat>) -> Response {
@@ -219,12 +220,64 @@ async fn admin(State(hub): State<Arc<Hub>>, headers: HeaderMap, Json(b): Json<Ad
     }
 }
 
-/// Send an admin command to the node that runs `room`, with the cluster secret.
-pub async fn forward_admin(hub: &Hub, node: &NodeInfo, room: &str, cmd: AdminCmd) -> Result<(), String> {
+/// The HTTP client for calls to game nodes.
+fn node_http() -> &'static reqwest::Client {
     static HTTP: std::sync::LazyLock<reqwest::Client> =
         std::sync::LazyLock::new(|| reqwest::Client::builder().timeout(Duration::from_secs(5)).build().unwrap_or_default());
+    &HTTP
+}
+
+/// The evidence of `room` for a report: from this server's room, or from the
+/// node that runs it. `Ok(None)` when no live room has that code.
+pub async fn room_evidence(hub: &Hub, room: &str, player: Option<u32>) -> Result<Option<Evidence>, String> {
+    if let Some(handle) = hub.room(room) {
+        return Ok(gather_evidence(&handle, player).await);
+    }
+    let Some(node) = node_with_room(hub, room) else {
+        return Ok(None);
+    };
+    let body = serde_json::to_vec(&serde_json::json!({ "room": room, "player": player })).unwrap_or_default();
+    let resp = node_http()
+        .post(format!("{}/internal/evidence", node.url))
+        .bearer_auth(&hub.cfg.cluster_secret)
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(body)
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    match resp.status() {
+        StatusCode::NOT_FOUND => Ok(None),
+        s if s.is_success() => {
+            let bytes = resp.bytes().await.map_err(|e| e.to_string())?;
+            serde_json::from_slice(&bytes).map(Some).map_err(|e| e.to_string())
+        }
+        s => Err(format!("node answered {s}")),
+    }
+}
+
+#[derive(Deserialize)]
+struct EvidenceBody {
+    room: String,
+    player: Option<u32>,
+}
+
+async fn evidence(State(hub): State<Arc<Hub>>, headers: HeaderMap, Json(b): Json<EvidenceBody>) -> Response {
+    if !authorized(&hub, &headers) {
+        return denied();
+    }
+    let Some(handle) = hub.room(&b.room) else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+    match gather_evidence(&handle, b.player).await {
+        Some(ev) => Json(ev).into_response(),
+        None => StatusCode::NOT_FOUND.into_response(),
+    }
+}
+
+/// Send an admin command to the node that runs `room`, with the cluster secret.
+pub async fn forward_admin(hub: &Hub, node: &NodeInfo, room: &str, cmd: AdminCmd) -> Result<(), String> {
     let body = serde_json::to_vec(&serde_json::json!({ "room": room, "cmd": cmd })).unwrap_or_default();
-    let resp = HTTP
+    let resp = node_http()
         .post(format!("{}/internal/admin", node.url))
         .bearer_auth(&hub.cfg.cluster_secret)
         .header(header::CONTENT_TYPE, "application/json")
