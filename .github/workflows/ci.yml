@@ -1,0 +1,58 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  rust:
+    name: Rust tests and WASM build
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Test
+        run: cargo test --release --workspace
+      - name: Build WASM game module
+        run: |
+          rustup target add wasm32-unknown-unknown
+          cargo build --profile wasm --target wasm32-unknown-unknown -p neobox-wasm
+
+  client:
+    name: Client, server bundle and end-to-end tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: oven-sh/setup-bun@v2
+      - uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ runner.os }}-${{ hashFiles('client/bun.lock') }}
+      - name: Install client dependencies
+        working-directory: client
+        run: bun install --frozen-lockfile
+      - name: Typecheck
+        working-directory: client
+        run: bunx tsc --noEmit -p tsconfig.json
+      - name: Unit tests
+        working-directory: client
+        run: bun test
+      - name: Build server bundle (WASM, client, server)
+        run: bash deploy/build.sh
+      - name: Install Chromium
+        working-directory: client
+        run: bunx playwright-core install --with-deps chromium
+      - name: End-to-end tests
+        working-directory: client
+        run: bun run e2e
