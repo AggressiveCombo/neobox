@@ -56,9 +56,11 @@ This is why I have set up some goals that I believe will make the project an imp
 * **Playing together.** Quick-play queues (free for all, teams, lives) that
   drop you into rotating-map rooms, invite links, password rooms, and
   reconnecting to your own slot after a dropped connection or a page reload.
-  Hosts manage teams, lock teams, kick, ban and unban, hand over the host
-  role, count down and start matches, and end them from the room screen or
-  with chat commands (`/help`).
+  The room list shows each room's distance and its host's flag, nearest
+  first with friends' rooms on top. Optional regional game servers: new
+  rooms open on the server nearest to you. Hosts manage teams, lock teams,
+  kick, ban and unban, hand over the host role, count down and start
+  matches, and end them from the room screen or with chat commands (`/help`).
 * **Levels.** Experience for every finished game (more for better places),
   a post-game screen with your level bar and a vote on the map, and levels
   shown next to names. Awards are computed by the server.

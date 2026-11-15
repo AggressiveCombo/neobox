@@ -128,14 +128,26 @@ cp deploy/neobox.service /etc/systemd/system/neobox.service
 systemctl daemon-reload
 systemctl enable --now neobox
 
+# room list distances and flags: DB-IP's free city database, checked daily
+cp deploy/neobox-geoip.service deploy/neobox-geoip.timer /etc/systemd/system/
+systemctl daemon-reload
+systemctl enable --now neobox-geoip.timer
+systemctl start neobox-geoip.service    # first download now (about 60 MB)
+
 cp deploy/Caddyfile /etc/caddy/Caddyfile
 systemctl reload caddy
 ```
 
+Set `NEOBOX_LOCATION` in `/etc/neobox.env` to the server's latitude and
+longitude (your provider's data centre city is close enough, e.g.
+`50.11,8.68` for Frankfurt) so the room list can show distances.
+
 ## 6. Check
 
 * `systemctl status neobox` shows `active (running)`; the log line
-  `WebRTC transport listening (UDP)` confirms UDP is enabled.
+  `WebRTC transport listening (UDP)` confirms UDP is enabled, and
+  `geolocation database loaded` (within a minute of the first download)
+  confirms distances and flags.
 * Open `https://neobox.aggressivecombo.com`: the menu appears.
 * Open `https://neobox.aggressivecombo.com/admin` and log in with the
   admin password. Join a game from another tab: the room and player appear
@@ -180,6 +192,50 @@ To restore: `systemctl stop neobox`, copy a backup to
 `/var/lib/neobox/neobox.db`, delete `neobox.db-wal` and `neobox.db-shm` next to
 it, `chown neobox:neobox /var/lib/neobox/neobox.db`, `systemctl start neobox`.
 
+## Regional game servers (optional)
+
+Players far from the server get more lag. Like the original game, neobox
+can run extra game servers in other regions: the main server keeps the
+website, accounts, the map library, the admin page and the room list, and
+each **game node** only runs rooms. The room list shows every server's rooms
+with their region and distance; new rooms and quick play go to the server
+nearest to the player; joining a room connects the browser to that room's
+server.
+
+```mermaid
+flowchart LR
+  B[Browser] -- "website, room list, accounts" --> M[main server]
+  B -- "game socket + UDP for a room on the node" --> N[game node]
+  N -- "rooms every 2 s, experience, votes (HTTPS + secret)" --> M
+  M -- "admin actions" --> N
+```
+
+On the **main server**, in `/etc/neobox.env`:
+
+```sh
+NEOBOX_REGION=Frankfurt
+NEOBOX_LOCATION=50.11,8.68
+NEOBOX_PUBLIC_URL=https://neobox.aggressivecombo.com
+NEOBOX_CLUSTER_SECRET=<a long random secret: openssl rand -hex 32>
+```
+
+then `systemctl restart neobox`.
+
+For **each node**: a second small VPS in the other region, with its own DNS
+name (for example an `A` record `us.neobox` → the node's IP). On it, follow
+steps 1 to 5 above with two differences: copy
+`deploy/neobox-node.env.example` (instead of `neobox.env.example`) to
+`/etc/neobox.env` and fill in the main server's URL, the same secret, the
+node's own URL, region and location; and use the node block of
+`deploy/Caddyfile` with the node's name. The node needs no backups: it keeps
+no data.
+
+Within a few seconds the main server logs the node joining, and its admin
+page lists the node's rooms with their region. A node that stops sending
+drops out of the room list after 10 seconds. Restarting a node ends its
+matches like restarting the main server does: its players return to the
+main server's room list, so update nodes when few people play.
+
 ## Everyday operations
 
 | Task | Command / place |
@@ -208,6 +264,12 @@ All settings are environment variables (in `/etc/neobox.env`).
 | `NEOBOX_MAX_PLAYERS` | `32` | Players per room limit (rooms choose 1..this). |
 | `NEOBOX_MAX_CONNS_PER_IP` | `8` | Simultaneous connections per IP address. |
 | `NEOBOX_TRUST_PROXY` | `true` | Use the client IP forwarded by Caddy. Set `false` if the server is exposed directly. |
+| `NEOBOX_GEOIP` | (empty: no distances or flags; the service sets `/var/lib/neobox/dbip-city-lite.mmdb`) | MaxMind-format city database for the room list (`neobox-geoip.timer` keeps DB-IP's free one current). |
+| `NEOBOX_LOCATION` | (empty) | This server's `latitude,longitude`; room list distances are measured to it. |
+| `NEOBOX_REGION` | (empty) | Region name shown in the room list when there are game nodes. |
+| `NEOBOX_PUBLIC_URL` | (empty) | Base URL browsers reach this server at. Required on game nodes. |
+| `NEOBOX_CLUSTER_SECRET` | (empty: no nodes) | Secret shared by the main server and its game nodes. |
+| `NEOBOX_MAIN` | (empty: this is the main server) | On a game node: the main server's base URL. |
 | `RUST_LOG` | `info` | Log detail (`debug` for more). |
 
 ## Running locally (development)
