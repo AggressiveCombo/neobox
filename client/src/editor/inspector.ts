@@ -123,6 +123,8 @@ const BODY_FIELDS: Field[] = [
   { key: "39", label: "Force zone", kind: "bool" },
   { key: "40", label: "Zone X", kind: "num", step: 0.5 },
   { key: "41", label: "Zone Y", kind: "num", step: 0.5 },
+  { key: "31", label: "Race checkpoint (0 = none, highest = finish)", kind: "num", step: 1, min: 0 },
+  { key: "34", label: "Race object", kind: "bool" },
 ];
 
 const JOINT_FIELDS: Field[] = [

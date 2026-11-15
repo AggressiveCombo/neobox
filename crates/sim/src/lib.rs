@@ -12,6 +12,7 @@ pub mod js;
 pub mod map;
 mod objects;
 mod player;
+mod race;
 mod round;
 pub mod settings;
 pub mod start;

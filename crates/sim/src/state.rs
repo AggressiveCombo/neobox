@@ -181,12 +181,21 @@ pub struct PlayerRecord {
     pub kills: f64,
     /// `Fi` round wins
     pub wins: f64,
+    // Race times (heav.io builds; the current original keeps these slots
+    // unused). Times are run ticks (the player's age when it happened).
+    /// `co` best finish time this match (0 = none).
     pub co: f64,
+    /// `do_` age at the last tick, while the map has checkpoints.
     pub do_: f64,
+    /// `po` last finish time.
     pub po: f64,
+    /// `wo` checkpoint times of the best run (by checkpoint number; NaN = none).
     pub wo: Vec<f64>,
+    /// `mo` checkpoint times of the current run (by checkpoint number; NaN = none).
     pub mo: Vec<f64>,
+    /// `yo` time behind (+) or ahead of (-) the best run at the last checkpoint (NaN = none).
     pub yo: f64,
+    /// `fo` time of the last checkpoint.
     pub fo: f64,
     /// `bo` alive this round
     pub alive: bool,
@@ -373,7 +382,9 @@ pub struct Player {
     /// `Ke`/`Xe` spawn point.
     pub spawn_x: f64,
     pub spawn_y: f64,
-    pub ze2: f64,
+    /// Race checkpoints passed this run (`bh` in the heav.io builds; the
+    /// current original keeps the slot but never changes it).
+    pub checkpoint: f64,
     /// `Qe` ticks alive.
     pub age: f64,
     /// `$e` frozen ticks (input ignored).
@@ -449,7 +460,7 @@ impl Default for Player {
             air_jump: true,
             spawn_x: 0.0,
             spawn_y: 0.0,
-            ze2: 0.0,
+            checkpoint: 0.0,
             age: 0.0,
             frozen: 0.0,
             tn: false,

@@ -442,6 +442,8 @@ impl GameSettings {
                 Ok(format!("playerSize: {}", js_num(f)))
             }
             "objectivelimit" => it!(objective_limit, "objectiveLimit"),
+            // neobox: the original never offered recordMode in /set
+            "recordmode" => bo!(record_mode, "recordMode"),
             _ => Err(format!("Couldn't find param {n}")),
         }
     }
@@ -511,6 +513,7 @@ impl GameSettings {
             b("parachuteEnabled", self.parachute_enabled),
             n("playerSize", self.player_width),
             n("objectiveLimit", self.objective_limit),
+            b("recordMode", self.record_mode),
         ]
     }
 }

@@ -124,6 +124,10 @@ pub(crate) struct Ctx<'g> {
     pub prev_caps: Vec<crate::map::MapCap>,
     /// (x, y, team) of the previous state's players (round logic reads them).
     pub prev_players: Vec<(f64, f64, f64)>,
+    /// Race course of the map (see `race`): the finish checkpoint (0 = no
+    /// race) and whether a race object is in play.
+    pub race_finish: f64,
+    pub race_object: bool,
 }
 
 impl Ctx<'_> {
@@ -250,6 +254,7 @@ impl Sim {
         // ro: post-step logic
         crate::round::post_step(&mut ctx);
         for i in 0..ctx.bodies.len() {
+            crate::race::object_step(&mut ctx, world, i);
             crate::objects::body_post_step(&mut ctx, i);
         }
         for i in 0..ctx.joints.len() {
@@ -299,6 +304,7 @@ fn intro_step(prev: &State, events: Option<&Events>, gs: &GameSettings) -> State
 }
 
 fn build<'g>(prev: &State, gs: &'g GameSettings) -> Ctx<'g> {
+    let (race_finish, race_object) = crate::race::course(&prev.bodies);
     Ctx {
         gs,
         prev_settings: prev.settings.clone(),
@@ -318,6 +324,8 @@ fn build<'g>(prev: &State, gs: &'g GameSettings) -> Ctx<'g> {
         caps: prev.caps.iter().map(|c| CapObj::new(c.clone())).collect(),
         prev_caps: prev.caps.clone(),
         prev_players: prev.players.values().map(|p| (p.x, p.y, p.team)).collect(),
+        race_finish,
+        race_object,
     }
 }
 

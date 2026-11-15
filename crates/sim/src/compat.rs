@@ -262,7 +262,7 @@ fn player(p: &Player) -> Value {
         b(p.air_jump),
         n(p.spawn_x),
         n(p.spawn_y),
-        n(p.ze2),
+        n(p.checkpoint),
         n(p.age),
         n(p.frozen),
         b(p.tn),

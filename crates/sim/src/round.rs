@@ -50,17 +50,24 @@ pub(crate) struct RoundObj {
     changed: bool,
     /// rounds modes: someone joined this tick (`O_`)
     joined: bool,
-    /// rounds modes: the round state at the start of the tick (`R_`)
+    /// rounds modes, and any mode with `recordMode`: the round state at the
+    /// start of the tick (`R_`)
     initial: Option<Round>,
     /// endless teams: the map has objective bodies (`J_`)
     has_objectives: bool,
+    /// `recordMode`: deaths take players out of play, and a racer's finish
+    /// can decide the round (`Gn`/`Yn`/`Vn` of the heav.io builds)
+    record_mode: bool,
+    /// other modes: a racer finished with `recordMode` this tick (`Pn`)
+    race_changed: bool,
 }
 
 impl RoundObj {
     pub fn new(eo: Round, gs: &GameSettings) -> RoundObj {
         let mode = Mode::of(gs.game_mode);
-        let initial = if mode.rounds_like() { Some(eo.clone()) } else { None };
-        RoundObj { mode, eo, changed: false, joined: false, initial, has_objectives: false }
+        let record_mode = gs.record_mode;
+        let initial = if mode.rounds_like() || record_mode { Some(eo.clone()) } else { None };
+        RoundObj { mode, eo, changed: false, joined: false, initial, has_objectives: false, record_mode, race_changed: false }
     }
 
     pub fn with_bodies(mut self, bodies: &Sparse<Body>) -> RoundObj {
@@ -243,6 +250,11 @@ impl RoundObj {
             }
             _ => {}
         }
+        if self.record_mode && !self.mode.rounds_like() {
+            if let Some(vr) = v.and_then(|v| self.eo.players.get_mut(v)) {
+                vr.alive = false;
+            }
+        }
     }
 
     /// `lr`: suicide / environmental death.
@@ -266,6 +278,11 @@ impl RoundObj {
                 }
             }
             _ => {}
+        }
+        if self.record_mode && !self.mode.rounds_like() {
+            if let Some(r) = self.eo.players.get_mut(i) {
+                r.alive = false;
+            }
         }
     }
 
@@ -440,6 +457,15 @@ impl RoundObj {
             }
             return;
         }
+        self.last_standing(gs);
+    }
+
+    /// `Vn`: with at most one player still in play, that one wins the round
+    /// (or nobody: a draw), and the match when it has enough round wins.
+    fn last_standing(&mut self, gs: &GameSettings) {
+        if self.round_over() || self.game_over() {
+            return;
+        }
         let mut alive = 0;
         let mut last = -1.0;
         for r in self.eo.players.values() {
@@ -448,7 +474,7 @@ impl RoundObj {
                 last = r.id;
             }
         }
-        let alive_before = initial.players.values().filter(|r| r.alive).count();
+        let alive_before = self.initial.as_ref().map_or(0, |i| i.players.values().filter(|r| r.alive).count());
         if alive <= 1 {
             if alive == 1 {
                 if let Some(r) = index_of(last).and_then(|l| self.eo.players.get_mut(l)) {
@@ -466,6 +492,19 @@ impl RoundObj {
             } else {
                 self.eo.round_over = ROUND_OVER_TICKS;
             }
+        }
+    }
+
+    /// `Yn`: a racer finished with `recordMode` and stays out of play until
+    /// the round ends.
+    fn race_out(&mut self, id: u32) {
+        if let Some(r) = self.eo.players.get_mut(id) {
+            r.alive = false;
+        }
+        if self.mode.rounds_like() {
+            self.changed = true;
+        } else {
+            self.race_changed = true;
         }
     }
 
@@ -490,6 +529,8 @@ impl RoundObj {
             if self.joined {
                 self.rounds_joined();
             }
+        } else if self.race_changed {
+            self.last_standing(gs);
         }
         if self.eo.round_over > 0.0 {
             self.eo.round_over -= 1.0;
@@ -717,6 +758,13 @@ pub(crate) fn suicide(ctx: &mut Ctx<'_>, id: f64) {
 pub(crate) fn respawn_in(ctx: &mut Ctx<'_>, id: f64, ticks: f64) {
     if let Some(i) = index_of(id) {
         ctx.round.respawn_in(i, ticks);
+    }
+}
+
+/// A racer finished with `recordMode` (see `race`).
+pub(crate) fn race_out(ctx: &mut Ctx<'_>, id: f64) {
+    if let Some(i) = index_of(id) {
+        ctx.round.race_out(i);
     }
 }
 

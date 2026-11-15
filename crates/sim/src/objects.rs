@@ -49,6 +49,8 @@ pub(crate) struct BodyObj {
     pub objective: f64,
     /// `al` touched by a player (releases latched joints)
     pub player_touch: bool,
+    /// `Tr` a race object touched its next checkpoint this tick
+    pub race_passed: bool,
     pub new_sounds: Vec<Sound>,
     pub limiter: Limiter,
 }
@@ -65,6 +67,7 @@ impl BodyObj {
             impacts: 0,
             objective: -1.0,
             player_touch: false,
+            race_passed: false,
             new_sounds: Vec::new(),
             limiter,
         }
@@ -282,8 +285,13 @@ pub(crate) fn body_begin_contact(ctx: &mut Ctx<'_>, store: &mut Store, i: usize,
             let dmg = ctx.projectiles[oi].eo.object_damage;
             let o = &mut ctx.bodies[i];
             o.eo.damage += dmg;
-            // threshold `jr` would convert the body to dynamic, but the
-            // original throws there (immutable definition); see DEVIATIONS.md
+            // the heav.io builds turned the body dynamic here; today's
+            // original throws instead (its definition is frozen)
+            if o.eo.damage >= def.dynamic_threshold && def.dynamic_threshold > 0.0 && def.motion != BODY_DYNAMIC {
+                let mut d = (*o.eo.def).clone();
+                d.motion = BODY_DYNAMIC;
+                o.eo.def = std::sync::Arc::new(d);
+            }
             if o.eo.damage >= def.removal_threshold && def.removal_threshold > 0.0 {
                 o.removed = true;
             }
@@ -297,6 +305,12 @@ pub(crate) fn body_begin_contact(ctx: &mut Ctx<'_>, store: &mut Store, i: usize,
         if (def.objective == 1.0 || def.objective == 3.0) && target == 3.0 {
             o.objective = 3.0;
         }
+    } else {
+        crate::race::object_touch(ctx, i, k, oi);
+    }
+    // race checkpoints let everything through on the first contact tick
+    if def.checkpoint > 0.0 {
+        store.contact_mut(c).set_enabled(false);
     }
 }
 

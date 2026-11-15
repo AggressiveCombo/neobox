@@ -83,6 +83,10 @@ pub(crate) struct PlayerObj {
     /// bodies held by grab joints this tick (`tu`)
     pub grabbed: Vec<BodyId>,
     pub limiter: Limiter,
+    /// `rl` touched the next race checkpoint this tick
+    pub passed: bool,
+    /// `el`/`nl`/`ol` back to the last race checkpoint at the end of the tick
+    pub to_checkpoint: Option<(f64, f64)>,
 }
 
 impl PlayerObj {
@@ -108,6 +112,8 @@ impl PlayerObj {
             new_projectiles: Vec::new(),
             grabbed: Vec::new(),
             limiter,
+            passed: false,
+            to_checkpoint: None,
         }
     }
 
@@ -177,6 +183,7 @@ pub(crate) fn create(ctx: &mut Ctx<'_>, world: &mut World, i: usize) {
 /// `mu`: apply one tick of input.
 pub(crate) fn update(ctx: &mut Ctx<'_>, world: &mut World, i: usize, mut input: Input) {
     let gs = ctx.gs;
+    crate::race::reset_key(ctx, i, input.bat);
     if ctx.players[i].eo.frozen > 0.0 {
         input = Input::default();
     }
@@ -1333,6 +1340,10 @@ pub(crate) fn begin_contact(ctx: &mut Ctx<'_>, store: &mut Store, i: usize, othe
         if def.kill_players && p.eo.age > 10.0 {
             p.damage(999.0);
         }
+        // the next race checkpoint (heav.io builds)
+        if def.checkpoint == p.eo.checkpoint + 1.0 {
+            p.passed = true;
+        }
         if def.freeze_players {
             if p.eo.freeze_ready {
                 p.sound_at(store, sound::FREEZE, 30.0, 0.6);
@@ -1441,11 +1452,21 @@ pub(crate) fn post_step(ctx: &mut Ctx<'_>, world: &mut World, i: usize) {
         world.store_mut().body_mut(body).set_linear_velocity(vel);
     }
     let y = world.store().body(body).get_position().y;
-    let p = &mut ctx.players[i];
+    let p = &ctx.players[i];
     if p.eo.health <= 0.0 || (!wrap && y > ah + p.eu) {
-        p.dead = true;
-        p.xl = true;
+        if p.eo.checkpoint > 0.0 {
+            // heav.io race: back to the last checkpoint instead of dying
+            crate::race::back_to_checkpoint(ctx, i);
+        } else {
+            let p = &mut ctx.players[i];
+            p.dead = true;
+            p.xl = true;
+        }
     }
+    if ctx.players[i].passed {
+        crate::race::passed(ctx, i);
+    }
+    crate::race::run_time(ctx, i);
     if ctx.players[i].dead {
         let me = ctx.players[i].id();
         let attacker = ctx.players[i].eo.attacker;
@@ -1479,6 +1500,24 @@ pub(crate) fn serialize(ctx: &mut Ctx<'_>, world: &mut World, i: usize, next: &m
                 let pos = store.body(body).get_position();
                 p.new_sounds.push(Sound { x: pos.x, y: pos.y, ttl: 5.0, kind: sound::DEATH, player: p.id(), volume: 0.23, effect_row: false });
             }
+        } else if let (false, Some((x, y))) = (p.dead, p.to_checkpoint) {
+            // the old body breaks up; a fresh player appears at the checkpoint, its run time still going
+            debris(p, store, next);
+            let e = &p.eo;
+            let back = Player {
+                id: e.id,
+                x,
+                y,
+                spawn_x: e.spawn_x,
+                spawn_y: e.spawn_y,
+                team: e.team,
+                teleported: true,
+                checkpoint: e.checkpoint,
+                age: e.age,
+                en: e.en,
+                ..Player::default()
+            };
+            next.players.insert(p.index, back);
         } else if !p.dead {
             let b = store.body(body);
             let pos = b.get_position();

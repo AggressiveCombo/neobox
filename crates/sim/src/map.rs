@@ -242,7 +242,7 @@ pub struct BodyDef {
     pub force_x: f64,
     pub force_y: f64,
     pub torque: f64,
-    /// `21` damage threshold for becoming dynamic (inert: see DEVIATIONS.md).
+    /// `21` damage at which a static or kinematic body becomes dynamic.
     pub dynamic_threshold: f64,
     /// `22` damage threshold for removal.
     pub removal_threshold: f64,
@@ -289,6 +289,15 @@ pub struct BodyDef {
     pub force_zone: bool,
     pub zone_x: f64,
     pub zone_y: f64,
+    /// `31` race checkpoint number (`Ko`, 0 = none). Players pass the
+    /// checkpoints in order; the highest number is the finish.
+    pub checkpoint: f64,
+    /// `34` race object (`Qo`): it must be carried through the
+    /// checkpoints in order, and reaching the finish ends the round.
+    pub race_object: bool,
+    /// `44` checkpoints the race object has passed (`$o`): runtime state the
+    /// original kept in the body's definition.
+    pub race_progress: f64,
     pub shapes: Vec<MapShape>,
     pub extra: Extra,
 }
@@ -336,6 +345,9 @@ impl Default for BodyDef {
             force_zone: false,
             zone_x: 0.0,
             zone_y: 0.0,
+            checkpoint: 0.0,
+            race_object: false,
+            race_progress: 0.0,
             shapes: Vec::new(),
             extra: Extra::default(),
         }
@@ -795,13 +807,16 @@ fn decode_body(o: &Map<String, Value>) -> Result<(f64, MapBody), MapError> {
         force_zone: flag(o, "39", d.force_zone),
         zone_x: num(o, "40", d.zone_x),
         zone_y: num(o, "41", d.zone_y),
+        checkpoint: num(o, "31", d.checkpoint),
+        race_object: flag(o, "34", d.race_object),
+        race_progress: num(o, "44", d.race_progress),
         shapes,
         extra: extra_of(
             o,
             &[
                 "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16", "17", "18", "19", "20",
-                "21", "22", "23", "24", "25", "26", "27", "28", "29", "30", "32", "36", "37", "38", "39", "40", "41", "43",
-                "45", "50", "55", "56", "57", "58", "60", "61", "62", "63", "64", "65", "s", "pf",
+                "21", "22", "23", "24", "25", "26", "27", "28", "29", "30", "31", "32", "34", "36", "37", "38", "39", "40",
+                "41", "43", "44", "45", "50", "55", "56", "57", "58", "60", "61", "62", "63", "64", "65", "s", "pf",
             ],
         ),
     };
@@ -1140,7 +1155,9 @@ fn encode_body(id: u32, b: &MapBody) -> Value {
     o.b("28", f.collide_c, d.collide_c);
     o.b("29", f.collide_d, d.collide_d);
     o.n("30", f.player_pass, d.player_pass);
+    o.n("31", f.checkpoint, d.checkpoint);
     o.b("32", f.freeze_players, d.freeze_players);
+    o.b("34", f.race_object, d.race_object);
     o.b("36", f.pinned, d.pinned);
     o.n("37", f.pin_x, d.pin_x);
     o.n("38", f.pin_y, d.pin_y);
@@ -1148,6 +1165,7 @@ fn encode_body(id: u32, b: &MapBody) -> Value {
     o.n("40", f.zone_x, d.zone_x);
     o.n("41", f.zone_y, d.zone_y);
     o.b("43", f.no_jump, d.no_jump);
+    o.n("44", f.race_progress, d.race_progress);
     o.b("45", f.bullet, d.bullet);
     o.b("50", f.invisible, d.invisible);
     o.n("55", f.parallax, d.parallax);

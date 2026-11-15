@@ -11,7 +11,9 @@ use neobox_sim::{advance, match_start, GameSettings, Sim, State};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
-pub const REPLAY_VERSION: u32 = 1;
+/// 2: map bodies carry the race fields (snapshots of version 1 no longer
+/// decode; version-1 recordings from a match start still play).
+pub const REPLAY_VERSION: u32 = 2;
 /// Ticks between the states [`ReplayPlayer`] keeps for seeking backwards.
 pub const KEYFRAME_INTERVAL: u32 = 300;
 /// Longest accepted recording (ticks): 10 hours at 30 Hz.
@@ -45,7 +47,8 @@ impl Replay {
 
     pub fn from_json(text: &[u8]) -> Result<Replay, ReplayError> {
         let r: Replay = serde_json::from_slice(text).map_err(|e| ReplayError::Format(e.to_string()))?;
-        if r.version != REPLAY_VERSION {
+        // a version-1 recording without a snapshot holds no encoded state
+        if r.version != REPLAY_VERSION && !(r.version == 1 && r.snapshot.is_none()) {
             return Err(ReplayError::Version(r.version));
         }
         Ok(r)
