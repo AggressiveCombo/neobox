@@ -28,6 +28,10 @@ import {
   ensureRoomMap,
   startMatch,
   signUp,
+  dismissPhoneSplash,
+  ipIn,
+  geoServer,
+  regionServers,
 } from "./lib.mjs";
 import { writeFileSync, mkdtempSync } from "node:fs";
 import os from "node:os";
@@ -414,9 +418,38 @@ async function training(s) {
   await button(page, "Next").click();
   const second = await page.locator(".training-text").textContent();
   check(first !== second, "Next did not change the lesson");
+  await button(page, "Replay tutorial").click();
+  const again = await page.locator(".training-text").textContent();
+  check(again === first, `Replay tutorial did not return to the first lesson: ${again}`);
   await button(page, "Leave").click();
   await menuName(page).waitFor();
-  return "lessons step, canvas renders, leave";
+  return "lessons step, replay tutorial, canvas renders, leave";
+}
+
+/** In-match menu (the original's): the lobby and the controls while the match runs, then back to the game. */
+async function matchMenu(s) {
+  const { host } = await matchWithGuest(s, { clipboard: false });
+  const { page } = host;
+  await waitForPixels(host, "host canvas");
+
+  await button(page, "Menu").click();
+  await button(page, "Show lobby").click();
+  await button(page, "Back to game").click();
+  await page.locator(".hud-root").waitFor();
+
+  await button(page, "Menu").click();
+  await button(page, "Change controls").click();
+  await page.getByRole("heading", { name: "Settings", exact: true }).waitFor();
+  await button(page, "Back").click();
+  await page.locator(".hud-root").waitFor();
+  await waitForPixels(host, "host canvas after the menu");
+
+  // Escape opens and closes the menu while the chat is closed
+  await page.keyboard.press("Escape");
+  await page.locator("#hud-menu").waitFor();
+  await page.keyboard.press("Escape");
+  await page.locator("#hud-menu").waitFor({ state: "hidden" });
+  return "lobby and controls during a match, back to the running game";
 }
 
 /** Update news: opens, pages, closes; the menu shows players online. */
@@ -504,7 +537,8 @@ async function practice(s) {
   await page.goto(s.base);
   await menuName(page).waitFor();
   await navTo(page, "Practice");
-  await page.locator(".offline-choice").first().click();
+  // a built-in map from the list (it loads after the presets render)
+  await page.locator(".offline-list .offline-choice").first().click();
   await button(page, "Start").click();
   await page.locator(".offline.playing").waitFor();
   await waitForPixels(h, "practice canvas");
@@ -519,11 +553,12 @@ async function phone(s) {
   const h = await s.open("phone", { phone: true, name: uniqueName("ph") });
   const { page } = h;
   await page.goto(s.base);
+  await dismissPhoneSplash(page);
   await menuName(page).waitFor();
   await expectNoOverflow(page, "menu");
   await navTo(page, "Practice");
   await expectNoOverflow(page, "practice setup");
-  await page.locator(".offline-choice").first().click();
+  await page.locator(".offline-list .offline-choice").first().click();
   await button(page, "Start").click();
   await page.locator(".offline.playing").waitFor();
   check(await page.locator(".hud-touch-layer").isVisible(), "touch controls are not visible on the phone");
@@ -535,6 +570,7 @@ async function phone(s) {
   await createRoom(host, s.base, uniqueName("pr"), { isPublic: true });
   const code = await roomCode(host.page);
   await page.goto(`${s.base}/${code}`);
+  await dismissPhoneSplash(page);
   await page.locator("h1.room-title").waitFor();
   await expectNoOverflow(page, "room");
   return "menu, practice touch layer, room: no overflow";
@@ -583,7 +619,29 @@ async function editor(s) {
   await button(page, "Redo").click();
   check(await button(page, "Undo").isEnabled(), "undo not enabled after redo");
 
-  // Built-in maps from the menu.
+  // Inside a body (the original's double-click): a circle drawn there joins the box's body.
+  // (the redo above deleted the first box again: draw a fresh one)
+  await button(page, "Box (W)").click();
+  await page.mouse.move(cx - 80, cy - 50);
+  await page.mouse.down();
+  await page.mouse.move(cx + 80, cy + 50, { steps: 8 });
+  await page.mouse.up();
+  await button(page, "Select (Q)").click();
+  await page.mouse.dblclick(cx, cy);
+  await page.locator(".editor-scope").waitFor({ state: "visible" });
+  await button(page, "Circle (E)").click();
+  await page.mouse.move(cx + 20, cy);
+  await page.mouse.down();
+  await page.mouse.move(cx + 40, cy, { steps: 6 });
+  await page.mouse.up();
+  await page.waitForFunction(
+    () => (JSON.parse(localStorage.getItem("neobox.editor.draft") ?? "{}").b ?? []).some((b) => (b.s ?? []).length === 2),
+  );
+  await page.keyboard.press("Escape");
+  await page.locator(".editor-scope").waitFor({ state: "hidden" });
+
+  // Built-in maps from the menu (the map has content now: confirm replacing it).
+  user.acceptDialogs = true;
   await button(page, "Menu").click();
   await page.locator(".editor-menu").waitFor({ state: "visible" });
   await page.locator(".editor-list .editor-item").first().click();
@@ -637,6 +695,7 @@ async function editorPhone(s) {
   const h = await s.open("editor-phone", { phone: true });
   const { page } = h;
   await page.goto(s.base);
+  await dismissPhoneSplash(page);
   await menuName(page).waitFor();
   await navTo(page, "Map editor");
   const canvas = page.locator("canvas.editor-canvas");
@@ -649,6 +708,105 @@ async function editorPhone(s) {
   return "editor and test play fit the phone";
 }
 
+/** The room-list row of `roomName` on the room list (`ul[aria-label="rooms"]`). */
+const roomRow = (page, roomName) =>
+  page.locator('ul[aria-label="rooms"] li.room-item').filter({ hasText: roomName }).locator("button.room-row");
+
+/** Opens the room list from the menu (Play) and returns the row of `roomName`. */
+async function openRoomList(h, base, roomName) {
+  await h.page.goto(base);
+  await menuName(h.page).waitFor();
+  await playFromMenu(h.page, null);
+  await h.page.locator('ul[aria-label="rooms"]').waitFor();
+  const row = roomRow(h.page, roomName);
+  await row.waitFor();
+  return row;
+}
+
+/** A room row's distance: the number and its unit ("km" or "mi"); "—" when unknown. */
+async function rowDistance(row) {
+  const text = ((await row.locator("span.room-distance").textContent()) ?? "").trim();
+  const m = /^(\d+) (km|mi)$/.exec(text);
+  return { text, value: m ? Number(m[1]) : null, unit: m ? m[2] : null };
+}
+
+const rowRegion = async (row) => ((await row.locator("span.room-region").textContent()) ?? "").trim();
+
+/** Geo: the room list shows the host's flag and the distance from the viewer to the room's server, in the viewer's unit. */
+async function geoRoomList(s) {
+  const roomName = uniqueName("geo");
+  const host = await s.open("london", { name: uniqueName("lon"), ip: ipIn("192.0.2") });
+  await createRoom(host, s.base, roomName, { isPublic: true });
+
+  const ny = await s.open("newyork", { name: uniqueName("nyv"), ip: ipIn("203.0.113") });
+  const nyRow = await openRoomList(ny, s.base, roomName);
+  const flag = nyRow.locator("img.room-flag");
+  const src = (await flag.getAttribute("src")) ?? "";
+  check(src.endsWith("flags/gb.svg"), `the London host's row shows flag "${src}", expected GB`);
+  const alt = await flag.getAttribute("alt");
+  check(alt === "United Kingdom", `flag alt is "${alt}", expected "United Kingdom"`);
+  const nyDist = await rowDistance(nyRow);
+  check(
+    nyDist.unit === "mi" && nyDist.value >= 3000 && nyDist.value <= 4500,
+    `New York viewer sees "${nyDist.text}", expected about 3860 mi`,
+  );
+
+  const fra = await s.open("frankfurt", { name: uniqueName("fra"), ip: ipIn("198.51.100") });
+  const fraDist = await rowDistance(await openRoomList(fra, s.base, roomName));
+  check(fraDist.unit === "km" && fraDist.value <= 50, `Frankfurt viewer sees "${fraDist.text}", expected 0-50 km`);
+
+  const unknown = await s.open("unknown", { name: uniqueName("unk") });
+  const unkDist = await rowDistance(await openRoomList(unknown, s.base, roomName));
+  check(unkDist.text === "—", `viewer of unknown location sees "${unkDist.text}", expected "—"`);
+  return `GB flag; New York ${nyDist.text}; Frankfurt ${fraDist.text}; unknown "${unkDist.text}"`;
+}
+
+/** Regions: a room opened on the New York node is listed on the Frankfurt main server and joins from there. */
+async function regionRooms(s) {
+  const roomName = uniqueName("nyc");
+  const guestName = uniqueName("frg");
+  const host = await s.open("nyhost", { name: uniqueName("nyh"), ip: ipIn("203.0.113") });
+  const code = await createRoom(host, s.base, roomName, { isPublic: true });
+  check((await adminRoom(s.base, code)).region === "New York", "the room is not on the New York node"); // main's admin lists every node's rooms
+
+  const guest = await s.open("frguest", { name: guestName, ip: ipIn("198.51.100") });
+  const row = await openRoomList(guest, s.base, roomName);
+  const region = await rowRegion(row);
+  check(region === "New York", `room region is "${region}", expected "New York"`);
+  const dist = await rowDistance(row);
+  check(
+    dist.unit === "km" && dist.value >= 5500 && dist.value <= 7000,
+    `Frankfurt viewer sees "${dist.text}" to New York, expected about 6200 km`,
+  );
+  await row.click();
+  await roomTitle(guest.page, roomName).waitFor();
+  await playerRow(host.page, guestName).waitFor();
+  await startMatch(host, [guest]);
+  await waitForPixels(host, "host canvas");
+  await waitForPixels(guest, "guest canvas");
+
+  await guest.page.locator(".hud-leave").click();
+  await guest.page.locator('ul[aria-label="rooms"]').waitFor();
+  await button(guest.page, "Refresh").click();
+  const after = roomRow(guest.page, roomName);
+  await after.waitFor();
+  check((await rowRegion(after)) === "New York", "the main list no longer shows the New York region after the guest left");
+  return `hosted on New York, joined from the Frankfurt list at ${dist.text}; guest back on the main list`;
+}
+
+/** Regions with an account: a signed-in New Yorker's room lands on the node and the roster shows their level. */
+async function regionAccount(s) {
+  const name = uniqueName("nyacc");
+  const acct = await signedIn(s, "nyacct", name, { ip: ipIn("203.0.113") });
+  const code = await createRoom(acct, s.base, uniqueName("acct"), { isPublic: true });
+  check((await adminRoom(s.base, code)).region === "New York", "the room is not on the New York node");
+  const level = acct.page.locator("li.room-player").filter({ hasText: name }).locator("span.room-level");
+  await level.waitFor();
+  const text = ((await level.textContent()) ?? "").trim();
+  check(text === "Level 1", `roster shows "${text}" for the signed-in player, expected "Level 1"`);
+  return "room on the New York node; roster shows Level 1";
+}
+
 export const scenarios = [
   { name: "menu", run: menu },
   { name: "settings", run: settings },
@@ -657,6 +815,7 @@ export const scenarios = [
   { name: "library", run: library },
   { name: "room lobby", run: roomLobby },
   { name: "room match", run: roomMatch },
+  { name: "match menu", run: matchMenu },
   { name: "reconnect", run: reconnect },
   { name: "quick play", run: quickPlay },
   { name: "levels", run: levels },
@@ -671,4 +830,7 @@ export const scenarios = [
   { name: "input latency", run: latency },
   { name: "map editor", run: editor },
   { name: "map editor phone", run: editorPhone },
+  { name: "geo room list", run: geoRoomList, topology: geoServer },
+  { name: "regions", run: regionRooms, topology: regionServers },
+  { name: "regions account", run: regionAccount, topology: regionServers },
 ];

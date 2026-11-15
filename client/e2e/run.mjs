@@ -41,11 +41,17 @@ console.log(`server ${server.base}  (dist ${DIST_DIR})`);
 
 let failed = 0;
 for (const scenario of selected) {
-  const s = new Scenario(scenario.name, env);
+  const s = new Scenario(scenario.name, { ...env });
   const t0 = Date.now();
   let detail = "";
   let error = null;
+  let topology = null;
   try {
+    if (scenario.topology) {
+      topology = await scenario.topology();
+      s.env.base = topology.base;
+      s.env.nodeBase = topology.nodeBase;
+    }
     detail = (await scenario.run(s)) ?? "";
   } catch (err) {
     error = err instanceof Error ? err.message : String(err);
@@ -58,10 +64,12 @@ for (const scenario of selected) {
     const shots = await s.screenshot();
     console.log(`FAIL ${scenario.name} (${secs}s): ${error}`);
     for (const file of shots) console.log(`     screenshot ${path.relative(SHOTS_DIR, file)}`);
+    if (topology) console.log(`server logs:\n${topology.output()}`);
   } else {
     console.log(`ok   ${scenario.name} (${secs}s)${detail ? `: ${detail}` : ""}`);
   }
   await s.close();
+  await topology?.stop();
 }
 
 console.log(`${selected.length - failed}/${selected.length} scenarios passed in ${((Date.now() - started) / 1000).toFixed(1)}s`);

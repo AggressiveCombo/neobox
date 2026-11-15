@@ -87,7 +87,7 @@ export async function launchBrowser() {
 
 // ---------------------------------------------------------------- server
 
-function freePort() {
+export function freePort() {
   return new Promise((resolve, reject) => {
     const srv = net.createServer();
     srv.on("error", reject);
@@ -98,14 +98,14 @@ function freePort() {
   });
 }
 
-/** Starts the built server on a free port with a fresh database; stopped and cleaned at exit. */
-export async function startServer() {
+/** Starts the built server (on `port`, or a free one) with a fresh database and `extraEnv` on top; stopped and cleaned at exit. */
+export async function startServer({ port: wantPort, extraEnv = {} } = {}) {
   const exe = path.join(DIST_DIR, process.platform === "win32" ? "neobox-server.exe" : "neobox-server");
   if (!existsSync(exe) || !existsSync(path.join(DIST_DIR, "client", "index.html"))) {
     throw new Error(`no server build in ${DIST_DIR}: run \`bash deploy/build.sh\` first (or set NEOBOX_DIST)`);
   }
   const dataDir = mkdtempSync(path.join(os.tmpdir(), "neobox-e2e-"));
-  const port = await freePort();
+  const port = wantPort ?? (await freePort());
   const env = {
     ...process.env,
     NEOBOX_BIND: `127.0.0.1:${port}`,
@@ -116,6 +116,7 @@ export async function startServer() {
     NEOBOX_ADMIN_PASSWORD: ADMIN_PASSWORD,
     NEOBOX_MAX_CONNS_PER_IP: "64",
     NEOBOX_TRUST_PROXY: "true", // per-context X-Forwarded-For (see nextClientIp); loopback only
+    ...extraEnv,
   };
   const proc = spawn(exe, [], { env, cwd: dataDir, stdio: ["ignore", "pipe", "pipe"], windowsHide: true });
   let output = "";
@@ -147,7 +148,7 @@ export async function startServer() {
     if (Date.now() > deadline) throw new Error(`server did not answer /healthz:\n${output}`);
     await sleep(100);
   }
-  return { base, output: () => output };
+  return { base, port, output: () => output, stop };
 }
 
 /** Built-in maps from the server: [{ name, code }]. */
@@ -203,8 +204,9 @@ export class Scenario {
    * (localStorage "neobox.name", only when unset). Dialogs fail the scenario
    * unless `handle.acceptDialogs` is set.
    */
-  async open(label, { phone = false, name, clipboard = false } = {}) {
-    const ip = nextClientIp();
+  async open(label, { phone = false, name, clipboard = false, ip: forcedIp } = {}) {
+    // `ip` is the client address the browser sends as X-Forwarded-For (picks its GeoIP location).
+    const ip = forcedIp ?? nextClientIp();
     const context = await this.env.browser.newContext({
       ...(phone ? PHONE : DESKTOP),
       acceptDownloads: true,
@@ -294,17 +296,85 @@ export async function signUp(handle, base, name) {
 }
 
 /** A page signed in as a new account, on the menu. */
-export async function signedIn(s, label, name = uniqueName(label)) {
-  const h = await s.open(label);
+export async function signedIn(s, label, name = uniqueName(label), opts = {}) {
+  const h = await s.open(label, opts);
   await signUp(h, s.base, name);
   await h.page.goto(s.base);
   await menuName(h.page).waitFor();
-  return { ...h, userName: name };
+  // the handle itself, not a copy: flags such as acceptDialogs must reach its listeners
+  h.userName = name;
+  return h;
+}
+
+let ipCounter = 0;
+/** A fresh client address in `prefix` (see GEOIP_FIXTURE for the locations of 192.0.2, 198.51.100 and 203.0.113). */
+export function ipIn(prefix) {
+  ipCounter++;
+  return `${prefix}.${ipCounter}`;
+}
+
+const CLUSTER_SECRET = "e2e-cluster-secret";
+/** GeoIP fixture: 192.0.2.x is London, 198.51.100.x Frankfurt, 203.0.113.x New York. */
+const GEOIP_FIXTURE = path.resolve(CLIENT_DIR, "..", "crates", "server", "tests", "data", "geo-test.mmdb");
+
+function regionEnv(base, region, location) {
+  return {
+    NEOBOX_CLUSTER_SECRET: CLUSTER_SECRET,
+    NEOBOX_REGION: region,
+    NEOBOX_LOCATION: location,
+    NEOBOX_PUBLIC_URL: base,
+    NEOBOX_GEOIP: GEOIP_FIXTURE,
+  };
+}
+
+/** A main server in Frankfurt with no game node: room locations come from the GeoIP fixture. */
+export async function geoServer() {
+  const port = await freePort();
+  const base = `http://127.0.0.1:${port}`;
+  const main = await startServer({ port, extraEnv: regionEnv(base, "Frankfurt", "50.1109,8.6821") });
+  return { base, nodeBase: null, output: main.output, stop: main.stop };
+}
+
+/** The main server in Frankfurt plus a game node in New York registered with it. */
+export async function regionServers() {
+  const mainPort = await freePort();
+  const base = `http://127.0.0.1:${mainPort}`;
+  const main = await startServer({ port: mainPort, extraEnv: regionEnv(base, "Frankfurt", "50.1109,8.6821") });
+  const nodePort = await freePort();
+  const nodeBase = `http://127.0.0.1:${nodePort}`;
+  const node = await startServer({
+    port: nodePort,
+    extraEnv: { ...regionEnv(nodeBase, "New York", "40.7128,-74.0060"), NEOBOX_MAIN: base },
+  });
+  // The node registers through heartbeats (every 2 s); there is no public node list to poll.
+  await sleep(2500);
+  return {
+    base,
+    nodeBase,
+    output: () => `main:\n${main.output()}\nnode:\n${node.output()}`,
+    stop: async () => {
+      await node.stop();
+      await main.stop();
+    },
+  };
 }
 
 // ---------------------------------------------------------------- UI helpers
 
 export const menuName = (page) => page.getByPlaceholder("name", { exact: true });
+
+/**
+ * Touch-only devices show the phone welcome on every page load (client/src/ui/phone-splash.ts).
+ * Waits for it, checks it is shown exactly once, and dismisses it with Play.
+ */
+export async function dismissPhoneSplash(page) {
+  const welcome = page.getByRole("dialog", { name: "Welcome", exact: true });
+  await welcome.waitFor();
+  const shown = await welcome.count();
+  if (shown !== 1) throw new Error(`phone welcome shown ${shown} times on one page load`);
+  await welcome.getByRole("button", { name: "Play", exact: true }).click();
+  await welcome.waitFor({ state: "detached" });
+}
 
 export function button(scope, name) {
   return scope.getByRole("button", { name, exact: true });
