@@ -26,6 +26,11 @@ const STAMINA_FILL = "#8fe3ff";
 /** Stamina bar under the local player: half width and height, CSS px. */
 const STAMINA_HALF_W = 20;
 const STAMINA_H = 3;
+/** Damage bar: black border (CSS px, centred on the body) and the white fill inside its 1 px rim. */
+const BAR_BORDER_W = 32;
+const BAR_BORDER_H = 6;
+const BAR_FILL_W = 30;
+const BAR_FILL_H = 4;
 /** Local kill line: top edge and height, CSS px (under the objective bar). */
 const PERSONAL_TOP = 42;
 const PERSONAL_H = 28;
@@ -76,6 +81,7 @@ export class Overlay {
     const cssW = this.canvas.width / dpr;
     const cssH = this.canvas.height / dpr;
     this.recordKills(scene);
+    this.drawDamageBars(scene, cam, cssW, cssH);
     this.drawNames(scene, cam, names, cssW, cssH);
     this.drawIntro(scene, tickHz, cssW, cssH);
     this.drawBanner(scene, names, cssW, cssH);
@@ -143,6 +149,23 @@ export class Overlay {
     ctx.lineWidth = 1.5;
     ctx.fill();
     ctx.stroke();
+  }
+
+  /**
+   * Damage bars of the bodies that have a threshold (the original's `x$` bar): drawn upright on
+   * the body centre, the fill scaled to the fraction still left before the next threshold.
+   */
+  private drawDamageBars(scene: Scene, cam: Camera, cssW: number, cssH: number): void {
+    const ctx = this.ctx;
+    const [sx, sy, ox, oy] = worldXf(cam);
+    for (const b of scene.bars) {
+      const x = ((b.x * sx + ox) + 1) * cssW / 2;
+      const y = (1 - (b.y * sy + oy)) * cssH / 2;
+      ctx.fillStyle = "#000000";
+      ctx.fillRect(x - BAR_BORDER_W / 2, y - BAR_BORDER_H / 2, BAR_BORDER_W, BAR_BORDER_H);
+      ctx.fillStyle = this.colourCss(b.colour);
+      ctx.fillRect(x - BAR_FILL_W / 2, y - BAR_FILL_H / 2, BAR_FILL_W * b.fraction, BAR_FILL_H);
+    }
   }
 
   /** Thin stamina bar of `fraction` (0..1) centred on x, top edge at `top`. */

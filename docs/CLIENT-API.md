@@ -61,11 +61,11 @@ Little-endian. Word = 4 bytes. View it as both `Uint32Array` and
 `Float32Array` over `memory.buffer` at `nb_frame_ptr()` (re-create the views
 if `memory.buffer` changed).
 
-Header (words 0..31):
+Header (words 0..33):
 
 | Word | Type | Field |
 | --- | --- | --- |
-| 0 | u32 | layout version (2) |
+| 0 | u32 | layout version (4) |
 | 1 | u32 | world vertex count |
 | 2 | u32 | world vertex offset (words) |
 | 3 | u32 | player count |
@@ -97,6 +97,8 @@ Header (words 0..31):
 | 29 | f32 | network: rollbacks per second |
 | 30 | u32 | kill count (kills since the previous frame) |
 | 31 | u32 | kill offset (words) |
+| 32 | u32 | damage bar count |
+| 33 | u32 | damage bar offset (words) |
 
 World vertices: 3 words each `x f32, y f32, colour u32`; the colour's bytes
 in memory are R, G, B, A (i.e. `r | g << 8 | b << 16 | a << 24`, ready for a
@@ -104,12 +106,15 @@ in memory are R, G, B, A (i.e. `r | g << 8 | b << 16 | a << 24`, ready for a
 Positions are already interpolated, in world units (+y is down). Draw as a
 triangle list in buffer order (back to front).
 
-Players: 11 words each:
+Players: 14 words each:
 `id u32, x f32, y f32, angle f32, team u32, stamina f32, flags u32,
-attacker u32, size f32, health f32, aim f32`.
-Flags: bit0 local, bit1 ghost, bit2 frozen, bit3 rocket aiming, bit4 bat
-swinging, bit5 pushing, bit6 dashing, bit7 teleported (no interpolation),
-bit8 air jump available.
+attacker u32, size f32, health f32, rocket f32, rocket_angle f32, egg f32,
+egg_aim f32`. `rocket` is the rocket launcher's charge (-1 when idle) and
+`rocket_angle` its interpolated aim; `egg` is the egg throw charge and
+`egg_aim` its aim.
+Flags: bit0 local, bit1 ghost, bit2 frozen, bit4 bat swinging, bit5
+pushing, bit6 dashing, bit7 teleported (no interpolation), bit8 air jump
+available.
 
 Sounds: 5 words each `kind u32, x f32, y f32, volume f32, player i32`.
 Kinds: 1 jump, 2 air jump, 3 push hit, 4 push miss, 5 push click (reserved:
@@ -119,13 +124,18 @@ spawn, 10 countdown, 11 death, 12 body impact, 13 bat swing, 14 bat hit, 15
 rocket charge, 16 rocket fire, 17 explosion, 18 parachute, 19 ghost trail, 20
 fanfare (game over).
 
-Score rows: 13 words each: `id u32, team u32, kills f32, wins f32, lives f32,
+Score rows: 15 words each: `id u32, team u32, kills f32, wins f32, lives f32,
 alive u32, respawn f32, eliminated f32, killed_by i32, last_victim i32,
-kill_timer f32, death_timer f32, suicide_timer f32`. `killed_by` and
-`last_victim` are player ids, -1 for none.
+kill_timer f32, death_timer f32, suicide_timer f32, spawn_x f32, spawn_y f32`.
+`killed_by` and `last_victim` are player ids, -1 for none. `spawn_x`/`spawn_y`
+are the claimed respawn point (NaN when none), flashed by the spawn preview.
 
 Kill pairs: 2 words each, `killer u32, victim u32`, in order, for the kills
 since the previous frame. Count in word 30, offset in word 31.
+
+Damage bars: 4 words each, `x f32, y f32, fraction f32, colour u32`
+(0xRRGGBB), one per body with a dynamic (field 21) or removal (field 22)
+damage threshold, at the body's interpolated position.
 
 ## Camera
 

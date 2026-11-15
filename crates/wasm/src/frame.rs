@@ -2,18 +2,23 @@
 //! consecutive simulation states.
 
 use neobox_sim::map::{BodyDef, MapShape, SHAPE_CIRCLE};
-use neobox_sim::state::{Body, Effect, Player, Projectile, State};
+use neobox_sim::state::{Body, Effect, Player, Projectile, State, ATTACH_ON};
+use neobox_sim::step::kind;
 use neobox_sim::GameSettings;
 use std::collections::HashMap;
 
-pub const LAYOUT_VERSION: u32 = 2;
-pub const HEADER_WORDS: usize = 32;
-pub const PLAYER_WORDS: usize = 11;
+pub const LAYOUT_VERSION: u32 = 4;
+pub const HEADER_WORDS: usize = 34;
+pub const PLAYER_WORDS: usize = 14;
 pub const SOUND_WORDS: usize = 5;
-pub const SCORE_WORDS: usize = 13;
+pub const SCORE_WORDS: usize = 15;
+pub const BAR_WORDS: usize = 4;
 /// Client-only sound cues (the sim emits kinds 1-4 and 6-19): push stamina ran out, game over.
 pub const SOUND_PUSH_CLICK: u32 = 5;
 pub const SOUND_FANFARE: u32 = 20;
+/// Damage bar colours (0xRRGGBB): yellow while the dynamic threshold is the next one, red towards removal.
+pub const DAMAGE_DYNAMIC_RGB: u32 = 0xd4cd47;
+pub const DAMAGE_REMOVAL_RGB: u32 = 0xc43543;
 
 /// Team colours (0xRRGGBB).
 pub const RED: u32 = 0xd44234;
@@ -68,6 +73,8 @@ pub struct FrameBuilder {
     tmp: Vec<[f32; 2]>,
     /// Kill events of the built frame: (killer, victim) pairs.
     kills: Vec<u32>,
+    /// Damage bars of the built frame: x, y, fraction, colour (BAR_WORDS each).
+    bars: Vec<u32>,
 }
 
 /// Local-space triangles of one shape and its colour.
@@ -236,12 +243,7 @@ impl FrameBuilder {
         if cur.def.invisible {
             return;
         }
-        let (x, y, a) = match prev {
-            Some(p) if !cur.teleported && std::sync::Arc::ptr_eq(&p.def, &cur.def) => {
-                (lerp(p.x, cur.x, t), lerp(p.y, cur.y, t), lerp_angle(p.angle, cur.angle, t))
-            }
-            _ => (cur.x, cur.y, cur.angle),
-        };
+        let (x, y, a) = body_pose(prev, cur, t);
         let key = std::sync::Arc::as_ptr(&cur.def) as usize;
         self.meshes(&cur.def);
         let meshes = &self.cache[&key];
@@ -293,15 +295,65 @@ impl FrameBuilder {
         }
     }
 
+    /// The bat head (the original's `gu`): a brown wedge and head swung at the aim. It starts
+    /// behind the player during the windup, and a dashed trail shows while it winds up.
+    fn bat_head(&mut self, prev: Option<&Player>, p: &Player, t: f64, gs: &GameSettings, px: f64, py: f64) {
+        if p.bat_frame < 0.0 || !gs.bat_enabled || p.ghost {
+            return;
+        }
+        let (prev_frame, prev_aim) = prev.map_or((p.bat_frame, p.bat_aim), |pp| (pp.bat_frame, pp.bat_aim));
+        // the original interpolates the frame counter and runs one frame ahead of it
+        let frame = lerp(prev_frame, p.bat_frame, t) + 1.0;
+        let (fire, hold, hide) = (gs.bat_fire_on, gs.bat_hold_until, gs.bat_hide_after);
+        if !(frame > -1.0 && frame < fire + hide) {
+            return;
+        }
+        let sin = lerp(prev_aim.sin(), p.bat_aim.sin(), t);
+        let cos = lerp(prev_aim.cos(), p.bat_aim.cos(), t);
+        let rotation = sin.atan2(cos) + if frame < fire { std::f64::consts::PI } else { 0.0 };
+        // the head grows from 0.4 to 1 over the hold window (the original's `cs` easing)
+        let o = 1.0 - 0.6 * (frame.min(hold) / hold * std::f64::consts::FRAC_PI_2).cos();
+        let flip = if (std::f64::consts::FRAC_PI_2..=1.5 * std::f64::consts::PI).contains(&rotation) { -1.0 } else { 1.0 };
+        let d = (gs.bat_range - 0.125) * o;
+        let r = 0.25 * o;
+        let g = 0.12 * o;
+        let at = |x: f64, y: f64| {
+            let (rx, ry) = rotate(x, y, rotation);
+            (px + rx, py + ry)
+        };
+        let (a, b, c, e) = ([0.0, -g / 2.0], [d, -r / 2.0], [d, r / 2.0], [0.0, g / 2.0]);
+        let head = [a, b, c, a, c, e].map(|v| [v[0] as f32, v[1] as f32]);
+        self.push_tri_list(&head, px, py, rotation, rgba(0x683d14, 1.0));
+        let (hx, hy) = at(d, 0.0);
+        self.disc(hx, hy, r / 2.0, rgba(0x683d14, 1.0));
+        if frame >= hold && frame < fire {
+            for f in (0..10).step_by(2) {
+                let f = f as f64;
+                let (ax, ay) = at(-0.15 * f, 0.0);
+                let (bx, by) = at(-0.15 * (f + 1.0), 0.0);
+                self.quad_line(ax, ay, bx, by, 0.03, rgba(0xdddddd, 0.5));
+            }
+        }
+        let (ex, ey) = at(d + r / 5.0, -r / 3.0 * flip);
+        self.quad_line(px, py, ex, ey, 0.08 * o, rgba(0xffffff, 0.07));
+    }
+
     /// Build the frame for `cur`, interpolating from `prev` by `t` in [0, 1].
     pub fn build(&mut self, prev: &State, cur: &State, t: f64, gs: &GameSettings, meta: Meta, sounds: &[SoundOut]) {
         self.verts.clear();
+        self.bars.clear();
         // bodies, back to front by z-index (stable)
         let mut order: Vec<(f64, u32)> = cur.bodies.iter().map(|(k, b)| (b.def.z_index, k)).collect();
         order.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
         for (_, id) in order {
             let b = cur.bodies.get(id).expect("body");
-            self.body(prev.bodies.get(id), b, t);
+            let pb = prev.bodies.get(id);
+            self.body(pb, b, t);
+            let bar = if b.def.invisible { None } else { damage_bar(b.damage, b.def.dynamic_threshold, b.def.removal_threshold) };
+            if let Some((frac, colour)) = bar {
+                let (x, y, _) = body_pose(pb, b, t);
+                self.bars.extend([(x as f32).to_bits(), (y as f32).to_bits(), (frac as f32).to_bits(), colour]);
+            }
         }
         // capture points
         for c in &cur.caps {
@@ -347,6 +399,24 @@ impl FrameBuilder {
                 self.quad_line(px, py, c.x - w * c.angle.cos(), c.y - w * c.angle.sin(), 0.04, rgba(0xdddddd, 0.7));
                 self.quad_line(px, py, c.x + w * c.angle.cos(), c.y + w * c.angle.sin(), 0.04, rgba(0xdddddd, 0.7));
             }
+            // grab lines (the original's `Lm`): from each held grab point on the player to the
+            // grabbed body's anchor
+            let pa = interp_angle(pp, p, t);
+            let (hu, eu) = (gs.player_width / 2.0, gs.player_height / 2.0);
+            for (dir, a) in p.grabs.iter().enumerate() {
+                if a.state != ATTACH_ON || a.kind != kind::BODY as f64 || a.target < 0.0 {
+                    continue;
+                }
+                let Some(body) = cur.bodies.get(a.target as u32) else { continue };
+                let (bx, by, ba) = body_pose(prev.bodies.get(a.target as u32), body, t);
+                let (sx, sy) = GRAB_DIR[dir];
+                let (ox, oy) = rotate(sx * hu, sy * eu, pa);
+                let (tx, ty) = rotate(a.ax, a.ay, ba);
+                let (ex, ey) = (bx + tx, by + ty);
+                self.quad_line(px + ox, py + oy, ex, ey, 0.04, rgba(0xbbbbbb, 0.7));
+                self.ring(ex, ey, 0.02, 0.04, rgba(0xbbbbbb, 0.7));
+            }
+            self.bat_head(pp, p, t, gs, px, py);
             let col = player_color(p.id, p.team);
             if p.rocket_frame >= 0.0 {
                 let a = p.rocket_aim;
@@ -404,10 +474,7 @@ impl FrameBuilder {
         w[4] = w.len() as u32;
         for (id, p) in cur.players.iter() {
             let (x, y) = interp_player(prev.players.get(id), p, t);
-            let angle = match prev.players.get(id) {
-                Some(pp) if !p.teleported => lerp_angle(pp.angle, p.angle, t),
-                _ => p.angle,
-            };
+            let angle = interp_angle(prev.players.get(id), p, t);
             let mut flags = 0u32;
             if meta.local >= 0 && id == meta.local as u32 {
                 flags |= 1;
@@ -417,9 +484,6 @@ impl FrameBuilder {
             }
             if p.frozen > 0.0 {
                 flags |= 4;
-            }
-            if p.rocket_frame >= 0.0 {
-                flags |= 8;
             }
             if p.bat_frame >= 0.0 {
                 flags |= 16;
@@ -436,7 +500,9 @@ impl FrameBuilder {
             if p.air_jump {
                 flags |= 256;
             }
-            let aim = if p.rocket_frame >= 0.0 { p.rocket_aim } else if p.egg_frame > 0.0 { p.egg_aim } else { p.bat_aim };
+            let (rocket, rocket_rot) = interp_rocket(prev.players.get(id), p, t);
+            let rocket = if p.rocket_frame == -1.0 { -1.0 } else { rocket };
+            let egg = egg_charge(p.egg_frame, gs.egg_delay1, gs.egg_delay2);
             w.extend([
                 id,
                 f(x),
@@ -448,7 +514,10 @@ impl FrameBuilder {
                 if p.attacker >= 0.0 { p.attacker as u32 } else { u32::MAX },
                 f(gs.player_width),
                 f(p.health),
-                f(aim),
+                f(rocket),
+                f(rocket_rot),
+                f(egg),
+                f(p.egg_aim),
             ]);
         }
         w[5] = sounds.len() as u32;
@@ -463,6 +532,8 @@ impl FrameBuilder {
         let shown = |v: f64| f(v.max(0.0));
         for (id, r) in cur.round.players.iter() {
             let killed_by = if r.killed_by >= 0.0 { r.killed_by as u32 } else { u32::MAX };
+            let spawn = if r.spawn >= 0.0 { cur.spawns.get(r.spawn as u32) } else { None };
+            let (spawn_x, spawn_y) = spawn.map_or((f64::NAN, f64::NAN), |s| (s.x, s.y));
             let last_victim = if r.last_victim >= 0.0 { r.last_victim as u32 } else { u32::MAX };
             w.extend([
                 id,
@@ -478,11 +549,16 @@ impl FrameBuilder {
                 f(r.kill_timer),
                 f(r.death_timer),
                 f(r.suicide_timer),
+                f(spawn_x),
+                f(spawn_y),
             ]);
         }
         w[30] = (self.kills.len() / 2) as u32;
         w[31] = w.len() as u32;
         w.extend_from_slice(&self.kills);
+        w[32] = (self.bars.len() / BAR_WORDS) as u32;
+        w[33] = w.len() as u32;
+        w.extend_from_slice(&self.bars);
         let st = &cur.settings;
         w[9] = f(st.screen_width);
         w[10] = f(st.width);
@@ -508,6 +584,40 @@ impl FrameBuilder {
     }
 }
 
+fn body_pose(prev: Option<&Body>, cur: &Body, t: f64) -> (f64, f64, f64) {
+    match prev {
+        Some(p) if !cur.teleported && std::sync::Arc::ptr_eq(&p.def, &cur.def) => {
+            (lerp(p.x, cur.x, t), lerp(p.y, cur.y, t), lerp_angle(p.angle, cur.angle, t))
+        }
+        _ => (cur.x, cur.y, cur.angle),
+    }
+}
+
+/// The original's damage bar (`Md`): the fraction shown (0..1) and its colour, or None while
+/// hidden. The nearer threshold ahead sets the colour: yellow for dynamic, red for removal.
+/// A body with neither threshold has no bar.
+fn damage_bar(damage: f64, dynamic: f64, removal: f64) -> Option<(f64, u32)> {
+    if !(dynamic > 0.0 || removal > 0.0) {
+        return None;
+    }
+    let to_dynamic = dynamic - damage;
+    let to_removal = removal - damage;
+    let (frac, colour) = if to_dynamic > 0.0 && (to_dynamic < to_removal || to_removal <= 0.0) {
+        (1.0 - damage / dynamic, DAMAGE_DYNAMIC_RGB)
+    } else if to_removal > 0.0 {
+        let frac = if dynamic > 0.0 && dynamic < removal {
+            1.0 - (damage - dynamic) / (removal - dynamic)
+        } else {
+            1.0 - damage / removal
+        };
+        (frac, DAMAGE_REMOVAL_RGB)
+    } else {
+        return None;
+    };
+    let frac = frac.max(0.0);
+    (frac != 0.0).then_some((frac, colour))
+}
+
 fn push_tris(verts: &mut Vec<u32>, local: &[[f32; 2]], x: f64, y: f64, angle: f64, color: u32) {
     let (s, c) = (angle.sin() as f32, angle.cos() as f32);
     let (x, y) = (x as f32, y as f32);
@@ -523,6 +633,39 @@ fn interp_player(prev: Option<&Player>, p: &Player, t: f64) -> (f64, f64) {
         Some(pp) if !p.teleported => (lerp(pp.x, p.x, t), lerp(pp.y, p.y, t)),
         _ => (p.x, p.y),
     }
+}
+
+/// Angle of `p` at `t`, matching `interp_player`; a teleported player snaps.
+fn interp_angle(prev: Option<&Player>, p: &Player, t: f64) -> f64 {
+    match prev {
+        Some(pp) if !p.teleported => lerp_angle(pp.angle, p.angle, t),
+        _ => p.angle,
+    }
+}
+
+/// Rocket charge and aim of `p` at `t` (the original's launcher update): the charge is lerped and
+/// floored at 0, the aim is the atan2 of the lerped sine and cosine. The caller maps idle (-1) to hidden.
+fn interp_rocket(prev: Option<&Player>, p: &Player, t: f64) -> (f64, f64) {
+    let (pf, pa) = prev.map_or((p.rocket_frame, p.rocket_aim), |pp| (pp.rocket_frame, pp.rocket_aim));
+    let charge = lerp(pf, p.rocket_frame, t).max(0.0);
+    let (s0, c0) = pa.sin_cos();
+    let (s1, c1) = p.rocket_aim.sin_cos();
+    (charge, lerp(s0, s1, t).atan2(lerp(c0, c1, t)))
+}
+
+/// Length fraction of the egg aim line (0 until the charge passes `delay1`, full after `delay1 + delay2`).
+fn egg_charge(frame: f64, delay1: f64, delay2: f64) -> f64 {
+    let c = ((frame - delay1) / delay2).min(1.0);
+    if c > 0.0 { c } else { 0.0 }
+}
+
+/// Grab directions as signs of the player box corners and edge midpoints; mirrors the sim's
+/// `grab_anchor` for `outer == false`.
+const GRAB_DIR: [(f64, f64); 8] = [(1.0, -1.0), (1.0, 1.0), (-1.0, 1.0), (-1.0, -1.0), (1.0, 0.0), (-1.0, 0.0), (0.0, 1.0), (0.0, -1.0)];
+
+fn rotate(x: f64, y: f64, angle: f64) -> (f64, f64) {
+    let (s, c) = angle.sin_cos();
+    (x * c - y * s, x * s + y * c)
 }
 
 /// New sounds of `cur` relative to `prev` (sounds append after survivors), then the client-only
@@ -557,5 +700,14 @@ mod tests {
         assert_eq!(out.len(), 12);
         let total: f32 = out.chunks(3).map(|t| area2(t).abs() / 2.0).sum();
         assert!((total - 3.0).abs() < 1e-5);
+    }
+
+    #[test]
+    fn damage_bar_follows_the_original() {
+        // 10 to become dynamic, 20 to be removed
+        assert_eq!(damage_bar(5.0, 10.0, 20.0), Some((0.5, DAMAGE_DYNAMIC_RGB)));
+        assert_eq!(damage_bar(15.0, 10.0, 20.0), Some((0.5, DAMAGE_REMOVAL_RGB)));
+        assert_eq!(damage_bar(25.0, 10.0, 20.0), None);
+        assert_eq!(damage_bar(5.0, 0.0, 0.0), None);
     }
 }

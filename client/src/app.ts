@@ -187,6 +187,7 @@ export function start(): void {
     if (!fb) return null;
     ensureRenderer();
     const scene = readScene(fb);
+    scene.localKeys = input.mask();
     const cam = computeCamera(scene, window.innerWidth, window.innerHeight, findLocal(scene));
     renderer?.draw(scene, cam);
     overlay.draw(scene, cam, names, tickHz);

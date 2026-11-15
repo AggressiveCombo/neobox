@@ -4,17 +4,19 @@
 // shrink, so steady-state frames allocate nothing here.
 
 import type { PlayerRec, Scene } from "../frame";
-import { FLAG_AIR_JUMP, FLAG_BAT, FLAG_DASH, FLAG_FROZEN, FLAG_GHOST, FLAG_LOCAL, FLAG_PUSHING, FLAG_ROCKET_AIM } from "../frame";
+import { FLAG_AIR_JUMP, FLAG_BAT, FLAG_DASH, FLAG_FROZEN, FLAG_GHOST, FLAG_LOCAL, FLAG_PUSHING, FLAG_TELEPORT } from "../frame";
+import { findLocal } from "../camera";
 import { TEAM_BLUE, TEAM_FFA, TEAM_RED, TEAM_SPECTATOR } from "../protocol";
 import { prefs, type Palette } from "../prefs";
+import { BIT } from "../input";
 
 /** Bytes per vertex. */
 export const VERTEX_BYTES = 12;
 const WORDS_PER_VERTEX = 3;
 const INITIAL_CAPACITY = 1024;
 const BACKGROUND_VERTICES = 6;
-/** Rocket aim line (6) + body quad (6) + local marker (3). */
-const PLAYER_MAX_VERTICES = 15;
+/** Body (6), launcher (90), egg (6), highlight ring (24), marker fill and outline (21). The trail reserves its own. */
+const PLAYER_MAX_VERTICES = 147;
 
 /** Clip transform (sx, sy, ox, oy): clip = (x*sx + ox, y*sy + oy). */
 export type Xf = [number, number, number, number];
@@ -42,16 +44,40 @@ const MARKER_FROZEN_RGB = 0x6b8aff;
 const MARKER_READY_RGB = 0xffd240;
 const MARKER_SPENT_RGB = 0xbbbbbb;
 const GHOST_ALPHA = 0.35;
-const AIM_ALPHA = 0.75;
 const MARKER_ALPHA = 0.9;
 const FROZEN_MIX = 0.5;
-/** Aim line length and half width, in player sides. */
-const AIM_LENGTH = 2;
-const AIM_HALF_WIDTH = 0.04;
-/** Marker gap, height and half width, in player sides. */
+/** Launcher and egg aim lines, and the countdown outline: the original's light grey, half-opaque lines. */
+const LINE_RGB = 0xdddddd;
+const LINE_ALPHA = 0.5;
+const LINE_WIDTH = 0.03;
+const LAUNCHER_RED_RGB = 0x8c2020;
+/** Launcher in player sides: pivot, dashes, hub, fade-in length in charge frames, and egg reach. */
+const LAUNCHER_PIVOT_X = 0.11;
+const LAUNCHER_PIVOT_Y = 0.12;
+const LAUNCHER_FADE_FRAMES = 6;
+const DASH_COUNT = 6;
+const DASH_PERIOD = 0.3;
+const DASH_LENGTH = 0.15;
+const HUB_X = 0.625;
+const HUB_RADIUS = 0.0475;
+const HUB_SIDES = 12;
+const EGG_REACH = 4;
+/** Motion trail: how long a position stays (ms) and its full width at the body, in player sides. */
+const TRAIL_MS = 200;
+const TRAIL_WIDTH = 0.4;
+const TRAIL_RGB = 0x4d6d73;
+/** Countdown outline stroke, and the keys that light it (the original's push, rocket, bat and grab). */
+const HIGHLIGHT_STROKE = 0.08;
+const HIGHLIGHT_KEYS = BIT.PUSH | BIT.ROCKET | BIT.BAT | BIT.GRAB;
+/** Marker gap, height, half width and 1 px outline, in player sides. */
 const MARKER_GAP = 0.15;
-const MARKER_HEIGHT = 0.35;
+const MARKER_HEIGHT = 0.24;
 const MARKER_HALF_WIDTH = 0.2;
+const MARKER_STROKE = 0.025;
+const MARKER_STROKE_RGB = 0x000222;
+/** Spawn preview: alpha and the vertices of its square. */
+const SPAWN_ALPHA = 0.6;
+const SPAWN_VERTICES = 6;
 
 /** Backing-store size for a device-pixel request, scaled by the renderScale pref. */
 export function scaledSize(widthPx: number, heightPx: number): [number, number] {
@@ -114,6 +140,52 @@ function bodyRgb(flags: number, rgb: number): number {
   return mixRgb(c, WHITE_RGB, Math.min(lift, 0.5));
 }
 
+/** Vertices per trail segment and per quad (two triangles). */
+const SEGMENT_VERTICES = 6;
+
+/** Scratch output of poseAt, reused so mapping a vertex allocates nothing. */
+const at = { x: 0, y: 0 };
+/** Current local-to-world transform: origin, rotation, y-flip, pivot and scale (the original's pixi pose). */
+const pose = { ox: 0, oy: 0, co: 1, si: 0, flip: 1, px: 0, py: 0, sc: 1 };
+
+/** Set `pose`; angle in radians, flip -1 mirrors y before rotating, pivot and scale in player sides. */
+function setPose(ox: number, oy: number, angle: number, flip: number, px: number, py: number, sc: number): void {
+  pose.ox = ox;
+  pose.oy = oy;
+  pose.co = Math.cos(angle);
+  pose.si = Math.sin(angle);
+  pose.flip = flip;
+  pose.px = px;
+  pose.py = py;
+  pose.sc = sc;
+}
+
+/** Map local (lx, ly), in player sides, into `at`: translate by -pivot, scale, flip y, rotate, translate. */
+function poseAt(lx: number, ly: number): void {
+  const a = (lx - pose.px) * pose.sc;
+  const b = pose.flip * (ly - pose.py) * pose.sc;
+  at.x = pose.ox + a * pose.co - b * pose.si;
+  at.y = pose.oy + a * pose.si + b * pose.co;
+}
+
+/** The original's easing (`us`): a + b * easeOutBack over x in [0, c]; overshoots past a + b. */
+function ease(x: number, a: number, b: number, c: number): number {
+  const t = x / c - 1;
+  return a + b * (t * t * ((1.70158 + 1) * t + 1.70158) + 1);
+}
+
+/** A trail sample: the body's position and when it was recorded (ms). */
+interface TrailPoint {
+  x: number;
+  y: number;
+  t: number;
+}
+
+interface Trail {
+  points: TrailPoint[];
+  generation: number;
+}
+
 export class Geometry {
   private f32 = new Float32Array(0);
   private u32 = new Uint32Array(0);
@@ -121,6 +193,9 @@ export class Geometry {
   private capacity = 0;
   /** Vertices written by the current build(). */
   private used = 0;
+  /** Motion trails by player id; `generation` is the last build that drew the player. */
+  private readonly trails = new Map<number, Trail>();
+  private generation = 0;
 
   readonly background: Span = { first: 0, count: 0 };
   readonly world: Span = { first: 0, count: 0 };
@@ -175,39 +250,176 @@ export class Geometry {
 
   private putPlayers(scene: Scene): void {
     const players = scene.players;
-    this.reserve(players.length * PLAYER_MAX_VERTICES);
+    this.reserve(players.length * PLAYER_MAX_VERTICES + SPAWN_VERTICES);
     this.players.first = this.used;
+    this.generation++;
+    const now = Date.now();
+    const followed = findLocal(scene);
+    this.putSpawn(scene, followed);
     for (let i = 0; i < players.length; i++) {
       const p = players[i];
-      if (p.team !== TEAM_SPECTATOR) this.putPlayer(p);
+      if (p.team !== TEAM_SPECTATOR) this.putPlayer(scene, p, followed, now);
     }
+    this.pruneTrails();
     this.players.count = this.used - this.players.first;
   }
 
-  private putPlayer(p: PlayerRec): void {
-    const rgb = playerRgb(p.team, p.id);
-    if ((p.flags & FLAG_ROCKET_AIM) !== 0) this.putAim(p, rgb);
-    this.putBody(p, rgb);
-    if ((p.flags & FLAG_LOCAL) !== 0) this.putMarker(p);
+  /** Drop the trails of players that are not drawn this frame. */
+  private pruneTrails(): void {
+    for (const [id, trail] of this.trails) {
+      if (trail.generation !== this.generation) this.trails.delete(id);
+    }
   }
 
-  /** Thin line from the player centre along `aim`, fading nothing (constant alpha). */
-  private putAim(p: PlayerRec, rgb: number): void {
-    const dx = Math.cos(p.aim);
-    const dy = Math.sin(p.aim);
-    const len = p.size * AIM_LENGTH;
-    const hw = p.size * AIM_HALF_WIDTH;
-    const ex = p.x + dx * len;
-    const ey = p.y + dy * len;
-    const nx = -dy * hw;
-    const ny = dx * hw;
-    const colour = packRgba(rgb, AIM_ALPHA);
-    this.put(p.x + nx, p.y + ny, colour);
-    this.put(p.x - nx, p.y - ny, colour);
-    this.put(ex - nx, ey - ny, colour);
-    this.put(p.x + nx, p.y + ny, colour);
-    this.put(ex - nx, ey - ny, colour);
-    this.put(ex + nx, ey + ny, colour);
+  private putPlayer(scene: Scene, p: PlayerRec, followed: PlayerRec | undefined, now: number): void {
+    const rgb = playerRgb(p.team, p.id);
+    this.putTrail(p, now);
+    this.putLauncher(p);
+    this.putEgg(p);
+    this.putBody(p, rgb);
+    if ((p.flags & FLAG_LOCAL) !== 0 && scene.intro > -1 && (scene.localKeys & HIGHLIGHT_KEYS) !== 0) this.putHighlight(p);
+    if (p === followed) this.putMarker(p);
+  }
+
+  /**
+   * The original's motion trail: the body's positions over the last TRAIL_MS, each segment as wide as
+   * its newer end and thinning with age. A teleport starts a fresh trail.
+   */
+  private putTrail(p: PlayerRec, now: number): void {
+    let trail = this.trails.get(p.id);
+    if (!trail || (p.flags & FLAG_TELEPORT) !== 0) {
+      trail = { points: [], generation: 0 };
+      this.trails.set(p.id, trail);
+    }
+    trail.generation = this.generation;
+    const pts = trail.points;
+    pts.push({ x: p.x, y: p.y, t: now });
+    while (pts.length > 1 && now - pts[0].t > TRAIL_MS) pts.shift();
+    this.reserve((pts.length - 1) * SEGMENT_VERTICES);
+    const colour = packRgba(TRAIL_RGB, 1);
+    for (let i = 1; i < pts.length; i++) {
+      const a = pts[i - 1];
+      const b = pts[i];
+      const width = TRAIL_WIDTH * p.size * (1 - (now - b.t) / TRAIL_MS);
+      this.putSegment(a.x, a.y, b.x, b.y, width / 2, colour);
+    }
+  }
+
+  /**
+   * The original's launcher, in its own frame: a dashed rail, a red hub and two grey blocks, pivoted
+   * near the back and turned to the aim. Idle (charge -1) it is hidden; a fresh charge fades it in while
+   * it rises from below the body.
+   */
+  private putLauncher(p: PlayerRec): void {
+    if (p.rocketCharge < 0) return;
+    const s = p.size;
+    let yoff = 0;
+    let alpha = 1;
+    if (p.rocketCharge < LAUNCHER_FADE_FRAMES) {
+      alpha = Math.min(1, Math.max(0, ease(p.rocketCharge, 0.2, 1, LAUNCHER_FADE_FRAMES)));
+      yoff = ease(p.rocketCharge, -0.7 * s, 0.7 * s, LAUNCHER_FADE_FRAMES);
+    }
+    const flip = Math.abs(p.rocketRot) < Math.PI / 2 ? 1 : -1;
+    setPose(p.x, p.y + yoff, p.rocketRot, flip, LAUNCHER_PIVOT_X, LAUNCHER_PIVOT_Y, s);
+    const line = packRgba(LINE_RGB, LINE_ALPHA * alpha);
+    const grey = packRgba(LINE_RGB, alpha);
+    for (let k = 0; k < DASH_COUNT; k++) {
+      const x0 = k * DASH_PERIOD;
+      this.rectLocal(x0, -LINE_WIDTH / 2, x0 + DASH_LENGTH, LINE_WIDTH / 2, line);
+    }
+    const red = packRgba(LAUNCHER_RED_RGB, alpha);
+    for (let i = 0; i < HUB_SIDES; i++) {
+      const a0 = (2 * Math.PI * i) / HUB_SIDES;
+      const a1 = (2 * Math.PI * (i + 1)) / HUB_SIDES;
+      this.triLocal(
+        HUB_X,
+        0,
+        HUB_X + HUB_RADIUS * Math.cos(a0),
+        HUB_RADIUS * Math.sin(a0),
+        HUB_X + HUB_RADIUS * Math.cos(a1),
+        HUB_RADIUS * Math.sin(a1),
+        red,
+      );
+    }
+    this.rectLocal(-0.625, -0.095, 0.625, 0.095, grey);
+    this.rectLocal(-0.625, -0.125, -0.525, 0.125, grey);
+    this.rectLocal(0.15625, 0, 0.22625, 0.15, grey);
+  }
+
+  /** The egg aim line: from the centre along the egg aim, its length following the charge. */
+  private putEgg(p: PlayerRec): void {
+    if (p.eggCharge <= 0) return;
+    setPose(p.x, p.y, p.eggAim, 1, 0, 0, p.size);
+    this.rectLocal(0, -LINE_WIDTH / 2, EGG_REACH * p.eggCharge, LINE_WIDTH / 2, packRgba(LINE_RGB, LINE_ALPHA));
+  }
+
+  /** Countdown outline on the local body, drawn while the intro runs and a fire key is held. */
+  private putHighlight(p: PlayerRec): void {
+    setPose(p.x, p.y, p.angle, 1, 0, 0, p.size);
+    const outer = 0.5 + HIGHLIGHT_STROKE / 2;
+    const inner = 0.5 - HIGHLIGHT_STROKE / 2;
+    const c = packRgba(LINE_RGB, 1);
+    this.rectLocal(-outer, -outer, outer, -inner, c);
+    this.rectLocal(-outer, inner, outer, outer, c);
+    this.rectLocal(-outer, -inner, -inner, inner, c);
+    this.rectLocal(inner, -inner, outer, inner, c);
+  }
+
+  /** Rectangle [x0, x1] x [y0, y1] in the current pose. */
+  private rectLocal(x0: number, y0: number, x1: number, y1: number, colour: number): void {
+    this.quadLocal(x0, y0, x1, y0, x1, y1, x0, y1, colour);
+  }
+
+  /** Quad with corners in order, in the current pose. */
+  private quadLocal(x0: number, y0: number, x1: number, y1: number, x2: number, y2: number, x3: number, y3: number, colour: number): void {
+    poseAt(x0, y0);
+    const ax = at.x;
+    const ay = at.y;
+    poseAt(x1, y1);
+    const bx = at.x;
+    const by = at.y;
+    poseAt(x2, y2);
+    const cx = at.x;
+    const cy = at.y;
+    poseAt(x3, y3);
+    const dx = at.x;
+    const dy = at.y;
+    this.put(ax, ay, colour);
+    this.put(bx, by, colour);
+    this.put(cx, cy, colour);
+    this.put(ax, ay, colour);
+    this.put(cx, cy, colour);
+    this.put(dx, dy, colour);
+  }
+
+  /** Triangle in the current pose. */
+  private triLocal(x0: number, y0: number, x1: number, y1: number, x2: number, y2: number, colour: number): void {
+    poseAt(x0, y0);
+    const ax = at.x;
+    const ay = at.y;
+    poseAt(x1, y1);
+    const bx = at.x;
+    const by = at.y;
+    poseAt(x2, y2);
+    this.put(ax, ay, colour);
+    this.put(bx, by, colour);
+    this.put(at.x, at.y, colour);
+  }
+
+  /** Line of half-width `hw` from (ax, ay) to (bx, by), world coordinates; nothing for a zero-length line. */
+  private putSegment(ax: number, ay: number, bx: number, by: number, hw: number, colour: number): void {
+    const dx = bx - ax;
+    const dy = by - ay;
+    const len = Math.hypot(dx, dy);
+    if (len === 0) return;
+    const nx = (-dy / len) * hw;
+    const ny = (dx / len) * hw;
+    this.put(ax + nx, ay + ny, colour);
+    this.put(ax - nx, ay - ny, colour);
+    this.put(bx - nx, by - ny, colour);
+    this.put(ax + nx, ay + ny, colour);
+    this.put(bx - nx, by - ny, colour);
+    this.put(bx + nx, by + ny, colour);
   }
 
   /** Square of side `size` centred on the player, rotated by `angle`. */
@@ -235,18 +447,47 @@ export class Geometry {
     this.put(dx, dy, colour);
   }
 
-  /** Small upright triangle above the local player (not rotated). */
+  /**
+   * The original's spawn preview: a square of the player's size on the followed player's claimed
+   * spawn, drawn under the bodies and blinking on the wall clock (shown for the first half of each 100 ms).
+   */
+  private putSpawn(scene: Scene, followed: PlayerRec | undefined): void {
+    if (!followed) return;
+    const row = scene.scores.find((r) => r.id === followed.id);
+    if (!row || !Number.isFinite(row.spawnX) || !Number.isFinite(row.spawnY)) return;
+    if (Date.now() % 100 >= 50) return;
+    const h = followed.size / 2;
+    const x = row.spawnX;
+    const y = row.spawnY;
+    const colour = packRgba(playerRgb(followed.team, followed.id), SPAWN_ALPHA);
+    this.put(x - h, y - h, colour);
+    this.put(x + h, y - h, colour);
+    this.put(x + h, y + h, colour);
+    this.put(x - h, y - h, colour);
+    this.put(x + h, y + h, colour);
+    this.put(x - h, y + h, colour);
+  }
+
+  /**
+   * The original's marker over the followed player: a triangle whose tip sits just above the body and
+   * whose flat edge is above the tip, with a thin dark outline.
+   */
   private putMarker(p: PlayerRec): void {
     const size = p.size;
-    const baseY = p.y - size / 2 - size * MARKER_GAP;
-    const tipY = baseY - size * MARKER_HEIGHT;
+    const tipY = p.y - size / 2 - size * MARKER_GAP;
+    const topY = tipY - size * MARKER_HEIGHT;
     const hw = size * MARKER_HALF_WIDTH;
     const rgb =
       (p.flags & FLAG_FROZEN) !== 0 ? MARKER_FROZEN_RGB : (p.flags & FLAG_AIR_JUMP) !== 0 ? MARKER_READY_RGB : MARKER_SPENT_RGB;
     const colour = packRgba(rgb, MARKER_ALPHA);
     this.put(p.x, tipY, colour);
-    this.put(p.x - hw, baseY, colour);
-    this.put(p.x + hw, baseY, colour);
+    this.put(p.x - hw, topY, colour);
+    this.put(p.x + hw, topY, colour);
+    const stroke = packRgba(MARKER_STROKE_RGB, 1);
+    const sh = (size * MARKER_STROKE) / 2;
+    this.putSegment(p.x, tipY, p.x - hw, topY, sh, stroke);
+    this.putSegment(p.x - hw, topY, p.x + hw, topY, sh, stroke);
+    this.putSegment(p.x + hw, topY, p.x, tipY, sh, stroke);
   }
 
   /** Grow the store (doubling) so `extra` more vertices fit. Keeps the vertices written so far. */

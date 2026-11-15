@@ -1,13 +1,12 @@
 // Decodes the frame buffer header and records (docs/CLIENT-API.md "Frame buffer").
-// Layout: little-endian words; header words 0..31; world verts (3 words), players
-// (11 words), sounds (5 words), score rows (13 words), kill pairs (2 words).
+// Layout: little-endian words; header words 0..33; world verts (3 words), players
+// (14 words), sounds (5 words), score rows (15 words), kill pairs (2 words), damage bars (4 words).
 
 import type { FrameView } from "./engine";
 
 export const FLAG_LOCAL = 1;
 export const FLAG_GHOST = 2;
 export const FLAG_FROZEN = 4;
-export const FLAG_ROCKET_AIM = 8;
 export const FLAG_BAT = 16;
 export const FLAG_PUSHING = 32;
 export const FLAG_DASH = 64;
@@ -25,7 +24,14 @@ export interface PlayerRec {
   attacker: number;
   size: number;
   health: number;
-  aim: number;
+  /** Launcher charge frame (the original's `pn`, lerped and floored at 0); -1 when the launcher is idle. */
+  rocketCharge: number;
+  /** Launcher aim (radians), from the lerped sine and cosine of the aim angle. */
+  rocketRot: number;
+  /** Egg aim line length as a fraction of its full length (0..1). */
+  eggCharge: number;
+  /** Egg aim angle (radians). */
+  eggAim: number;
 }
 
 export interface ScoreRow {
@@ -44,12 +50,23 @@ export interface ScoreRow {
   killTimer: number;
   deathTimer: number;
   suicideTimer: number;
+  /** Claimed spawn point (world units); NaN when the player has none. */
+  spawnX: number;
+  spawnY: number;
 }
 
 /** A kill that happened since the previous frame. */
 export interface KillRec {
   killer: number;
   victim: number;
+}
+
+/** A body's damage bar: centre (world units), fill fraction (0..1) and colour (0xRRGGBB). */
+export interface BarRec {
+  x: number;
+  y: number;
+  fraction: number;
+  colour: number;
 }
 
 export interface SoundRec {
@@ -85,10 +102,13 @@ export interface Scene {
   rollbacksPerSec: number;
   worldOffset: number;
   worldCount: number;
+  /** Local input mask (input.ts BIT values), set by the caller after readScene; not part of the frame. */
+  localKeys: number;
   players: PlayerRec[];
   sounds: SoundRec[];
   scores: ScoreRow[];
   kills: KillRec[];
+  bars: BarRec[];
   /** Word offset of the world vertex block (for zero-copy geometry). */
   view: FrameView;
 }
@@ -106,7 +126,7 @@ export function readScene(fb: FrameView): Scene {
 
   const players: PlayerRec[] = [];
   for (let i = 0; i < playerCount; i++) {
-    const o = playerOff + i * 11;
+    const o = playerOff + i * 14;
     players.push({
       id: u32[o] ?? 0,
       x: f32[o + 1] ?? 0,
@@ -118,7 +138,10 @@ export function readScene(fb: FrameView): Scene {
       attacker: u32[o + 7] ?? 0,
       size: f32[o + 8] ?? 0,
       health: f32[o + 9] ?? 0,
-      aim: f32[o + 10] ?? 0,
+      rocketCharge: f32[o + 10] ?? 0,
+      rocketRot: f32[o + 11] ?? 0,
+      eggCharge: f32[o + 12] ?? 0,
+      eggAim: f32[o + 13] ?? 0,
     });
   }
 
@@ -136,7 +159,7 @@ export function readScene(fb: FrameView): Scene {
 
   const scores: ScoreRow[] = [];
   for (let i = 0; i < rowCount; i++) {
-    const o = rowOff + i * 13;
+    const o = rowOff + i * 15;
     scores.push({
       id: u32[o] ?? 0,
       team: u32[o + 1] ?? 0,
@@ -151,6 +174,8 @@ export function readScene(fb: FrameView): Scene {
       killTimer: f32[o + 10] ?? 0,
       deathTimer: f32[o + 11] ?? 0,
       suicideTimer: f32[o + 12] ?? 0,
+      spawnX: f32[o + 13] ?? NaN,
+      spawnY: f32[o + 14] ?? NaN,
     });
   }
 
@@ -158,6 +183,14 @@ export function readScene(fb: FrameView): Scene {
   for (let i = 0; i < killCount; i++) {
     const o = killOff + i * 2;
     kills.push({ killer: u32[o] ?? 0, victim: u32[o + 1] ?? 0 });
+  }
+
+  const barCount = u32[32] ?? 0;
+  const barOff = u32[33] ?? 0;
+  const bars: BarRec[] = [];
+  for (let i = 0; i < barCount; i++) {
+    const o = barOff + i * 4;
+    bars.push({ x: f32[o] ?? 0, y: f32[o + 1] ?? 0, fraction: f32[o + 2] ?? 0, colour: u32[o + 3] ?? 0 });
   }
 
   return {
@@ -185,10 +218,12 @@ export function readScene(fb: FrameView): Scene {
     rollbacksPerSec: f32[29] ?? 0,
     worldOffset: u32[2] ?? 0,
     worldCount: u32[1] ?? 0,
+    localKeys: 0,
     players,
     sounds,
     scores,
     kills,
+    bars,
     view: fb,
   };
 }
