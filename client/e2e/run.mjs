@@ -6,7 +6,7 @@ import { existsSync } from "node:fs";
 import path from "node:path";
 import {
   DIST_DIR,
-  launchBrowser,
+  launchEngine,
   onCleanup,
   runCleanups,
   Scenario,
@@ -35,7 +35,7 @@ for (const signal of ["SIGINT", "SIGTERM"]) {
 
 const started = Date.now();
 const server = await startServer();
-const browser = await launchBrowser();
+const browser = await launchEngine(process.env.NEOBOX_ENGINE || "chromium");
 const env = { base: server.base, browser };
 console.log(`server ${server.base}  (dist ${DIST_DIR})`);
 
