@@ -25,10 +25,10 @@ mod share;
 mod ticket;
 mod youtube;
 
-use axum::extract::{ConnectInfo, State, WebSocketUpgrade};
+use axum::extract::{ConnectInfo, Request, State, WebSocketUpgrade};
 use axum::http::{header, HeaderMap, HeaderValue};
 use axum::middleware;
-use axum::response::IntoResponse;
+use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use axum::{Json, Router};
 use hub::{Config, Hub};
@@ -50,6 +50,18 @@ const CSP: &str = "default-src 'self'; script-src 'self' 'wasm-unsafe-eval' http
     frame-src https://www.youtube.com https://www.youtube-nocookie.com; style-src 'self' 'unsafe-inline'; \
     img-src 'self' data: blob: https://i.ytimg.com; connect-src 'self' ws: wss:; object-src 'none'; base-uri 'none'; \
     frame-ancestors 'none'";
+
+/// The service worker script and the HTML shell are never cached by the browser: a 304 on a stale
+/// copy would keep an old worker, or an index.html naming old hashed bundles, after a deploy.
+async fn no_store_entry(req: Request, next: middleware::Next) -> Response {
+    let sw = req.uri().path() == "/sw.js";
+    let mut res = next.run(req).await;
+    let html = res.headers().get(header::CONTENT_TYPE).is_some_and(|ct| ct.as_bytes().starts_with(b"text/html"));
+    if sw || html {
+        res.headers_mut().insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    }
+    res
+}
 
 async fn ws(State(hub): State<Arc<Hub>>, ConnectInfo(peer): ConnectInfo<SocketAddr>, headers: HeaderMap, upgrade: WebSocketUpgrade) -> impl IntoResponse {
     let ip = admin::client_ip(&hub, &headers, peer);
@@ -125,6 +137,7 @@ async fn main() {
         .layer(SetResponseHeaderLayer::if_not_present(header::X_CONTENT_TYPE_OPTIONS, HeaderValue::from_static("nosniff")))
         .layer(SetResponseHeaderLayer::if_not_present(header::REFERRER_POLICY, HeaderValue::from_static("same-origin")))
         .layer(SetResponseHeaderLayer::if_not_present(header::CONTENT_SECURITY_POLICY, HeaderValue::from_static(CSP)))
+        .layer(middleware::from_fn(no_store_entry))
         .layer(CompressionLayer::new())
         .layer(middleware::from_fn_with_state(hub.clone(), origin::guard))
         .with_state(hub);

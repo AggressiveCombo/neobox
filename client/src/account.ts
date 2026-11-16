@@ -321,16 +321,16 @@ export function startAccountSync(ctx: AppCtx, ready: () => void): void {
     pushTimer = undefined;
     void pushPrefs(ctx, true);
   });
-  fetchMe().then(
-    (account) => {
-      ctx.store.set({ account });
-      ready();
-    },
-    (err: unknown) => {
-      ctx.toast(`could not check your account: ${errorText(err)}`, "error");
-      ready();
-    },
-  );
+  // Offline the lookup cannot succeed and the browser already says so; it runs again once the connection is back.
+  const checkAccount = async (): Promise<void> => {
+    try {
+      ctx.store.set({ account: await fetchMe() });
+    } catch (err) {
+      if (navigator.onLine) ctx.toast(`could not check your account: ${errorText(err)}`, "error");
+    }
+  };
+  void checkAccount().then(ready);
+  window.addEventListener("online", () => void checkAccount());
 }
 
 /**
