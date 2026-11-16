@@ -11,11 +11,12 @@ import { BIT } from "../../input";
 import { filterProfanity } from "../../profanity";
 import { prefs } from "../../prefs";
 import { MAX_CHAT_LEN, TEAM_BLUE, TEAM_FFA, TEAM_RED, TEAM_SPECTATOR, type PlayerInfo, type XpAward } from "../../protocol";
-import { cssHex, playerRgb, setPlayerColors } from "../../render/geometry";
+import { cssHex, mixRgb, playerRgb, setPlayerColors } from "../../render/geometry";
 import { CHAT_LIMIT, type AppState, type ChatLine, type Stats } from "../../state";
 import { chatPlaceholder } from "../chat-hint";
 import { h } from "../dom";
 import { icon, type IconName } from "../icons";
+import { contrastRatio } from "../kit";
 
 const SCORE_INTERVAL_MS = 100;
 const CHAT_SHOWN = 8;
@@ -28,6 +29,15 @@ const TYPING_TICK_MS = 1000;
 const XP_SHOW_MS = 3000;
 /** Ping above this turns the connection chip red. */
 const BAD_PING_MS = 150;
+
+/** The chat's ground (`--hud-solid`, hud.css). */
+const HUD_SOLID = 0x0a0a0a;
+/** A player's name colour as text: the palette colour lifted toward white until it reads at 4.5:1 on the chat ground. */
+function nameText(rgb: number): number {
+  let t = 0;
+  while (t < 1 && contrastRatio(mixRgb(rgb, 0xffffff, t), HUD_SOLID) < 4.5) t += 0.02;
+  return mixRgb(rgb, 0xffffff, Math.min(t, 1));
+}
 
 /** Own chat lines (most recent last), recalled with Up/Down. Kept for the session only. */
 const SENT_HISTORY_MAX = 50;
@@ -541,7 +551,7 @@ export const hudScreen: HudFactory = (ctx) => {
     if (line.name !== "") {
       const player = line.from === null ? undefined : roomPlayers.get(line.from);
       const name = h("span", { class: "hud-chat-name" }, `${line.name}: `);
-      if (player !== undefined) name.style.color = cssHex(playerRgb(player.team, player.id));
+      if (player !== undefined) name.style.color = cssHex(nameText(playerRgb(player.team, player.id)));
       el.append(name);
     }
     el.append(text);

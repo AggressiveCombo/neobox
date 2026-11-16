@@ -141,17 +141,22 @@ export function avatar(name: string, color: number | null, small = false): HTMLE
   const el = h("span", { class: small ? "avatar small" : "avatar", "aria-hidden": "true" }, small ? "" : initial(name));
   if (color !== null) {
     el.style.setProperty("--avatar", `#${color.toString(16).padStart(6, "0")}`);
-    el.style.color = avatarInk(color);
+    // The letter takes whichever of white or near-black contrasts more with the colour.
+    el.style.color = contrastRatio(color, 0xffffff) > contrastRatio(color, 0x0a0a0a) ? "#ffffff" : "#0a0a0a";
+    // A colour within 3:1 of either theme's ground loses its edge: outline it in ink.
+    if (GROUNDS.some((g) => contrastRatio(color, g) < 3)) el.classList.add("is-edged");
   }
   return el;
 }
 
-/** Near-black or white, whichever has the higher WCAG contrast on `color`; the better of the two is at least 4.5:1 for any colour. */
-function avatarInk(color: number): string {
-  const l = relativeLuminance(color);
-  const onWhite = 1.05 / (l + 0.05);
-  const onInk = (l + 0.05) / (relativeLuminance(0x0a0a0a) + 0.05);
-  return onWhite > onInk ? "#ffffff" : "#0a0a0a";
+/** Light and dark `--ground` (style.css). */
+const GROUNDS = [0xf7f7f7, 0x0a0a0a] as const;
+
+/** WCAG contrast ratio of two 0xRRGGBB colours, 1 to 21. */
+export function contrastRatio(a: number, b: number): number {
+  const la = relativeLuminance(a);
+  const lb = relativeLuminance(b);
+  return (Math.max(la, lb) + 0.05) / (Math.min(la, lb) + 0.05);
 }
 
 /** WCAG relative luminance of a 0xRRGGBB colour. */

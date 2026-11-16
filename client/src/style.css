@@ -893,6 +893,11 @@ input[type="range"]::-moz-range-thumb {
   font-size: 0;
 }
 
+/* A colour close to the ground: the ink edge keeps the square's outline visible. */
+.avatar.is-edged {
+  box-shadow: inset 0 0 0 1px var(--ink);
+}
+
 /* Keyboard key, shown in the text face inside a box. */
 .key {
   display: inline-flex;
