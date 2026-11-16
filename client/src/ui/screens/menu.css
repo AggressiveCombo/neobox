@@ -1,25 +1,28 @@
 /* Home (ui/screens/menu.ts). Desktop: a grid. The left column holds the wordmark, the name,
-   the two ways in and the destination index; the right side is a giant turned square, cropped
-   by the viewport edge, where a clip plays (the GL view is masked to the square by menu.ts).
-   Phone (<=600px): one column in this order: wordmark, name and play, the index, then the square
+   the two ways in and the destination index, as one block centred in the window's height; the
+   right column is a giant turned square, centred in it, where a clip plays (the GL view is masked
+   to the square by menu.ts).
+   Phone and tablet portrait (<=860px): one column in this order: wordmark, name and play, the index, then the square
    bleeding off the right edge so the first screen holds everything that matters. */
 
-/* The home page is transparent so the GL view can show through the square. */
+/* The home page is transparent so the GL view can show through the square. The free rows
+   above and below the left block share the spare height, so nothing gathers at one edge. */
 .page.home {
   position: relative;
   background: transparent;
   display: grid;
-  grid-template-columns: minmax(0, 540px) minmax(0, 1fr);
-  grid-template-rows: auto 1fr auto auto;
+  grid-template-columns: minmax(0, clamp(480px, 34vw, 720px)) minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr) auto auto minmax(0, 1fr) auto;
   column-gap: 40px;
-  row-gap: 32px;
-  align-content: start;
+  row-gap: 28px;
 }
 
-/* Top bar: account, news, music, fullscreen. */
+/* Top bar: account, news, music, fullscreen. Above the square, whose corner can reach it. */
 .home-top {
   grid-column: 1 / -1;
   grid-row: 1;
+  position: relative;
+  z-index: 2;
   display: flex;
   justify-content: flex-end;
   padding-top: calc(16px + env(safe-area-inset-top));
@@ -75,8 +78,8 @@ button.home-account {
 /* Left column: the wordmark, the name and the two ways in. */
 .home-copy {
   grid-column: 1;
-  grid-row: 2;
-  align-self: center;
+  grid-row: 3;
+  align-self: end;
   display: flex;
   flex-direction: column;
   gap: 28px;
@@ -189,16 +192,16 @@ button.home-account {
   display: none;
 }
 
-/* Right side: the square. Absolutely placed over the page, behind the copy. */
+/* Right column: the square, centred in it and as large as the height allows. Turned, its
+   corners reach about 13% past its box on each side, which the column's spare width takes. */
 .menu-art {
   grid-column: 2;
-  grid-row: 2 / span 2;
+  grid-row: 2 / 6;
   position: relative;
   align-self: center;
-  justify-self: end;
-  width: min(64vh, 42vw);
+  justify-self: center;
+  width: min(78%, 70vh);
   aspect-ratio: 1;
-  margin-right: calc(var(--margin) * -2);
   min-width: 0;
 }
 
@@ -244,11 +247,11 @@ button.home-account {
 /* The index: destinations as icon tiles, four to a row. */
 .home-index {
   grid-column: 1;
-  grid-row: 3;
+  grid-row: 4;
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 8px;
-  align-self: end;
+  align-self: start;
 }
 
 /* Top padding leaves room for the "Start here" chip in the corner. */
@@ -270,13 +273,19 @@ button.home-row-btn:hover:not(:disabled) {
   background: var(--surface-2);
 }
 
+/* Hover lifts the tile's content, icon and label together. */
 button.home-row-btn svg {
   color: var(--accent);
+}
+
+button.home-row-btn svg,
+.home-row-label {
   transition: transform 200ms var(--ease);
 }
 
-button.home-row-btn:hover:not(:disabled) svg {
-  transform: translateY(-2px);
+button.home-row-btn:hover:not(:disabled) svg,
+button.home-row-btn:hover:not(:disabled) .home-row-label {
+  transform: translateY(-3px);
 }
 
 .home-row-label {
@@ -301,7 +310,7 @@ button.home-row-btn:hover:not(:disabled) svg {
 /* Footer: one muted line, the makers above it. */
 .home-foot {
   grid-column: 1 / -1;
-  grid-row: 4;
+  grid-row: 6;
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -331,36 +340,9 @@ button.home-privacy {
   background: none;
 }
 
-/* Desktop: the square sits behind the title area, so the index keeps the left column. */
-@media (max-width: 1100px) {
-  .page.home {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
-  .menu-art {
-    grid-column: 1;
-    grid-row: 2;
-    justify-self: end;
-    width: min(60vw, 52vh);
-    margin-right: calc(var(--margin) * -2);
-    opacity: 0.98;
-  }
-
-  .home-copy {
-    grid-row: 2;
-    position: relative;
-    z-index: 1;
-    max-width: 540px;
-  }
-
-  .home-index {
-    grid-column: 1;
-    grid-row: 3;
-  }
-}
-
-/* Phone: one column in flow. Wordmark, name and play, the index, then the square bleeding off the right. */
-@media (max-width: 600px) {
+/* Phone and tablet portrait: one column in flow. Wordmark, name and play, the index, then the
+   square bleeding off the right. */
+@media (max-width: 860px) {
   .page.home {
     display: flex;
     flex-direction: column;
@@ -375,6 +357,7 @@ button.home-privacy {
 
   .home-copy {
     order: 1;
+    align-self: stretch;
     gap: 20px;
   }
 

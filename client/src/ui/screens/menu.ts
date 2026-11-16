@@ -225,11 +225,15 @@ export const menuScreen: ScreenFactory = (ctx) => {
   const creditSlot = h("div", { class: "menu-credit" });
   const art = h("div", { class: "menu-art" }, square, creditSlot);
 
-  /** Mask the game view and its overlay to the square's corners while a clip plays; otherwise show nothing of them. */
+  /**
+   * Mask the game view and its overlay to the square's corners while a clip plays. Otherwise
+   * mask all of it: a frame left on the canvas (the clip that just ended, the match before)
+   * must not flash over the whole window.
+   */
   function fitView(): void {
     if (!glHost) return;
     if (!liveClip) {
-      setMask("");
+      setMask("inset(50%)");
       return;
     }
     const r = square.getBoundingClientRect();
@@ -257,6 +261,7 @@ export const menuScreen: ScreenFactory = (ctx) => {
   });
   const resizeObserver = new ResizeObserver(() => fitView());
   resizeObserver.observe(square);
+  fitView();
   window.addEventListener("resize", fitView);
   window.addEventListener("scroll", fitView, { capture: true, passive: true });
 
