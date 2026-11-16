@@ -85,6 +85,52 @@ export async function launchBrowser() {
   return browser;
 }
 
+/**
+ * Silences a context's pages on every engine (the tests run on the user's machine): Web Audio
+ * output goes through a zero gain and media elements start muted. Chromium also gets
+ * --mute-audio and Firefox media.volume_scale 0 from launchEngine; WebKit has no switch, so this
+ * script is what keeps it quiet.
+ */
+export async function muteAudio(context) {
+  await context.addInitScript(() => {
+    const AN = window.AudioNode;
+    if (AN) {
+      const connect = AN.prototype.connect;
+      const silent = new WeakMap();
+      AN.prototype.connect = function (dest, ...rest) {
+        if (typeof AudioDestinationNode !== "undefined" && dest instanceof AudioDestinationNode) {
+          let g = silent.get(dest);
+          if (!g) {
+            g = this.context.createGain();
+            g.gain.value = 0;
+            connect.call(g, dest);
+            silent.set(dest, g);
+          }
+          return connect.call(this, g, ...rest);
+        }
+        return connect.call(this, dest, ...rest);
+      };
+    }
+    const play = HTMLMediaElement.prototype.play;
+    HTMLMediaElement.prototype.play = function (...a) {
+      this.muted = true;
+      return play.apply(this, a);
+    };
+  });
+}
+
+/** Any engine ("chromium" | "firefox" | "webkit"), headless and muted; closed at exit. Use with muteAudio(context). */
+export async function launchEngine(name) {
+  const pw = await import("playwright-core");
+  let browser;
+  if (name === "chromium") browser = await launchBrowser();
+  else if (name === "firefox") browser = await pw.firefox.launch({ headless: true, firefoxUserPrefs: { "media.volume_scale": "0.0" } });
+  else if (name === "webkit") browser = await pw.webkit.launch({ headless: true });
+  else throw new Error(`unknown engine ${name}`);
+  if (name !== "chromium") onCleanup(() => browser.close());
+  return browser;
+}
+
 // ---------------------------------------------------------------- server
 
 export function freePort() {
