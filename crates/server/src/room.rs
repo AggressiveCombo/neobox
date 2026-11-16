@@ -1232,7 +1232,11 @@ impl Room {
                 if !host {
                     return self.error(id, "not_host", "Only the host can stop the match");
                 }
-                self.end_match("ended by the host");
+                if self.game.is_some() {
+                    let name = self.player(id).map_or_else(|| "The host".to_owned(), |p| p.name.clone());
+                    self.system_chat(&format!("{name} ended the match. No experience was awarded."));
+                    self.end_match("ended by the host");
+                }
             }
             ClientMsg::Kick { player, ban } => {
                 if !host || player == id {
