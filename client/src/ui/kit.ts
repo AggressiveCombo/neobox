@@ -136,11 +136,31 @@ export function loading(text: string): HTMLElement {
   return h("p", { class: "loading-line", role: "status" }, h("span", { class: "loader", "aria-hidden": "true" }), text);
 }
 
-/** A player's coloured square with their initial. `color` is 0xRRGGBB. */
+/** A player's coloured square with their initial. `color` is 0xRRGGBB; the letter takes whichever ink contrasts more with it. */
 export function avatar(name: string, color: number | null, small = false): HTMLElement {
   const el = h("span", { class: small ? "avatar small" : "avatar", "aria-hidden": "true" }, small ? "" : initial(name));
-  if (color !== null) el.style.setProperty("--avatar", `#${color.toString(16).padStart(6, "0")}`);
+  if (color !== null) {
+    el.style.setProperty("--avatar", `#${color.toString(16).padStart(6, "0")}`);
+    el.style.color = avatarInk(color);
+  }
   return el;
+}
+
+/** Near-black or white, whichever has the higher WCAG contrast on `color`; the better of the two is at least 4.5:1 for any colour. */
+function avatarInk(color: number): string {
+  const l = relativeLuminance(color);
+  const onWhite = 1.05 / (l + 0.05);
+  const onInk = (l + 0.05) / (relativeLuminance(0x0a0a0a) + 0.05);
+  return onWhite > onInk ? "#ffffff" : "#0a0a0a";
+}
+
+/** WCAG relative luminance of a 0xRRGGBB colour. */
+function relativeLuminance(rgb: number): number {
+  const lin = (c: number): number => {
+    const v = c / 255;
+    return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4;
+  };
+  return 0.2126 * lin((rgb >> 16) & 0xff) + 0.7152 * lin((rgb >> 8) & 0xff) + 0.0722 * lin(rgb & 0xff);
 }
 
 function initial(name: string): string {

@@ -787,6 +787,15 @@ input[type="range"]::-moz-range-thumb {
   background: var(--ink);
 }
 
+@media (forced-colors: active) {
+  .seg-option[aria-checked="true"],
+  .seg-option[aria-pressed="true"],
+  .seg-option[aria-selected="true"] {
+    background: Highlight;
+    color: HighlightText;
+  }
+}
+
 /* The chosen option is ink, drawn by one square that slides between options (kit.ts seg). */
 .seg-indicator {
   position: absolute;
@@ -873,7 +882,7 @@ input[type="range"]::-moz-range-thumb {
   display: inline-grid;
   place-items: center;
   background: var(--avatar, var(--surface-3));
-  color: #0a0a0a;
+  color: var(--ink);
   font-weight: 500;
   line-height: 1;
 }
