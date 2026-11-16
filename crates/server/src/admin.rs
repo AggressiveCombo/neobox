@@ -211,6 +211,12 @@ async fn room_cmd(State(hub): State<Arc<Hub>>, headers: HeaderMap, Path(code): P
     if !authorized(&hub, &headers) {
         return StatusCode::UNAUTHORIZED.into_response();
     }
+    if let AdminCmd::SetTickRate { hz } = &cmd {
+        if !neobox_net::valid_tick_hz(*hz) {
+            let (min, max) = (neobox_net::TICK_HZ_MIN, neobox_net::TICK_HZ_MAX);
+            return (StatusCode::BAD_REQUEST, format!("Tick rate must be between {min} and {max} Hz")).into_response();
+        }
+    }
     match hub.room(&code) {
         Some(r) => {
             let _ = r.tx.send(RoomCmd::Admin(cmd));

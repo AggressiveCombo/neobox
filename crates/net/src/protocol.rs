@@ -18,6 +18,14 @@ pub const MAX_NAME_LEN: usize = 15;
 pub const MAX_CHAT_LEN: usize = 300;
 pub const MAX_ROOM_NAME_LEN: usize = 50;
 
+/// Tick rates an administrator may set (Hz).
+pub const TICK_HZ_MIN: f64 = 5.0;
+pub const TICK_HZ_MAX: f64 = 120.0;
+
+pub fn valid_tick_hz(hz: f64) -> bool {
+    hz.is_finite() && (TICK_HZ_MIN..=TICK_HZ_MAX).contains(&hz)
+}
+
 /// Teams.
 pub const TEAM_SPECTATOR: u8 = 0;
 pub const TEAM_FFA: u8 = 1;

@@ -74,7 +74,7 @@ function renderRoom(r) {
       <div class="row"><input id="say" placeholder="Message to this room" style="flex:1"><button id="saybtn">Send</button></div>
       <div id="scores"></div>`;
     $("#endmatch").onclick = () => cmd(r.code, { action: "end_match" });
-    $("#sethz").onclick = () => cmd(r.code, { action: "set_tick_rate", hz: Number($("#hz").value) });
+    $("#sethz").onclick = async () => { const res = await cmd(r.code, { action: "set_tick_rate", hz: Number($("#hz").value) }); if (!res.ok) alert(await res.text()); };
     $("#setmax").onclick = () => cmd(r.code, { action: "set_max_players", max: Number($("#maxp").value) });
     $("#close").onclick = () => { if (confirm("Close room " + r.code + "?")) cmd(r.code, { action: "close" }); };
     $("#saybtn").onclick = () => { const t = $("#say").value.trim(); if (t) { cmd(r.code, { action: "say", text: t }); $("#say").value = ""; } };

@@ -1769,7 +1769,7 @@ impl Room {
             AdminCmd::Kick { player, ban } => self.kick(player, ban),
             AdminCmd::EndMatch => self.end_match("ended by an administrator"),
             AdminCmd::SetTickRate { hz } => {
-                if hz.is_finite() && (5.0..=120.0).contains(&hz) {
+                if valid_tick_hz(hz) {
                     if self.game.is_some() {
                         self.next_tick_hz = Some(hz);
                         self.system_chat(&format!("Tick rate set to {hz} Hz (applies from the next match)"));
