@@ -7,6 +7,7 @@ import type { Engine, ReplayInfo } from "../../engine";
 import { FrameLoop } from "../../local-loop";
 import type { Screen } from "../../state";
 import { h } from "../dom";
+import { engineStatus } from "../engine-status";
 import { icon, type IconName } from "../icons";
 import { page, pageHead, seg } from "../kit";
 import "./replay.css";
@@ -68,6 +69,8 @@ export const replayScreen: ScreenFactory = (ctx) => {
   let speedSeg: { set(v: string): void } | null = null;
   // Picker-view status line (rebuilt by showPicker).
   let pickerMsg: HTMLElement | null = null;
+  /** A replay whose open waited on a failed engine; it opens once the engine recovers. */
+  let resumeOnReady: { name: string; text: string } | null = null;
 
   const loop = new FrameLoop(
     (dt) => frame(dt),
@@ -192,8 +195,12 @@ export const replayScreen: ScreenFactory = (ctx) => {
     let eng: Engine;
     try {
       eng = await ctx.engine();
-    } catch (err) {
-      if (!destroyed) showPicker(`The engine failed to load: ${errText(err)}`);
+    } catch {
+      // The engine status line on the picker shows the failure with Retry; this replay resumes on recovery.
+      if (!destroyed) {
+        resumeOnReady = { name, text };
+        showPicker();
+      }
       return;
     }
     if (destroyed) return;
@@ -277,6 +284,7 @@ export const replayScreen: ScreenFactory = (ctx) => {
         pageHead({ title: "Replay", back: leave }),
         h("p", { class: "lead" }, "Watch a replay saved from an online match. Nothing is sent to the server."),
         drop,
+        engineMsg.el,
         pickerMsg,
       ),
     );
@@ -362,6 +370,13 @@ export const replayScreen: ScreenFactory = (ctx) => {
     releaseTop = ctx.reserveTop(bar);
   }
 
+  // Engine state on the picker; a replay waiting on a failed engine opens once it recovers.
+  const engineMsg = engineStatus(() => {
+    const r = resumeOnReady;
+    resumeOnReady = null;
+    if (r && !destroyed) void openText(r.name, r.text);
+  });
+
   const pending = pendingReplay;
   pendingReplay = null;
   showPicker();
@@ -379,6 +394,7 @@ export const replayScreen: ScreenFactory = (ctx) => {
       destroyed = true;
       window.removeEventListener("keydown", onKey);
       unload();
+      engineMsg.destroy();
       root.remove();
     },
   } satisfies ScreenHandle;

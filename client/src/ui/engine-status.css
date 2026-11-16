@@ -1,0 +1,18 @@
+/* The engine's loading or failed state (engine-status.ts); the text colours come from offline.css. */
+
+.engine-status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+}
+
+.engine-status[hidden] {
+  display: none;
+}
+
+.engine-status-bar {
+  flex: 1 1 160px;
+  min-width: 120px;
+  height: 8px;
+}

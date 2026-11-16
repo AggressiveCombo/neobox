@@ -5,7 +5,8 @@ import { fetchBuiltinMaps, fetchTicket, wsUrl, wsUrlFor, type BuiltinMap } from 
 import { sfx } from "./audio";
 import { computeCamera, coverCamera, fitView, findLocal, publishView } from "./camera";
 import type { AppCtx, HudHandle, Present, ScreenFactory, ScreenHandle, WasmTools } from "./ctx";
-import { Engine, loadWasmEngine } from "./engine";
+import type { Engine } from "./engine";
+import { engineLoader } from "./engine-loader";
 import { readScene } from "./frame";
 import { MatchLoop, type SnapshotBytes } from "./game";
 import { Input } from "./input";
@@ -159,12 +160,12 @@ export function start(): void {
     return engine;
   }
 
-  // The menu mounts immediately; the engine loads in the background.
-  const engineP: Promise<Engine> = loadWasmEngine().then((raw) => {
-    engine = new Engine(raw);
-    return engine;
+  // The menu mounts immediately; the engine loads in the background and screens that need it show its progress.
+  engineLoader.subscribe((state) => {
+    if (state.status === "ready") engine = state.engine;
   });
-  engineP.catch((err: unknown) => toast(`engine failed to load: ${errText(err)}`, "error"));
+  // Screens that need the engine show its failure inline with Retry, so the background load reports nothing itself.
+  engineLoader.get().catch(() => {});
 
   /** When the game view was last drawn; the view hides once nothing has drawn it for a moment. */
   let lastPresent = 0;
@@ -218,7 +219,7 @@ export function start(): void {
     input,
     sfx,
     wasm,
-    engine: () => engineP,
+    engine: () => engineLoader.get(),
     present,
     send: (msg) => {
       if (msg.t === "join_room") joinAttempt = msg.room;
@@ -496,7 +497,8 @@ export function start(): void {
   function startMatch(match: MatchStart, you: number | null, snap: SnapshotBytes | null): void {
     const eng = engine;
     if (!eng) {
-      toast("engine not loaded", "error");
+      const state = engineLoader.state;
+      toast(state.status === "failed" ? `The game engine failed to load: ${state.error}` : "The game engine is still loading.", "error");
       return;
     }
     ensureRenderer();

@@ -283,19 +283,45 @@ export interface ReplayInfo {
 
 const EMPTY = new Uint8Array(0);
 
-/** Load the production module from `neobox.wasm` next to the page. */
-export async function loadWasmEngine(url = "./neobox.wasm"): Promise<RawEngine> {
+/**
+ * Load the production module from `neobox.wasm` next to the page. `onProgress` gets the bytes
+ * received so far and the total (0 when unknown: compressed responses carry no usable length).
+ */
+export async function loadWasmEngine(url = "./neobox.wasm", onProgress?: (loaded: number, total: number) => void): Promise<RawEngine> {
   const imports: WebAssembly.Imports = {};
-  let instance: WebAssembly.Instance;
-  try {
-    ({ instance } = await WebAssembly.instantiateStreaming(fetch(url), imports));
-  } catch {
-    const bytes = await (await fetch(url)).arrayBuffer();
-    ({ instance } = await WebAssembly.instantiate(bytes, imports));
-  }
+  const { instance } = await WebAssembly.instantiate(await readWasm(url, onProgress), imports);
   // The export set is the ABI of docs/CLIENT-API.md; the memory check above guards the
   // only property read here, and a missing function fails at its first call.
   const api: NeoboxExports = instance.exports as unknown as NeoboxExports;
   if (!(api.memory instanceof WebAssembly.Memory)) throw new EngineError("neobox.wasm has no memory export");
   return { exports: api };
+}
+
+/**
+ * The module bytes, counting each chunk as it arrives. Compiles from the bytes, not a Response
+ * rebuilt around a piped stream: Firefox logs "microtasks reordered" when instantiateStreaming
+ * consumes such a Response.
+ */
+async function readWasm(url: string, onProgress?: (loaded: number, total: number) => void): Promise<Uint8Array> {
+  const res = await fetch(url);
+  if (!res.ok) throw new EngineError(`neobox.wasm: HTTP ${res.status}`);
+  if (!res.body) return new Uint8Array(await res.arrayBuffer());
+  const total = res.headers.get("content-encoding") ? 0 : Number(res.headers.get("content-length")) || 0;
+  const reader = res.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let loaded = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    chunks.push(value);
+    loaded += value.byteLength;
+    onProgress?.(loaded, total);
+  }
+  const bytes = new Uint8Array(loaded);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return bytes;
 }

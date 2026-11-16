@@ -6,9 +6,11 @@ import type { BuiltinMap } from "../../api";
 import type { ScreenFactory, ScreenHandle } from "../../ctx";
 import type { Engine } from "../../engine";
 import { FrameLoop } from "../../local-loop";
+import { bundledMaps } from "../../offline-maps";
 import type { GameSettings, MatchStart } from "../../protocol";
 import type { Screen } from "../../state";
 import { type Child, h } from "../dom";
+import { type EngineStatus, engineStatus } from "../engine-status";
 import { icon } from "../icons";
 import { field, page, pageHead, seg } from "../kit";
 import { rotateGate, touchControls } from "./hud";
@@ -69,6 +71,7 @@ export const practiceScreen: ScreenFactory = (ctx) => {
   let choice: Choice | null = null;
   let preset = PRESETS[0];
   let setup: SetupUi | null = null;
+  let engineUi: EngineStatus | null = null;
 
   // Live game.
   let eng: Engine | null = null;
@@ -211,6 +214,11 @@ export const practiceScreen: ScreenFactory = (ctx) => {
     }
     try {
       await ctx.engine();
+    } catch {
+      // The engine status on this screen reports the failure and offers Retry.
+      return;
+    }
+    try {
       ctx.wasm.mapPreview(code);
     } catch (err) {
       if (!setup) return;
@@ -233,11 +241,9 @@ export const practiceScreen: ScreenFactory = (ctx) => {
     let engine: Engine;
     try {
       engine = await ctx.engine();
-    } catch (err) {
-      if (!destroyed && setup) {
-        setup.status.textContent = `The engine failed to load: ${errText(err)}`;
-        setup.status.classList.add("offline-error");
-      }
+    } catch {
+      // The engine status on this screen reports the failure and offers Retry.
+      if (!destroyed && setup) setup.status.textContent = "";
       return;
     }
     if (destroyed) return;
@@ -257,6 +263,7 @@ export const practiceScreen: ScreenFactory = (ctx) => {
   /** The setup view: map tiles, paste field, rules, Start. */
   function showSetup(message = ""): void {
     stopGame();
+    engineUi?.destroy();
     eng = null;
     root.className = "offline";
 
@@ -283,6 +290,8 @@ export const practiceScreen: ScreenFactory = (ctx) => {
       },
     );
     const status = h("p", { class: message ? "offline-error" : "offline-status", role: "status" }, message);
+    const loading = engineStatus();
+    engineUi = loading;
     const startBtn = h("button", { type: "button", class: "primary big block", onclick: () => void start() }, icon("play", 20), "Start");
     setup = { list, hint, start: startBtn, status, code };
 
@@ -305,7 +314,7 @@ export const practiceScreen: ScreenFactory = (ctx) => {
           rulesSeg.el,
           hint,
         ),
-        h("div", { class: "practice-actions" }, status, startBtn),
+        h("div", { class: "practice-actions" }, loading.el, status, startBtn),
       ),
     ];
     root.replaceChildren(page("practice-page", pageHead({ title: "Practice", back: exit }), ...content));
@@ -316,7 +325,14 @@ export const practiceScreen: ScreenFactory = (ctx) => {
 
   async function loadMaps(): Promise<void> {
     try {
-      maps = await ctx.maps();
+      maps = await ctx.maps().catch(async (err: unknown) => {
+        // The server's list is out of reach (offline): the maps bundled with the app stand in.
+        try {
+          return await bundledMaps(ctx);
+        } catch {
+          throw err;
+        }
+      });
       // Start is one tap away: the first built-in map is picked until the player chooses another.
       choice ??= maps[0] ? { name: maps[0].name, code: maps[0].code } : null;
     } catch (err) {
@@ -348,6 +364,7 @@ export const practiceScreen: ScreenFactory = (ctx) => {
       destroyed = true;
       window.removeEventListener("keydown", onKey);
       stopGame();
+      engineUi?.destroy();
       eng = null;
       root.remove();
     },

@@ -9,6 +9,7 @@ import { type Action, prefs } from "../../prefs";
 import { FrameLoop } from "../../local-loop";
 import type { Screen } from "../../state";
 import { type Child, h } from "../dom";
+import { type EngineStatus, engineStatus } from "../engine-status";
 import { icon } from "../icons";
 import { page, pageHead } from "../kit";
 import { rotateGate, touchControls } from "./hud";
@@ -80,6 +81,7 @@ export const trainingScreen: ScreenFactory = (ctx) => {
   let nextBtn: HTMLButtonElement | null = null;
   let releaseTop: (() => void) | null = null;
   let mapCode = "";
+  let engineUi: EngineStatus | null = null;
 
   const loop = new FrameLoop(
     (dt) => frame(dt),
@@ -157,8 +159,12 @@ export const trainingScreen: ScreenFactory = (ctx) => {
 
   /** A plain page (loading, errors) with the hall's head and Back. */
   function showPage(...content: Child[]): void {
+    engineUi?.destroy();
+    // Waiting for the engine shows its progress; a failed load shows the error and Retry at once.
+    const status = engineStatus(() => void start());
+    engineUi = status;
     root.className = "offline";
-    root.replaceChildren(page("offline-page", pageHead({ title: "Training hall", back: leave }), ...content));
+    root.replaceChildren(page("offline-page", pageHead({ title: "Training hall", back: leave }), ...content, status.el));
   }
 
   function showMessage(message: string): void {
@@ -222,6 +228,8 @@ export const trainingScreen: ScreenFactory = (ctx) => {
       lessonEl,
       nextBtn,
     );
+    engineUi?.destroy();
+    engineUi = null;
     root.replaceChildren(touch.el, bar, card, rotate.el);
     releaseTop = ctx.reserveTop(bar);
     renderLesson();
@@ -230,9 +238,18 @@ export const trainingScreen: ScreenFactory = (ctx) => {
 
   async function start(): Promise<void> {
     showPage(h("p", { class: "offline-status" }, "Loading the training hall…"));
+    // The map code loads while the engine does; the engine's own status shows its failure with Retry.
+    const codeReady = loadMapCode();
+    codeReady.catch(() => {});
     let engine: Engine;
     try {
-      [engine, mapCode] = await Promise.all([ctx.engine(), loadMapCode()]);
+      engine = await ctx.engine();
+    } catch {
+      if (!destroyed) showPage();
+      return;
+    }
+    try {
+      mapCode = await codeReady;
     } catch (err) {
       if (!destroyed) showMessage(`The training hall could not load: ${errText(err)}`);
       return;
@@ -273,6 +290,7 @@ export const trainingScreen: ScreenFactory = (ctx) => {
       destroyed = true;
       window.removeEventListener("keydown", onKey);
       stopGame();
+      engineUi?.destroy();
       root.remove();
     },
   } satisfies ScreenHandle;
