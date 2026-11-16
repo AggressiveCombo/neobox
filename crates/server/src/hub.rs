@@ -97,7 +97,35 @@ impl Config {
 pub enum Out {
     Text(String),
     Binary(Vec<u8>),
-    Close(String),
+    Close(Close),
+}
+
+/// How a connection is closed: a WebSocket close code and the reason the
+/// client reads (machine-readable; the client picks its message from it).
+#[derive(Debug, Clone, Copy)]
+pub struct Close {
+    pub code: u16,
+    pub reason: &'static str,
+}
+
+pub mod close {
+    use super::Close;
+    use axum::extract::ws::close_code;
+    /// Another socket took over this player's seat.
+    pub const REPLACED: Close = Close { code: close_code::POLICY, reason: "replaced" };
+    /// Removed by the room's host (kick) or a ban.
+    pub const KICKED: Close = Close { code: close_code::POLICY, reason: "kicked" };
+    pub const BANNED: Close = Close { code: close_code::POLICY, reason: "banned" };
+    /// Sat idle past the room's limit.
+    pub const IDLE: Close = Close { code: close_code::POLICY, reason: "idle" };
+    /// Sent too many messages per second.
+    pub const FLOOD: Close = Close { code: close_code::POLICY, reason: "flood" };
+    /// A message exceeded the size limit.
+    pub const TOO_BIG: Close = Close { code: close_code::SIZE, reason: "too_big" };
+    /// Too many sockets from one address.
+    pub const TOO_MANY: Close = Close { code: close_code::POLICY, reason: "too_many" };
+    /// The server is restarting.
+    pub const SHUTDOWN: Close = Close { code: close_code::AWAY, reason: "shutdown" };
 }
 
 /// Live per-connection statistics.
@@ -201,6 +229,8 @@ pub struct Hub {
     pub rotation: crate::rotation::Rotation,
     /// The full rotation as last built (see `rotation::current`).
     pub rotation_cache: tokio::sync::Mutex<Option<(Instant, Arc<crate::rotation::Rotation>)>>,
+    /// Set to true when the server shuts down: each connection sends a close frame.
+    pub shutdown: tokio::sync::watch::Sender<bool>,
 }
 
 impl Hub {
@@ -238,6 +268,7 @@ impl Hub {
             geo: crate::geo::Geo::open(cfg_geoip),
             rotation,
             rotation_cache: tokio::sync::Mutex::new(None),
+            shutdown: tokio::sync::watch::channel(false).0,
         })
     }
 

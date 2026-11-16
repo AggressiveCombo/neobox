@@ -7,11 +7,43 @@ export type NetStatus = "connecting" | "open" | "closed";
 /** Active gameplay transport: "udp" = WebRTC data channel, "ws" = WebSocket. */
 export type Transport = "udp" | "ws";
 
+/** What a closed socket means to the player: status line, toast ("" = none), whether to resume. */
+export interface CloseNotice {
+  label: string;
+  text: string;
+  reconnect: boolean;
+}
+
+/** Map the close reason the server sends (see `hub::close`) to a notice. */
+export function closeNotice(reason: string, wasClean: boolean): CloseNotice {
+  switch (reason) {
+    // the kick, ban or idle message already told the player why
+    case "kicked":
+    case "banned":
+    case "idle":
+      return { label: "", text: "", reconnect: false };
+    case "replaced":
+      return { label: "Opened in another window", text: "This game opened in another window.", reconnect: false };
+    case "flood":
+      return { label: "Sending too fast", text: "Disconnected: sending messages too fast.", reconnect: false };
+    case "too_big":
+      return { label: "Message too large", text: "Disconnected: a message was too large.", reconnect: false };
+    case "too_many":
+      return { label: "Too many connections", text: "Too many connections from your network.", reconnect: false };
+    case "shutdown":
+      return { label: "Server restarting", text: "The server is restarting. Reconnecting…", reconnect: true };
+    default:
+      return wasClean
+        ? { label: "", text: "", reconnect: true }
+        : { label: "Connection lost", text: "Connection lost.", reconnect: true };
+  }
+}
+
 export interface NetHandlers {
   onMessage(msg: ServerMsg): void;
   onBinary(data: Uint8Array): void;
   /** `unexpected`: the socket closed without close() being called (network drop or server close). */
-  onStatus(status: NetStatus, detail?: string, unexpected?: boolean): void;
+  onStatus(status: NetStatus, notice?: CloseNotice, unexpected?: boolean): void;
 }
 
 interface Rtc {
@@ -67,7 +99,7 @@ export class Net {
       if (this.ws !== ws) return;
       this.ws = null;
       this.dropRtc();
-      this.setStatus("closed", ev.reason || (ev.wasClean ? undefined : "connection lost"), true);
+      this.setStatus("closed", closeNotice(ev.reason, ev.wasClean), true);
     };
     ws.onerror = () => {
       // onclose follows; it carries the reason.
@@ -152,9 +184,9 @@ export class Net {
     cur.pc.close();
   }
 
-  private setStatus(status: NetStatus, detail?: string, unexpected = false): void {
+  private setStatus(status: NetStatus, notice?: CloseNotice, unexpected = false): void {
     this.status = status;
-    this.handlers.onStatus(status, detail, unexpected);
+    this.handlers.onStatus(status, notice, unexpected);
   }
 }
 

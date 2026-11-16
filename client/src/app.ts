@@ -9,7 +9,7 @@ import { Engine, loadWasmEngine } from "./engine";
 import { readScene } from "./frame";
 import { MatchLoop, type SnapshotBytes } from "./game";
 import { Input } from "./input";
-import { Net, type NetStatus } from "./net";
+import { Net, type CloseNotice, type NetStatus } from "./net";
 import { NAME_RE, PROTOCOL_VERSION, type ClientMsg, type MatchStart, type RoomState, type ServerMsg } from "./protocol";
 import { createRenderer, type Renderer } from "./render";
 import { Overlay } from "./render/overlay";
@@ -69,8 +69,6 @@ const ROOM_CODE_RE = /^[A-HJ-NP-Z2-9]{6}$/;
 const RECONNECT_DELAYS_MS = [500, 1000, 2000, 4000, 8000];
 /** Stop retrying this long after the first drop. */
 const RECONNECT_GIVE_UP_MS = 60_000;
-/** Close reasons the server sends when it removes us from the room; the kick message already says so. */
-const REMOVED_REASONS = new Set(["kicked", "banned"]);
 
 function byId<T extends HTMLElement>(id: string): T {
   const el = document.getElementById(id);
@@ -211,7 +209,7 @@ export function start(): void {
   const net = new Net({
     onMessage: (msg) => handleServer(msg),
     onBinary: (bytes) => loop?.onServer(bytes),
-    onStatus: (status, detail, unexpected) => onStatus(status, detail, unexpected ?? false),
+    onStatus: (status, notice, unexpected) => onStatus(status, notice, unexpected ?? false),
   });
 
   const ctx: AppCtx = {
@@ -653,7 +651,7 @@ export function start(): void {
         leaveRoom();
         return;
       case "kicked":
-        toast(`kicked: ${msg.reason}`, "error");
+        toast(msg.reason, "error");
         leaveRoom();
         return;
       case "chat":
@@ -758,8 +756,8 @@ export function start(): void {
     connectForResume();
   }
 
-  function onStatus(status: NetStatus, detail: string | undefined, unexpected: boolean): void {
-    store.set({ connection: status, connectDetail: detail ?? "" });
+  function onStatus(status: NetStatus, notice: CloseNotice | undefined, unexpected: boolean): void {
+    store.set({ connection: status, connectDetail: notice?.label ?? "" });
     if (switching) return;
     if (status === "open") {
       const name = pendingName ?? (store.state.reconnecting ? store.state.name : null);
@@ -770,17 +768,19 @@ export function start(): void {
     if (status !== "closed") return;
     linkSeq++;
     loop?.stop();
-    if (unexpected && roomCode !== null && resumeToken !== null) {
-      beginReconnect();
-      return;
-    }
-    // The game server dropped and there is no room to resume: back to the list on home.
-    if (unexpected && server !== null) {
-      serverGone();
-      return;
+    if (unexpected && notice?.reconnect) {
+      if (roomCode !== null && resumeToken !== null) {
+        beginReconnect();
+        return;
+      }
+      // The game server dropped and there is no room to resume: back to the list on home.
+      if (server !== null) {
+        serverGone();
+        return;
+      }
     }
     resetToMenu();
-    if (detail && !REMOVED_REASONS.has(detail)) toast(detail, "error");
+    if (notice?.text) toast(notice.text, "error");
   }
 
   /** Connect if needed, then say hello with `name`. The welcome message moves the app to the browser. */

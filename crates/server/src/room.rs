@@ -1,7 +1,7 @@
 //! A room: lobby (players, teams, chat, host settings, map) and, while a
 //! match runs, the authoritative input timeline ticking at the room's rate.
 
-use crate::hub::{AccountRef, ConnInfo, Hub, Out, RoomHandle};
+use crate::hub::{close, AccountRef, ConnInfo, Hub, Out, RoomHandle};
 use crate::{award, emoji, youtube};
 use base64::Engine;
 use neobox_net::*;
@@ -729,7 +729,7 @@ impl Room {
     fn resume(&mut self, i: usize, conn: ConnInfo) -> (u32, String) {
         if let Link::Live(old) = &self.players[i].link {
             // the replaced connection's later commands are ignored (see `is_live_as`)
-            old.send(Out::Close("replaced by a new connection".into()));
+            old.send(Out::Close(close::REPLACED));
         }
         let p = &mut self.players[i];
         p.ip = conn.ip;
@@ -1338,7 +1338,7 @@ impl Room {
         let keys = conn_keys(&p.ip, p.account.as_ref());
         let reason = if ban { "You were banned" } else { "You were kicked" };
         p.send(Out::Text(json(&ServerMsg::Kicked { reason: reason.into() })));
-        p.send(Out::Close(if ban { "banned" } else { "kicked" }.into()));
+        p.send(Out::Close(if ban { close::BANNED } else { close::KICKED }));
         if ban {
             self.bans.push(Ban { name: name.clone(), keys });
         }
@@ -1484,7 +1484,7 @@ impl Room {
         for id in idle {
             if let Some(p) = self.player(id) {
                 p.text(&ServerMsg::Kicked { reason: "You were removed from the room for being idle too long".into() });
-                p.send(Out::Close("idle".into()));
+                p.send(Out::Close(close::IDLE));
             }
             self.remove(id, "idle");
         }

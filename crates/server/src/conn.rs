@@ -2,9 +2,9 @@
 
 use crate::geo::distance_km;
 use crate::cluster::{self, Site};
-use crate::hub::{AccountRef, ConnInfo, ConnStats, Hub, Out, Presence, RoomHandle};
+use crate::hub::{close, AccountRef, Close, ConnInfo, ConnStats, Hub, Out, Presence, RoomHandle};
 use crate::room::{json, RoomCmd};
-use axum::extract::ws::{close_code, CloseFrame, Message, Utf8Bytes, WebSocket};
+use axum::extract::ws::{CloseFrame, Message, Utf8Bytes, WebSocket};
 use futures_util::{SinkExt, StreamExt};
 use neobox_net::*;
 use neobox_store::FriendState;
@@ -36,7 +36,7 @@ pub async fn serve(hub: Arc<Hub>, mut socket: WebSocket, ip: IpAddr, account: Op
     };
     if !admitted {
         info!(%ip, "too many connections from this address");
-        let frame = CloseFrame { code: close_code::POLICY, reason: Utf8Bytes::from_static("Too many connections from your network") };
+        let frame = CloseFrame { code: close::TOO_MANY.code, reason: Utf8Bytes::from_static(close::TOO_MANY.reason) };
         let _ = socket.send(Message::Close(Some(frame))).await;
         return;
     }
@@ -374,7 +374,7 @@ async fn run(hub: &Arc<Hub>, socket: WebSocket, ip: IpAddr, conn_id: u64, accoun
     let started = Instant::now();
     let writer_stats = stats.clone();
     let writer_hub = hub.clone();
-    let writer = tokio::spawn(async move {
+    let mut writer = tokio::spawn(async move {
         let mut ping = tokio::time::interval(Duration::from_secs(2));
         loop {
             tokio::select! {
@@ -388,8 +388,8 @@ async fn run(hub: &Arc<Hub>, socket: WebSocket, ip: IpAddr, conn_id: u64, accoun
                             }
                             _ => Message::Binary(b.into()),
                         },
-                        Some(Out::Close(reason)) => {
-                            let frame = CloseFrame { code: close_code::POLICY, reason: Utf8Bytes::from(reason) };
+                        Some(Out::Close(c)) => {
+                            let frame = CloseFrame { code: c.code, reason: Utf8Bytes::from_static(c.reason) };
                             let _ = sink.send(Message::Close(Some(frame))).await;
                             break;
                         }
@@ -413,13 +413,26 @@ async fn run(hub: &Arc<Hub>, socket: WebSocket, ip: IpAddr, conn_id: u64, accoun
     });
     let mut window = Instant::now();
     let mut count = 0u32;
+    let mut stop = hub.shutdown.subscribe();
+    // why the server closes this socket, if it does: sent as the close frame
+    let mut closing: Option<Close> = None;
     loop {
         let msg = tokio::select! {
             m = stream.next() => match m {
                 Some(Ok(m)) => m,
-                _ => break,
+                Some(Err(e)) => {
+                    if e.to_string().contains("Space limit") {
+                        closing = Some(close::TOO_BIG);
+                    }
+                    break;
+                }
+                None => break,
             },
             Some(b) = rtc_rx.recv() => Message::Binary(b.into()),
+            _ = stop.changed() => {
+                closing = Some(close::SHUTDOWN);
+                break;
+            }
         };
         count += 1;
         if window.elapsed() >= Duration::from_secs(1) {
@@ -427,6 +440,7 @@ async fn run(hub: &Arc<Hub>, socket: WebSocket, ip: IpAddr, conn_id: u64, accoun
             count = 0;
         } else if count > MAX_MSG_RATE {
             info!(conn = conn_id, %ip, "message flood: disconnecting");
+            closing = Some(close::FLOOD);
             break;
         }
         match msg {
@@ -434,6 +448,7 @@ async fn run(hub: &Arc<Hub>, socket: WebSocket, ip: IpAddr, conn_id: u64, accoun
                 stats.bytes_in.fetch_add(t.len() as u64, Ordering::Relaxed);
                 stats.msgs_in.fetch_add(1, Ordering::Relaxed);
                 if t.len() > MAX_TEXT {
+                    closing = Some(close::TOO_BIG);
                     break;
                 }
                 s.text(t.as_str()).await;
@@ -442,6 +457,7 @@ async fn run(hub: &Arc<Hub>, socket: WebSocket, ip: IpAddr, conn_id: u64, accoun
                 stats.bytes_in.fetch_add(b.len() as u64, Ordering::Relaxed);
                 stats.msgs_in.fetch_add(1, Ordering::Relaxed);
                 if b.len() > MAX_BINARY {
+                    closing = Some(close::TOO_BIG);
                     break;
                 }
                 s.binary(&b);
@@ -463,7 +479,14 @@ async fn run(hub: &Arc<Hub>, socket: WebSocket, ip: IpAddr, conn_id: u64, accoun
     if let Some(rtc) = &hub.rtc {
         rtc.close(conn_id);
     }
+    if let Some(c) = closing {
+        // queued behind everything sent so far; the writer sends it and exits
+        let _ = s.out.send(Out::Close(c));
+    }
     s.drop_room();
     drop(s);
+    if closing.is_some() {
+        let _ = tokio::time::timeout(Duration::from_secs(2), &mut writer).await;
+    }
     writer.abort();
 }

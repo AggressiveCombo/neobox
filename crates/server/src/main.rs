@@ -119,6 +119,7 @@ async fn main() {
             .fallback_service(files)
             .layer(middleware::from_fn_with_state(hub.clone(), share::preview))
     };
+    let shutdown_hub = hub.clone();
     let app = routes
         .layer(SetResponseHeaderLayer::if_not_present(header::X_CONTENT_TYPE_OPTIONS, HeaderValue::from_static("nosniff")))
         .layer(SetResponseHeaderLayer::if_not_present(header::REFERRER_POLICY, HeaderValue::from_static("same-origin")))
@@ -129,9 +130,12 @@ async fn main() {
     let listener = tokio::net::TcpListener::bind(&bind).await.unwrap_or_else(|e| panic!("cannot listen on {bind}: {e}"));
     info!(%bind, static_dir = %static_dir.display(), "neobox server listening");
     axum::serve(listener, app.into_make_service_with_connect_info::<SocketAddr>())
-        .with_graceful_shutdown(async {
+        .with_graceful_shutdown(async move {
             let _ = tokio::signal::ctrl_c().await;
             info!("shutting down");
+            // open sockets send their close frame first; the listener stops after a moment
+            shutdown_hub.shutdown.send_replace(true);
+            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
         })
         .await
         .expect("server error");
