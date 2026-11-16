@@ -372,13 +372,15 @@ export async function rtcServer() {
 export const menuName = (page) => page.getByPlaceholder("name", { exact: true });
 
 /**
- * Touch-only devices show the phone welcome on every page load (client/src/ui/phone-splash.ts).
- * Waits for it, checks it is shown exactly once, and dismisses it with Play.
+ * Touch-only devices show the phone welcome once per device (client/src/ui/phone-splash.ts).
+ * Dismisses it with Play when it appears; passes straight through when it does not (desktop,
+ * or a device that already saw it). Checks it is shown at most once.
  */
 export async function dismissPhoneSplash(page) {
   const welcome = page.getByRole("dialog", { name: "Welcome", exact: true });
-  await welcome.waitFor();
+  await welcome.waitFor({ timeout: 2000 }).catch(() => undefined);
   const shown = await welcome.count();
+  if (shown === 0) return;
   if (shown !== 1) throw new Error(`phone welcome shown ${shown} times on one page load`);
   await welcome.getByRole("button", { name: "Play", exact: true }).click();
   await welcome.waitFor({ state: "detached" });
@@ -393,11 +395,11 @@ export async function navTo(page, label) {
   await button(page.getByRole("navigation", { name: "more", exact: true }), label).click();
 }
 
-/** Plays from the menu: fills the guest name when needed, then Play (or Quick play). */
+/** Plays from the menu: fills the guest name when needed, then Quick play or Browse rooms. */
 export async function playFromMenu(page, name, { quick = false } = {}) {
   const input = menuName(page);
   if (name && !(await input.getAttribute("readonly"))) await input.fill(name);
-  await button(page, quick ? "Quick play" : "Play").click();
+  await button(page, quick ? "Quick play" : "Browse rooms").click();
 }
 
 /** Creates a room from the menu. Returns its code. */
@@ -406,6 +408,7 @@ export async function createRoom(h, base, roomName, { isPublic } = {}) {
   await page.goto(base);
   await menuName(page).waitFor();
   await playFromMenu(page, null);
+  await button(page, "New room").click();
   await page.getByRole("heading", { name: "Create a room", exact: true }).waitFor();
   await page.getByLabel("room name", { exact: true }).fill(roomName);
   if (isPublic !== undefined) {
@@ -439,7 +442,8 @@ export async function joinByInvite(h, base, code, roomName) {
 export async function ensureRoomMap(page) {
   const mapName = page.locator(".room-map-name");
   if ((await mapName.textContent())?.trim()) return;
-  await page.locator(".room-map-controls .room-btn").first().click();
+  await page.getByRole("button", { name: "Change map", exact: true }).click();
+  await page.locator(".room-map-list button").first().click();
   await mapName.filter({ hasText: /\S/ }).waitFor();
 }
 

@@ -78,7 +78,7 @@ async function menu(s) {
   await page.goto(s.base);
   await menuName(page).waitFor();
   check(await button(page, "Quick play").isVisible(), "Quick play button not visible");
-  check(await button(page, "Play").isVisible(), "Play button not visible");
+  check(await button(page, "Browse rooms").isVisible(), "Browse rooms button not visible");
   const links = ["Training", "Library", "Friends", "Practice", "Replay", "Map editor", "Settings", "About"];
   for (const link of links) {
     await navTo(page, link);
@@ -138,8 +138,8 @@ async function accounts(s) {
   const { page } = h;
   await page.goto(s.base);
   await menuName(page).waitFor();
-  await page.getByRole("button", { name: /^(Sign in|Account)$/ }).first().click();
-  await page.getByLabel("name", { exact: true }).fill(name);
+  await page.getByRole("button", { name: /^(Sign in|Account, Level \d+)$/ }).first().click();
+  await page.locator(".account-form").getByLabel("name", { exact: true }).fill(name);
   await page.getByLabel("password", { exact: true }).fill(PASSWORD);
   await button(page, "Create account").click();
   await page.getByText("Account created.").waitFor();
@@ -147,11 +147,11 @@ async function accounts(s) {
   await menuName(page).waitFor();
   await page.reload();
   await expectMenuName(page, name);
-  await page.getByRole("button", { name: /^(Sign in|Account)$/ }).first().click();
+  await page.getByRole("button", { name: /^(Sign in|Account, Level \d+)$/ }).first().click();
   await page.getByText(name, { exact: false }).first().waitFor();
   await button(page, "Sign out").click();
-  await page.getByLabel("name", { exact: true }).waitFor();
-  await page.getByLabel("name", { exact: true }).fill(name);
+  await page.locator(".account-form").getByLabel("name", { exact: true }).waitFor();
+  await page.locator(".account-form").getByLabel("name", { exact: true }).fill(name);
   await page.getByLabel("password", { exact: true }).fill(PASSWORD);
   await button(page, "Sign in").click();
   await page.getByText("Signed in.").waitFor();
@@ -253,6 +253,7 @@ async function library(s) {
   await back(page).click();
   const roomName = uniqueName("pick");
   await createRoom(user, s.base, roomName, { isPublic: true });
+  await button(page, "Change map").click();
   await button(page, "Library").click();
   const picker = page.getByRole("dialog", { name: "Pick a map" });
   await picker.waitFor();
@@ -370,7 +371,7 @@ async function quickPlay(s) {
   await fresh.page.getByRole("heading", { name: "Quick play", exact: true }).waitFor();
   // the original's cards: players online and a rotation carousel that steps through the maps
   const card = fresh.page.locator(".quick-card", { hasText: "Sweaty Bois" });
-  await card.getByText(/\d+ players online/).waitFor();
+  await card.getByText(/\d+ playing/).waitFor();
   const mid = card.locator(".quick-thumb-mid");
   const first = await mid.getAttribute("title");
   await card.getByRole("button", { name: "Next Sweaty Bois map" }).click();
@@ -391,11 +392,13 @@ async function levels(s) {
   const { page } = user;
   const roomName = uniqueName("lv");
   const code = await createRoom(user, s.base, roomName, { isPublic: false });
-  const guest = await s.open("lv-guest", { name: uniqueName("lg") });
+  const guestName = uniqueName("lg");
+  const guest = await s.open("lv-guest", { name: guestName });
   await joinByInvite(guest, s.base, code, roomName);
-  await playerRow(page, "Guest").first().waitFor();
+  await playerRow(page, guestName).first().waitFor();
   // a map with no ground and one life each: the match ends by itself
   const voidMap = '{"b":[],"j":[],"s":[{"1":15,"2":10},{"1":25,"2":10}],"p":[],"tu":[],"tc":[],"gp":[],"c":[],"set":{"3":40,"15":40,"16":25}}';
+  await button(page, "Change map").click();
   await page.getByLabel("Map code or JSON", { exact: true }).fill(voidMap);
   await button(page, "Use code").click();
   const chat = page.getByLabel("Chat message", { exact: true });
@@ -412,7 +415,7 @@ async function levels(s) {
   await guestPanel.waitFor({ timeout: 20_000 });
   await page.keyboard.press("Escape");
   await panel.waitFor({ state: "detached" });
-  await page.locator("span.room-level").filter({ hasText: /^Level \d+$/ }).first().waitFor();
+  await page.locator("span.room-level").filter({ hasText: /^Lv \d+$/ }).first().waitFor();
   return "post-game panel for the account and the guest, level in the roster";
 }
 
@@ -534,6 +537,29 @@ async function jukebox(s) {
   await host.page.getByLabel("Jukebox", { exact: true }).waitFor({ state: "visible" });
   await guest.page.getByLabel("Jukebox", { exact: true }).waitFor({ state: "visible" });
   return "suggestion line, host play, jukebox on both pages";
+}
+
+/** Every sound and music file the page requests exists, and a UI click fetches a sound effect. */
+async function sounds(s) {
+  const h = await s.open("desktop");
+  const { page } = h;
+  const fetched = [];
+  const missing = [];
+  page.on("response", (res) => {
+    const { pathname } = new URL(res.url());
+    if (!/^\/(sfx|music)\//.test(pathname)) return;
+    if (res.status() >= 400) missing.push(`${res.status()} ${pathname}`);
+    else if (pathname.startsWith("/sfx/")) fetched.push(pathname);
+  });
+  await page.goto(s.base);
+  await menuName(page).waitFor();
+  await navTo(page, "Settings");
+  await back(page).click();
+  await menuName(page).waitFor();
+  await sleep(300);
+  check(missing.length === 0, `sound or music files missing: ${missing.join(", ")}`);
+  check(fetched.length > 0, "a click fetched no sound effect");
+  return `${fetched.length} sound effects fetched, none missing`;
 }
 
 async function replay(s) {
@@ -689,7 +715,14 @@ async function editor(s) {
   await navTo(page, "Map editor");
   const canvas = page.locator("canvas.editor-canvas");
   await canvas.waitFor({ state: "visible" });
-  const box = await canvas.boundingBox();
+  // The screen transition moves the canvas for a few frames: measure once its rect stops changing.
+  let box = await canvas.boundingBox();
+  for (let settled = 0; settled < 3; ) {
+    await sleep(100);
+    const next = await canvas.boundingBox();
+    settled = next && box && next.x === box.x && next.y === box.y && next.width === box.width && next.height === box.height ? settled + 1 : 0;
+    box = next;
+  }
   check(box && box.width > 100 && box.height > 100, "editor canvas has no size");
   const cx = box.x + box.width / 2;
   const cy = box.y + box.height / 2;
@@ -763,8 +796,9 @@ async function editor(s) {
 
   // ...and as a room map.
   await createRoom(user, s.base, uniqueName("edroom"), { isPublic: false });
+  await button(page, "Change map").click();
   await page.getByLabel("Map code or JSON", { exact: true }).fill(code);
-  await page.getByLabel("Map code or JSON", { exact: true }).press("Tab");
+  await button(page, "Use code").click();
   await page.locator(".room-map-name").filter({ hasText: /\S/ }).waitFor();
   await button(page, "Leave").click();
   await button(page, "Back").click();
@@ -894,8 +928,8 @@ async function regionAccount(s) {
   const level = acct.page.locator("li.room-player").filter({ hasText: name }).locator("span.room-level");
   await level.waitFor();
   const text = ((await level.textContent()) ?? "").trim();
-  check(text === "Level 1", `roster shows "${text}" for the signed-in player, expected "Level 1"`);
-  return "room on the New York node; roster shows Level 1";
+  check(text === "Lv 1", `roster shows "${text}" for the signed-in player, expected "Lv 1"`);
+  return "room on the New York node; roster shows Lv 1";
 }
 
 /** An invite link opened by a signed-in player with no saved guest name joins the room once the account loads. */
@@ -911,17 +945,22 @@ async function inviteSignedIn(s) {
   return "a signed-in player without a saved guest name joined from the invite link";
 }
 
-/** WebRTC: with UDP offered, both players' game data moves to the data channel and the match runs. */
-async function rtcMatch(s) {
-  const m = await matchWithGuest(s, { clipboard: false });
+/** Waits until both players of room `code` have their game data on UDP (the data channel). */
+async function waitForUdp(s, code) {
   const end = Date.now() + 15_000;
   let transports = [];
   for (;;) {
-    transports = (await adminRoom(s.base, m.code)).players.map((p) => p.transport);
-    if (transports.length === 2 && transports.every((t) => t === "udp")) break;
+    transports = (await adminRoom(s.base, code)).players.map((p) => p.transport);
+    if (transports.length === 2 && transports.every((t) => t === "udp")) return;
     if (Date.now() > end) throw new Error(`transports stayed ${JSON.stringify(transports)}, expected udp for both`);
     await sleep(250);
   }
+}
+
+/** WebRTC: with UDP offered, both players' game data moves to the data channel and the match runs. */
+async function rtcMatch(s) {
+  const m = await matchWithGuest(s, { clipboard: false });
+  await waitForUdp(s, m.code);
   await waitForPixels(m.guest, "guest canvas");
   // the start countdown freezes frames; then holding Right moves the guest
   await sleep(4000);
@@ -932,6 +971,41 @@ async function rtcMatch(s) {
   const moved = (await probeChanges(m.guest.page)) - before;
   check(moved > 5, `guest frames barely changed over WebRTC (${moved} changes)`);
   return `both players on udp; ${moved} frame changes while holding Right`;
+}
+
+/**
+ * A guest page stalls for seconds (no animation frames, no acks): over UDP the
+ * server resends a snapshot, the restored match must show the same map as before.
+ */
+async function resyncKeepsMap(s) {
+  const m = await matchWithGuest(s, { clipboard: false });
+  const { host, guest, code } = m;
+  await waitForUdp(s, code);
+  await waitForPixels(host, "host canvas");
+  await waitForPixels(guest, "guest canvas");
+  await sleep(4000); // the start countdown freezes frames
+  await waitQuiet(guest.page, 800);
+  const before = await guest.page.evaluate(() => window.__e2eProbe.hash);
+  const resyncs = () => (s.env.output?.() ?? "").split("\n").filter((l) => l.includes("too far behind") && l.includes(`room=${code}`)).length;
+  const start = resyncs();
+  for (let round = 1; round <= 2; round++) {
+    await guest.page.evaluate(() => {
+      const end = performance.now() + 4000;
+      while (performance.now() < end) {
+        // busy: the page processes no frames and sends no acks
+      }
+    });
+    await sleep(4000);
+    await waitQuiet(guest.page, 800);
+    const after = await guest.page.evaluate(() => window.__e2eProbe.hash);
+    check(after === before, `the map changed after snapshot resync ${round}`);
+  }
+  const sent = resyncs() - start;
+  check(sent >= 2, `the server resent a snapshot ${sent} time(s) to the stalled guest, expected 2`);
+  await sleep(3000);
+  const more = resyncs() - start - sent;
+  check(more === 0, `the guest kept falling behind after it recovered (${more} more snapshots)`);
+  return `${sent} snapshot resyncs; map unchanged; no resyncs after recovery`;
 }
 
 export const scenarios = [
@@ -963,4 +1037,6 @@ export const scenarios = [
   { name: "regions account", run: regionAccount, topology: regionServers },
   { name: "invite signed in", run: inviteSignedIn },
   { name: "webrtc match", run: rtcMatch, topology: rtcServer },
+  { name: "resync keeps map", run: resyncKeepsMap, topology: rtcServer },
+  { name: "sounds", run: sounds },
 ];

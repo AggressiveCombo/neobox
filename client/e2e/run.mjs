@@ -50,6 +50,7 @@ for (const scenario of selected) {
     if (scenario.topology) {
       topology = await scenario.topology();
       s.env.base = topology.base;
+      s.env.output = topology.output;
       s.env.nodeBase = topology.nodeBase;
     }
     detail = (await scenario.run(s)) ?? "";
