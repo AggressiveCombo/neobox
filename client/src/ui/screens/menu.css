@@ -370,7 +370,9 @@ button.home-privacy {
   }
 
   .home-title {
-    font-size: clamp(3rem, 14vw, 4.5rem);
+    /* Capped by height too: short landscape phones at large text scale grew the title past its
+       gap and into the name row. Only binds where the title is already taller than 24vh. */
+    font-size: clamp(3rem, min(14vw, 24vh), 4.5rem);
   }
 
   .home-actions button {
