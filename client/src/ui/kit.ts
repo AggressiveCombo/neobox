@@ -181,18 +181,36 @@ export interface ModalOptions {
   onclose?: () => void;
 }
 
+/** Open modals, top last. Each one owns a history entry; Back closes the top one (popstate in app.ts closes the modals above it). */
+const openStack: { dialog: HTMLDialogElement; id: string; silent: boolean }[] = [];
+/** History pops that page-side modal closes asked for and that have not landed yet (history.back() is async). */
+let pagePops = 0;
+/** True while such a pop is in flight: the nav subscriber holds screen changes until it lands. */
+export function modalPopPending(): boolean {
+  return pagePops > 0;
+}
+/** Called from popstate: true, with one pop accounted for, if this Back is a page-side modal close's pop. */
+export function takeModalPop(): boolean {
+  if (pagePops === 0) return false;
+  pagePops--;
+  return true;
+}
+
 /**
  * A modal <dialog> on the ground colour. Escape and a click on the scrim close
- * it; it removes itself from the page when closed.
+ * it; it removes itself from the page when closed. Opening one adds a history
+ * entry, so the browser's Back closes it instead of leaving the page.
  */
-export function openModal(opts: ModalOptions): { dialog: HTMLDialogElement; close(): void } {
+export function openModal(opts: ModalOptions): { dialog: HTMLDialogElement; close(): void; id: string } {
   const titleId = uid("m");
+  const id = uid("modal");
   const actions = opts.actions && opts.actions.length > 0 ? opts.actions : [h("button", { type: "button" }, "Close")];
   const dialog = h(
     "dialog",
     { class: "modal", "aria-labelledby": titleId },
     h("div", { class: "modal-body" }, h("h2", { id: titleId }, opts.title), ...opts.body, h("div", { class: "modal-actions" }, ...actions)),
   );
+  const entry = { dialog, id, silent: false };
   // Close at once, so the page is interactive and focus is back where it was before the exit
   // animation runs; the closed dialog then fades out (style.css dialog.modal.is-closing).
   const close = (): void => {
@@ -207,6 +225,15 @@ export function openModal(opts: ModalOptions): { dialog: HTMLDialogElement; clos
     if (e.target === dialog) close();
   });
   dialog.addEventListener("close", () => {
+    const i = openStack.indexOf(entry);
+    if (i >= 0) openStack.splice(i, 1);
+    // Closed from the page rather than by Back: this modal's entry is still the current one, so pop it. Left in place it
+    // would be a dead entry: Back would land on the screen the modal opened over. The pop is async; screen changes made
+    // until it lands wait for it (app.ts), so they are recorded on the entry Back lands on.
+    if (!entry.silent && history.state?.modal === id) {
+      pagePops++;
+      history.back();
+    }
     opts.onclose?.();
     if (reducedMotion()) {
       dialog.remove();
@@ -217,13 +244,71 @@ export function openModal(opts: ModalOptions): { dialog: HTMLDialogElement; clos
     window.setTimeout(() => dialog.remove(), MODAL_CLOSE_MS);
   });
   document.body.appendChild(dialog);
+  openStack.push(entry);
+  history.pushState({ ...history.state, modal: id }, "");
   dialog.showModal();
   // Without an explicit [autofocus], start on the dialog itself rather than ringing its first button.
   if (!dialog.querySelector("[autofocus]")) {
     dialog.tabIndex = -1;
     dialog.focus();
   }
-  return { dialog, close };
+  return { dialog, close, id };
+}
+
+/** What a confirm asks: a title, one line of consequence, and the label of the action it guards. */
+export interface ConfirmOptions {
+  title: string;
+  message: string;
+  action: string;
+}
+
+/**
+ * A destructive confirm (role alertdialog) built on openModal. Cancel has the initial focus. Only the action
+ * resolves true; Cancel, Escape, the scrim and Back resolve false. Nothing blocks: the page keeps running behind it.
+ * Its history entry is popped like any modal's (see openModal), and the caller's screen change waits for that pop.
+ */
+export function confirmDialog(opts: ConfirmOptions): Promise<boolean> {
+  const { promise, resolve } = Promise.withResolvers<boolean>();
+  const messageId = uid("confirm");
+  let answered = false;
+  const finish = (yes: boolean): void => {
+    if (answered) return;
+    answered = true;
+    close();
+    resolve(yes);
+  };
+  const cancel = h("button", { type: "button", class: "quiet", autofocus: true }, "Cancel");
+  const actionBtn = h("button", { type: "button", class: "danger" }, opts.action);
+  const { dialog, close } = openModal({
+    title: opts.title,
+    body: [h("p", { id: messageId }, opts.message)],
+    actions: [cancel, actionBtn],
+    onclose: () => finish(false),
+  });
+  dialog.setAttribute("role", "alertdialog");
+  dialog.setAttribute("aria-describedby", messageId);
+  // Listeners added after openModal's run after its own (Escape and scrim close it first, synchronously).
+  dialog.addEventListener("cancel", () => finish(false));
+  dialog.addEventListener("click", (e) => {
+    if (e.target === dialog) finish(false);
+  });
+  cancel.addEventListener("click", () => finish(false));
+  actionBtn.addEventListener("click", () => finish(true));
+  return promise;
+}
+
+/**
+ * Close the open modals above the one with entry `id` (all of them when `id` is null); with `inclusive`, that one too.
+ * Silent: history is not touched, since Back (or a screen change that takes over the modal's entry) has already moved on.
+ */
+export function closeModalsAbove(id: string | null, inclusive = false): void {
+  const at = id === null ? -1 : openStack.findIndex((m) => m.id === id);
+  if (id !== null && at < 0) return;
+  const from = id === null ? 0 : at + (inclusive ? 0 : 1);
+  for (const m of openStack.slice(from).reverse()) {
+    m.silent = true;
+    m.dialog.close();
+  }
 }
 
 let uidCounter = 0;

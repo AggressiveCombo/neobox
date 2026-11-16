@@ -16,7 +16,7 @@ import { CHAT_LIMIT, type AppState, type ChatLine, type Stats } from "../../stat
 import { chatPlaceholder } from "../chat-hint";
 import { h } from "../dom";
 import { icon, type IconName } from "../icons";
-import { contrastRatio } from "../kit";
+import { confirmDialog, contrastRatio } from "../kit";
 
 const SCORE_INTERVAL_MS = 100;
 const CHAT_SHOWN = 8;
@@ -402,7 +402,7 @@ export const hudScreen: HudFactory = (ctx) => {
   const matchingEl = h(
     "div",
     { class: "hud-matching", role: "status", hidden: true },
-    "Please wait, currently matching you with other players...",
+    "Waiting for other players to join this arena...",
   );
 
   // Match menu, the original's in-game menu: the lobby (the match keeps
@@ -674,12 +674,27 @@ export const hudScreen: HudFactory = (ctx) => {
     ctx.send({ t: "typing" });
   }
 
-  function endMatch(): void {
-    if (window.confirm("End the match for everyone?")) ctx.send({ t: "end_match" });
+  /** True while the End match confirm is open: its keys belong to the dialog, not to chat, the menu or the spectator. */
+  let endConfirming = false;
+
+  async function endMatch(): Promise<void> {
+    if (endConfirming) return;
+    endConfirming = true;
+    try {
+      const ok = await confirmDialog({
+        title: "End the match?",
+        message: "The match ends for everyone in the room now.",
+        action: "End match",
+      });
+      if (ok) ctx.send({ t: "end_match" });
+    } finally {
+      endConfirming = false;
+    }
   }
 
   // Capture phase: while chat is open, keys go to chat and never reach the movement input.
   function onWindowKey(e: KeyboardEvent): void {
+    if (endConfirming) return;
     const t = e.target;
     if (t instanceof HTMLInputElement || t instanceof HTMLTextAreaElement || t instanceof HTMLSelectElement || e.isComposing) return;
     if (!chatOpen) {

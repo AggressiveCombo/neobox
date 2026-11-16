@@ -340,7 +340,6 @@ async function roomLobby(s) {
   const extraName = uniqueName("extra");
   const roomName = uniqueName("lobby");
   const host = await s.open("host", { name: hostName });
-  host.acceptDialogs = true;
   const code = await createRoom(host, s.base, roomName, { isPublic: true });
   const guest = await s.open("guest", { name: guestName });
   await joinByInvite(guest, s.base, code, roomName);
@@ -428,7 +427,7 @@ async function quickPlay(s) {
   await waitForPixels(fresh, "quick-play canvas");
   check(!fresh.page.url().endsWith(`/${code}`), "quick play joined the custom room");
   // alone in the room: the original's matchmaking notice
-  await fresh.page.getByText("Please wait, currently matching you with other players...").waitFor();
+  await fresh.page.getByText("Waiting for other players to join this arena...").waitFor();
   return "mode card (count, carousel) opened a self-starting quick-play match with the matching notice";
 }
 
@@ -477,7 +476,7 @@ async function lobbySignals(s) {
   await host.page.locator("div.room-chat-log").getByText(`${guestName} has joined the game`).waitFor();
   const chat = guest.page.getByLabel("Chat message", { exact: true });
   await chat.pressSequentially("gg :fire:", { delay: 30 });
-  await host.page.getByLabel(`${guestName} is typing`).waitFor();
+  await host.page.locator(".room-typing", { hasText: `${guestName} is` }).waitFor();
   await chat.press("Enter");
   await host.page.locator("div.room-chat-log").getByText("gg 🔥").waitFor();
   await button(host.page, "Start").click();
@@ -612,8 +611,16 @@ async function replay(s) {
   const m = await matchWithGuest(s, { clipboard: false });
   const { host } = m;
   await waitForPixels(host, "match canvas");
-  host.acceptDialogs = true;
-  await host.page.locator(".hud-end").click();
+    await host.page.locator(".hud-end").click();
+    const endDialog = host.page.getByRole("alertdialog", { name: "End the match?", exact: true });
+    await endDialog.waitFor();
+    // Escape cancels: the match goes on, and the HUD stays live behind the dialog.
+    await host.page.keyboard.press("Escape");
+    await endDialog.waitFor({ state: "detached" });
+    await host.page.locator(".hud-end").waitFor();
+    await host.page.locator(".hud-end").click();
+    await endDialog.waitFor();
+    await endDialog.getByRole("button", { name: "End match", exact: true }).click();
   const save = button(host.page, "Save replay");
   await save.waitFor();
   const [download] = await Promise.all([host.page.waitForEvent("download"), save.click()]);
@@ -810,10 +817,11 @@ async function editor(s) {
   await page.locator(".editor-scope").waitFor({ state: "hidden" });
 
   // Built-in maps from the menu (the map has content now: confirm replacing it).
-  user.acceptDialogs = true;
   await button(page, "Menu").click();
   await page.locator(".editor-menu").waitFor({ state: "visible" });
   await page.locator(".editor-list .editor-item").first().click();
+  const replaceDialog = page.getByRole("alertdialog", { name: "Replace the current map?", exact: true });
+  await replaceDialog.getByRole("button", { name: "Replace map", exact: true }).click();
   await page.locator(".editor-menu").waitFor({ state: "hidden" });
 
   // Share code, then test play.

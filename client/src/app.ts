@@ -19,7 +19,7 @@ import { NAME_STORAGE_KEY, SEAT_STORAGE_KEY } from "./storage-keys";
 import { aboutScreen } from "./ui/screens/about";
 import { browserScreen } from "./ui/screens/browser";
 import { hudScreen } from "./ui/screens/hud";
-import { menuScreen } from "./ui/screens/menu";
+import { guestName, menuScreen } from "./ui/screens/menu";
 import { roomScreen } from "./ui/screens/room";
 import { practiceScreen } from "./ui/screens/practice";
 import { settingsScreen } from "./ui/screens/settings";
@@ -38,6 +38,8 @@ import { prefs } from "./prefs";
 import { music } from "./music";
 import type { XpAward } from "./protocol";
 import { h } from "./ui/dom";
+import { closeModalsAbove, modalPopPending, openModal, takeModalPop } from "./ui/kit";
+import { needsServer, offlinePage } from "./ui/offline-page";
 import { showToast } from "./ui/toast";
 import { playScreenTransition, transitionKind } from "./ui/transition";
 
@@ -99,13 +101,19 @@ function inviteFromUrl(): string | null {
   return ROOM_CODE_RE.test(code) ? code : null;
 }
 
-/** Keep the address bar on `/CODE` while in a room (shareable, reload rejoins), `/` otherwise. */
-function syncUrl(code: string | null): void {
-  const want = code === null ? "/" : `/${code}`;
-  if (location.pathname !== want || location.search !== "") history.replaceState(null, "", want);
+/** A history entry: the screen it shows, the screen it was entered from, and the modal it opened, if any. */
+interface NavState {
+  screen: Screen;
+  prev: Screen | null;
+  modal?: string;
 }
 
-export function start(): void {
+/** The room's screens: the room, its match, and the map editor the host opened from the room. */
+function inRoomScreen(screen: Screen, editorForRoom: boolean): boolean {
+  return screen === "room" || screen === "match" || (screen === "editor" && editorForRoom);
+}
+
+export function start(): Store<AppState> {
   const store = new Store<AppState>(initialState());
   const input = new Input();
   const overlay = new Overlay(byId<HTMLCanvasElement>("overlay"));
@@ -116,6 +124,8 @@ export function start(): void {
   let engine: Engine | null = null;
   let renderer: Renderer | null = null;
   let rendererP: Promise<void> | null = null;
+  /** Set once the game could not be drawn: no further attempts (the dialog says so). */
+  let rendererFailed = false;
   let mapsP: Promise<BuiltinMap[]> | null = null;
   let pendingName: string | null = null;
   /** Room to join once the server has welcomed us (invite links, friends). */
@@ -147,6 +157,8 @@ export function start(): void {
   let reconnectSince = 0;
   let reconnectAttempt = 0;
   let mounted: Screen | null = null;
+  /** The shown page is the offline page in place of a server screen. */
+  let offlineShown = false;
   let current: ScreenHandle | null = null;
   let hud: HudHandle | null = null;
   let loop: MatchLoop | null = null;
@@ -295,13 +307,14 @@ export function start(): void {
   function mount(screen: Screen): void {
     current?.destroy();
     hud = null;
+    offlineShown = needsServer(screen) && !navigator.onLine;
     let handle: ScreenHandle;
     if (screen === "match") {
       const hudHandle = hudScreen(ctx);
       hud = hudHandle;
       handle = hudHandle;
     } else {
-      handle = SCREEN_FACTORIES[screen](ctx);
+      handle = offlineShown ? offlinePage(ctx, screen) : SCREEN_FACTORIES[screen](ctx);
     }
     const from = mounted;
     const leaving = current?.el ?? null;
@@ -347,7 +360,12 @@ export function start(): void {
     }
     if (award.quick || award === shownAward || state.screen !== "room") return;
     shownAward = award;
-    closePostGame = showPostGame(ctx, award, state.room?.map ?? null);
+    // Opened once this change settles: a modal pushes a history entry, and the nav subscriber (which runs after this one)
+    // must first write this change's screen entry, or it would take the new modal for a takeover and close it at once.
+    queueMicrotask(() => {
+      if (store.state.xp !== award || store.state.screen !== "room") return;
+      closePostGame = showPostGame(ctx, award, store.state.room?.map ?? null);
+    });
   });
 
   // Shown over every screen while the connection to a room is being restored.
@@ -374,7 +392,7 @@ export function start(): void {
 
   /** Renderer creation is async (WebGPU or WebGL2 init); the loop skips drawing until it is ready. */
   function ensureRenderer(): void {
-    if (renderer || rendererP) return;
+    if (renderer || rendererP || rendererFailed) return;
     rendererP = createRenderer(glHost, onRendererLost).then(
       (r) => {
         renderer = r;
@@ -383,9 +401,43 @@ export function start(): void {
       },
       (err: unknown) => {
         rendererP = null;
-        toast(`graphics unavailable: ${errText(err)}`, "error");
+        graphicsFailed(errText(err));
       },
     );
+  }
+
+  /**
+   * Neither WebGPU nor WebGL 2 is available, so the game cannot be drawn. Say so once, in a dialog, rather than
+   * on every frame. Back leaves the game screen for the nearest one that needs no graphics.
+   */
+  function graphicsFailed(detail: string): void {
+    rendererFailed = true;
+    let m: { close(): void } | null = null;
+    const back = h(
+      "button",
+      {
+        type: "button",
+        onclick: () => {
+          loop?.stop();
+          store.set({
+            inMatch: false,
+            tickHz: 0,
+            showScores: false,
+            screen: store.state.room ? "room" : store.state.serverName ? "browse" : "menu",
+          });
+          m?.close();
+        },
+      },
+      "Back",
+    );
+    m = openModal({
+      title: "This browser cannot draw the game",
+      body: [
+        h("p", null, `Neobox draws with WebGPU or WebGL 2, and this browser offers neither (${detail}).`),
+        h("p", null, "Turn on hardware acceleration in the browser's settings and reload, or open the game in another browser."),
+      ],
+      actions: [back],
+    });
   }
 
   function onRendererLost(): void {
@@ -458,14 +510,13 @@ export function start(): void {
       typing: {},
       editorForRoom: false,
     });
-    syncUrl(null);
   }
 
   /**
    * Leave the current room (the server said so, or the player did) and show the browser. A room on a game
    * server sends us back to the home server, whose welcome then shows the list.
    */
-  function leaveRoom(): void {
+  function leaveRoom(next: Screen = "browse"): void {
     loop?.stop();
     roomCode = null;
     resumeToken = null;
@@ -481,9 +532,8 @@ export function start(): void {
       xp: null,
       typing: {},
       editorForRoom: false,
-      screen: "browse",
+      screen: next,
     });
-    syncUrl(null);
     if (server !== null) connectServer(null, null);
     else net.send({ t: "list_rooms" });
   }
@@ -605,7 +655,7 @@ export function start(): void {
             serverGone();
           } else {
             leaveRoom();
-            toast(`could not rejoin the room: ${msg.message}`, "error");
+            toast(msg.code === "room_not_found" ? "That room has closed, so you cannot rejoin it." : `could not rejoin the room: ${msg.message}`, "error");
           }
           return;
         }
@@ -620,6 +670,10 @@ export function start(): void {
         }
         // A refusal from a game server we only visited (not in a room there): back to the list on home.
         if (server !== null && roomCode === null) leaveRoom();
+        if (msg.code === "room_not_found" && roomCode === null && joinAttempt !== null) {
+          roomNotFound(joinAttempt);
+          return;
+        }
         toast(msg.message, "error");
         return;
       }
@@ -638,7 +692,6 @@ export function start(): void {
         if (msg.room.quick !== null) quickVisited.add(msg.room.code.toUpperCase());
         matching = null;
         saveSeat();
-        syncUrl(roomCode);
         // a match, or the host's map editor opened from the room, stays on screen
         const keep = store.state.inMatch || (store.state.editorForRoom && store.state.screen === "editor");
         store.set({
@@ -650,7 +703,7 @@ export function start(): void {
         return;
       }
       case "left":
-        leaveRoom();
+        if (roomCode !== null) leaveRoom();
         return;
       case "kicked":
         toast(msg.reason, "error");
@@ -802,17 +855,19 @@ export function start(): void {
    * (which redirects to the right one). Connects first when needed; the welcome then sends the join.
    */
   function joinRoom(code: string): void {
+    if (!navigator.onLine) {
+      toast("You are offline: rooms need the server.", "error");
+      return;
+    }
     const target = seat(code)?.server ?? null;
     if (net.status === "open" && store.state.serverName !== "" && server === target) {
       sendJoin(code, null);
       return;
     }
     pendingJoin = code;
-    const name = store.state.account?.name ?? (store.state.name || window.localStorage.getItem(NAME_STORAGE_KEY) || "");
-    if (!NAME_RE.test(name)) {
-      store.set({ screen: "menu" });
-      return;
-    }
+    let name = store.state.account?.name ?? (store.state.name || window.localStorage.getItem(NAME_STORAGE_KEY) || "");
+    // A first visit has no name yet: join as a guest, as the menu offers one.
+    if (!NAME_RE.test(name)) name = guestName();
     if (net.status === "closed") server = target;
     if (server === target) {
       play(name);
@@ -853,7 +908,111 @@ export function start(): void {
     if (!document.hidden) retryNow();
   });
   window.addEventListener("online", retryNow);
+  // A server screen gives way to the offline page while the connection is gone, and comes back with it.
+  const onConnectionChange = (): void => {
+    if (mounted !== null && needsServer(mounted) && offlineShown !== !navigator.onLine) mount(mounted);
+  };
+  window.addEventListener("online", onConnectionChange);
+  window.addEventListener("offline", onConnectionChange);
 
+  // Screens are history entries, so the browser's Back and Forward move between them. A room's screens
+  // (room, match, the host's editor) share one entry; each entry records the screen it was entered from.
+  let navigating = false;
+
+  /** The state a screen change was made from while a modal's history pop is in flight: recorded once that pop lands. */
+  let deferredFrom: AppState | null = null;
+
+  /** Writes the history entry for the screen change from `prev` to `state`: a screen entry, or the modal entry it takes over. */
+  function recordScreen(state: AppState, prev: AppState): void {
+    const cur: NavState | null = history.state;
+    const url = state.room === null ? "/" : `/${state.room.code}`;
+    const wasRoom = inRoomScreen(prev.screen, prev.editorForRoom);
+    const isRoom = inRoomScreen(state.screen, state.editorForRoom);
+    if (cur?.modal !== undefined) {
+      // A modal's entry takes the screen change: the modal closes, and the entry becomes this screen's.
+      closeModalsAbove(cur.modal, true);
+      history.replaceState({ screen: state.screen, prev: prev.screen }, "", url);
+    } else if (cur === null || state.screen === prev.screen || (wasRoom && isRoom)) {
+      history.replaceState({ screen: state.screen, prev: cur?.prev ?? null }, "", url);
+    } else if (cur.prev === state.screen) {
+      // Back to the screen this one was entered from: the entry below is that screen.
+      history.back();
+    } else if (wasRoom) {
+      // Leaving the room's screens for another: the room's entry becomes that screen (no dead room entry).
+      history.replaceState({ screen: state.screen, prev: cur.prev }, "", url);
+    } else {
+      history.pushState({ screen: state.screen, prev: prev.screen }, "", url);
+    }
+  }
+
+  store.subscribe((state, prev) => {
+    if (navigating) return;
+    if (state.screen === prev.screen && state.room?.code === prev.room?.code) return;
+    if (modalPopPending()) {
+      if (deferredFrom === null) deferredFrom = prev;
+      return;
+    }
+    recordScreen(state, prev);
+  });
+
+  window.addEventListener("popstate", (e: PopStateEvent) => {
+    const nav: NavState | null = e.state;
+    navigating = true;
+    try {
+      // Back past a modal's entry closes the modals opened after it; a plain screen entry closes them all.
+      closeModalsAbove(nav?.modal ?? null);
+      if (takeModalPop()) {
+        // The pop a page-side modal close asked for: the screen stays. Changes made while it was in flight are recorded on this entry.
+        if (!modalPopPending() && deferredFrom !== null) {
+          const from = deferredFrom;
+          deferredFrom = null;
+          recordScreen(store.state, from);
+        }
+        return;
+      }
+      if (nav === null) return;
+      const s = store.state;
+      let target: Screen = nav.screen === "match" && !s.inMatch ? "room" : nav.screen;
+      if ((target === "room" || target === "match") && s.room === null) target = "browse";
+      if ((target === "browse" || target === "quick" || target === "room" || target === "match") && s.serverName === "") target = "menu";
+      if (target !== s.screen) {
+        // Back out of the room's screens leaves the room, as its Leave button does.
+        if (roomCode !== null && !inRoomScreen(target, s.editorForRoom)) {
+          net.send({ t: "leave_room" });
+          leaveRoom(target);
+        } else {
+          store.set({ screen: target });
+        }
+      }
+      history.replaceState({ ...nav, screen: store.state.screen }, "", store.state.room === null ? "/" : `/${store.state.room.code}`);
+    } finally {
+      navigating = false;
+    }
+  });
+
+  /** A join named a room that is not open: say so, and offer the room list. */
+  function roomNotFound(code: string): void {
+    let m: { close(): void } | null = null;
+    const browse = h(
+      "button",
+      {
+        type: "button",
+        onclick: () => {
+          store.set({ screen: "browse" });
+          m?.close();
+        },
+      },
+      "Browse rooms",
+    );
+    m = openModal({
+      title: "Room not found",
+      body: [h("p", null, `No open room has the code ${code.toUpperCase()}. It may have closed, or the link may have a typo.`)],
+      actions: [browse],
+    });
+  }
+
+  // The first history entry is the screen this page opened on, at the URL it opened at.
+  history.replaceState({ screen: store.state.screen, prev: null }, "");
   resizeAll();
   mount(store.state.screen);
   const boot = document.getElementById("boot");
@@ -863,4 +1022,5 @@ export function start(): void {
       boot.hidden = true;
     }, 180);
   }
+  return store;
 }

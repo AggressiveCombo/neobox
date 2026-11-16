@@ -57,7 +57,7 @@ export function writeStoredName(name: string): void {
 }
 
 /** A guest name for a first visit: "Box" and four digits. */
-function guestName(): string {
+export function guestName(): string {
   return `Box${String(Math.floor(Math.random() * 10_000)).padStart(4, "0")}`;
 }
 

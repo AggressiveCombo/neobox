@@ -10,6 +10,13 @@ const LEAVE_MS = 160;
 const timers = new WeakMap<HTMLElement, number>();
 
 export function showToast(host: HTMLElement, text: string, kind: "info" | "error"): void {
+  // The same message already on screen: restart its timer instead of stacking a copy.
+  for (const el of host.children) {
+    if (el instanceof HTMLElement && el.textContent === text && el.classList.contains(`toast-${kind}`) && !el.classList.contains("is-leaving")) {
+      dismiss(el);
+      break;
+    }
+  }
   while (host.childElementCount >= MAX_TOASTS) {
     const oldest = host.firstElementChild;
     if (!(oldest instanceof HTMLElement)) break;

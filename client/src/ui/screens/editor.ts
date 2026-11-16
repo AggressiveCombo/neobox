@@ -14,7 +14,7 @@ import { startTestPlay, type TestPlay } from "../../editor/testplay";
 import type { Screen } from "../../state";
 import { h } from "../dom";
 import { icon, type IconName } from "../icons";
-import { field, openModal, seg, uid } from "../kit";
+import { confirmDialog, field, openModal, seg, uid } from "../kit";
 import { VISIBILITY_LABELS, mapCode } from "../map-list";
 import { signInPrompt } from "./account";
 
@@ -212,7 +212,7 @@ export const editorScreen: ScreenFactory = (ctx) => {
           h("button", { type: "button", onclick: () => fileInput.click() }, icon("folder-open"), "Load file"),
           h("button", { type: "button", onclick: () => downloadMap(ctrl.doc) }, icon("download"), "Download"),
           h("button", { type: "button", onclick: () => void copyCode() }, icon("copy"), "Copy map code"),
-          h("button", { type: "button", onclick: () => newMap() }, icon("file-plus"), "New map"),
+          h("button", { type: "button", onclick: () => void newMap() }, icon("file-plus"), "New map"),
         ),
         fileInput,
       ),
@@ -244,8 +244,8 @@ export const editorScreen: ScreenFactory = (ctx) => {
     fileInput.value = "";
     if (!file) return;
     void readMapFile(file)
-      .then((doc) => {
-        if (replaceMap(doc, file.name)) libraryMap = null;
+      .then(async (doc) => {
+        if (await replaceMap(doc, file.name)) libraryMap = null;
       })
       .catch((err: unknown) => ctx.toast(errorText(err), "error"));
   });
@@ -321,9 +321,16 @@ export const editorScreen: ScreenFactory = (ctx) => {
     return JSON.stringify(ctrl.doc) === JSON.stringify(emptyDoc());
   }
 
-  /** Replace the open map; asks first when the current map is not empty. Returns false when the user declined. */
-  function replaceMap(doc: Obj, label: string): boolean {
-    if (!isEmptyMap() && !window.confirm("Replace the current map?")) return false;
+  /** Replace the open map; asks first when the current map is not empty. Resolves false when the user declined. */
+  async function replaceMap(doc: Obj, label: string): Promise<boolean> {
+    if (!isEmptyMap()) {
+      const ok = await confirmDialog({
+        title: "Replace the current map?",
+        message: "Edits not saved to the library or a file are lost.",
+        action: "Replace map",
+      });
+      if (!ok) return false;
+    }
     ctrl.load(doc);
     mapName = label;
     toggleMenu(false);
@@ -331,8 +338,15 @@ export const editorScreen: ScreenFactory = (ctx) => {
     return true;
   }
 
-  function newMap(): void {
-    if (!isEmptyMap() && !window.confirm("Start a new map? The current map is replaced.")) return;
+  async function newMap(): Promise<void> {
+    if (!isEmptyMap()) {
+      const ok = await confirmDialog({
+        title: "Start a new map?",
+        message: "The current map is replaced with an empty one. Edits not saved are lost.",
+        action: "Start new map",
+      });
+      if (!ok) return;
+    }
     ctrl.load(emptyDoc());
     mapName = null;
     libraryMap = null;
@@ -348,7 +362,7 @@ export const editorScreen: ScreenFactory = (ctx) => {
   async function openCode(code: string, label: string, from: LibraryMap | null = null): Promise<void> {
     try {
       const doc = await decode(code);
-      if (replaceMap(doc, label)) libraryMap = from;
+      if (await replaceMap(doc, label)) libraryMap = from;
     } catch (err) {
       ctx.toast(errorText(err), "error");
     }
@@ -467,7 +481,14 @@ export const editorScreen: ScreenFactory = (ctx) => {
       return;
     }
     const target = mode === "overwrite" ? libraryMap : null;
-    if (target && !window.confirm(`Overwrite “${target.name}”?`)) return;
+    if (target) {
+      const ok = await confirmDialog({
+        title: `Overwrite “${target.name}”?`,
+        message: "The library copy is replaced with the map on screen.",
+        action: "Overwrite",
+      });
+      if (!ok) return;
+    }
     const description = f.description.trim();
     let code: string;
     try {

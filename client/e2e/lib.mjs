@@ -273,8 +273,8 @@ export class Scenario {
 
   /**
    * Opens a fresh headless context and page. `name` pre-fills the guest name
-   * (localStorage "neobox.name", only when unset). Dialogs fail the scenario
-   * unless `handle.acceptDialogs` is set.
+   * (localStorage "neobox.name", only when unset). Native dialogs (alert, confirm, prompt) fail the scenario;
+   * the app's own confirms are DOM dialogs and are driven like any other control.
    */
   async open(label, { phone = false, name, clipboard = false, ip: forcedIp } = {}) {
     // `ip` is the client address the browser sends as X-Forwarded-For (picks its GeoIP location).
@@ -298,7 +298,7 @@ export class Scenario {
     }
     const page = await context.newPage();
     page.setDefaultTimeout(STEP_TIMEOUT);
-    const handle = { label, context, page, ip, problems: [], acceptDialogs: false };
+    const handle = { label, context, page, ip, problems: [] };
     page.on("pageerror", (err) => handle.problems.push(`${label}: page error: ${err.message}`));
     page.on("console", (msg) => {
       if (msg.type() !== "error") return;
@@ -306,12 +306,8 @@ export class Scenario {
       handle.problems.push(`${label}: console error: ${msg.text()}${url ? ` (${url})` : ""}`);
     });
     page.on("dialog", (dialog) => {
-      if (handle.acceptDialogs) {
-        void dialog.accept();
-      } else {
-        handle.problems.push(`${label}: unexpected dialog: ${dialog.message()}`);
-        void dialog.dismiss();
-      }
+      handle.problems.push(`${label}: unexpected dialog: ${dialog.message()}`);
+      void dialog.dismiss();
     });
     this.handles.push(handle);
     return handle;
@@ -373,7 +369,7 @@ export async function signedIn(s, label, name = uniqueName(label), opts = {}) {
   await signUp(h, s.base, name);
   await h.page.goto(s.base);
   await menuName(h.page).waitFor();
-  // the handle itself, not a copy: flags such as acceptDialogs must reach its listeners
+  // the handle itself, not a copy: callers and listeners share it
   h.userName = name;
   return h;
 }

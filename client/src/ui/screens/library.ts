@@ -25,7 +25,7 @@ import type { AppCtx, ScreenFactory } from "../../ctx";
 import type { AppState } from "../../state";
 import { h, type Child } from "../dom";
 import { icon } from "../icons";
-import { field, openModal, page, pageHead, seg, uid, type SegOption } from "../kit";
+import { confirmDialog, field, openModal, page, pageHead, seg, uid, type SegOption } from "../kit";
 import {
   SORT_LABELS,
   VISIBILITY_LABELS,
@@ -483,7 +483,12 @@ export const libraryScreen: ScreenFactory = (ctx) => {
         type: "button",
         class: "danger",
         onclick: async () => {
-          if (!confirm(`Delete "${map.name}"? This cannot be undone.`)) return;
+          const ok = await confirmDialog({
+            title: `Delete "${map.name}"?`,
+            message: "This cannot be undone.",
+            action: "Delete map",
+          });
+          if (!ok) return;
           try {
             await deleteMap(map.id);
             maps = maps.filter((m) => m.id !== map.id);
