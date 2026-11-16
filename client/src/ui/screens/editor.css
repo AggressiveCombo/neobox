@@ -325,6 +325,23 @@ body:has(.screen.editor) #toasts {
   font-size: var(--step-small);
 }
 
+.editor-side .inspector-points {
+  font-size: var(--step-small);
+}
+
+.editor-side .inspector-points summary {
+  cursor: pointer;
+  color: var(--muted);
+}
+
+.editor-side .point-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr);
+  gap: 6px;
+  align-items: end;
+  margin-top: 8px;
+}
+
 .editor-side :is(input, select, textarea) {
   background: var(--ground);
 }

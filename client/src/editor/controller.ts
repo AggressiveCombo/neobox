@@ -61,6 +61,8 @@ const HIT_PX = 8;
 const DRAG_PX = 3;
 /** Smallest box or circle the editor creates, in map units. */
 const MIN_SIZE = 1;
+/** Half the side of a box, or the radius of a circle, that Enter places at the view centre (screen pixels, so it reads the same at any zoom). */
+const KEY_PX = 40;
 /** Joints made by the joint tool are pivots; the inspector changes the kind. */
 const JOINT_PIVOT = 1;
 const DRAFT_MS = 400;
@@ -80,8 +82,8 @@ type Gesture =
   | { kind: "marquee"; a: Pt; b: Pt; keep: Ref[] }
   | { kind: "shapeMove"; start: Pt; startPx: Pt; base: Obj; bi: number; sel: number[]; clicked: number; collapse: boolean; moved: boolean }
   | { kind: "shapeMarquee"; a: Pt; b: Pt; keep: number[]; bi: number }
-  | { kind: "rect"; a: Pt; b: Pt }
-  | { kind: "circle"; c: Pt; r: Pt }
+  | { kind: "rect"; a: Pt; b: Pt; startPx: Pt; moved: boolean }
+  | { kind: "circle"; c: Pt; r: Pt; startPx: Pt; moved: boolean }
   | { kind: "pan"; p0: Pt; v0: View };
 
 function dist(a: Pt, b: Pt): number {
@@ -197,6 +199,8 @@ export class EditorController {
   private hover: Pt | null = null;
   private poly: Pt[] = [];
   private jointFrom: Anchor | null = null;
+  /** First corner or centre set by a tap; the next tap completes the box or circle. */
+  private pending: Pt | null = null;
   private spaceDown = false;
   /** True while test play runs: pointers and keys belong to the game then. */
   private paused = false;
@@ -286,26 +290,30 @@ export class EditorController {
       case "select":
         if (this.scope) {
           return this.scope.shapes.length
-            ? "Drag to move. Arrow keys nudge. Delete removes. Esc leaves the body."
-            : "Click a shape, or drag to box-select. Esc leaves the body.";
+            ? "Drag or arrow keys to move. [ ] cycles shapes. Delete removes. Esc leaves the body."
+            : "Click a shape, or drag to box-select. [ ] cycles shapes. Esc leaves the body.";
         }
         return this.selection.length
-          ? "Drag to move. Arrow keys nudge. Delete removes."
-          : "Tap or drag to select. Drag empty space to box-select.";
+          ? "Drag or arrow keys to move (Shift: 10 units). [ ] cycles. Delete removes."
+          : "Tap or drag to select. [ ] cycles entities. Arrow keys pan the view.";
       case "rect":
-        return "Drag to draw a box.";
+        if (this.pending) return "Tap the opposite corner, or press Enter for the view centre. Esc cancels.";
+        return "Drag a box, or tap two corners. Enter places a box at the view centre.";
       case "circle":
-        return "Drag from the centre to set the radius.";
+        if (this.pending) return "Tap the edge, or press Enter for the view centre. Esc cancels.";
+        return "Drag from the centre to set the radius, or tap centre then edge. Enter places a circle at the view centre.";
       case "poly":
         return this.poly.length
-          ? "Tap points in order. Tap the first point or press Enter to close."
-          : "Tap to place the first point.";
+          ? "Tap points in order. Tap the first point or press Shift+Enter to close. Enter adds the view-centre point."
+          : "Tap to place the first point. Enter places it at the view centre.";
       case "joint":
-        return this.jointFrom ? "Tap the second anchor. Empty space is the ground." : "Tap the first anchor. Empty space is the ground.";
+        return this.jointFrom
+          ? "Tap the second anchor. Empty space is the ground. Enter joins at the view centre."
+          : "Tap the first anchor. Empty space is the ground. Enter anchors at the view centre.";
       case "fill":
-        return "Click a shape to paint it with the current colour.";
+        return "Click a shape to paint it with the current colour. Enter paints the shape at the view centre.";
       default:
-        return "Tap to place.";
+        return "Tap to place. Enter places at the view centre.";
     }
   }
 
@@ -318,6 +326,7 @@ export class EditorController {
     this.cancelGesture();
     this.poly = [];
     this.jointFrom = null;
+    this.pending = null;
     this.activeTool = tool;
     this.note = "";
     this.notify();
@@ -334,6 +343,7 @@ export class EditorController {
     this.lastTap = null;
     this.poly = [];
     this.jointFrom = null;
+    this.pending = null;
     this.note = "";
     this.fitted = false;
     this.fit();
@@ -495,10 +505,10 @@ export class EditorController {
         this.selectDown(e, p, raw, tol, s);
         break;
       case "rect":
-        this.gesture = { kind: "rect", a: s, b: s };
+        this.gesture = { kind: "rect", a: s, b: s, startPx: p, moved: false };
         break;
       case "circle":
-        this.gesture = { kind: "circle", c: s, r: s };
+        this.gesture = { kind: "circle", c: s, r: s, startPx: p, moved: false };
         break;
       case "poly":
         if (this.poly.length >= 3 && dist(raw, this.poly[0]!) <= tol) this.finishPoly();
@@ -607,7 +617,7 @@ export class EditorController {
     this.hover = this.snap(this.worldOf(p));
     const g = this.gesture;
     if (!g) {
-      if (this.poly.length || this.jointFrom) this.paint();
+      if (this.poly.length || this.jointFrom || this.pending) this.paint();
       return;
     }
     switch (g.kind) {
@@ -651,9 +661,17 @@ export class EditorController {
         break;
       }
       case "rect":
+        if (!g.moved) {
+          if (dist(p, g.startPx) < DRAG_PX) return;
+          g.moved = true;
+        }
         g.b = this.snap(this.worldOf(p));
         break;
       case "circle":
+        if (!g.moved) {
+          if (dist(p, g.startPx) < DRAG_PX) return;
+          g.moved = true;
+        }
         g.r = this.snap(this.worldOf(p));
         break;
     }
@@ -722,33 +740,18 @@ export class EditorController {
       case "shapeMarquee":
         this.notify();
         return;
-      case "rect": {
-        const w = Math.abs(g.b.x - g.a.x);
-        const h = Math.abs(g.b.y - g.a.y);
-        if (w < MIN_SIZE || h < MIN_SIZE) return this.notify();
-        this.create(() => {
-          const x0 = Math.min(g.a.x, g.b.x);
-          const x1 = Math.max(g.a.x, g.b.x);
-          const y0 = Math.min(g.a.y, g.b.y);
-          const y1 = Math.max(g.a.y, g.b.y);
-          const corners = [
-            { x: x0, y: y0 },
-            { x: x1, y: y0 },
-            { x: x1, y: y1 },
-            { x: x0, y: y1 },
-          ];
-          this.addParts(convexParts(corners));
-        });
+      case "rect":
+        if (!g.moved) return this.tapCorner(g.a);
+        this.pending = null;
+        if (Math.abs(g.b.x - g.a.x) < MIN_SIZE || Math.abs(g.b.y - g.a.y) < MIN_SIZE) return this.notify();
+        this.placeBox(g.a, g.b);
         return;
-      }
-      case "circle": {
-        const r = dist(g.c, g.r);
-        if (r < MIN_SIZE) return this.notify();
-        this.create(() => {
-          this.addCircle(g.c, r);
-        });
+      case "circle":
+        if (!g.moved) return this.tapCentre(g.c);
+        this.pending = null;
+        if (dist(g.c, g.r) < MIN_SIZE) return this.notify();
+        this.placeCircle(g.c, dist(g.c, g.r));
         return;
-      }
     }
   }
 
@@ -759,6 +762,65 @@ export class EditorController {
       this.addParts(convexParts(pts));
       this.poly = [];
     });
+  }
+
+  /** Add a box with corners a and b: to the scoped body while editing in place, else as a new body. One undo step. */
+  private placeBox(a: Pt, b: Pt): void {
+    this.pending = null;
+    this.create(() => {
+      const x0 = Math.min(a.x, b.x);
+      const x1 = Math.max(a.x, b.x);
+      const y0 = Math.min(a.y, b.y);
+      const y1 = Math.max(a.y, b.y);
+      const corners = [
+        { x: x0, y: y0 },
+        { x: x1, y: y0 },
+        { x: x1, y: y1 },
+        { x: x0, y: y1 },
+      ];
+      this.addParts(convexParts(corners));
+    });
+  }
+
+  /** Add a circle of radius r around c (see addCircle). One undo step. */
+  private placeCircle(c: Pt, r: number): void {
+    this.pending = null;
+    this.create(() => this.addCircle(c, r));
+  }
+
+  /** Box by taps: the first tap sets a corner, the second completes the box. */
+  private tapCorner(s: Pt): void {
+    if (!this.pending) {
+      this.pending = s;
+      this.note = "";
+      this.notify();
+      return;
+    }
+    const a = this.pending;
+    if (Math.abs(s.x - a.x) < MIN_SIZE || Math.abs(s.y - a.y) < MIN_SIZE) {
+      this.note = "Tap a corner away from the first.";
+      this.notify();
+      return;
+    }
+    this.placeBox(a, s);
+  }
+
+  /** Circle by taps: the first tap sets the centre, the second sets the radius. */
+  private tapCentre(s: Pt): void {
+    if (!this.pending) {
+      this.pending = s;
+      this.note = "";
+      this.notify();
+      return;
+    }
+    const c = this.pending;
+    const r = dist(c, s);
+    if (r < MIN_SIZE) {
+      this.note = "Tap a point away from the centre.";
+      this.notify();
+      return;
+    }
+    this.placeCircle(c, r);
   }
 
   /** Add convex world-space parts as polygon shapes: to the scoped body while editing in place, else as a new body. */
@@ -957,14 +1019,19 @@ export class EditorController {
     } else if (e.key === "Escape") {
       this.escape();
     } else if (e.key === "Enter") {
-      if (this.activeTool !== "poly" || this.poly.length < 3) return;
-      this.finishPoly();
+      if (t instanceof HTMLButtonElement) return;
+      if (e.shiftKey) {
+        if (this.activeTool !== "poly" || this.poly.length < 3) return;
+        this.finishPoly();
+      } else if (!this.placeAtView()) return;
     } else if (e.key.startsWith("Arrow")) {
-      if (this.selection.length === 0 && !this.scope?.shapes.length) return;
-      const d = e.shiftKey ? 10 : 1;
-      const dx = e.key === "ArrowLeft" ? -d : e.key === "ArrowRight" ? d : 0;
-      const dy = e.key === "ArrowUp" ? -d : e.key === "ArrowDown" ? d : 0;
-      this.nudge(dx, dy);
+      const big = e.shiftKey;
+      const sx = e.key === "ArrowLeft" ? -1 : e.key === "ArrowRight" ? 1 : 0;
+      const sy = e.key === "ArrowUp" ? -1 : e.key === "ArrowDown" ? 1 : 0;
+      if (this.selection.length === 0 && !this.scope?.shapes.length) this.pan(sx * (big ? 240 : 80), sy * (big ? 240 : 80));
+      else this.nudge(sx * (big ? 10 : 1), sy * (big ? 10 : 1));
+    } else if (e.key === "[" || e.key === "]") {
+      this.cycle(e.key === "]" ? 1 : -1);
     } else if (TOOL_KEYS[key] && !e.shiftKey) {
       this.setTool(TOOL_KEYS[key]);
     } else {
@@ -977,6 +1044,7 @@ export class EditorController {
     if (this.gesture) this.cancelGesture();
     else if (this.poly.length) this.poly = [];
     else if (this.jointFrom) this.jointFrom = null;
+    else if (this.pending) this.pending = null;
     else if (this.scope) {
       this.leaveScope();
       return;
@@ -985,6 +1053,66 @@ export class EditorController {
     else return;
     this.note = "";
     this.notify();
+    this.paint();
+  }
+
+  /** Enter: what a tap at the view centre does; a box or circle with nothing started gets the default size. False when the tool places nothing. */
+  private placeAtView(): boolean {
+    const { w, h } = this.size();
+    const raw = worldAt(this.view, w, h, w / 2, h / 2);
+    const s = this.snap(raw);
+    const tol = HIT_PX / this.view.scale;
+    switch (this.activeTool) {
+      case "select":
+        return false;
+      case "rect":
+        if (this.pending) this.tapCorner(s);
+        else this.placeBox({ x: s.x - KEY_PX / this.view.scale, y: s.y - KEY_PX / this.view.scale }, { x: s.x + KEY_PX / this.view.scale, y: s.y + KEY_PX / this.view.scale });
+        break;
+      case "circle":
+        if (this.pending) this.tapCentre(s);
+        else this.placeCircle(s, KEY_PX / this.view.scale);
+        break;
+      case "poly":
+        this.poly.push(s);
+        this.notify();
+        break;
+      case "joint":
+        this.jointDown(raw, s, tol);
+        break;
+      case "fill":
+        this.fillDown(raw, tol);
+        break;
+      default:
+        this.placeMarker(this.activeTool, s);
+    }
+    this.paint();
+    return true;
+  }
+
+  /** [ and ]: select the previous or next entity, or shape while editing in place. */
+  private cycle(step: 1 | -1): void {
+    const scope = this.scope;
+    if (scope) {
+      const n = list(getList(this.doc, "body")[scope.index] ?? {}, "s").length;
+      if (n === 0) return;
+      const cur = scope.shapes.length === 1 ? scope.shapes[0]! : step > 0 ? -1 : 0;
+      this.shapeSel = [(((cur + step) % n) + n) % n];
+    } else {
+      const all: Ref[] = [];
+      for (const kind of KIND_ORDER) getList(this.doc, kind).forEach((_, i) => all.push({ kind, i }));
+      if (all.length === 0) return;
+      const cur = this.selection.length === 1 ? all.findIndex((r) => sameRef(r, this.selection[0]!)) : -1;
+      const next = cur < 0 ? (step > 0 ? 0 : all.length - 1) : (cur + step + all.length) % all.length;
+      this.selection = [all[next]!];
+    }
+    this.notify();
+    this.paint();
+  }
+
+  /** Pan the view by a screen offset in pixels (arrow keys with nothing selected). */
+  private pan(dx: number, dy: number): void {
+    this.view = { ...this.view, x: this.view.x + dx / this.view.scale, y: this.view.y + dy / this.view.scale };
     this.paint();
   }
 
@@ -1042,6 +1170,8 @@ export class EditorController {
     if (g?.kind === "rect") return { kind: "rect", a: g.a, b: g.b };
     if (g?.kind === "circle") return { kind: "circle", c: g.c, r: g.r };
     if (g?.kind === "marquee") return { kind: "rect", a: g.a, b: g.b };
+    if (this.pending && this.activeTool === "rect") return { kind: "rect", a: this.pending, b: this.hover ?? this.pending };
+    if (this.pending && this.activeTool === "circle") return { kind: "circle", c: this.pending, r: this.hover ?? this.pending };
     if (this.activeTool === "poly" && this.poly.length) return { kind: "poly", pts: this.poly, cursor: this.hover };
     if (this.activeTool === "joint" && this.jointFrom) return { kind: "joint", from: this.jointFrom.w, cursor: this.hover };
     return null;

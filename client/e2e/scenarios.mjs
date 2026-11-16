@@ -128,8 +128,19 @@ async function settings(s) {
     await page.getByLabel("Deuteranopia (green-blind)", { exact: false }).isChecked(),
     "palette choice did not persist",
   );
+  // Touch: the tall Jump slot takes Bat; Bat moves into the slot Jump left. Persists across a reload.
+  await page.locator(".settings-nav-item", { hasText: "Touch" }).click();
+  await page.locator('.touch-layout select[data-slot="jump"]').selectOption("bat");
+  await page.reload();
+  await menuName(page).waitFor();
+  await navTo(page, "Settings");
+  check(
+    (await page.locator('.touch-layout select[data-slot="jump"]').inputValue()) === "bat" &&
+      (await page.locator('.touch-layout select[data-slot="bat"]').inputValue()) === "up",
+    "touch button layout did not persist as a swap",
+  );
   await button(page, "Reset to defaults").click();
-  return "jump rebind, volume, palette persisted";
+  return "jump rebind, volume, palette, touch layout persisted";
 }
 
 async function accessibilityPrefs(s) {
@@ -735,7 +746,7 @@ async function phoneLandscapeTouch(s) {
   check(moved > 5, `guest frames barely changed while holding the touch stick right (${moved} changes)`);
 
   // Jump is a touch button of its own: holding it makes the player leap.
-  const jump = await centre(".hud-touch-jump");
+  const jump = await centre('.hud-touch[data-action="up"]');
   const beforeJump = await probeChanges(page);
   await send("touchStart", [{ x: jump.x, y: jump.y }]);
   await sleep(400);
@@ -815,6 +826,27 @@ async function editor(s) {
   );
   await page.keyboard.press("Escape");
   await page.locator(".editor-scope").waitFor({ state: "hidden" });
+
+  // Drag-free routes (WCAG 2.5.7): two taps make a box, Enter drops one at the view centre, Shift+arrow moves the selection.
+  const draftBodies = () => page.evaluate(() => JSON.parse(localStorage.getItem("neobox.editor.draft") ?? "{}").b ?? []);
+  const bodyCount = async () => (await draftBodies()).length;
+  const bodiesBefore = await bodyCount();
+  await button(page, "Box").click();
+  await page.mouse.click(cx - box.width * 0.3, cy - box.height * 0.3);
+  await page.waitForFunction(() => document.querySelector(".editor-hint")?.textContent.includes("opposite corner"));
+  await page.mouse.click(cx - box.width * 0.1, cy - box.height * 0.1);
+  await page.waitForFunction((n) => (JSON.parse(localStorage.getItem("neobox.editor.draft") ?? "{}").b ?? []).length === n + 1, bodiesBefore);
+  await page.keyboard.press("Enter");
+  await page.waitForFunction((n) => (JSON.parse(localStorage.getItem("neobox.editor.draft") ?? "{}").b ?? []).length === n + 2, bodiesBefore);
+  const x0 = (await draftBodies()).at(-1)["2"];
+  await page.keyboard.press("Shift+ArrowRight");
+  await page.waitForFunction(
+    (x) => {
+      const v = (JSON.parse(localStorage.getItem("neobox.editor.draft") ?? "{}").b ?? []).at(-1)?.["2"];
+      return typeof v === "number" && Math.abs(v - (x + 10)) < 1e-3;
+    },
+    x0,
+  );
 
   // Built-in maps from the menu (the map has content now: confirm replacing it).
   await button(page, "Menu").click();

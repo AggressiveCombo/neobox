@@ -25,7 +25,7 @@ import {
   shapeColor,
   withField,
 } from "./schema";
-import { type Ref, getList, isCircle, kindLabel, mergeBodies, patchEntity, patchShape, setShapeColor } from "./model";
+import { type Ref, getList, isCircle, kindLabel, mergeBodies, patchEntity, patchShape, setShapeColor, setShapeOutline, shapeOutline } from "./model";
 
 type Value = number | boolean | string;
 type Apply = (v: Value) => void;
@@ -544,6 +544,39 @@ function shapesBlock(doc: Obj, bodyIdx: number, commit: (next: Obj) => void): HT
   );
 }
 
+/** Numeric X/Y fields for each point of a polygon shape: the keyboard route to the vertex drag. Shape-relative, like the stored outline. */
+function pointFields(doc: Obj, bodyIdx: number, si: number, shape: Obj, commit: (next: Obj) => void): HTMLElement {
+  const outline = shapeOutline(shape);
+  const axis = (k: number, which: "x" | "y", value: number): HTMLElement => {
+    const input = h("input", {
+      type: "number",
+      step: 0.5,
+      value: String(Math.round(value * 1e6) / 1e6),
+      "aria-label": `Point ${k + 1} ${which.toUpperCase()}`,
+      onchange: (e: Event) => {
+        const el = e.target as HTMLInputElement;
+        const n = Number(el.value);
+        if (!Number.isFinite(n)) return;
+        const q = outline[k]!;
+        const moved = which === "x" ? { x: n, y: q.y } : { x: q.x, y: n };
+        try {
+          commit(setShapeOutline(doc, bodyIdx, si, outline.map((p, i) => (i === k ? moved : p))));
+        } catch {
+          // Not a simple polygon: keep the stored outline and show it again.
+          el.value = String(value);
+        }
+      },
+    });
+    return h("label", { class: "field point-field" }, h("span", { class: "field-label" }, which.toUpperCase()), input);
+  };
+  return h(
+    "details",
+    { class: "inspector-points" },
+    h("summary", null, `Points (${outline.length})`),
+    ...outline.map((p, k) => h("div", { class: "point-row" }, h("span", { class: "field-label" }, `Point ${k + 1}`), axis(k, "x", p.x), axis(k, "y", p.y))),
+  );
+}
+
 function shapeBlock(doc: Obj, bodyIdx: number, body: Obj, si: number, shape: Obj, commit: (next: Obj) => void): HTMLElement {
   const set = (patch: Obj): void => commit(patchShape(doc, bodyIdx, si, patch));
   const circle = isCircle(shape);
@@ -592,6 +625,7 @@ function shapeBlock(doc: Obj, bodyIdx: number, body: Obj, si: number, shape: Obj
     h("p", { class: "field-label" }, `Shape ${si + 1}: ${label}`),
     h("label", { class: "field shape-row" }, h("span", { class: "field-label" }, "Colour"), colour),
     ...fs.map((f) => fieldRow(f, readField(shape, f, SHAPE_DEFAULTS), (v) => set({ [f.key]: stored(f, v) }))),
+    ...(circle ? [] : [pointFields(doc, bodyIdx, si, shape, commit)]),
     ...overrides,
   );
 }
