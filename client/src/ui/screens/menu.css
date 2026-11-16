@@ -34,13 +34,14 @@
   gap: 2px;
 }
 
-/* Square tool buttons: 40px, no fill until hovered or pressed (button.quiet). */
-.home-tool {
+/* Square tool buttons: 48px, the touch floor, at every width. The selector beats button.icon
+   (style.css), whose width is --control, which only reaches 48 under a coarse pointer. */
+button.icon.home-tool {
   position: relative;
   display: inline-grid;
   place-items: center;
-  width: 40px;
-  height: 40px;
+  width: 48px;
+  height: 48px;
   padding: 0;
 }
 
@@ -54,6 +55,7 @@ button.home-account {
   font-size: var(--step-small);
   font-weight: 500;
   white-space: nowrap;
+  min-height: 48px;
 }
 
 .home-account .avatar {
@@ -125,7 +127,7 @@ button.home-account {
 .home-name input.home-name-input {
   min-width: 0;
   width: 12em;
-  min-height: 0;
+  min-height: 48px;
   padding: 2px 0;
   border: 0;
   border-bottom: 1px solid transparent;
@@ -341,7 +343,8 @@ button.home-privacy {
 
 button.home-privacy {
   padding: 0;
-  min-height: 0;
+  min-width: 48px;
+  min-height: 48px;
   background: none;
 }
 
