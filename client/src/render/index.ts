@@ -24,7 +24,8 @@ export async function createRenderer(host: HTMLElement, onLost: () => void): Pro
   try {
     return await createWebGpuRenderer(gpuCanvas, onLost, prefs.value.antialias);
   } catch (err) {
-    console.warn("neobox: WebGPU unavailable, using WebGL2", err);
+    // an expected path on browsers without WebGPU, not a problem
+    console.info("neobox: WebGPU unavailable, using WebGL2", err);
     gpuCanvas.remove();
   }
   const glCanvas = appendCanvas(host);
