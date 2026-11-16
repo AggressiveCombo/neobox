@@ -447,13 +447,14 @@ fn take_name(text: &str, names: &[&str]) -> Option<(String, String)> {
     best.and_then(|n| text.get(n.len()..).map(|rest| (n.to_string(), rest.trim().to_string())))
 }
 
-/// Full state for a player at the current tick (see `ServerMsg::Snapshot`).
-fn snapshot_msg(g: &Game, id: u32) -> ServerMsg {
+/// Full state for a player at the current tick (see `ServerMsg::Snapshot`). `you` is set only
+/// while `playing`: a spectator has no seat in the engine, so the client must not treat it as one.
+fn snapshot_msg(g: &Game, id: u32, playing: bool) -> ServerMsg {
     ServerMsg::Snapshot {
         start: g.m.start.clone(),
         tick: g.m.tick,
         state: base64::engine::general_purpose::STANDARD.encode(g.m.snapshot()),
-        you: Some(id),
+        you: playing.then_some(id),
         held: g.m.held_masks(),
     }
 }
@@ -757,7 +758,7 @@ impl Room {
         if let Some(g) = self.game.as_ref() {
             p.ack = g.m.tick;
             p.last_sent = None;
-            p.send(Out::Text(json(&snapshot_msg(g, id))));
+            p.send(Out::Text(json(&snapshot_msg(g, id, p.in_match))));
         }
     }
 
@@ -1249,7 +1250,7 @@ impl Room {
                 let Some(i) = self.players.iter().position(|p| p.id == id) else { return };
                 let Some(g) = self.game.as_mut() else { return };
                 let tick = g.m.tick;
-                let snap = snapshot_msg(g, id);
+                let snap = snapshot_msg(g, id, self.players[i].in_match);
                 let p = &mut self.players[i];
                 p.text(&snap);
                 p.ack = tick;
@@ -1326,6 +1327,11 @@ impl Room {
                     g.m.join(id, team as f64);
                 }
                 p.in_match = team != TEAM_SPECTATOR;
+                // the client learns its seat from a snapshot: `you` is set only while playing
+                let snap = snapshot_msg(g, id, p.in_match);
+                p.text(&snap);
+                p.ack = g.m.tick;
+                p.last_sent = None;
             }
         }
         self.broadcast_room();
@@ -1391,7 +1397,7 @@ impl Room {
             p.ack = start.start_tick;
             p.last_sent = None;
             p.margin16 = 0;
-            p.text(&ServerMsg::MatchStart { start: start.clone(), you: Some(p.id) });
+            p.text(&ServerMsg::MatchStart { start: start.clone(), you: p.in_match.then_some(p.id) });
         }
         let now = Instant::now();
         self.game = Some(Game {
