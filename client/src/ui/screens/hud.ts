@@ -507,7 +507,7 @@ export const hudScreen: HudFactory = (ctx) => {
     statsRows.transport.value.textContent = s.transport === "udp" ? "WebRTC" : "WebSocket";
     statsRows.fps.value.textContent = String(Math.round(s.fps));
     statsRows.ping.value.textContent = s.pingMs < 0 ? "-" : `${Math.round(s.pingMs)} ms`;
-    statsRows.rtt.value.textContent = `${Math.round(s.rttMs)} ms`;
+    statsRows.rtt.value.textContent = s.rttMs < 0 ? "-" : `${Math.round(s.rttMs)} ms`;
     statsRows.predDepth.value.textContent = `${s.predDepth} ticks`;
     statsRows.rollbacks.value.textContent = `${s.rollbacksPerSec.toFixed(1)}/s`;
   }

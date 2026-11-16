@@ -44,11 +44,11 @@ Strings are UTF-8. Every call is synchronous and cheap except where noted.
 | `nb_match_start` | `(json: u32, json_len: u32, local: i32, now_ms: f64) -> i32` | Start a session from the `start` object of a `match_start` message (JSON text). `local` = your player id, or `-1` to spectate. 0 = ok. |
 | `nb_match_snapshot` | `(json: u32, json_len: u32, local: i32, tick: u32, snap: u32, snap_len: u32, now_ms: f64) -> i32` | Same, from a `snapshot` message (`state` is base64: decode it to bytes first). |
 | `nb_match_end` | `()` | Drop the session. |
-| `nb_server_frame` | `(ptr: u32, len: u32) -> i32` | Feed one binary server frame. Returns 0, or 1 if a resync is needed (send `{"t":"resync"}`). |
+| `nb_server_frame` | `(ptr: u32, len: u32, now_ms: f64) -> i32` | Feed one binary server frame received at `now_ms` (`performance.now()`, the clock pings are stamped with). Returns 0, or 1 if a resync is needed (send `{"t":"resync"}`). |
 | `nb_frame` | `(now_ms: f64, mask: u32) -> u32` | Once per animation frame: advance the tick clock, apply the local input mask (bits below), predict, and build the frame buffer. Returns the length of the outgoing binary frame at `nb_out_ptr()` (0 = nothing to send). |
 | `nb_out_ptr` | `() -> u32` | Outgoing binary frame (valid until the next call). |
 | `nb_frame_ptr`/`nb_frame_len` | `() -> u32` | Frame buffer (layout below; length in bytes). |
-| `nb_ping` | `(now_ms: f64) -> u32` | Build a ping frame (send every ~1 s); returns its length at `nb_out_ptr()`. |
+| `nb_ping` | `(now_ms: f64) -> u32` | Build a ping frame (send every ~1 s, stamped with `performance.now()`); returns its length at `nb_out_ptr()`. |
 | `nb_map_preview` | `(code: u32, code_len: u32) -> i32` | Decode a Hitbox map code and build a frame buffer of its lobby layout (players absent). 0 = ok; errors set the message. |
 | `nb_map_encode` | `(json: u32, json_len: u32) -> i32` | Compact map JSON → map code; result string at `nb_out_ptr()`, length returned. |
 

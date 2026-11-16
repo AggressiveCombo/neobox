@@ -37,7 +37,8 @@ struct App {
     next_seq: u32,
     sound_tick: u32,
     sounds: Vec<SoundOut>,
-    rtt_ms: f64,
+    /// app-level round-trip time; None until the first pong
+    rtt_ms: Option<f64>,
     rtt_jitter: f64,
     rollback_window: (f64, u64),
     rollback_rate: f32,
@@ -191,7 +192,7 @@ fn begin(a: &mut App, mut session: ClientSession, now_ms: f64) {
     let hz = session.start.tick_hz;
     let tick = session.head() as f64;
     // start ahead of the server by half a round trip plus a small margin
-    let lead = (a.rtt_ms / 2000.0) * hz + 2.0;
+    let lead = (a.rtt_ms.unwrap_or(0.0) / 2000.0) * hz + 2.0;
     let mut clock = TickClock::new(hz, tick, lead);
     clock.target_margin = target_margin(a.rtt_jitter, hz);
     a.clock = Some(clock);
@@ -275,9 +276,10 @@ pub extern "C" fn nb_match_end() {
 }
 
 /// # Safety
-/// `ptr`/`len` must describe readable memory.
+/// `ptr`/`len` must describe readable memory. `now_ms` is the receipt time on
+/// the same clock the pings are stamped with (`performance.now()`).
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn nb_server_frame(ptr: u32, len: u32) -> i32 {
+pub unsafe extern "C" fn nb_server_frame(ptr: u32, len: u32, now_ms: f64) -> i32 {
     let b = unsafe { bytes(ptr, len) };
     with(|a| {
         let Ok(f) = ServerFrame::decode(b) else { return fail(a, "bad server frame") };
@@ -304,12 +306,13 @@ pub unsafe extern "C" fn nb_server_frame(ptr: u32, len: u32) -> i32 {
                 0
             }
             ServerFrame::Pong { client_time, .. } => {
-                let rtt = (a.last_now - client_time).max(0.0);
-                if a.rtt_ms == 0.0 {
-                    a.rtt_ms = rtt;
-                } else {
-                    a.rtt_jitter += ((rtt - a.rtt_ms).abs() - a.rtt_jitter) * 0.2;
-                    a.rtt_ms += (rtt - a.rtt_ms) * 0.2;
+                let rtt = (now_ms - client_time).max(0.0);
+                match a.rtt_ms {
+                    None => a.rtt_ms = Some(rtt),
+                    Some(prev) => {
+                        a.rtt_jitter += ((rtt - prev).abs() - a.rtt_jitter) * 0.2;
+                        a.rtt_ms = Some(prev + (rtt - prev) * 0.2);
+                    }
                 }
                 if let (Some(c), Some(s)) = (a.clock.as_mut(), a.session.as_ref()) {
                     c.target_margin = target_margin(a.rtt_jitter, s.start.tick_hz);
@@ -323,16 +326,15 @@ pub unsafe extern "C" fn nb_server_frame(ptr: u32, len: u32) -> i32 {
 #[unsafe(no_mangle)]
 pub extern "C" fn nb_ping(now_ms: f64) -> u32 {
     with(|a| {
-        a.last_now = a.last_now.max(now_ms);
         a.out = ClientFrame::Ping { client_time: now_ms }.encode();
         a.out.len() as u32
     })
 }
 
-/// Round-trip time estimate in milliseconds.
+/// Round-trip time estimate in milliseconds; -1 until the first pong.
 #[unsafe(no_mangle)]
 pub extern "C" fn nb_rtt() -> f64 {
-    with(|a| a.rtt_ms)
+    with(|a| a.rtt_ms.unwrap_or(-1.0))
 }
 
 #[unsafe(no_mangle)]

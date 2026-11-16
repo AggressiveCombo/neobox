@@ -124,7 +124,7 @@ export function initialState(): AppState {
     chat: [],
     inMatch: false,
     tickHz: 0,
-    stats: { transport: "ws", pingMs: -1, rttMs: 0, predDepth: 0, rollbacksPerSec: 0, fps: 0 },
+    stats: { transport: "ws", pingMs: -1, rttMs: -1, predDepth: 0, rollbacksPerSec: 0, fps: 0 },
     showStats: false,
     showScores: false,
     replayReady: false,

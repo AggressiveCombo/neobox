@@ -72,10 +72,10 @@ export class MatchLoop {
   onServer(bytes: Uint8Array): void {
     if (!this.running) return;
     try {
-      if (this.d.engine.serverFrame(bytes)) this.d.net.send({ t: "resync" });
+      const now = performance.now();
+      if (this.d.engine.serverFrame(bytes, now)) this.d.net.send({ t: "resync" });
       // With no animation frames (hidden page) nothing else acknowledges the
       // server's ticks, and the server would resend a snapshot every few seconds.
-      const now = performance.now();
       if (now - this.lastStep > STALL_MS) this.d.net.sendBinary(this.d.engine.frame(now, this.d.input.mask()));
     } catch (err) {
       this.fail(err);
@@ -108,7 +108,7 @@ export class MatchLoop {
 
     if (now - this.lastPing >= PING_MS) {
       this.lastPing = now;
-      net.sendBinary(engine.ping(now));
+      net.sendBinary(engine.ping(performance.now()));
     }
 
     const scene = this.d.present(this.d.names(), this.d.store.state.tickHz);

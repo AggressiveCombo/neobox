@@ -23,7 +23,7 @@ export interface NeoboxExports {
     nowMs: number,
   ): number;
   nb_match_end(): void;
-  nb_server_frame(ptr: number, len: number): number;
+  nb_server_frame(ptr: number, len: number, nowMs: number): number;
   nb_frame(nowMs: number, mask: number): number;
   nb_out_ptr(): number;
   nb_frame_ptr(): number;
@@ -130,11 +130,11 @@ export class Engine {
     this.x.nb_match_end();
   }
 
-  /** Feed one binary server frame. Returns true when a resync must be requested. */
-  serverFrame(data: Uint8Array): boolean {
+  /** Feed one binary server frame received at `nowMs` (performance.now()). Returns true when a resync must be requested. */
+  serverFrame(data: Uint8Array, nowMs: number): boolean {
     const b = this.alloc(data);
     try {
-      const rc = this.x.nb_server_frame(b.ptr, b.len);
+      const rc = this.x.nb_server_frame(b.ptr, b.len, nowMs);
       if (rc < 0) throw new EngineError(this.lastError() || "server frame rejected");
       return rc === 1;
     } finally {
