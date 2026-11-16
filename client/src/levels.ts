@@ -2,7 +2,7 @@
 // Accounts keep their experience on the server; guests keep theirs in this
 // browser, capped below level 2 ("create an account to level up").
 
-const GUEST_XP_KEY = "neobox.guestXp";
+import { GUEST_XP_KEY } from "./storage-keys";
 
 /** Level of an experience total: floor(sqrt(xp) / 10) + 1. */
 export function levelOf(xp: number): number {

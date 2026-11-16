@@ -1,10 +1,19 @@
 // Privacy notice content. Plain data: the screen that shows it renders these strings.
 // Keep it in step with what the server stores (crates/store, crates/server).
 
+import { STORAGE_KEYS, type StorageKey } from "./storage-keys";
+
 export const PRIVACY_UPDATED = "2026-11-15";
 
 // Operator address (placeholder): confirm before release.
 export const PRIVACY_CONTACT = "neobox@aggressivecombo.com";
+
+/** The keys kept in one storage area, each with what it holds: "a (x), b (y) and c (z)". */
+function describe(scope: StorageKey["scope"]): string {
+  const items = STORAGE_KEYS.filter((k) => k.scope === scope).map((k) => `${k.key} (${k.purpose})`);
+  const last = items.pop() ?? "";
+  return items.length > 0 ? `${items.join(", ")} and ${last}` : last;
+}
 
 export const PRIVACY_SECTIONS: { heading: string; paragraphs: string[] }[] = [
   {
@@ -30,8 +39,8 @@ export const PRIVACY_SECTIONS: { heading: string; paragraphs: string[] }[] = [
   {
     heading: "Data kept in your browser",
     paragraphs: [
-      "localStorage on your device holds neobox.staySignedIn, neobox.name, neobox.prefs (settings used while you are a guest), neobox.guestXp (XP earned as a guest), neobox.newsSeen (news items you have read) and neobox.editor.draft (an unsaved map editor draft). Signed-in settings are also synced to the server.",
-      "sessionStorage holds neobox.seat for each tab: the room you are seated in and a resume token, so a reload can rejoin the match. It is cleared when the tab closes. Clearing site data removes everything listed here.",
+      `localStorage on your device holds ${describe("local")}. Signed-in settings are also synced to the server.`,
+      `sessionStorage holds ${describe("session")}. Each tab has its own. It is cleared when the tab closes. Clearing site data removes everything listed here.`,
     ],
   },
   {

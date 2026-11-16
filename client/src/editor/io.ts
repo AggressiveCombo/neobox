@@ -3,8 +3,8 @@
 // encoded, so this module only checks the outer shape.
 
 import { type Obj, LIST_KEYS, asObj } from "./schema";
+import { DRAFT_KEY } from "../storage-keys";
 
-export const DRAFT_KEY = "neobox.editor.draft";
 
 /** Check the outer shape of a map and keep every other key and the key order. */
 export function normalise(value: unknown): Obj {

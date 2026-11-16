@@ -3,6 +3,8 @@
 // server stores the JSON as-is). Every module reads `prefs.value` and
 // subscribes for changes; only the settings screen writes.
 
+import { PREFS_KEY } from "./storage-keys";
+
 export type Action = "left" | "right" | "up" | "down" | "push" | "rocket" | "bat" | "grab";
 
 export const ACTIONS: { action: Action; label: string; bit: number }[] = [
@@ -106,8 +108,6 @@ export const DEFAULT_PREFS: Prefs = {
   readableFont: false,
 };
 
-const STORAGE_KEY = "neobox.prefs";
-
 type PrefsListener = (next: Prefs, prev: Prefs) => void;
 
 function clamp(v: unknown, lo: number, hi: number, dflt: number): number {
@@ -157,7 +157,7 @@ class PrefsStore {
   constructor() {
     let stored: unknown = null;
     try {
-      stored = JSON.parse(window.localStorage.getItem(STORAGE_KEY) ?? "null");
+      stored = JSON.parse(window.localStorage.getItem(PREFS_KEY) ?? "null");
     } catch {
       stored = null;
     }
@@ -169,7 +169,7 @@ class PrefsStore {
     const prev = this.value;
     this.value = sanitizePrefs({ ...prev, ...patch });
     try {
-      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(this.value));
+      window.localStorage.setItem(PREFS_KEY, JSON.stringify(this.value));
     } catch {
       // storage full or blocked (private mode): keep the session copy
     }

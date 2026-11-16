@@ -5,7 +5,8 @@
 import type { AppCtx } from "./ctx";
 import { NAME_RE } from "./protocol";
 import { prefs, sanitizePrefs } from "./prefs";
-import { NAME_STORAGE_KEY, type Account, type AppState, type Screen } from "./state";
+import { NAME_STORAGE_KEY, REMEMBER_KEY } from "./storage-keys";
+import { type Account, type AppState, type Screen } from "./state";
 
 export class ApiError extends Error {
   constructor(
@@ -63,9 +64,6 @@ export async function request<T>(method: string, path: string, body?: unknown, k
 
 /** The signed-in account, or null for guests. */
 export const fetchMe = (): Promise<Account | null> => request<Account | null>("GET", "/api/account/me");
-
-/** This browser's "Stay signed in" choice, so a password change keeps the same kind of session. */
-const REMEMBER_KEY = "neobox.staySignedIn";
 
 /** Sign in or register; `remember` keeps the session after the browser closes (the original's "Stay logged in"). */
 async function startSession(path: string, name: string, password: string, remember: boolean): Promise<Account> {

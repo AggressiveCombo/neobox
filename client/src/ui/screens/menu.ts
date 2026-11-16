@@ -10,7 +10,8 @@ import type { ScreenFactory } from "../../ctx";
 import { levelOf } from "../../levels";
 import { MAX_NAME_LEN, NAME_RE } from "../../protocol";
 import { prefs } from "../../prefs";
-import { type Account, type AppState, NAME_STORAGE_KEY, type Screen } from "../../state";
+import { type Account, type AppState, type Screen } from "../../state";
+import { NAME_STORAGE_KEY, TRAINING_SEEN_KEY } from "../../storage-keys";
 import { type Child, h } from "../dom";
 import { type IconName, icon } from "../icons";
 import { avatar } from "../kit";
@@ -21,8 +22,6 @@ import { REPO_URL } from "./about";
 const STATS_REFRESH_MS = 10_000;
 /** Tilt of the home square, degrees. */
 const SQUARE_ANGLE = -18;
-/** localStorage flag: the first-visit "Start here" badge on Training was dismissed. */
-const TRAINING_SEEN_KEY = "neobox.hintSeen";
 
 /** The destinations, in index order. The description is the button's tooltip. */
 const DESTINATIONS: { label: string; screen: Screen; icon: IconName; desc: string }[] = [

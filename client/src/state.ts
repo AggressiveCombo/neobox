@@ -108,9 +108,6 @@ export class Store<T extends object> {
 }
 
 export const CHAT_LIMIT = 200;
-export const NAME_STORAGE_KEY = "neobox.name";
-/** sessionStorage: this tab's room seat `{ room, token }`, so a reload resumes it. */
-export const SEAT_STORAGE_KEY = "neobox.seat";
 
 export function initialState(): AppState {
   return {
