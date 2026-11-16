@@ -139,7 +139,11 @@ export async function launchEngine(name) {
   const pw = await import("playwright-core");
   let browser;
   if (name === "chromium") browser = await launchBrowser();
-  else if (name === "firefox") browser = await pw.firefox.launch({ headless: true, firefoxUserPrefs: { "media.volume_scale": "0.0" } });
+  else if (name === "firefox") {
+    // media.cubeb.force_null_context: audio renders into a null device, so nothing reaches the speakers.
+    const firefoxUserPrefs = { "media.volume_scale": "0.0", "media.cubeb.force_null_context": true };
+    browser = await pw.firefox.launch({ headless: true, firefoxUserPrefs });
+  }
   else if (name === "webkit") browser = await pw.webkit.launch({ headless: true });
   else throw new Error(`unknown engine ${name}`);
   if (name !== "chromium") onCleanup(() => browser.close());
