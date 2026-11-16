@@ -123,7 +123,7 @@
 .friend-avatar .avatar {
   width: 40px;
   height: 40px;
-  font-size: 16px;
+  font-size: 1rem;
 }
 
 /* A small green square at the avatar's corner, shown only while the friend is online. */

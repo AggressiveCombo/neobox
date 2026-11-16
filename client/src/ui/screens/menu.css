@@ -244,24 +244,28 @@ button.home-account {
   pointer-events: none;
 }
 
-/* The index: destinations as icon tiles, four to a row. */
+/* The index: destinations as icon tiles, at most four to a row. A tile is never narrower than
+   5rem, so larger text (the Text size setting, browser font size, zoom) drops to three or two
+   columns instead of clipping the labels. */
 .home-index {
+  --tile-gap: 8px;
   grid-column: 1;
   grid-row: 4;
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 8px;
+  grid-template-columns: repeat(auto-fit, minmax(max(5rem, calc((100% - 3 * var(--tile-gap)) / 4)), 1fr));
+  gap: var(--tile-gap);
   align-self: start;
 }
 
-/* Top padding leaves room for the "Start here" chip in the corner. */
+/* Top padding leaves room for the "Start here" chip in the corner: the chip's line box
+   (0.6875rem x 1.4) plus its 6px offset and a gap, so it never sits on the icon at any text size. */
 button.home-row-btn {
   position: relative;
   flex-direction: column;
   justify-content: center;
   gap: 8px;
   min-height: 92px;
-  padding: 28px 6px 12px;
+  padding: calc(0.9625rem + 14px) 6px 12px;
   background: var(--surface);
   color: var(--ink);
   font-size: var(--step-small);
@@ -289,7 +293,8 @@ button.home-row-btn:hover:not(:disabled) .home-row-label {
 }
 
 .home-row-label {
-  white-space: nowrap;
+  max-width: 100%;
+  text-align: center;
 }
 
 /* First visit only: a small chip in the tile's top-right corner, gone once Training is opened. */
@@ -300,7 +305,7 @@ button.home-row-btn:hover:not(:disabled) .home-row-label {
   padding: 1px 5px;
   background: var(--accent);
   color: var(--accent-ink);
-  font-size: 10px;
+  font-size: 0.6875rem;
   font-weight: 600;
   letter-spacing: 0.02em;
   line-height: 1.4;
@@ -374,15 +379,14 @@ button.home-privacy {
   }
 
   .home-index {
+    --tile-gap: 6px;
     order: 2;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-    gap: 6px;
     align-self: stretch;
   }
 
   button.home-row-btn {
     min-height: 84px;
-    padding: 24px 4px 10px;
+    padding: calc(0.9625rem + 12px) 4px 10px;
   }
 
   .menu-art {
@@ -399,12 +403,5 @@ button.home-privacy {
 
   .home-foot {
     order: 4;
-  }
-}
-
-/* Very narrow phones: the index tiles go two to a row. */
-@media (max-width: 360px) {
-  .home-index {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }

@@ -319,7 +319,7 @@ button,
 .page-head h1 {
   flex: 1;
   min-width: 0;
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
 }
 
 .page-head .page-actions {
@@ -988,7 +988,7 @@ table.data .r {
   display: inline-flex;
   align-items: center;
   gap: 10px;
-  font-size: 22px;
+  font-size: 1.375rem;
   font-weight: 500;
   letter-spacing: -0.05em;
   line-height: 1;

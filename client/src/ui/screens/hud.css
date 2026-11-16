@@ -146,7 +146,7 @@
 
 .hud-link-kind {
   color: var(--hud-muted);
-  font-size: 13px;
+  font-size: 0.8125rem;
 }
 
 .hud-link-bad {
@@ -257,7 +257,7 @@
 
 .hud-table th {
   color: var(--hud-muted);
-  font-size: 13px;
+  font-size: 0.8125rem;
   font-weight: 500;
   border-bottom: 2px solid rgb(255 255 255 / 0.2);
 }
@@ -401,7 +401,7 @@
   padding: 2px 8px;
   background: var(--hud-solid);
   color: var(--hud-muted);
-  font-size: 13px;
+  font-size: 0.8125rem;
 }
 
 .hud-root .hud-chat-btn[aria-expanded="true"] {
@@ -455,7 +455,7 @@
 }
 
 .hud-xp-limit {
-  font-size: 13px;
+  font-size: 0.8125rem;
   font-weight: 500;
 }
 
@@ -500,7 +500,7 @@
   min-height: 44px;
   padding: 0 8px;
   background: transparent;
-  font-size: 20px;
+  font-size: 1.25rem;
 }
 
 .hud-spectate-prev svg {
@@ -753,7 +753,7 @@
   .hud-stats {
     min-width: 0;
     padding: 4px 8px;
-    font-size: 13px;
+    font-size: 0.8125rem;
   }
 
   .hud-chat-log {
