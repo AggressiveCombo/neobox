@@ -111,15 +111,30 @@ export async function muteAudio(context) {
         return connect.call(this, dest, ...rest);
       };
     }
-    const play = HTMLMediaElement.prototype.play;
-    HTMLMediaElement.prototype.play = function (...a) {
-      this.muted = true;
+    // Media elements (menu/match music, the YouTube jukebox inside its iframe) stay muted
+    // whatever the page sets: every write to muted/volume stores muted=true and volume=0 through
+    // the native setters, and play() forces both first.
+    const proto = HTMLMediaElement.prototype;
+    const nativeMuted = Object.getOwnPropertyDescriptor(proto, "muted");
+    const nativeVolume = Object.getOwnPropertyDescriptor(proto, "volume");
+    const silence = (el) => {
+      nativeMuted.set.call(el, true);
+      nativeVolume.set.call(el, 0);
+    };
+    Object.defineProperty(proto, "muted", { configurable: true, get() { return nativeMuted.get.call(this); }, set() { silence(this); } });
+    Object.defineProperty(proto, "volume", { configurable: true, get() { return nativeVolume.get.call(this); }, set() { silence(this); } });
+    const play = proto.play;
+    proto.play = function (...a) {
+      silence(this);
       return play.apply(this, a);
     };
   });
 }
 
-/** Any engine ("chromium" | "firefox" | "webkit"), headless and muted; closed at exit. Use with muteAudio(context). */
+/**
+ * Any engine ("chromium" | "firefox" | "webkit"), headless and muted; closed at exit. Every
+ * context it creates (newContext, newPage) is passed through muteAudio automatically.
+ */
 export async function launchEngine(name) {
   const pw = await import("playwright-core");
   let browser;
@@ -128,6 +143,13 @@ export async function launchEngine(name) {
   else if (name === "webkit") browser = await pw.webkit.launch({ headless: true });
   else throw new Error(`unknown engine ${name}`);
   if (name !== "chromium") onCleanup(() => browser.close());
+  const newContext = browser.newContext.bind(browser);
+  browser.newContext = async (opts) => {
+    const ctx = await newContext(opts);
+    await muteAudio(ctx);
+    return ctx;
+  };
+  browser.newPage = async (opts) => (await browser.newContext(opts)).newPage();
   return browser;
 }
 
