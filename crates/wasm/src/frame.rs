@@ -177,6 +177,13 @@ fn lerp_angle(a: f64, b: f64, t: f64) -> f64 {
     a + d * t
 }
 
+/// An aim angle at `t`: the atan2 of the lerped sine and cosine (the original's launcher
+/// update), so a turn across ±π takes the short way.
+fn lerp_aim(a: f64, b: f64, t: f64) -> f64 {
+    let ((s0, c0), (s1, c1)) = (a.sin_cos(), b.sin_cos());
+    lerp(s0, s1, t).atan2(lerp(c0, c1, t))
+}
+
 impl FrameBuilder {
     fn meshes(&mut self, def: &std::sync::Arc<BodyDef>) -> &Vec<Mesh> {
         let key = std::sync::Arc::as_ptr(def) as usize;
@@ -311,9 +318,7 @@ impl FrameBuilder {
         if !(frame > -1.0 && frame < fire + hide) {
             return;
         }
-        let sin = lerp(prev_aim.sin(), p.bat_aim.sin(), t);
-        let cos = lerp(prev_aim.cos(), p.bat_aim.cos(), t);
-        let rotation = sin.atan2(cos) + if frame < fire { std::f64::consts::PI } else { 0.0 };
+        let rotation = lerp_aim(prev_aim, p.bat_aim, t) + if frame < fire { std::f64::consts::PI } else { 0.0 };
         // the head grows from 0.4 to 1 over the hold window (the original's `cs` easing)
         let o = 1.0 - 0.6 * (frame.min(hold) / hold * std::f64::consts::FRAC_PI_2).cos();
         let flip = if (std::f64::consts::FRAC_PI_2..=1.5 * std::f64::consts::PI).contains(&rotation) { -1.0 } else { 1.0 };
@@ -422,16 +427,16 @@ impl FrameBuilder {
             self.bat_head(pp, p, t, gs, px, py);
             let col = player_color(p.id, p.team);
             if p.rocket_frame >= 0.0 {
-                let a = p.rocket_aim;
-                let len = 1.2 + p.rocket_frame.min(8.0) * 0.08;
+                let (charge, a) = interp_rocket(pp, p, t);
+                let len = 1.2 + charge.min(8.0) * 0.08;
                 self.quad_line(px, py, px + len * a.cos(), py + len * a.sin(), 0.07, rgba(col, 0.75));
             }
             if p.egg_frame > 0.0 {
-                let a = p.egg_aim;
+                let a = interp_egg_aim(pp, p, t);
                 self.quad_line(px, py, px + 1.4 * a.cos(), py + 1.4 * a.sin(), 0.07, rgba(col, 0.75));
             }
             if p.bat_frame >= 0.0 && p.bat_frame < gs.bat_fire_on + gs.bat_fire_frames {
-                let a = p.bat_aim;
+                let a = pp.map_or(p.bat_aim, |pp| lerp_aim(pp.bat_aim, p.bat_aim, t));
                 let firing = p.bat_frame >= gs.bat_fire_on;
                 let r = gs.bat_range;
                 let span = gs.bat_angle.to_radians();
@@ -448,8 +453,8 @@ impl FrameBuilder {
                 }
             }
         }
-        for (_, q) in cur.projectiles.iter() {
-            self.projectile(None, q, t);
+        for (id, q) in cur.projectiles.iter() {
+            self.projectile(prev.projectiles.get(id), q, t);
         }
         for (_, e) in cur.effects.iter() {
             self.effect(e);
@@ -520,7 +525,7 @@ impl FrameBuilder {
                 f(rocket),
                 f(rocket_rot),
                 f(egg),
-                f(p.egg_aim),
+                f(interp_egg_aim(prev.players.get(id), p, t)),
             ]);
         }
         w[5] = sounds.len() as u32;
@@ -647,13 +652,15 @@ fn interp_angle(prev: Option<&Player>, p: &Player, t: f64) -> f64 {
 }
 
 /// Rocket charge and aim of `p` at `t` (the original's launcher update): the charge is lerped and
-/// floored at 0, the aim is the atan2 of the lerped sine and cosine. The caller maps idle (-1) to hidden.
+/// floored at 0, the aim follows `lerp_aim`. The caller maps idle (-1) to hidden.
 fn interp_rocket(prev: Option<&Player>, p: &Player, t: f64) -> (f64, f64) {
     let (pf, pa) = prev.map_or((p.rocket_frame, p.rocket_aim), |pp| (pp.rocket_frame, pp.rocket_aim));
-    let charge = lerp(pf, p.rocket_frame, t).max(0.0);
-    let (s0, c0) = pa.sin_cos();
-    let (s1, c1) = p.rocket_aim.sin_cos();
-    (charge, lerp(s0, s1, t).atan2(lerp(c0, c1, t)))
+    (lerp(pf, p.rocket_frame, t).max(0.0), lerp_aim(pa, p.rocket_aim, t))
+}
+
+/// Egg aim of `p` at `t`, like the rocket's.
+fn interp_egg_aim(prev: Option<&Player>, p: &Player, t: f64) -> f64 {
+    prev.map_or(p.egg_aim, |pp| lerp_aim(pp.egg_aim, p.egg_aim, t))
 }
 
 /// Length fraction of the egg aim line (0 until the charge passes `delay1`, full after `delay1 + delay2`).
@@ -744,5 +751,21 @@ mod tests {
             let cold = mesh_summary(FrameBuilder::default().meshes(&new));
             assert_eq!(mesh_summary(warm.meshes(&new)), cold);
         }
+    }
+
+    #[test]
+    fn projectiles_are_drawn_between_ticks() {
+        let at = |x: f64| {
+            let mut s = State::default();
+            s.projectiles.insert(3, Projectile { x, y: 0.0, size: 1.0, shape: 0.0, ..Projectile::default() });
+            s
+        };
+        let (prev, cur) = (at(0.0), at(10.0));
+        let mut f = FrameBuilder::default();
+        f.build(&prev, &cur, 0.5, &GameSettings::default(), Meta::default(), &[]);
+        let xs: Vec<f32> = f.verts.chunks(3).map(|v| f32::from_bits(v[0])).collect();
+        assert!(!xs.is_empty());
+        let mid = xs.iter().sum::<f32>() / xs.len() as f32;
+        assert!((mid - 5.0).abs() < 0.01, "projectile centre {mid}, expected 5");
     }
 }
