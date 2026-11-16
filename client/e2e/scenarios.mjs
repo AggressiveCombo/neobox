@@ -132,6 +132,52 @@ async function settings(s) {
   return "jump rebind, volume, palette persisted";
 }
 
+async function accessibilityPrefs(s) {
+  const { page } = await s.open("desktop");
+  const openSettings = async () => {
+    await page.goto(s.base);
+    await menuName(page).waitFor();
+    await navTo(page, "Settings");
+    await page.getByRole("radiogroup", { name: "Motion", exact: true }).waitFor();
+  };
+  const choose = (group, option) =>
+    page.getByRole("radiogroup", { name: group, exact: true }).getByRole("radio", { name: option, exact: true }).click();
+  const rootData = (key) => page.evaluate((k) => document.documentElement.dataset[k], key);
+  const rootFontSize = () => page.evaluate(() => getComputedStyle(document.documentElement).fontSize);
+  const bodyFont = () => page.evaluate(() => getComputedStyle(document.body).fontFamily);
+
+  // The system's reduce-motion setting applies while the player has not chosen one.
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await openSettings();
+  check((await rootData("motion")) === "reduce", "system reduce-motion did not apply");
+  // The player's choice overrides the system both ways.
+  await choose("Motion", "Full");
+  check((await rootData("motion")) === "full", "Full did not override the system reduce-motion");
+  await page.emulateMedia({ reducedMotion: "no-preference" });
+  await choose("Motion", "Reduce");
+  check((await rootData("motion")) === "reduce", "Reduce did not override the system setting");
+  await openSettings();
+  check((await rootData("motion")) === "reduce", "Reduce did not persist across reload");
+
+  await choose("Text size", "150%");
+  check((await rootFontSize()) === "24px", `150% text size gave root font-size ${await rootFontSize()}`);
+  await openSettings();
+  check((await rootFontSize()) === "24px", "150% text size did not persist across reload");
+
+  await page.getByRole("switch", { name: /^Readable font/ }).check();
+  check((await rootData("font")) === "readable", "readable font did not apply");
+  check((await bodyFont()).includes("OpenDyslexic"), `body font is ${await bodyFont()}`);
+  await openSettings();
+  check(await page.getByRole("switch", { name: /^Readable font/ }).isChecked(), "readable font did not persist across reload");
+  check((await bodyFont()).includes("OpenDyslexic"), "readable font not applied after reload");
+
+  await button(page, "Reset to defaults").click();
+  await page.getByRole("dialog").getByRole("button", { name: "Reset everything", exact: true }).click();
+  check((await rootFontSize()) === "16px", "reset did not restore the text size");
+  check((await rootData("font")) === "default", "reset did not restore the font");
+  return "motion override, 150% text, readable font persisted; reset restores";
+}
+
 async function accounts(s) {
   const name = uniqueName("acct");
   const h = await s.open("desktop");
@@ -1011,6 +1057,7 @@ async function resyncKeepsMap(s) {
 export const scenarios = [
   { name: "menu", run: menu },
   { name: "settings", run: settings },
+  { name: "accessibility prefs", run: accessibilityPrefs },
   { name: "accounts", run: accounts },
   { name: "friends", run: friends },
   { name: "library", run: library },

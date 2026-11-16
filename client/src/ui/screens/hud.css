@@ -809,8 +809,6 @@
   }
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .hud-menu:not([hidden]) {
-    animation: none;
-  }
+:root[data-motion="reduce"] .hud-menu:not([hidden]) {
+  animation: none;
 }

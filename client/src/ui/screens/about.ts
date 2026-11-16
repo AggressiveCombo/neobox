@@ -56,6 +56,14 @@ export const THIRD_PARTY: AssetCredit[] = [
     sourceUrl: "https://github.com/marcologous/hanken-grotesk",
   },
   {
+    asset: "Readable typeface",
+    title: "OpenDyslexic",
+    author: "Abbie Gonzalez",
+    licence: "SIL Open Font License 1.1",
+    licenceUrl: "https://openfontlicense.org",
+    sourceUrl: "https://github.com/antijingoist/opendyslexic",
+  },
+  {
     asset: "Chat emoji names",
     title: "gemoji",
     author: "GitHub",

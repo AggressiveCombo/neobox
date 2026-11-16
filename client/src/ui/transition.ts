@@ -3,6 +3,7 @@
 // one fades out over it. Game views only cross-fade. Transform and opacity only.
 
 import type { Screen } from "../state";
+import { reducedMotion } from "./a11y";
 
 export type TransitionKind = "forward" | "back" | "fade";
 
@@ -53,7 +54,7 @@ export function playScreenTransition(
   kind: TransitionKind,
   scrollTop: number,
 ): void {
-  if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+  if (reducedMotion()) return;
   const inClasses = ["screen-in", `screen-in-${kind}`];
   entering.classList.add(...inClasses);
   const done = (e: AnimationEvent): void => {

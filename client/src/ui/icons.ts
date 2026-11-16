@@ -4,6 +4,7 @@
 // add an icon by pasting its SVG body under its Lucide name.
 
 const ICONS = {
+  accessibility: `<circle cx="16" cy="4" r="1"/><path d="m18 19 1-7-6 1"/><path d="m5 8 3-3 5.5 3-2.36 3.5"/><path d="M4.24 14.5a5 5 0 0 0 6.88 6"/><path d="M13.76 17.5a5 5 0 0 0-6.88-6"/>`,
   anchor: `<path d="M12 22V8"/><path d="M5 12H2a10 10 0 0 0 20 0h-3"/><circle cx="12" cy="5" r="3"/>`,
   "arrow-left": `<path d="m12 19-7-7 7-7"/><path d="M19 12H5"/>`,
   "arrow-right": `<path d="M5 12h14"/><path d="m12 5 7 7-7 7"/>`,

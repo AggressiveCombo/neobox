@@ -38,6 +38,12 @@ Third-party assets shipped with neobox, with their authors, licences and source 
 - Licence: SIL Open Font License 1.1, https://openfontlicense.org (copy in `client/public/fonts/LICENSE-hanken-grotesk.txt`)
 - Source: https://github.com/marcologous/hanken-grotesk (the latin and latin-ext WOFF2 subsets served by Google Fonts)
 
+### Readable typeface: `client/public/fonts/opendyslexic-*.woff2`
+
+- Typeface: OpenDyslexic, Copyright 2019 Abbie Gonzalez (Reserved Font Name OpenDyslexic)
+- Licence: SIL Open Font License 1.1, https://openfontlicense.org (copy in `client/public/fonts/LICENSE-opendyslexic.txt`)
+- Source: https://github.com/antijingoist/opendyslexic (regular and bold WOFF2)
+
 ## Images
 
 ### Country flags: `client/public/flags/`

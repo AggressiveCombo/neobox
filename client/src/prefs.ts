@@ -36,6 +36,10 @@ export type Palette = "default" | "deuteranopia" | "protanopia" | "tritanopia";
 export type Theme = "system" | "light" | "dark";
 export const THEMES: readonly Theme[] = ["system", "light", "dark"];
 
+/** Motion: "system" follows the device's reduce-motion setting; "reduce" or "full" overrides it. */
+export type Motion = "system" | "reduce" | "full";
+export const MOTIONS: readonly Motion[] = ["system", "reduce", "full"];
+
 export interface Prefs {
   keys: KeyBindings;
   /** 0..1 */
@@ -70,6 +74,12 @@ export interface Prefs {
   jukeboxVolume: number;
   /** Colour theme of the menus: follow the system, or always light or dark. */
   theme: Theme;
+  /** Motion: follow the system, or always reduce (no decorative motion) or always keep it. */
+  motion: Motion;
+  /** Menu text size, 1..1.5 (scales every rem-sized step). */
+  textScale: number;
+  /** Dyslexia-friendly typeface and wider spacing in the menus. */
+  readableFont: boolean;
 }
 
 export const DEFAULT_PREFS: Prefs = {
@@ -91,6 +101,9 @@ export const DEFAULT_PREFS: Prefs = {
   filterProfanity: true,
   jukeboxVolume: 0.5,
   theme: "system",
+  motion: "system",
+  textScale: 1,
+  readableFont: false,
 };
 
 const STORAGE_KEY = "neobox.prefs";
@@ -131,6 +144,9 @@ export function sanitizePrefs(raw: unknown): Prefs {
     filterProfanity: typeof o.filterProfanity === "boolean" ? o.filterProfanity : DEFAULT_PREFS.filterProfanity,
     jukeboxVolume: clamp(o.jukeboxVolume, 0, 1, DEFAULT_PREFS.jukeboxVolume),
     theme: THEMES.includes(o.theme as Theme) ? (o.theme as Theme) : DEFAULT_PREFS.theme,
+    motion: MOTIONS.includes(o.motion as Motion) ? (o.motion as Motion) : DEFAULT_PREFS.motion,
+    textScale: clamp(o.textScale, 1, 1.5, DEFAULT_PREFS.textScale),
+    readableFont: typeof o.readableFont === "boolean" ? o.readableFont : DEFAULT_PREFS.readableFont,
   };
 }
 

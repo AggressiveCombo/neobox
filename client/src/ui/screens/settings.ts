@@ -1,10 +1,10 @@
-// Settings: controls, sound, display, touch and chat on one page. The section list
+// Settings: controls, sound, display, accessibility, touch and chat on one page. The section list
 // beside them (a row of buttons on phones) jumps to a section. Every change is written
 // to prefs at once (persisted, and read live by the rest of the app).
 
 import type { ScreenFactory } from "../../ctx";
 import { GAMEPAD_LABELS, RESERVED_KEYS, keyLabel } from "../../input";
-import { ACTIONS, DEFAULT_PREFS, THEMES, prefs, type Action, type KeyBindings, type Palette, type Theme } from "../../prefs";
+import { ACTIONS, DEFAULT_PREFS, MOTIONS, THEMES, prefs, type Action, type KeyBindings, type Motion, type Palette, type Theme } from "../../prefs";
 import { PALETTES, cssHex } from "../../render/geometry";
 import type { Screen } from "../../state";
 import { openColorPicker } from "../color-picker";
@@ -26,6 +26,11 @@ const THEME_OPTIONS: Record<Theme, { label: string; icon: IconName }> = {
   dark: { label: "Dark", icon: "moon" },
 };
 
+const MOTION_LABELS: Record<Motion, string> = { system: "System", reduce: "Reduce", full: "Full" };
+
+/** Menu text sizes, as multiples of the base size (prefs.textScale). */
+const TEXT_SCALES = [1, 1.15, 1.3, 1.5] as const;
+
 interface Slot {
   action: Action;
   index: number;
@@ -43,6 +48,7 @@ const SECTIONS = [
   { id: "touch", label: "Touch", icon: "hand" },
   { id: "sound", label: "Sound", icon: "volume-2" },
   { id: "display", label: "Display", icon: "palette" },
+  { id: "access", label: "Accessibility", icon: "accessibility" },
   { id: "chat", label: "Chat", icon: "message-square" },
 ] as const;
 type SectionId = (typeof SECTIONS)[number]["id"];
@@ -175,6 +181,23 @@ export const settingsScreen: ScreenFactory = (ctx) => {
     }),
   );
 
+  // Accessibility: motion, text size and a readable typeface. The palette above is listed here too.
+  const motionSeg = seg(
+    "Motion",
+    MOTIONS.map((value) => ({ value, label: MOTION_LABELS[value] })),
+    prefs.value.motion,
+    (v) => prefs.set({ motion: v }),
+  );
+  const textSeg = seg(
+    "Text size",
+    TEXT_SCALES.map((v) => ({ value: String(v), label: `${Math.round(v * 100)}%` })),
+    String(prefs.value.textScale),
+    (v) => prefs.set({ textScale: Number(v) }),
+  );
+  const readable = switchField("Readable font", "A typeface made for dyslexic readers, with wider spacing.", (on) =>
+    prefs.set({ readableFont: on }),
+  );
+
   const colorSwatch = h("span", { class: "swatch", "aria-hidden": "true" });
   const colorNote = h("p", { class: "field-hint" });
   /** The colour picker opened from this screen, closed again when the screen is left. */
@@ -291,7 +314,7 @@ export const settingsScreen: ScreenFactory = (ctx) => {
     const modal = openModal({
       title: "Reset settings?",
       body: [
-        h("p", null, "Controls, sound, display, touch and chat go back to the defaults. Your account and your friends are not changed."),
+        h("p", null, "Controls, sound, display, accessibility, touch and chat go back to the defaults. Your account and your friends are not changed."),
       ],
       actions: [
         h("button", { type: "button", onclick: () => modal.close() }, "Cancel"),
@@ -431,6 +454,9 @@ export const settingsScreen: ScreenFactory = (ctx) => {
     antialias.set(p.antialias);
     stats.set(store.state.showStats);
     for (const [name, radio] of paletteRadios) radio.checked = name === p.palette;
+    motionSeg.set(p.motion);
+    textSeg.set(String(p.textScale));
+    readable.set(p.readableFont);
     touchSize.set(Math.round(p.touchScale * 100));
     leftHanded.set(p.touchLeftHanded);
     touchPreview.style.setProperty("--touch-scale", String(p.touchScale));
@@ -519,9 +545,19 @@ export const settingsScreen: ScreenFactory = (ctx) => {
           h("p", { class: "field-hint" }, "Lower is faster on weak devices."),
           antialias.el,
           stats.el,
-          paletteGroup,
           h("div", { class: "settings-group" }, h("span", { class: "field-label" }, "Your colour"), colorSwatch, chooseColor, autoColor),
           colorNote,
+        ),
+        section(
+          "access",
+          "Accessibility",
+          "Motion, text size and reading aids. Changes apply straight away.",
+          h("div", { class: "settings-group" }, h("span", { class: "field-label" }, "Motion"), motionSeg.el),
+          h("p", { class: "field-hint" }, "Reduce stops slides, pop-ups and hover movement. System follows your device setting."),
+          h("div", { class: "settings-group" }, h("span", { class: "field-label" }, "Text size"), textSeg.el),
+          h("p", { class: "field-hint" }, "Scales the text in the menus."),
+          readable.el,
+          paletteGroup,
         ),
         section("chat", "Chat", null, filterProfanity.el),
         h(

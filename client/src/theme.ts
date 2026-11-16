@@ -2,6 +2,7 @@
 // browser's theme colour, following the system setting unless the player chose one.
 
 import { prefs, type Theme } from "./prefs";
+import { startA11y } from "./ui/a11y";
 
 const GROUND = { light: "#f7f7f7", dark: "#0a0a0a" } as const;
 
@@ -18,8 +19,9 @@ function apply(): void {
   for (const meta of document.querySelectorAll<HTMLMetaElement>('meta[name="theme-color"]')) meta.content = GROUND[theme];
 }
 
-/** Apply the theme now and whenever the preference or the system setting changes. */
+/** Apply the theme and the accessibility prefs now, and again whenever they change. */
 export function startTheme(): void {
+  startA11y();
   apply();
   prefs.subscribe((next, prev) => {
     if (next.theme !== prev.theme) apply();

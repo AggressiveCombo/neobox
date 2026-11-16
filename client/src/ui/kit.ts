@@ -3,6 +3,7 @@
 
 import { h, type Child } from "./dom";
 import { icon, type IconName } from "./icons";
+import { reducedMotion } from "./a11y";
 
 const MODAL_CLOSE_MS = 140;
 
@@ -182,7 +183,7 @@ export function openModal(opts: ModalOptions): { dialog: HTMLDialogElement; clos
   });
   dialog.addEventListener("close", () => {
     opts.onclose?.();
-    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+    if (reducedMotion()) {
       dialog.remove();
       return;
     }

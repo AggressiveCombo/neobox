@@ -7,6 +7,7 @@ import "./profile.css";
 import { ApiError, errorText, getPlayer, type PlayerMap, type PlayerProfile } from "../account";
 import type { AppCtx } from "../ctx";
 import { xpForLevel } from "../levels";
+import { reducedMotion } from "./a11y";
 import { h } from "./dom";
 import { icon, type IconName } from "./icons";
 import { avatar, openModal } from "./kit";
@@ -143,7 +144,7 @@ function stat(glyph: IconName, label: string, value: number, format: (n: number)
 }
 
 function countUp(el: HTMLElement, to: number, format: (n: number) => string): void {
-  if (window.matchMedia("(prefers-reduced-motion: reduce)").matches || to === 0) {
+  if (reducedMotion() || to === 0) {
     el.textContent = format(to);
     return;
   }
