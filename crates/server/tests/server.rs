@@ -61,6 +61,11 @@ impl Server {
 
     /// One HTTP/1.1 request: (status, session cookie set by the answer, JSON body or Null).
     async fn http(&self, method: &str, path: &str, cookie: Option<&str>, body: Option<Value>) -> (u16, Option<String>, Value) {
+        self.http_from(method, path, cookie, None, body).await
+    }
+
+    /// `http` with an `Origin` header when `origin` is given, as a page on that site sends.
+    async fn http_from(&self, method: &str, path: &str, cookie: Option<&str>, origin: Option<&str>, body: Option<Value>) -> (u16, Option<String>, Value) {
         let mut stream = tokio::net::TcpStream::connect(("127.0.0.1", self.port)).await.unwrap();
         let body = body.map(|b| b.to_string()).unwrap_or_default();
         let mut req = format!("{method} {path} HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\nContent-Length: {}\r\n", body.len());
@@ -69,6 +74,9 @@ impl Server {
         }
         if let Some(c) = cookie {
             req.push_str(&format!("Cookie: {c}\r\n"));
+        }
+        if let Some(o) = origin {
+            req.push_str(&format!("Origin: {o}\r\n"));
         }
         req.push_str("\r\n");
         req.push_str(&body);
@@ -468,4 +476,85 @@ async fn race_finish_sets_a_fastest_time() {
     assert_eq!(rows.as_array().map(Vec::len), Some(1), "{rows}");
     assert_eq!((rows[0]["rank"].as_i64(), rows[0]["name"].as_str()), (Some(1), Some("alice")), "{rows}");
     assert!(rows[0]["ticks"].as_i64().is_some_and(|t| t > 0), "{rows}");
+}
+
+/// A page on another site must not use the visitor's cookie; the server's own origin and requests without one still work.
+#[tokio::test]
+async fn cross_site_requests_are_refused() {
+    let server = Server::start();
+    let alice = server.register("alice").await;
+    let url = server.ws();
+
+    let mut req = url.as_str().into_client_request().unwrap();
+    req.headers_mut().insert("Origin", "https://evil.example".parse().unwrap());
+    req.headers_mut().insert("Cookie", alice.parse().unwrap());
+    match tokio_tungstenite::connect_async(req).await {
+        Err(tokio_tungstenite::tungstenite::Error::Http(res)) => assert_eq!(res.status(), 403),
+        other => panic!("a foreign origin must be refused with 403, got {:?}", other.map(|_| ())),
+    }
+
+    let (status, _, body) = server.http_from("GET", "/api/friends", Some(&alice), Some("https://evil.example"), None).await;
+    assert_eq!(status, 403, "{body}");
+
+    // the test server's Host header is 127.0.0.1, so that is its own origin
+    let (status, _, body) = server.http_from("GET", "/api/friends", Some(&alice), Some("http://127.0.0.1"), None).await;
+    assert_eq!(status, 200, "{body}");
+    let mut req = url.as_str().into_client_request().unwrap();
+    req.headers_mut().insert("Origin", format!("http://127.0.0.1:{}", server.port).parse().unwrap());
+    let (own, _) = tokio_tungstenite::connect_async(req).await.expect("the own origin connects");
+    drop(own);
+}
+
+/// The same account in a second tab takes its seat over; the first tab is closed as replaced.
+#[tokio::test]
+async fn one_seat_per_account() {
+    let server = Server::start();
+    let alice = server.register("alice").await;
+    let url = server.ws();
+
+    let mut first = Client::connect_as(&url, "alice", Some(&alice)).await;
+    let (seat, _) = first.create(None).await.unwrap();
+
+    let mut second = Client::connect_as(&url, "alice", Some(&alice)).await;
+    let (taken, room) = second.join(&seat.code, None, None).await.unwrap();
+    assert_eq!(taken.you, seat.you, "the account keeps its seat");
+    assert_eq!(room.players.len(), 1, "{:?}", room.players);
+
+    let closed = tokio::time::timeout(WAIT, async {
+        loop {
+            match first.ws.next().await {
+                Some(Ok(Message::Close(frame))) => return frame,
+                Some(Ok(_)) => {}
+                other => panic!("expected the first tab to be closed, got {other:?}"),
+            }
+        }
+    })
+    .await
+    .expect("the first tab is closed");
+    assert_eq!(closed.map(|f| f.reason.as_str().to_string()).as_deref(), Some("replaced"));
+}
+
+/// Invisible-only lines are dropped; bidi controls and zero-width characters are
+/// removed from the rest; emoji joined by zero-width joiners stay whole.
+#[tokio::test]
+async fn chat_drops_invisible_characters() {
+    let server = Server::start();
+    let mut host = Client::connect(&server.ws(), "host").await;
+    host.create(None).await.unwrap();
+
+    host.chat("\u{200B}\u{202E}\u{FEFF}").await;
+    host.chat("a\u{202E}bc\u{200B}").await;
+    host.chat("\u{1F468}\u{200D}\u{1F469}\u{200D}\u{1F467} hi").await;
+    let mut lines = Vec::new();
+    for _ in 0..2 {
+        lines.push(
+            host.until("chat line", |m| match m {
+                ServerMsg::Chat { text, .. } if !text.ends_with("has joined the game") => Some(Ok(text.clone())),
+                _ => None,
+            })
+            .await
+            .unwrap(),
+        );
+    }
+    assert_eq!(lines, ["abc", "\u{1F468}\u{200D}\u{1F469}\u{200D}\u{1F467} hi"]);
 }
