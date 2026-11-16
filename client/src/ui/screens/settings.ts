@@ -500,17 +500,15 @@ export const settingsScreen: ScreenFactory = (ctx) => {
         label,
       ),
     ),
-    h(
-      "button",
-      { type: "button", class: "quiet settings-nav-item", onclick: () => store.set({ screen: "account" }) },
-      icon("circle-user", 18),
-      "Account",
-    ),
   );
 
   const el = page(
     "settings-page",
-    pageHead({ title: "Settings", back }),
+    pageHead({
+      title: "Settings",
+      back,
+      actions: [h("button", { type: "button", class: "quiet", onclick: () => store.set({ screen: "account" }) }, icon("circle-user", 18), "Account")],
+    }),
     h(
       "div",
       { class: "settings-layout" },

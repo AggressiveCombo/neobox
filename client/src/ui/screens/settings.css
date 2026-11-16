@@ -1,10 +1,20 @@
 /* Settings: a section list beside the sections. On phones the list is a row of
    choices above one column. */
 
+/* #ui is a row flex box: a stretched page has the viewport's height, and its content shrinks into it. Size to the content (min-height still fills the viewport). */
+.settings-page {
+  align-self: flex-start;
+}
+
 .settings-page .settings-layout {
   display: grid;
   gap: 16px;
   align-items: start;
+}
+
+/* The page title scrolls with the page: a sticky bar over the controls hid them at large text sizes. */
+.settings-page .page-head {
+  position: static;
 }
 
 /* At large text sizes the page title takes a row of its own on phones instead of breaking mid-word. */

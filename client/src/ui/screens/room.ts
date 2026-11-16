@@ -503,7 +503,7 @@ export const roomScreen: ScreenFactory = (ctx: AppCtx) => {
         p.account ? h("span", { class: "room-verified", role: "img", title: "Verified account", "aria-label": "Verified account" }, icon("badge-check", 14)) : null,
         isMe ? h("span", { class: "room-you" }, "you") : null,
         st.account !== null && p.account && !isMe ? friendChip(p.name) : null,
-        typing ? h("span", { class: "room-typing", "aria-label": `${p.name} is typing` }, "typing…") : null,
+        typing ? h("span", { class: "room-typing" }, h("span", { class: "room-sr" }, `${p.name} is `), "typing…") : null,
         p.editing ? h("span", { class: "room-editing", title: "building a map" }, "editing") : null,
         p.connected ? null : h("span", { class: "room-offline", title: "reconnecting" }, "Reconnecting"),
       ),
@@ -1162,7 +1162,8 @@ export const roomScreen: ScreenFactory = (ctx: AppCtx) => {
     h("div", { class: "room-col room-col-match" }, modePanel, mapPanel, managePanel, settingsPanel),
     h("div", { class: "room-col room-col-chat" }, chatPanel),
   );
-  const root = h("div", { class: "room-screen", "data-tab": "players" }, header, notice, startNotice, tabBar, main, dock);
+  const content = h("main", { class: "room-content" }, notice, startNotice, tabBar, main);
+  const root = h("div", { class: "room-screen", "data-tab": "players" }, header, content, dock);
 
   // Section builders. Each reads `st`, which is set before any render runs.
 
