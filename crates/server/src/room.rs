@@ -56,8 +56,9 @@ pub enum RoomCmd {
     Leave { player: u32, out: mpsc::UnboundedSender<Out> },
     /// The connection dropped: its slot is held for a reconnect.
     Lost { player: u32, out: mpsc::UnboundedSender<Out> },
-    Msg { player: u32, msg: ClientMsg },
-    Frame { player: u32, frame: ClientFrame },
+    /// Chat or a game command. `out` identifies the connection; a stale one changes nothing (see `Leave`).
+    Msg { player: u32, msg: ClientMsg, out: mpsc::UnboundedSender<Out> },
+    Frame { player: u32, frame: ClientFrame, out: mpsc::UnboundedSender<Out> },
     Admin(AdminCmd),
     View { reply: oneshot::Sender<Option<Vec<u8>>> },
     /// What a report keeps of the room; `player` is the one reported.
@@ -532,8 +533,16 @@ impl Room {
                 }
             }
             RoomCmd::Lost { player, out } => self.lost(player, &out),
-            RoomCmd::Msg { player, msg } => self.message(player, msg),
-            RoomCmd::Frame { player, frame } => self.frame(player, frame),
+            RoomCmd::Msg { player, msg, out } => {
+                if self.is_live_as(player, &out) {
+                    self.message(player, msg);
+                }
+            }
+            RoomCmd::Frame { player, frame, out } => {
+                if self.is_live_as(player, &out) {
+                    self.frame(player, frame);
+                }
+            }
             RoomCmd::Admin(a) => self.admin(a),
             RoomCmd::Evidence { player, reply } => {
                 let _ = reply.send(self.evidence(player));
@@ -665,6 +674,12 @@ impl Room {
         let keys = conn_keys(&conn.ip, conn.account.as_ref());
         if self.bans.iter().any(|b| b.keys.iter().any(|k| keys.contains(k))) {
             return Err(("banned".into(), "You are banned from this room".into()));
+        }
+        // one seat per signed-in account: another connection of the same account takes the seat over
+        if let Some(account) = conn.account.as_ref().map(|a| a.id) {
+            if let Some(i) = self.players.iter().position(|p| p.account.as_ref().is_some_and(|a| a.id == account)) {
+                return Ok(self.resume(i, conn));
+            }
         }
         if let Some(pw) = &self.password {
             if !password.as_deref().is_some_and(|p| ct_eq(p, pw)) {

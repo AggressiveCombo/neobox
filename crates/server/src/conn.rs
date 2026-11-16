@@ -328,7 +328,7 @@ impl Session {
                 }
                 match &self.room {
                     Some((r, id)) => {
-                        let _ = r.tx.send(RoomCmd::Msg { player: *id, msg: other });
+                        let _ = r.tx.send(RoomCmd::Msg { player: *id, msg: other, out: self.out.clone() });
                     }
                     None => self.error("not_in_room", "Join a room first"),
                 }
@@ -339,7 +339,7 @@ impl Session {
     fn binary(&self, b: &[u8]) {
         let Ok(frame) = ClientFrame::decode(b) else { return };
         if let Some((r, id)) = &self.room {
-            let _ = r.tx.send(RoomCmd::Frame { player: *id, frame });
+            let _ = r.tx.send(RoomCmd::Frame { player: *id, frame, out: self.out.clone() });
         } else if let ClientFrame::Ping { client_time } = frame {
             let pong = ServerFrame::Pong { client_time, server_tick: 0, tick_phase: 0.0 }.encode();
             let _ = self.out.send(Out::Binary(pong));
