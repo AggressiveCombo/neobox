@@ -762,7 +762,7 @@ input[type="range"]::-moz-range-thumb {
 }
 
 .seg-option {
-  min-height: 40px;
+  min-height: var(--control);
   padding: 0 14px;
   background: transparent;
   position: relative;

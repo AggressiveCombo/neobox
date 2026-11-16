@@ -135,7 +135,8 @@
   align-items: stretch;
 }
 
-.bind-slot {
+/* Scoped deeper than the base `.key` rule (style.css), which is cascaded later and would win at equal specificity. */
+.bind-row .bind-slot {
   min-height: var(--control);
   min-width: 5.5rem;
   padding: 0 12px;
