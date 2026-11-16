@@ -449,6 +449,9 @@ export const menuName = (page) => page.getByPlaceholder("name", { exact: true })
  * or a device that already saw it). Checks it is shown at most once.
  */
 export async function dismissPhoneSplash(page) {
+  // the same test as phone-splash.ts: only touch-only devices ever show it
+  const touchOnly = await page.evaluate(() => matchMedia("(pointer: coarse)").matches && !matchMedia("(any-pointer: fine)").matches);
+  if (!touchOnly) return;
   const welcome = page.getByRole("dialog", { name: "Welcome", exact: true });
   await welcome.waitFor({ timeout: 2000 }).catch(() => undefined);
   const shown = await welcome.count();
@@ -535,6 +538,8 @@ export async function matchWithGuest(s, { clipboard = true } = {}) {
   const roomName = uniqueName("room");
   const host = await s.open("host", { name: hostName, clipboard });
   const code = await createRoom(host, s.base, roomName, { isPublic: true });
+  // on a phone the welcome sheet covers Start
+  await dismissPhoneSplash(host.page);
   const guest = await s.open("guest", { name: guestName });
   if (clipboard) {
     await button(host.page, "Copy invite link").click();
@@ -550,6 +555,7 @@ export async function matchWithGuest(s, { clipboard = true } = {}) {
     await joinByInvite(guest, s.base, code, roomName);
   }
   await roomTitle(guest.page, roomName).waitFor();
+  await dismissPhoneSplash(guest.page);
   await host.page.locator("li.room-player").filter({ hasText: guestName }).waitFor();
   await startMatch(host, [guest]);
   return { host, guest, code, roomName, hostName, guestName };
