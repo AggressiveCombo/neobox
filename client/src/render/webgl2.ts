@@ -6,7 +6,7 @@ import { worldXf } from "../camera";
 import type { Scene } from "../frame";
 import type { Renderer } from "./index";
 import { prefs } from "../prefs";
-import { Geometry, IDENTITY_XF, VERTEX_BYTES, scaledSize, type Span, type Xf } from "./geometry";
+import { Geometry, VOID_RGB, VERTEX_BYTES, scaledSize, type Span, type Xf } from "./geometry";
 
 const POS_LOCATION = 0;
 const COLOUR_LOCATION = 1;
@@ -84,7 +84,7 @@ class WebGl2Renderer implements Renderer {
     gl.useProgram(this.program);
     gl.enable(gl.BLEND);
     gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
-    gl.clearColor(0, 0, 0, 1);
+    gl.clearColor(VOID_RGB[0], VOID_RGB[1], VOID_RGB[2], VOID_RGB[3]);
 
     canvas.addEventListener("webglcontextlost", this.onContextLost);
     this.unsubPrefs = prefs.subscribe(() => this.applySize());
@@ -97,7 +97,7 @@ class WebGl2Renderer implements Renderer {
     const xf = worldXf(cam);
     gl.clear(gl.COLOR_BUFFER_BIT);
     gl.bindVertexArray(this.vao);
-    this.drawSpan(geo.background, IDENTITY_XF);
+    this.drawSpan(geo.background, xf);
     this.drawSpan(geo.world, xf);
     this.drawSpan(geo.players, xf);
   }

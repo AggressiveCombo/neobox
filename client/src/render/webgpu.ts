@@ -6,7 +6,7 @@ import type { Camera } from "../camera";
 import { worldXf } from "../camera";
 import type { Scene } from "../frame";
 import type { Renderer } from "./index";
-import { Geometry, IDENTITY_XF, VERTEX_BYTES, type Span } from "./geometry";
+import { Geometry, VOID_RGB, VERTEX_BYTES, type Span } from "./geometry";
 
 const SLOT_BYTES = 256;
 const SLOT_FLOATS = SLOT_BYTES / 4;
@@ -24,7 +24,7 @@ const BUFFER_COPY_DST = 0x0008;
 const TEXTURE_RENDER_ATTACHMENT = 0x0010;
 const SHADER_STAGE_VERTEX = 0x0001;
 
-const CLEAR = { r: 0, g: 0, b: 0, a: 1 };
+const CLEAR = { r: VOID_RGB[0], g: VOID_RGB[1], b: VOID_RGB[2], a: VOID_RGB[3] };
 
 const BLEND: GpuBlendState = {
   color: { srcFactor: "src-alpha", dstFactor: "one-minus-src-alpha", operation: "add" },
@@ -266,7 +266,7 @@ class WebGpuRenderer implements Renderer {
     this.uploadVertices();
 
     const xf = worldXf(cam);
-    this.xfData.set(IDENTITY_XF, 0);
+    this.xfData.set(xf, 0);
     this.xfData.set(xf, SLOT_FLOATS);
     this.xfData.set(xf, 2 * SLOT_FLOATS);
     device.queue.writeBuffer(this.ubo, 0, this.xfData);

@@ -1,4 +1,4 @@
-/* Phone welcome sheet (ui/phone-splash.ts). A bottom sheet on the ground colour, not a full cover. */
+/* Phone welcome sheet (ui/phone-splash.ts). A short bottom sheet on the ground colour, not a full cover. */
 
 .phone-splash {
   position: fixed;
@@ -7,10 +7,8 @@
   bottom: 0;
   z-index: 100;
   display: grid;
-  gap: 16px;
-  max-height: 80dvh;
-  overflow: auto;
-  padding: 20px calc(var(--margin) + env(safe-area-inset-right, 0px)) calc(20px + env(safe-area-inset-bottom, 0px))
+  gap: 14px;
+  padding: 18px calc(var(--margin) + env(safe-area-inset-right, 0px)) calc(18px + env(safe-area-inset-bottom, 0px))
     calc(var(--margin) + env(safe-area-inset-left, 0px));
   background: var(--ground);
   color: var(--ink);
@@ -24,24 +22,23 @@
 
 .phone-splash-lead {
   margin: 0;
-  font-size: var(--step-body);
-  line-height: 1.5;
-}
-
-.phone-splash-tips {
-  margin: 0;
-  padding: 0;
-  list-style: none;
   font-size: var(--step-small);
-  line-height: 1.5;
+  line-height: 1.45;
 }
 
-.phone-splash-tips li + li {
-  margin-top: 10px;
+.phone-splash-actions {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 10px;
 }
 
-.phone-splash button.block {
+.phone-splash-actions button {
   min-height: var(--control);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  white-space: nowrap;
 }
 
 @keyframes phone-splash-rise {

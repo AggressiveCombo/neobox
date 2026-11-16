@@ -15,6 +15,7 @@ import {
 import type { AppCtx } from "../ctx";
 import { drawMapPreview } from "../render/preview";
 import { h, type Child } from "./dom";
+import { icon, type IconName } from "./icons";
 
 export type LibraryTab = "browse" | "mine" | "favourites";
 
@@ -130,14 +131,14 @@ export function plural(n: number, word: string): string {
 /** A row of tabs (`.tabs`): one `tab` is selected. `label` names the tablist. */
 export function tabStrip<T extends string>(
   label: string,
-  items: readonly (readonly [T, string])[],
+  items: readonly (readonly [T, string, IconName?])[],
   current: T,
   onSelect: (value: T) => void,
 ): HTMLElement {
   return h(
     "div",
     { class: "tabs", role: "tablist", "aria-label": label },
-    items.map(([value, text]) =>
+    items.map(([value, text, glyph]) =>
       h(
         "button",
         {
@@ -147,6 +148,7 @@ export function tabStrip<T extends string>(
           "aria-selected": value === current ? "true" : "false",
           onclick: () => onSelect(value),
         },
+        glyph ? icon(glyph, 16) : null,
         text,
       ),
     ),
@@ -158,9 +160,9 @@ export function tabBar(current: LibraryTab, onSelect: (tab: LibraryTab) => void)
   return tabStrip(
     "Library",
     [
-      ["browse", "Browse"],
-      ["mine", "Mine"],
-      ["favourites", "Favourites"],
+      ["browse", "Browse", "layout-grid"],
+      ["mine", "Mine", "pencil-ruler"],
+      ["favourites", "Favourites", "heart"],
     ] as const,
     current,
     onSelect,
@@ -175,9 +177,14 @@ export function mapCard(ctx: AppCtx, map: LibraryMap, onOpen: () => void, withSt
   const lines: Child[] = [
     h("span", { class: "map-name" }, map.name),
     h("span", { class: "map-meta" }, `by ${map.author}`),
-    h("span", { class: "map-stats num" }, `${plural(map.votes, "vote")} · ${plural(map.plays, "play")}`),
+    h(
+      "span",
+      { class: "map-stats num" },
+      h("span", null, icon("thumbs-up", 14), plural(map.votes, "vote")),
+      h("span", null, icon("play", 14), plural(map.plays, "play")),
+    ),
   ];
-  if (map.pick) lines.push(h("span", { class: "chip" }, "Staff pick"));
+  if (map.pick) lines.push(h("span", { class: "chip" }, icon("award", 14), "Staff pick"));
   if (withState) lines.push(h("span", { class: "map-state" }, mapState(map)));
   return h("li", null, h("button", { type: "button", class: "map-card", onclick: onOpen }, previewThumb(ctx, map.id), h("span", { class: "map-body" }, lines)));
 }

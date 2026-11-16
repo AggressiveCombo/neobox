@@ -3,7 +3,7 @@
 
 import { fetchBuiltinMaps, fetchTicket, wsUrl, wsUrlFor, type BuiltinMap } from "./api";
 import { sfx } from "./audio";
-import { computeCamera, findLocal } from "./camera";
+import { computeCamera, coverCamera, fitView, findLocal, publishView } from "./camera";
 import type { AppCtx, HudHandle, Present, ScreenFactory, ScreenHandle, WasmTools } from "./ctx";
 import { Engine, loadWasmEngine } from "./engine";
 import { readScene } from "./frame";
@@ -37,6 +37,7 @@ import { music } from "./music";
 import type { XpAward } from "./protocol";
 import { h } from "./ui/dom";
 import { showToast } from "./ui/toast";
+import { playScreenTransition, transitionKind } from "./ui/transition";
 
 const SCREEN_FACTORIES: Record<Exclude<Screen, "match">, ScreenFactory> = {
   menu: menuScreen,
@@ -169,6 +170,8 @@ export function start(): void {
   /** When the game view was last drawn; the view hides once nothing has drawn it for a moment. */
   let lastPresent = 0;
   let viewShown = true;
+  /** The main menu's clip covers the whole window (its square is turned); game screens use the view rect. */
+  let backdrop = false;
   const overlayCanvas = byId("overlay");
   const setViewShown = (shown: boolean): void => {
     if (shown === viewShown) return;
@@ -183,15 +186,16 @@ export function start(): void {
   }, VIEW_IDLE_MS);
 
   /** Draw the engine's current frame buffer (built by a match, replay or local game). */
-  const present: Present = (names, tickHz) => {
+  const present: Present = (names, tickHz, chrome = true) => {
     const fb = engine?.framebuffer();
     if (!fb) return null;
     ensureRenderer();
     const scene = readScene(fb);
     scene.localKeys = input.mask();
-    const cam = computeCamera(scene, window.innerWidth, window.innerHeight, findLocal(scene));
+    const local = computeCamera(scene, findLocal(scene));
+    const cam = backdrop ? coverCamera(scene, local, window.innerWidth / window.innerHeight) : local;
     renderer?.draw(scene, cam);
-    overlay.draw(scene, cam, names, tickHz);
+    overlay.draw(scene, cam, names, tickHz, chrome);
     lastPresent = performance.now();
     setViewShown(true);
     for (const s of scene.sounds) sfx.play(s.kind, s.volume, (s.x - cam.cx) / (cam.w / 2));
@@ -262,12 +266,15 @@ export function start(): void {
       ro.observe(bar);
       window.addEventListener("resize", update);
       update();
+      const releaseBar = overlay.reserve(bar);
       return () => {
+        releaseBar();
         ro.disconnect();
         window.removeEventListener("resize", update);
         overlay.topInset = 0;
       };
     },
+    reserveChrome: (bar) => overlay.reserve(bar),
   };
 
   // A signed-in player joins under the account's name, so the invite waits for the account lookup.
@@ -296,9 +303,19 @@ export function start(): void {
     } else {
       handle = SCREEN_FACTORIES[screen](ctx);
     }
+    const from = mounted;
+    const leaving = current?.el ?? null;
+    const scrollTop = uiRoot.scrollTop;
     current = handle;
     mounted = screen;
+    const wasBackdrop = backdrop;
+    backdrop = screen === "menu";
+    if (backdrop !== wasBackdrop) resizeAll();
     uiRoot.replaceChildren(handle.el);
+    // Pages never draw the game view: hide it now, not after the idle timeout, so the
+    // last frame does not show through the page sliding in.
+    if (!GAME_SCREENS[screen] && screen !== "menu") setViewShown(false);
+    if (from !== null) playScreenTransition(uiRoot, leaving, handle.el, transitionKind(from, screen), scrollTop);
   }
 
   store.subscribe((state, prev) => {
@@ -379,10 +396,14 @@ export function start(): void {
     if (store.state.inMatch) ensureRenderer();
   }
 
+  /** Size the game canvases to the view rect (the original's aspect, centred in the window) and publish it. */
   function resizeAll(): void {
+    const view = backdrop ? { x: 0, y: 0, w: window.innerWidth, h: window.innerHeight } : fitView(window.innerWidth, window.innerHeight);
+    publishView(view);
+    overlay.setView(view);
     const dpr = window.devicePixelRatio || 1;
-    const w = Math.round(window.innerWidth * dpr);
-    const hPx = Math.round(window.innerHeight * dpr);
+    const w = Math.round(view.w * dpr);
+    const hPx = Math.round(view.h * dpr);
     renderer?.resize(w, hPx);
     overlay.resize(w, hPx);
   }
@@ -830,7 +851,13 @@ export function start(): void {
   });
   window.addEventListener("online", retryNow);
 
+  resizeAll();
   mount(store.state.screen);
   const boot = document.getElementById("boot");
-  if (boot) boot.hidden = true;
+  if (boot) {
+    boot.classList.add("is-leaving");
+    window.setTimeout(() => {
+      boot.hidden = true;
+    }, 180);
+  }
 }

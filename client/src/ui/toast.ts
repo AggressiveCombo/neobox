@@ -5,6 +5,7 @@ import { h } from "./dom";
 
 const MAX_TOASTS = 4;
 const TOAST_MS = 3500;
+const LEAVE_MS = 160;
 
 const timers = new WeakMap<HTMLElement, number>();
 
@@ -20,7 +21,14 @@ export function showToast(host: HTMLElement, text: string, kind: "info" | "error
     text,
   );
   host.appendChild(el);
-  timers.set(el, window.setTimeout(() => dismiss(el), TOAST_MS));
+  timers.set(el, window.setTimeout(() => leave(el), TOAST_MS));
+}
+
+/** Timed out: fade down, then go. */
+function leave(el: HTMLElement): void {
+  timers.delete(el);
+  el.classList.add("is-leaving");
+  window.setTimeout(() => el.remove(), LEAVE_MS);
 }
 
 function dismiss(el: HTMLElement): void {

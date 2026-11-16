@@ -12,10 +12,11 @@
   font-size: var(--step-small);
 }
 
-.library-page .library-sorts .tabs {
-  box-shadow: none;
+.library-page .status:empty {
+  display: none;
 }
 
+/* Toolbar: search, sort and the upload action on one row. */
 .library-toolbar {
   display: flex;
   flex-wrap: wrap;
@@ -24,13 +25,36 @@
 }
 
 .library-search {
+  position: relative;
   flex: 1 1 240px;
   min-width: 0;
   max-width: 420px;
 }
 
-.library-search input {
+.library-search > .icon {
+  position: absolute;
+  top: 50%;
+  left: 14px;
+  color: var(--muted);
+  transform: translateY(-50%);
+  pointer-events: none;
+}
+
+.library-page .library-search > input {
   width: 100%;
+  padding-left: 44px;
+}
+
+.library-sort {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+}
+
+.library-sort select {
+  min-width: 160px;
 }
 
 .library-toolbar > button {
@@ -92,6 +116,7 @@
   font-weight: 400;
   text-align: left;
   box-shadow: none;
+  transition: background-color 160ms var(--ease), transform 140ms var(--ease);
 }
 
 .map-card:hover:not(:disabled) {
@@ -155,6 +180,14 @@
   white-space: nowrap;
 }
 
+/* Vote and play counts with their icons. */
+.map-card .map-stats > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-right: 10px;
+}
+
 .map-body .chip {
   margin-top: 4px;
 }
@@ -186,6 +219,12 @@ dialog.modal.map-dialog {
   color: var(--muted);
 }
 
+.map-byline .chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
 .map-state,
 .map-desc {
   margin: 0;
@@ -202,9 +241,18 @@ dialog.modal.map-dialog {
   font-size: var(--step-body);
 }
 
+/* Vote, star and copy: icon + word. A pressed toggle fills its icon. */
 .map-actions {
   display: flex;
   flex-wrap: wrap;
+  gap: 8px;
+}
+
+.map-actions button,
+.map-play button,
+.map-report {
+  display: inline-flex;
+  align-items: center;
   gap: 8px;
 }
 
@@ -218,6 +266,10 @@ dialog.modal.map-dialog {
   color: var(--ground);
 }
 
+.map-actions button[aria-pressed="true"] .icon {
+  fill: currentColor;
+}
+
 .map-play:empty {
   display: none;
 }
@@ -225,6 +277,7 @@ dialog.modal.map-dialog {
 .map-play {
   display: flex;
   flex-direction: column;
+  align-items: flex-start;
   gap: 8px;
 }
 
@@ -243,19 +296,43 @@ dialog.modal.map-dialog {
   overflow-x: auto;
 }
 
-.map-records h3,
-.map-owner h3 {
+.map-records h3 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   margin: 0;
   font-size: var(--step-body);
   font-weight: 500;
 }
 
+/* The owner's block: folded behind a summary so the dialog opens on the map. */
 .map-owner {
+  margin: 0;
+}
+
+.map-owner > summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: var(--control);
+  cursor: pointer;
+  font-weight: 500;
+  list-style: none;
+}
+
+.map-owner > summary::-webkit-details-marker {
+  display: none;
+}
+
+.map-owner > summary:hover {
+  color: var(--accent);
+}
+
+.map-owner-body {
   display: flex;
   flex-direction: column;
   gap: 16px;
-  padding: 16px;
-  background: var(--surface);
+  padding-top: 16px;
 }
 
 .map-owner .actions {
@@ -303,6 +380,9 @@ dialog.modal.map-picker {
 }
 
 .library-makers h2 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   margin: 0;
 }
 
@@ -365,10 +445,21 @@ dialog.modal.map-picker {
   .library-toolbar {
     flex-direction: column;
     align-items: stretch;
+    gap: 8px;
   }
 
   .library-search {
+    flex: none;
     max-width: none;
+  }
+
+  .library-sort {
+    width: 100%;
+  }
+
+  .library-sort select {
+    flex: 1 1 auto;
+    min-width: 0;
   }
 
   .library-toolbar > button {
@@ -381,5 +472,6 @@ dialog.modal.map-picker {
 
   .map-actions > button {
     flex: 1 1 calc(50% - 8px);
+    justify-content: center;
   }
 }

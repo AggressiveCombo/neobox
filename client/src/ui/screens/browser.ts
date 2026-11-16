@@ -1,7 +1,7 @@
-// The Play screen: quick play and join-by-code at the top; the open rooms as a table (search,
-// hide full rooms; nearest first, friends on top); the create-room form beside it on desktop and
-// below it on phones. Locked rooms ask for their password inline; a server that refused a join
-// asks for it in a panel above the list.
+// The Browse rooms screen: join by code, then the open rooms as one list (search, hide full
+// rooms; nearest first, friends on top). Create room opens a modal from the page head. Locked
+// rooms ask for their password inline; a server that refused a join asks for it in a panel above
+// the list.
 
 import type { ScreenFactory } from "../../ctx";
 import {
@@ -13,10 +13,13 @@ import {
 } from "../../protocol";
 import { clear, h } from "../dom";
 import { countryName, flagUrl, formatDistance, sortRooms } from "../../rooms";
-import { field, page, pageHead, toggle } from "../kit";
+import { field, openModal, page, pageHead, toggle } from "../kit";
+import { icon } from "../icons";
 
 const SVG_NS = "http://www.w3.org/2000/svg";
 const DEFAULT_MAX_PLAYERS = 8;
+/** Id of the create-room form; its Create room button in the modal's action row submits it. */
+const CREATE_FORM_ID = "create-room-form";
 /** Room codes: 6 characters from the server's alphabet (no I, O, 0 or 1). */
 const ROOM_CODE_RE = /^[A-HJ-NP-Z2-9]{6}$/;
 /** YouTube video ids: 11 characters from the URL-safe alphabet (anything else gets no thumbnail). */
@@ -53,6 +56,16 @@ function jukeboxCell(box: { video: string; title: string }): HTMLElement {
   return h("span", { class: "room-jukebox", title: box.title }, thumb, h("span", { class: "room-track" }, box.title));
 }
 
+/** Parse a max-players field, clamp it to the allowed range and write it back. */
+function clampMaxPlayers(input: HTMLInputElement): number {
+  const parsed = Number.parseInt(input.value, 10);
+  const clamped = Number.isFinite(parsed)
+    ? Math.min(ROOM_MAX_PLAYERS, Math.max(ROOM_MIN_PLAYERS, parsed))
+    : DEFAULT_MAX_PLAYERS;
+  input.value = String(clamped);
+  return clamped;
+}
+
 export const browserScreen: ScreenFactory = (ctx) => {
   const { store } = ctx;
 
@@ -75,7 +88,7 @@ export const browserScreen: ScreenFactory = (ctx) => {
 
   const codeInput = h("input", {
     type: "text",
-    placeholder: "Room code",
+    placeholder: "K7QF2M",
     maxlength: 6,
     autocapitalize: "characters",
     autocomplete: "off",
@@ -85,7 +98,7 @@ export const browserScreen: ScreenFactory = (ctx) => {
       codeJoin.disabled = !ROOM_CODE_RE.test(codeInput.value);
     },
   });
-  const codeJoin = h("button", { type: "submit", class: "primary", disabled: true }, "Join");
+  const codeJoin = h("button", { type: "submit", class: "primary", disabled: true }, icon("log-in", 18), "Join");
   const codeForm = h(
     "form",
     {
@@ -96,91 +109,71 @@ export const browserScreen: ScreenFactory = (ctx) => {
         ctx.joinRoom(codeInput.value);
       },
     },
-    field("Join with a code", codeInput),
+    field("Room code", codeInput),
     codeJoin,
-  );
-
-  const quickPlay = h(
-    "section",
-    { class: "panel start-quick" },
-    h("p", { class: "lead" }, "Jump into an open room, or start a new one, in one tap."),
-    h(
-      "button",
-      { type: "button", class: "primary big", onclick: () => store.set({ screen: "quick" }) },
-      "Quick play",
-    ),
-  );
-  const startCode = h(
-    "section",
-    { class: "panel start-code" },
-    h("p", { class: "lead" }, "Have a room code from a friend?"),
-    codeForm,
   );
 
   const inviteSlot = h("div", { class: "invite-slot" });
 
-  const roomName = h("input", {
-    type: "text",
-    maxlength: MAX_ROOM_NAME_LEN,
-    placeholder: "Optional",
-    autocomplete: "off",
-    "aria-label": "room name",
-  });
-  const roomPassword = h("input", {
-    type: "password",
-    placeholder: "Optional",
-    autocomplete: "new-password",
-  });
-  const maxInput = h("input", {
-    type: "number",
-    min: ROOM_MIN_PLAYERS,
-    max: ROOM_MAX_PLAYERS,
-    step: 1,
-    value: DEFAULT_MAX_PLAYERS,
-    onchange: () => {
-      readMaxPlayers();
-    },
-  });
-  const isPublic = h("input", { type: "checkbox", role: "switch", checked: true });
+  /** The create-room form in a modal: fresh fields each time it opens; Create room submits them. */
+  function openCreateRoom(): void {
+    const roomName = h("input", {
+      type: "text",
+      maxlength: MAX_ROOM_NAME_LEN,
+      placeholder: "Optional",
+      autocomplete: "off",
+      "aria-label": "room name",
+    });
+    const roomPassword = h("input", {
+      type: "password",
+      placeholder: "Optional",
+      autocomplete: "new-password",
+    });
+    const maxInput = h("input", {
+      type: "number",
+      min: ROOM_MIN_PLAYERS,
+      max: ROOM_MAX_PLAYERS,
+      step: 1,
+      value: DEFAULT_MAX_PLAYERS,
+      onchange: () => {
+        clampMaxPlayers(maxInput);
+      },
+    });
+    const isPublic = h("input", { type: "checkbox", role: "switch", checked: true });
 
-  /** Parse the max-players field, clamp it to the allowed range and write it back. */
-  function readMaxPlayers(): number {
-    const parsed = Number.parseInt(maxInput.value, 10);
-    const clamped = Number.isFinite(parsed)
-      ? Math.min(ROOM_MAX_PLAYERS, Math.max(ROOM_MIN_PLAYERS, parsed))
-      : DEFAULT_MAX_PLAYERS;
-    maxInput.value = String(clamped);
-    return clamped;
-  }
-
-  function createRoom(): void {
-    const password = roomPassword.value;
-    ctx.send({
-      t: "create_room",
-      name: roomName.value.trim(),
-      password: password === "" ? null : password,
-      max_players: readMaxPlayers(),
-      public: isPublic.checked,
+    const form = h(
+      "form",
+      {
+        id: CREATE_FORM_ID,
+        class: "create-form",
+        onsubmit: (e: Event) => {
+          e.preventDefault();
+          const password = roomPassword.value;
+          ctx.send({
+            t: "create_room",
+            name: roomName.value.trim(),
+            password: password === "" ? null : password,
+            max_players: clampMaxPlayers(maxInput),
+            public: isPublic.checked,
+          });
+          modal.close();
+        },
+      },
+      field("Room name", roomName),
+      field("Password", roomPassword, "Optional. Players type it to join."),
+      field("Max players", maxInput, `${ROOM_MIN_PLAYERS} to ${ROOM_MAX_PLAYERS} players`),
+      h("label", { class: "check" }, isPublic, "Public"),
+      h("p", { class: "field-hint" }, "Public rooms show in the list. Private rooms open only with the code."),
+    );
+    // The submit button sits in the modal's action row, outside the form, so it names the form.
+    const submit = h("button", { type: "submit", class: "primary" }, icon("plus", 18), "Create room");
+    submit.setAttribute("form", CREATE_FORM_ID);
+    const modal = openModal({
+      title: "Create a room",
+      body: [form],
+      actions: [h("button", { type: "button", onclick: () => modal.close() }, "Cancel"), submit],
     });
   }
-
-  const createForm = h(
-    "form",
-    {
-      class: "panel create-form",
-      onsubmit: (e: Event) => {
-        e.preventDefault();
-        createRoom();
-      },
-    },
-    h("h2", null, "Create a room"),
-    field("Room name", roomName),
-    field("Password", roomPassword, "Optional. Players type it to join."),
-    field("Max players", maxInput, `${ROOM_MIN_PLAYERS} to ${ROOM_MAX_PLAYERS} players`),
-    h("label", { class: "check" }, isPublic, "Public"),
-    h("p", { class: "field-hint" }, "Public rooms show in the list. Private rooms open only with the code."),
-    h("div", { class: "actions" }, h("button", { type: "submit", class: "primary" }, "Create room")),
-  );
 
   /** Password prompt for a room the server refused without one (invite link or a join that failed). */
   function inviteForm(code: string): HTMLFormElement {
@@ -334,15 +327,17 @@ export const browserScreen: ScreenFactory = (ctx) => {
   }
 
   const head = pageHead({
-    title: "Play",
+    title: "Browse rooms",
     back: () => ctx.disconnect(),
-    actions: [h("button", { type: "button", onclick: () => ctx.send({ t: "list_rooms" }) }, "Refresh")],
+    actions: [
+      h("button", { type: "button", onclick: () => ctx.send({ t: "list_rooms" }) }, icon("refresh-cw", 18), "Refresh"),
+      h("button", { type: "button", class: "primary", onclick: () => openCreateRoom() }, icon("plus", 18), "New room"),
+    ],
   });
 
-  const roomsPanel = h(
+  const roomsSection = h(
     "section",
-    { class: "panel room-browser" },
-    h("div", { class: "room-browser-head" }, h("h2", null, "Open rooms"), total),
+    { class: "room-browser" },
     h(
       "div",
       { class: "room-tools" },
@@ -351,6 +346,7 @@ export const browserScreen: ScreenFactory = (ctx) => {
         hideFull = on;
         renderRooms();
       }),
+      total,
     ),
     h(
       "div",
@@ -365,13 +361,7 @@ export const browserScreen: ScreenFactory = (ctx) => {
     emptyHint,
   );
 
-  const el = page(
-    "browser",
-    head,
-    h("div", { class: "browser-start" }, quickPlay, startCode),
-    inviteSlot,
-    h("div", { class: "browser-main" }, roomsPanel, createForm),
-  );
+  const el = page("browser", head, codeForm, inviteSlot, roomsSection);
 
   renderRooms();
   renderInvite(store.state.invite);

@@ -3,6 +3,7 @@
 
 import { cssHex } from "../render/geometry";
 import { h } from "./dom";
+import { icon } from "./icons";
 import { openModal } from "./kit";
 
 /** Preset appearance colours. Pale and dark ends are included so every background stays readable. */
@@ -25,6 +26,12 @@ const PRESETS: readonly { color: number; name: string }[] = [
 
 const STEP: Record<string, number> = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 };
 
+/** Ink for the check on a swatch: dark on the pale presets, white on the rest. */
+function markColor(color: number): string {
+  const luma = 0.299 * ((color >> 16) & 0xff) + 0.587 * ((color >> 8) & 0xff) + 0.114 * (color & 0xff);
+  return luma > 160 ? "#0a0a0a" : "#ffffff";
+}
+
 /** Open the colour picker over the current screen. Returns a function that closes it. */
 export function openColorPicker(initial: number, onSave: (color: number) => void): () => void {
   let chosen = initial;
@@ -44,7 +51,7 @@ export function openColorPicker(initial: number, onSave: (color: number) => void
       class: "color-swatch",
       "aria-label": name,
       "aria-checked": "false",
-      style: `background:${cssHex(color)}`,
+      style: `background:${cssHex(color)};color:${markColor(color)}`,
       onclick: () => select(color),
     }),
   );
@@ -74,6 +81,7 @@ export function openColorPicker(initial: number, onSave: (color: number) => void
       el.setAttribute("aria-checked", String(on));
       // Roving tabindex: the grid is one tab stop, on the chosen colour (or the first when custom).
       el.tabIndex = on || (index < 0 && i === 0) ? 0 : -1;
+      el.replaceChildren(...(on ? [icon("check", 18)] : []));
     });
   }
 
@@ -101,7 +109,7 @@ export function openColorPicker(initial: number, onSave: (color: number) => void
           "div",
           { class: "color-preview-row" },
           preview,
-          h("div", { class: "color-preview-text" }, colorName, h("span", { class: "muted small" }, "Your colour in rooms")),
+          h("div", { class: "color-preview-text" }, colorName),
         ),
         h("div", { class: "color-swatches", role: "radiogroup", "aria-label": "Colour", onkeydown: onGridKey }, swatches),
         h("label", { class: "color-custom-row" }, "Custom colour", custom),

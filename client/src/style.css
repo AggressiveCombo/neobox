@@ -42,30 +42,38 @@
 /* ---------------------------------------------------------------- tokens */
 
 /*
- * One ground, one ink, one accent. Surfaces are told apart by tone steps,
- * never by shadows (only floating things cast one) or decorative borders.
- * Every corner is square: the box is the motif (see DESIGN.md).
+ * One ground, one ink, one accent. The accent is the logo's blue; the ink is a
+ * neutral near-black that sits with the logo's black tile. Surfaces are told
+ * apart by tone steps, never by shadows (only floating things cast one) or
+ * decorative borders. Every corner is square: the box is the motif (see DESIGN.md).
  */
 :root {
   color-scheme: light;
+  /* The logo's own colours (public/logo.svg): fixed in both themes. */
+  --brand-tile: #000000;
+  --brand: linear-gradient(90deg, #0095ff, #0080ff);
+  --brand-flat: #0080ff;
   --ground: #f7f7f7;
   --surface: #ebebeb;
-  --surface-2: #dfe2df;
-  --surface-3: #d2d7d3;
-  --ink: #0d2a1c;
-  --muted: #56625b;
-  --line: rgb(13 42 28 / 0.14);
-  --line-strong: rgb(13 42 28 / 0.34);
-  --accent: #f6e016;
-  --accent-hover: #ffe93a;
-  --accent-ink: #0d2a1c;
+  --surface-2: #e0e0e0;
+  --surface-3: #d4d4d4;
+  --ink: #0a0a0a;
+  --muted: #5c5c5c;
+  --line: rgb(10 10 10 / 0.14);
+  --line-strong: rgb(10 10 10 / 0.34);
+  /* The logo blue, one step deeper so white labels on it stay readable (4.8:1). */
+  --accent: #006fe0;
+  --accent-hover: #005fc4;
+  --accent-ink: #ffffff;
+  /* The accent as text or a thin line on dark chips (6.4:1 on near-black). */
+  --accent-bright: #0095ff;
   --danger: #b3261e;
   --danger-ink: #ffffff;
   --good: #1d7a43;
-  --scrim: rgb(13 42 28 / 0.55);
-  --float-shadow: 0 18px 48px rgb(13 42 28 / 0.22), 0 2px 6px rgb(13 42 28 / 0.12);
+  --scrim: rgb(0 0 0 / 0.55);
+  --float-shadow: 0 18px 48px rgb(0 0 0 / 0.22), 0 2px 6px rgb(0 0 0 / 0.12);
   /* Over the game view: solid ink chips that read on any map colour. */
-  --hud: rgb(13 42 28 / 0.88);
+  --hud: rgb(10 10 10 / 0.88);
   --hud-ink: #f7f7f7;
 
   --font: "Hanken Grotesk", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
@@ -86,16 +94,16 @@
 
 :root[data-theme="dark"] {
   color-scheme: dark;
-  --ground: #0b1510;
-  --surface: #14211a;
-  --surface-2: #1c2c23;
-  --surface-3: #26382e;
-  --ink: #eef3ef;
-  --muted: #a3b3a9;
-  --line: rgb(238 243 239 / 0.14);
-  --line-strong: rgb(238 243 239 / 0.34);
+  --ground: #0a0a0a;
+  --surface: #161616;
+  --surface-2: #202020;
+  --surface-3: #2b2b2b;
+  --ink: #f2f2f2;
+  --muted: #a6a6a6;
+  --line: rgb(242 242 242 / 0.14);
+  --line-strong: rgb(242 242 242 / 0.34);
   --danger: #ff7a6e;
-  --danger-ink: #0b1510;
+  --danger-ink: #0a0a0a;
   --good: #5fd08c;
   --scrim: rgb(0 0 0 / 0.6);
   --float-shadow: 0 18px 48px rgb(0 0 0 / 0.5), 0 2px 6px rgb(0 0 0 / 0.4);
@@ -185,13 +193,17 @@ a:hover {
   outline-offset: 2px;
 }
 
-/* Game surfaces: no text selection, no browser gestures on the canvas. */
+/*
+ * Game surfaces: no text selection, no browser gestures on the canvas. They sit on the game
+ * view rect that app.ts publishes as --view-x/-y/-w/-h (the original's aspect, centred).
+ */
 #gl-host,
 #overlay {
   position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
+  left: var(--view-x);
+  top: var(--view-y);
+  width: var(--view-w);
+  height: var(--view-h);
   user-select: none;
   -webkit-user-select: none;
   touch-action: none;
@@ -199,6 +211,8 @@ a:hover {
 
 #gl-host {
   z-index: 0;
+  /* Letterbox: the window outside the view is painted black by a spread shadow. */
+  box-shadow: 0 0 0 100vmax #0a0a0a;
 }
 
 #gl-host canvas {
@@ -448,6 +462,13 @@ button.block {
   width: 100%;
 }
 
+/* Icons (ui/icons.ts): inline SVG in currentColor, never squeezed by flex. */
+svg.icon {
+  flex: none;
+  display: inline-block;
+  vertical-align: -0.125em;
+}
+
 /* ----------------------------------------------------------------- forms */
 
 .field {
@@ -691,6 +712,7 @@ input[type="range"]::-moz-range-thumb {
 /* Segmented control: one choice of a few. The chosen option is ink. */
 .seg {
   display: inline-flex;
+  position: relative;
   flex-wrap: wrap;
   gap: 2px;
   padding: 2px;
@@ -705,6 +727,7 @@ input[type="range"]::-moz-range-thumb {
   min-height: 40px;
   padding: 0 14px;
   background: transparent;
+  position: relative;
 }
 
 .seg-option:hover:not(:disabled) {
@@ -722,6 +745,24 @@ input[type="range"]::-moz-range-thumb {
 .seg-option[aria-pressed="true"]:hover:not(:disabled),
 .seg-option[aria-selected="true"]:hover:not(:disabled) {
   background: var(--ink);
+}
+
+/* The chosen option is ink, drawn by one square that slides between options (kit.ts seg). */
+.seg-indicator {
+  position: absolute;
+  top: 0;
+  left: 0;
+  background: var(--ink);
+  pointer-events: none;
+}
+
+.seg.is-ready .seg-indicator {
+  transition: transform 260ms var(--ease), width 260ms var(--ease), height 260ms var(--ease);
+}
+
+.seg.is-indicated .seg-option[aria-checked="true"],
+.seg.is-indicated .seg-option[aria-checked="true"]:hover:not(:disabled) {
+  background: transparent;
 }
 
 /* Tabs: words with a 3px ink bar under the current one. */
@@ -792,7 +833,7 @@ input[type="range"]::-moz-range-thumb {
   display: inline-grid;
   place-items: center;
   background: var(--avatar, var(--surface-3));
-  color: #0d2a1c;
+  color: #0a0a0a;
   font-weight: 500;
   line-height: 1;
 }
@@ -887,22 +928,21 @@ table.data .r {
 
 /* ------------------------------------------------------------- the box */
 
-/* The mark: the logo's square, turned. */
+/* The mark: the logo itself (public/logo.svg), drawn in CSS so it scales crisply. */
 .mark {
   flex: none;
   display: inline-block;
   width: 28px;
   height: 28px;
-  /* The logo's own tile colour in both themes. */
-  background: #0d2a1c;
+  background: var(--brand-tile);
   position: relative;
 }
 
 .mark::after {
   content: "";
   position: absolute;
-  inset: 22%;
-  background: var(--accent);
+  inset: 20%;
+  background: var(--brand);
   transform: rotate(var(--tilt));
 }
 
@@ -1001,6 +1041,44 @@ dialog.modal[open] {
   animation: rise-in 220ms var(--ease);
 }
 
+/* Already closed (the page is live again): drawn in place, with its scrim as a spread shadow, while it fades. */
+dialog.modal.is-closing {
+  display: block;
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  height: fit-content;
+  margin: auto;
+  pointer-events: none;
+  box-shadow:
+    var(--float-shadow),
+    0 0 0 100vmax var(--scrim);
+  animation: modal-out 140ms var(--ease) both;
+}
+
+dialog.modal[open]::backdrop {
+  animation: fade-in 220ms var(--ease);
+}
+
+@keyframes modal-out {
+  to {
+    opacity: 0;
+    transform: translateY(8px) scale(0.98);
+  }
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes fade-out {
+  to {
+    opacity: 0;
+  }
+}
+
 dialog.modal:focus {
   outline: none;
 }
@@ -1056,6 +1134,24 @@ dialog.modal:focus {
   display: grid;
   place-items: center;
   background: var(--ground);
+  transition: opacity 180ms var(--ease);
+}
+
+#boot.is-leaving {
+  opacity: 0;
+}
+
+.boot-stack {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 28px;
+}
+
+.boot-mark {
+  width: 56px;
+  height: 56px;
+  animation: rise-in 360ms var(--ease) both;
 }
 
 /* --------------------------------------------------------------- motion */
@@ -1090,6 +1186,62 @@ dialog.modal:focus {
 
 .enter > :nth-child(n + 5) {
   animation-delay: 240ms;
+}
+
+/* Screen changes (ui/transition.ts): the new screen slides in from where you are
+   heading; a frozen copy of the old one fades out above it. */
+.screen-in {
+  animation: screen-in 260ms var(--ease) both;
+}
+
+.screen-in-forward {
+  --screen-from: 40px;
+}
+
+.screen-in-back {
+  --screen-from: -40px;
+}
+
+.screen-out {
+  position: absolute;
+  left: 0;
+  right: 0;
+  z-index: 1;
+  pointer-events: none !important;
+  animation: screen-out 180ms var(--ease) both;
+}
+
+.screen-out-forward {
+  --screen-to: -24px;
+}
+
+.screen-out-back {
+  --screen-to: 24px;
+}
+
+@keyframes screen-in {
+  from {
+    opacity: 0;
+    transform: translateX(var(--screen-from, 0));
+  }
+}
+
+@keyframes screen-out {
+  to {
+    opacity: 0;
+    transform: translateX(var(--screen-to, 0));
+  }
+}
+
+.toast.is-leaving {
+  animation: toast-out 160ms var(--ease) both;
+}
+
+@keyframes toast-out {
+  to {
+    opacity: 0;
+    transform: translateY(8px);
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

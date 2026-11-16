@@ -9,6 +9,7 @@ import { prefs } from "../prefs";
 import type { JukeboxState } from "../protocol";
 import type { AppState } from "../state";
 import { h } from "./dom";
+import { icon } from "./icons";
 
 const API_SRC = "https://www.youtube.com/iframe_api";
 /** Seconds a player may drift from the room's position before it seeks. */
@@ -77,25 +78,6 @@ export function parseYouTubeId(text: string): string | null {
     else id = /^\/(?:embed|shorts)\/([^/]+)$/.exec(url.pathname)?.[1] ?? null;
   }
   return id !== null && VIDEO_ID_RE.test(id) ? id : null;
-}
-
-const ICON_PATHS = {
-  play: "M7 5l12 7-12 7z",
-  pause: "M8 5v14M16 5v14",
-  stop: "M6 6h12v12H6z",
-} as const;
-
-/** A 20px outline glyph in the current colour. */
-function icon(name: keyof typeof ICON_PATHS): SVGSVGElement {
-  const ns = "http://www.w3.org/2000/svg";
-  const svg = document.createElementNS(ns, "svg");
-  svg.setAttribute("viewBox", "0 0 24 24");
-  svg.setAttribute("aria-hidden", "true");
-  svg.setAttribute("focusable", "false");
-  const path = document.createElementNS(ns, "path");
-  path.setAttribute("d", ICON_PATHS[name]);
-  svg.append(path);
-  return svg;
 }
 
 function isHost(state: AppState): boolean {
@@ -210,7 +192,7 @@ export function mountJukebox(ctx: AppCtx): void {
       "div",
       { class: "jukebox-transport" },
       toggleBtn,
-      h("button", { type: "button", onclick: () => ctx.send({ t: "jukebox", action: "stop" }) }, icon("stop"), "Stop"),
+      h("button", { type: "button", onclick: () => ctx.send({ t: "jukebox", action: "stop" }) }, icon("square"), "Stop"),
     ),
   );
   const volume = h("input", {
@@ -228,7 +210,7 @@ export function mountJukebox(ctx: AppCtx): void {
     h("header", { class: "jukebox-head" }, title, stateChip),
     playerMount,
     hostRow,
-    h("label", { class: "jukebox-volume" }, h("span", null, "Volume"), volume),
+    h("label", { class: "jukebox-volume" }, h("span", { title: "Volume" }, icon("volume-2", 18)), volume),
   );
 
   function render(state: AppState): void {

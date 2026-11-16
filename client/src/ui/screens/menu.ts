@@ -1,7 +1,8 @@
-// Home: the first screen. The wordmark and one sentence, the name field, Play and Quick
-// play, the destinations as an index with previews, and the recorded match clips playing
-// inside a giant turned square (the GL view is masked to the square). With no clip the
-// square is a flat field with the mark. Signed-in accounts play under their account name.
+// Home: the first screen. The wordmark, the name field, the two ways in (Quick play for a
+// match now, Browse rooms for everything else), the destinations as an icon index, and the
+// recorded match clips playing inside a giant turned square (the GL view is masked to the
+// square). With no clip the square is a flat field with the mark. Signed-in accounts play
+// under their account name.
 
 import { listMakers } from "../../account";
 import { fetchStats } from "../../api";
@@ -9,31 +10,30 @@ import type { ScreenFactory } from "../../ctx";
 import { levelOf } from "../../levels";
 import { MAX_NAME_LEN, NAME_RE } from "../../protocol";
 import { prefs } from "../../prefs";
-import type { Account, AppState, Screen } from "../../state";
-import { NAME_STORAGE_KEY } from "../../state";
-import { h } from "../dom";
-import { avatar, uid } from "../kit";
+import { type Account, type AppState, NAME_STORAGE_KEY, type Screen } from "../../state";
+import { type Child, h } from "../dom";
+import { type IconName, icon } from "../icons";
+import { avatar } from "../kit";
 import { mountMenuClips } from "../menu-clips";
 import { hasUnreadNews, openNews } from "../news";
-import { CREDIT_LINE, LICENSE_URL, REPO_URL } from "./about";
-import { privacyLink } from "./privacy";
+import { REPO_URL } from "./about";
 
 const STATS_REFRESH_MS = 10_000;
 /** Tilt of the home square, degrees. */
 const SQUARE_ANGLE = -18;
-/** localStorage flag: the first-visit hint was dismissed. */
-const HINT_KEY = "neobox.hintSeen";
+/** localStorage flag: the first-visit "Start here" badge on Training was dismissed. */
+const TRAINING_SEEN_KEY = "neobox.hintSeen";
 
-/** The destinations, in index order. Each description shows on hover or focus (inline on phones). */
-const DESTINATIONS: { label: string; screen: Screen; desc: string }[] = [
-  { label: "Training", screen: "training", desc: "Learn the moves against a dummy that cannot hurt you." },
-  { label: "Practice", screen: "practice", desc: "Play against bots on any map, offline." },
-  { label: "Library", screen: "library", desc: "Maps you saved for later." },
-  { label: "Friends", screen: "friends", desc: "Your friends and friend requests." },
-  { label: "Replay", screen: "replay", desc: "Watch saved matches again." },
-  { label: "Map editor", screen: "editor", desc: "Draw your own floating maps and try them." },
-  { label: "Settings", screen: "settings", desc: "Controls, sound and display." },
-  { label: "About", screen: "about", desc: "What neobox is, credits and the licence." },
+/** The destinations, in index order. The description is the button's tooltip. */
+const DESTINATIONS: { label: string; screen: Screen; icon: IconName; desc: string }[] = [
+  { label: "Training", screen: "training", icon: "dumbbell", desc: "Learn the moves against a dummy that cannot hurt you." },
+  { label: "Practice", screen: "practice", icon: "swords", desc: "Play against bots on any map, offline." },
+  { label: "Library", screen: "library", icon: "library-big", desc: "Maps you saved for later." },
+  { label: "Friends", screen: "friends", icon: "users", desc: "Your friends and friend requests." },
+  { label: "Replay", screen: "replay", icon: "film", desc: "Watch saved matches again." },
+  { label: "Map editor", screen: "editor", icon: "pencil-ruler", desc: "Draw your own floating maps and try them." },
+  { label: "Settings", screen: "settings", icon: "settings", desc: "Controls, sound and display." },
+  { label: "About", screen: "about", icon: "info", desc: "What neobox is, credits and the licence." },
 ];
 
 /** Keep only allowed characters, cut to the server limit, trim. */
@@ -74,7 +74,7 @@ function writeFlag(key: string): void {
   try {
     window.localStorage.setItem(key, "1");
   } catch {
-    // Storage blocked: the hint simply shows again next visit.
+    // Storage blocked: the badge simply shows again next visit.
   }
 }
 
@@ -82,6 +82,18 @@ function statusText(state: AppState): string {
   if (state.connection === "connecting") return "Connecting…";
   if (state.connection === "open") return "Connected.";
   return state.connectDetail ? `Disconnected: ${state.connectDetail}` : "Disconnected.";
+}
+
+/** A square icon-only button in the top bar; the label is its accessible name and tooltip. */
+function toolButton(name: IconName, label: string, onclick: () => void): HTMLButtonElement {
+  return h("button", { type: "button", class: "icon quiet home-tool", "aria-label": label, title: label, onclick }, icon(name, 20));
+}
+
+/** Swap the glyph and label of a top-bar button (mute, fullscreen). */
+function setToolIcon(btn: HTMLElement, name: IconName, label: string): void {
+  btn.replaceChildren(icon(name, 20));
+  btn.setAttribute("aria-label", label);
+  btn.title = label;
 }
 
 export const menuScreen: ScreenFactory = (ctx) => {
@@ -96,20 +108,21 @@ export const menuScreen: ScreenFactory = (ctx) => {
   const status = h("p", { class: "status", role: "status", "aria-live": "polite" });
   const onlineLine = h("p", { class: "menu-online" });
   const makersLine = h("p", { class: "menu-makers", hidden: true });
-  const preview = h("p", { class: "home-preview", "aria-hidden": "true" });
 
   // Signed-in accounts play under their account name, which cannot be edited here.
   const account = store.state.account;
-  // A first visit gets a suggested guest name, so Play works straight away; it can be changed.
+  // A first visit gets a suggested guest name, so Browse rooms works straight away; it can be changed.
   const initialName = account?.name ?? (store.state.name || readStoredName() || guestName());
 
   const nameInput = h("input", {
     type: "text",
+    class: "home-name-input",
     placeholder: "name",
     maxlength: MAX_NAME_LEN,
+    size: 12,
     autocomplete: "nickname",
     spellcheck: "false",
-    "aria-label": "name",
+    "aria-label": "Your name",
     value: initialName,
     readonly: account !== null,
     oninput: () => {
@@ -117,81 +130,46 @@ export const menuScreen: ScreenFactory = (ctx) => {
     },
   });
 
-  const playBtn = h("button", { type: "submit", class: "primary big" }, "Play");
   const quickBtn = h(
     "button",
-    { type: "button", class: "big", onclick: () => store.set({ screen: "quick" }) },
+    { type: "button", class: "primary big home-quick", onclick: () => store.set({ screen: "quick" }) },
+    icon("zap", 22),
     "Quick play",
   );
+  const browseBtn = h("button", { type: "submit", class: "big home-browse" }, icon("door-open", 22), "Browse rooms");
 
   const accountBtn = h("button", {
     type: "button",
-    class: "home-tool home-account",
+    class: "home-tool home-account quiet",
     onclick: () => store.set({ screen: "account" }),
   });
-  const levelLine = h("span", { class: "home-level", hidden: true });
 
-  /** Guests see "Sign in"; signed-in players see their avatar, "Account" and their level. */
+  /** Guests see "Sign in"; signed-in players see their avatar and level under one label. */
   function setAccount(acc: Account | null): void {
     if (acc) {
       const swatch = avatar(acc.name, null, false);
       swatch.setAttribute("aria-hidden", "true");
-      accountBtn.replaceChildren(swatch, "Account");
-      levelLine.textContent = `Level ${levelOf(acc.xp)}`;
-      levelLine.hidden = false;
+      accountBtn.setAttribute("aria-label", `Account, Level ${levelOf(acc.xp)}`);
+      accountBtn.replaceChildren(swatch, h("span", { class: "home-level" }, `Level ${levelOf(acc.xp)}`));
     } else {
-      accountBtn.replaceChildren("Sign in");
-      levelLine.hidden = true;
+      accountBtn.removeAttribute("aria-label");
+      accountBtn.replaceChildren(icon("user", 20), h("span", null, "Sign in"));
     }
   }
 
   const unreadMark = h("span", { class: "home-unread", "aria-hidden": "true", hidden: !hasUnreadNews() });
-  const newsBtn = h(
-    "button",
-    {
-      type: "button",
-      class: "home-tool",
-      onclick: () => {
-        openNews();
-        unreadMark.hidden = !hasUnreadNews();
-      },
-    },
-    "News",
-    unreadMark,
-  );
-  const muteBtn = h("button", {
-    type: "button",
-    class: "home-tool",
-    onclick: () => prefs.set({ musicMuted: !prefs.value.musicMuted }),
+  const newsBtn = toolButton("newspaper", "News", () => {
+    openNews();
+    unreadMark.hidden = !hasUnreadNews();
   });
-  const fullscreenBtn = h("button", {
-    type: "button",
-    class: "home-tool",
-    hidden: !document.fullscreenEnabled,
-    onclick: () => toggleFullscreen(),
-  });
+  newsBtn.append(unreadMark);
+  const muteBtn = toolButton("volume-2", "Mute music", () => prefs.set({ musicMuted: !prefs.value.musicMuted }));
+  const fullscreenBtn = toolButton("maximize", "Fullscreen", () => toggleFullscreen());
+  fullscreenBtn.hidden = !document.fullscreenEnabled;
 
-  const hint = h(
-    "div",
-    { class: "home-hint", hidden: readFlag(HINT_KEY) },
-    h("p", null, "New here? Start with Training, below. It teaches the moves before you play anyone."),
-    h(
-      "button",
-      {
-        type: "button",
-        class: "quiet",
-        onclick: () => {
-          writeFlag(HINT_KEY);
-          hint.hidden = true;
-        },
-      },
-      "Got it",
-    ),
-  );
-
-  /** Enable the play button only when the name is valid. */
+  /** Enable Browse rooms only when the name is valid. */
   function sync(): void {
-    playBtn.disabled = !NAME_RE.test(sanitizeName(nameInput.value));
+    browseBtn.disabled = !NAME_RE.test(sanitizeName(nameInput.value));
   }
 
   /** Connect with the name and show the room browser once the server welcomes us. */
@@ -206,7 +184,8 @@ export const menuScreen: ScreenFactory = (ctx) => {
   }
 
   function syncMute(): void {
-    muteBtn.textContent = prefs.value.musicMuted ? "Unmute music" : "Mute music";
+    const muted = prefs.value.musicMuted;
+    setToolIcon(muteBtn, muted ? "volume-x" : "volume-2", muted ? "Unmute music" : "Mute music");
   }
 
   function toggleFullscreen(): void {
@@ -217,7 +196,8 @@ export const menuScreen: ScreenFactory = (ctx) => {
   }
 
   function syncFullscreen(): void {
-    fullscreenBtn.textContent = document.fullscreenElement !== null ? "Exit fullscreen" : "Fullscreen";
+    const on = document.fullscreenElement !== null;
+    setToolIcon(fullscreenBtn, on ? "minimize" : "maximize", on ? "Exit fullscreen" : "Fullscreen");
   }
 
   async function refreshStats(): Promise<void> {
@@ -291,40 +271,34 @@ export const menuScreen: ScreenFactory = (ctx) => {
     },
     h(
       "label",
-      { class: "field home-name" },
-      h("span", { class: "field-label" }, account ? "Signed in as" : "Your name"),
+      { class: "home-name" },
+      h("span", { class: "home-name-lead" }, account ? "Signed in as" : "Playing as"),
       nameInput,
+      account ? null : icon("pencil", 16),
     ),
-    h("div", { class: "actions home-actions" }, playBtn, quickBtn),
+    h("div", { class: "home-actions" }, quickBtn, browseBtn),
   );
 
-  // Each destination: the button's name is the label; its description is linked, not part of the name.
+  // The training badge marks the first visit only; choosing Training dismisses it for good.
+  const trainingBadge = h("span", { class: "home-badge", "aria-hidden": "true", hidden: readFlag(TRAINING_SEEN_KEY) }, "Start here");
   const rows = DESTINATIONS.map((d) => {
-    const descId = uid("home-desc");
-    const show = (): void => {
-      preview.textContent = d.desc;
-    };
-    const clear = (): void => {
-      preview.textContent = "";
-    };
+    const children: Child[] = [icon(d.icon, 22), h("span", { class: "home-row-label" }, d.label)];
+    if (d.screen === "training") children.push(trainingBadge);
     return h(
-      "div",
-      { class: "home-row" },
-      h(
-        "button",
-        {
-          type: "button",
-          class: "home-row-btn",
-          "aria-describedby": descId,
-          onpointerenter: show,
-          onpointerleave: clear,
-          onfocus: show,
-          onblur: clear,
-          onclick: () => store.set({ screen: d.screen }),
+      "button",
+      {
+        type: "button",
+        class: "home-row-btn",
+        title: d.desc,
+        onclick: () => {
+          if (d.screen === "training") {
+            writeFlag(TRAINING_SEEN_KEY);
+            trainingBadge.hidden = true;
+          }
+          store.set({ screen: d.screen });
         },
-        d.label,
-      ),
-      h("p", { class: "home-row-desc", id: descId }, d.desc),
+      },
+      ...children,
     );
   });
 
@@ -340,37 +314,28 @@ export const menuScreen: ScreenFactory = (ctx) => {
   const el = h(
     "main",
     { class: "page home" },
-    h(
-      "header",
-      { class: "home-top" },
-      h("div", { class: "home-tools" }, accountBtn, levelLine, newsBtn, muteBtn, fullscreenBtn),
-    ),
+    h("header", { class: "home-top" }, h("div", { class: "home-tools" }, accountBtn, newsBtn, muteBtn, fullscreenBtn)),
     h(
       "div",
       { class: "home-copy enter" },
       h("h1", { class: "home-title" }, h("span", { class: "mark", "aria-hidden": "true" }), "neobox"),
-      h("p", { class: "home-lead" }, "Square fighters batting each other off floating maps, free to play in your browser with no install."),
-      onlineLine,
       form,
+      onlineLine,
       status,
-      hint,
     ),
     art,
     h("nav", { class: "home-index", "aria-label": "more" }, ...rows),
-    preview,
     h(
       "footer",
       { class: "home-foot" },
       makersLine,
-      h("p", { class: "credit" }, CREDIT_LINE),
       h(
         "p",
         { class: "home-links" },
+        "Fan-made successor to Hitbox.io · ",
         h("a", { href: REPO_URL, target: "_blank", rel: "noopener" }, "Source"),
         " · ",
-        h("a", { href: LICENSE_URL, target: "_blank", rel: "noopener" }, "AGPL-3.0-or-later"),
-        " · ",
-        privacyLink(store),
+        h("button", { type: "button", class: "quiet home-privacy", onclick: () => store.set({ screen: "privacy" }) }, "Privacy"),
       ),
     ),
   );

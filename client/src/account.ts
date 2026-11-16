@@ -203,6 +203,44 @@ export interface MapRecord {
 
 export const listRecords = (id: number): Promise<MapRecord[]> => request<MapRecord[]>("GET", `/api/library/${id}/records`);
 
+// Players
+
+/** Totals a player's finished games add up to (GET /api/players/{name}). */
+export interface PlayerStats {
+  games: number;
+  wins: number;
+  rounds_won: number;
+  kills: number;
+  deaths: number;
+  play_seconds: number;
+}
+
+/** One of a player's best listed maps. */
+export interface PlayerMap {
+  id: number;
+  name: string;
+  plays: number;
+  score: number;
+}
+
+/** A signed-in player's public profile. `joined` is an ISO time. */
+export interface PlayerProfile {
+  name: string;
+  level: number;
+  xp: number;
+  joined: string;
+  /** Appearance colour (0xRRGGBB) shown in rooms; null when the player never chose one. */
+  color: number | null;
+  stats: PlayerStats;
+  friends: number;
+  published: number;
+  maps: PlayerMap[];
+  records: number;
+}
+
+export const getPlayer = (name: string): Promise<PlayerProfile> =>
+  request<PlayerProfile>("GET", `/api/players/${encodeURIComponent(name)}`);
+
 // Prefs sync
 
 const PUSH_DELAY_MS = 1000;

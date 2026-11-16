@@ -53,12 +53,6 @@
   height: 56px;
   background: var(--surface-3);
   color: var(--ink);
-  font-size: 1.75rem;
-  line-height: 1;
-}
-
-.replay-drop-mark::before {
-  content: "\2193";
 }
 
 .replay-drop strong {

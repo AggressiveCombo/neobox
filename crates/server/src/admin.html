@@ -7,7 +7,7 @@
 <link rel="icon" type="image/svg+xml" href="/logo.svg">
 <style>
 @font-face { font-family:"Hanken Grotesk"; src:url("/fonts/hanken-grotesk-latin.woff2") format("woff2"); font-display:swap; }
-:root { color-scheme: light; --bg:#f7f7f7; --panel:#ebebeb; --fg:#0d2a1c; --muted:#56625b; --rule:rgba(13,42,28,.16); --accent:#f6e016; --bad:#b3261e; }
+:root { color-scheme: light; --bg:#f7f7f7; --panel:#ebebeb; --fg:#0a0a0a; --muted:#5c5c5c; --rule:rgba(10,10,10,.16); --accent:#006fe0; --bad:#b3261e; }
 * { box-sizing: border-box; border-radius:0; }
 body { margin:0; font:14px/1.4 "Hanken Grotesk", system-ui, sans-serif; background:var(--bg); color:var(--fg); }
 header { display:flex; align-items:center; gap:12px; padding:10px 16px; border-bottom:1px solid var(--fg); background:var(--bg); position:sticky; top:0; z-index:2; }
@@ -23,15 +23,15 @@ table { width:100%; border-collapse:collapse; font-variant-numeric:tabular-nums;
 th, td { text-align:left; padding:6px; border-bottom:1px solid var(--rule); white-space:nowrap; }
 th { color:var(--muted); font-weight:600; font-size:12px; border-bottom-color:var(--fg); }
 th.num, td.num { text-align:right; }
-tr.sel td { background:rgba(246,224,22,.4); }
+tr.sel td { background:rgba(0,128,255,.18); }
 tbody tr { cursor:default; }
 #rooms tbody tr { cursor:pointer; }
 button, input, select, textarea { font:inherit; color:var(--fg); background:var(--bg); border:1px solid var(--rule); padding:6px 9px; }
-button { background:#dfe2df; border-color:#dfe2df; font-weight:500; cursor:pointer; }
-button:hover { background:#d2d7d3; border-color:#d2d7d3; }
+button { background:#e0e0e0; border-color:#e0e0e0; font-weight:500; cursor:pointer; }
+button:hover { background:#d4d4d4; border-color:#d4d4d4; }
 /* The one main action of a form: log in, send to all rooms. */
-form button, #sayallbtn { background:var(--accent); border-color:var(--accent); }
-form button:hover, #sayallbtn:hover { background:#ffe93a; border-color:#ffe93a; }
+form button, #sayallbtn { background:var(--accent); border-color:var(--accent); color:#fff; }
+form button:hover, #sayallbtn:hover { background:#005fc4; border-color:#005fc4; }
 button.bad { background:var(--bad); border-color:var(--bad); color:#fff; }
 button.bad:hover { background:#8f1e17; border-color:#8f1e17; }
 .row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin:8px 0; }

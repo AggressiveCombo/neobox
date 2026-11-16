@@ -33,11 +33,38 @@
   max-width: 1040px;
 }
 
-.friends-layout {
-  display: grid;
-  grid-template-columns: minmax(0, 340px) minmax(0, 1fr);
-  gap: 32px;
-  align-items: start;
+/* Add a friend: one slim row above the list (heading, name, send), its hint on a line below. */
+.friend-add {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  margin: 0;
+}
+
+.friend-add > h2 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+}
+
+.friend-add input {
+  flex: 1 1 220px;
+  min-width: 0;
+  max-width: 320px;
+}
+
+.friend-add > .field-hint {
+  flex: 1 0 100%;
+  margin: 0;
+}
+
+.friend-section h2 {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0;
 }
 
 .friends-main {
@@ -54,42 +81,104 @@
 }
 
 .friend-section {
-  gap: 10px;
+  gap: 12px;
 }
 
 .friend-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
   display: flex;
   flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
 }
 
+/* A row is a tone block: the online ones carry the accent edge. */
 .friend-row {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: 10px 16px;
-  min-height: 56px;
-  padding: 10px 0;
-  border-bottom: 1px solid var(--line);
+  min-height: 60px;
+  padding: 10px 12px;
+  background: var(--ground);
+  transition: background 160ms ease, box-shadow 160ms ease;
 }
 
-.friend-row:first-child {
-  border-top: 1px solid var(--line);
+.friend-row:hover {
+  background: var(--surface-2);
 }
 
-/* Presence: a square, ink when offline and green when online. */
-.dot {
-  flex: none;
-  width: 10px;
-  height: 10px;
-  background: var(--line-strong);
+.friend-row.online {
+  box-shadow: inset 3px 0 0 var(--good);
 }
 
-.dot.online {
+.friend-avatar {
+  position: relative;
+  display: inline-flex;
+  flex: 0 0 auto;
+}
+
+.friend-avatar .avatar {
+  width: 40px;
+  height: 40px;
+  font-size: 16px;
+}
+
+/* A small green square at the avatar's corner, shown only while the friend is online. */
+.friend-presence {
+  position: absolute;
+  right: -2px;
+  bottom: -2px;
+  width: 12px;
+  height: 12px;
   background: var(--good);
+  box-shadow: 0 0 0 2px var(--ground);
+}
+
+/* A friend's name opens their profile: plain text, underlined on hover. */
+.friend-name {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--ink);
+  font: inherit;
+  font-weight: 500;
+  text-align: left;
+  cursor: pointer;
+  overflow-wrap: anywhere;
+}
+
+.friend-name:hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.friend-who {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.friend-join,
+.friend-accept {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.friend-accept {
+  background: var(--accent);
+  color: var(--accent-ink);
+}
+
+.friend-remove {
+  color: var(--muted);
+}
+
+.friend-remove:hover {
+  color: var(--ink);
 }
 
 @media (max-width: 760px) {

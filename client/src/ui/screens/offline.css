@@ -196,9 +196,17 @@
   transition: box-shadow var(--fast), background-color var(--fast);
 }
 
+.offline-top button,
+.offline-dock button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
 .offline-top button:hover,
 .offline-dock button:hover:not(:disabled) {
-  box-shadow: inset 0 -2px 0 var(--accent);
+  box-shadow: inset 0 -2px 0 var(--accent-bright);
 }
 
 .offline-top button:focus-visible,
@@ -206,7 +214,7 @@
 .offline-dock button:focus-visible,
 .offline-dock select:focus-visible,
 .offline-dock input[type="range"]:focus-visible {
-  outline: 3px solid var(--accent);
+  outline: 3px solid var(--accent-bright);
   outline-offset: 2px;
 }
 
@@ -270,7 +278,7 @@
   min-width: 0;
   margin: 0;
   height: 44px;
-  accent-color: var(--accent);
+  accent-color: var(--accent-bright);
 }
 
 .offline-dock input[type="range"]::-webkit-slider-runnable-track {
@@ -285,20 +293,20 @@
 
 .offline-dock input[type="range"]::-moz-range-progress {
   height: 4px;
-  background: var(--accent);
+  background: var(--accent-bright);
 }
 
 .offline-dock input[type="range"]::-webkit-slider-thumb {
   width: 18px;
   height: 18px;
   margin-top: -7px;
-  background: var(--accent);
+  background: var(--accent-bright);
 }
 
 .offline-dock input[type="range"]::-moz-range-thumb {
   width: 18px;
   height: 18px;
-  background: var(--accent);
+  background: var(--accent-bright);
 }
 
 .offline-time {

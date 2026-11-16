@@ -1,26 +1,11 @@
-/* The Play screen (ui/screens/browser.ts). Page, panel, field and button base styles come from style.css. */
+/* The Browse rooms screen (ui/screens/browser.ts). Page, field and button base styles come from style.css. */
 
-/* Quick play and join-by-code, side by side. */
-.browser-start {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 24px;
-  align-items: stretch;
-}
-
-.start-quick > .primary {
-  align-self: flex-start;
-}
-
-.start-quick .lead,
-.start-code .lead {
-  margin: 0;
-}
-
+/* Join by code: the field and the Join button in one row. */
 .code-join {
   display: flex;
   align-items: flex-end;
   gap: 8px;
+  max-width: 420px;
 }
 
 .code-join .field {
@@ -31,55 +16,36 @@
   text-transform: uppercase;
 }
 
-/* Rooms and create-room side by side; the create form stays in view while the list scrolls. */
-.browser-main {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 360px;
-  gap: 24px;
-  align-items: start;
+.code-join button:disabled {
+  background: var(--surface);
+  color: var(--ink);
+  opacity: 0.45;
 }
 
+/* The create-room form, in a modal from the page head. */
 .create-form {
-  position: sticky;
-  top: 96px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
 }
 
 .create-form .check {
   min-height: var(--control);
 }
 
+/* The room list is the page: a slim toolbar, then rows on the ground colour with rules between them. */
 .room-browser {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 12px;
   min-width: 0;
-  padding: 24px;
-  background: var(--surface);
-}
-
-.room-browser h2 {
-  margin: 0;
-  font-size: var(--step-lead);
-  font-weight: 500;
-}
-
-.room-browser-head {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 4px 16px;
-}
-
-.room-total {
-  margin: 0;
 }
 
 .room-tools {
   display: flex;
   flex-wrap: wrap;
   align-items: flex-end;
-  gap: 16px 24px;
+  gap: 12px 24px;
 }
 
 .room-tools .field {
@@ -90,11 +56,15 @@
   min-height: var(--control);
 }
 
-.room-browser input[type="search"] {
-  background: var(--ground);
+.room-total {
+  margin: 0 0 0 auto;
+  white-space: nowrap;
 }
 
-/* The table: a header row and one row per room; rows are separated by rules. */
+.room-browser input[type="search"] {
+  background: var(--surface);
+}
+
 .room-table {
   display: flex;
   flex-direction: column;
@@ -131,7 +101,7 @@ button.room-row {
   border-bottom: 0;
 }
 
-/* Overrides the panel button base: a row is a plain full-width button. */
+/* Overrides the panel button base: a row is a plain full-width button on the ground colour. */
 .room-browser button.room-row {
   width: 100%;
   min-height: 56px;
@@ -143,11 +113,12 @@ button.room-row {
   font: inherit;
   text-align: left;
   cursor: pointer;
-  transition: background-color var(--fast) var(--ease), transform var(--fast) var(--ease);
+  transition: background-color var(--fast) var(--ease), box-shadow var(--fast) var(--ease), transform var(--fast) var(--ease);
 }
 
 .room-browser button.room-row:hover {
   background: var(--surface-2);
+  box-shadow: inset 3px 0 0 var(--accent);
 }
 
 .room-browser button.room-row:active {
@@ -285,7 +256,7 @@ button.room-row {
 .room-password input {
   flex: 1 1 auto;
   min-width: 0;
-  background: var(--ground);
+  background: var(--surface);
 }
 
 .room-password button {
@@ -301,27 +272,16 @@ button.room-row {
 }
 
 @media (max-width: 900px) {
-  .browser-main {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
-  .create-form {
-    position: static;
+  .room-tools .field {
+    flex-basis: 100%;
   }
 }
 
 /* Phone: one column; each room is a small block: name, then mode and map, then where and players. */
 @media (max-width: 600px) {
-  .browser-start {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
-  .start-quick > .primary {
-    align-self: stretch;
-  }
-
-  .room-browser {
-    padding: 16px;
+  .code-join {
+    flex: none;
+    max-width: none;
   }
 
   .room-head {

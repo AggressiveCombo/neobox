@@ -1,14 +1,14 @@
 /* In-match HUD (hud.ts). DOM only, layered above the render canvases.
    Solid chips in the top corners (the canvas draws the objective bar and
-   kill feed between them; overlay.ts keeps 208 px clear on each side), touch
+   kill feed between them; overlay.ts keeps clear of the chip rects), touch
    controls on the bottom corners. Square corners throughout. */
 
 :root {
   /* --hud is 88% ink; chips need it opaque so the canvas never shows through. */
-  --hud-solid: #0d2a1c;
+  --hud-solid: #0a0a0a;
   /* Secondary text and team colours on the ink chips (fixed in both themes). */
-  --hud-muted: #c9d6cf;
-  --hud-faint: #b8c4bd;
+  --hud-muted: #cfcfcf;
+  --hud-faint: #bdbdbd;
   --hud-red: #ff8a7a;
   --hud-blue: #7cc4ff;
   --hud-amber: #ffd479;
@@ -53,6 +53,10 @@
 
 /* Chips: solid, square, one accent line along the bottom edge on hover. */
 .hud-root button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
   min-height: 40px;
   padding: 0 14px;
   background: var(--hud-solid);
@@ -64,11 +68,23 @@
   font-weight: 500;
   cursor: pointer;
   touch-action: manipulation;
-  transition: box-shadow var(--fast), background var(--fast);
+  transition:
+    box-shadow var(--fast) var(--ease),
+    background var(--fast) var(--ease),
+    transform var(--fast) var(--ease);
+}
+
+.hud-root button svg,
+.hud-link svg {
+  flex: none;
+}
+
+.hud-root button:active:not(:disabled) {
+  transform: scale(0.96);
 }
 
 .hud-root button:hover {
-  box-shadow: inset 0 -2px 0 var(--accent);
+  box-shadow: inset 0 -2px 0 var(--accent-bright);
 }
 /* style.css paints every hovered button surface-2 (0,2,1); keep chips solid on hover, except active ones. */
 .hud-root button:hover:not(:disabled):not([aria-expanded="true"]):not(.hud-on) {
@@ -76,7 +92,7 @@
 }
 
 .hud-root button:focus-visible {
-  outline: 3px solid var(--accent);
+  outline: 3px solid var(--accent-bright);
   outline-offset: 2px;
 }
 
@@ -167,6 +183,21 @@
   pointer-events: auto;
 }
 
+.hud-menu:not([hidden]) {
+  animation: hud-menu-in var(--fast) var(--ease) both;
+}
+
+@keyframes hud-menu-in {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
 .hud-menu button {
   justify-content: flex-start;
   width: 100%;
@@ -247,11 +278,11 @@
 }
 
 .hud-row-self td {
-  background: rgb(246 224 22 / 0.14);
+  background: rgb(0 128 255 / 0.22);
 }
 
 .hud-row-self .hud-name {
-  color: var(--accent);
+  color: var(--accent-bright);
 }
 
 .hud-team-red {
@@ -268,6 +299,17 @@
 
 .hud-team-spec {
   color: var(--hud-faint);
+}
+
+.hud-team-red::before,
+.hud-team-blue::before {
+  content: "";
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-right: 8px;
+  background: currentColor;
+  vertical-align: middle;
 }
 
 /* Stats (F3) and chat: one column under the chip row, top-left. */
@@ -461,6 +503,10 @@
   font-size: 20px;
 }
 
+.hud-spectate-prev svg {
+  transform: rotate(180deg);
+}
+
 .hud-spectate-name {
   min-width: 140px;
   padding: 0 8px;
@@ -496,7 +542,7 @@
   width: calc(var(--hud-btn) * 2.2);
   height: calc(var(--hud-btn) * 2.2);
   /* Touch controls sit over the arena: see-through, so they never hide a fighter. */
-  background: rgb(13 42 28 / 0.45);
+  background: rgb(10 10 10 / 0.45);
   border: 0;
   box-shadow: inset 0 0 0 2px var(--hud-tint);
   touch-action: none;
@@ -528,7 +574,7 @@
 }
 
 .hud-stick.hud-on {
-  box-shadow: inset 0 0 0 3px var(--accent);
+  box-shadow: inset 0 0 0 3px var(--accent-bright);
 }
 
 .hud-stick-knob {
@@ -539,7 +585,7 @@
   height: 40%;
   margin: -20% 0 0 -20%;
   background: var(--surface);
-  box-shadow: 0 0 0 2px rgb(13 42 28 / 0.4);
+  box-shadow: 0 0 0 2px rgb(10 10 10 / 0.4);
   pointer-events: none;
 }
 
@@ -559,19 +605,30 @@
 }
 
 .hud-touch-layer .hud-touch {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
   width: var(--hud-btn);
   height: var(--hud-btn);
   min-height: 0;
   padding: 0;
-  background: rgb(13 42 28 / 0.55);
+  background: rgb(10 10 10 / 0.4);
   color: var(--hud-ink);
   border: 0;
-  box-shadow: inset 0 -3px 0 var(--accent);
-  font-size: clamp(13px, calc(var(--hud-btn) * 0.2), 18px);
+  box-shadow: inset 0 -3px 0 var(--accent-bright);
+  font-size: clamp(11px, calc(var(--hud-btn) * 0.16), 14px);
   font-weight: 500;
+  line-height: 1;
   touch-action: none;
   -webkit-touch-callout: none;
   pointer-events: auto;
+}
+
+.hud-touch-layer .hud-touch svg {
+  width: clamp(18px, calc(var(--hud-btn) * 0.34), 30px);
+  height: clamp(18px, calc(var(--hud-btn) * 0.34), 30px);
 }
 
 .hud-touch-layer .hud-touch.hud-on {
@@ -710,5 +767,50 @@
   .hud-table th,
   .hud-table td {
     padding: 4px 8px;
+  }
+}
+
+/* Narrow windows (phones, small splits): chips go icon-only so they stay clear of the objective bar,
+   which keeps 208px per side. Labels stay in the accessible name. */
+@media (max-width: 960px) {
+  .hud-chip-label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+  }
+
+  .hud-root .hud-menu-btn,
+  .hud-root .hud-chat-btn,
+  .hud-leave,
+  .hud-end {
+    min-width: 44px;
+    padding: 0;
+    justify-content: center;
+  }
+
+  .hud-link {
+    gap: 6px;
+    padding: 0 10px;
+  }
+
+  .hud-bar {
+    max-width: 200px;
+  }
+}
+
+/* Portrait: the objective bar sits in the chip row, so the stats and scores drop below it. */
+@media (max-aspect-ratio: 1/1) {
+  .hud-topleft,
+  .hud-scores {
+    top: calc(var(--hud-top) + var(--hud-row) + 34px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hud-menu:not([hidden]) {
+    animation: none;
   }
 }

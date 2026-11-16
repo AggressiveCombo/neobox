@@ -12,6 +12,8 @@ import { BIT } from "../input";
 
 /** Bytes per vertex. */
 export const VERTEX_BYTES = 12;
+/** Colour outside the arena inside the view, and the clear colour: the letterbox ink (#0a0a0a) in both themes. */
+export const VOID_RGB = [10 / 255, 10 / 255, 10 / 255, 1] as const;
 const WORDS_PER_VERTEX = 3;
 const INITIAL_CAPACITY = 1024;
 const BACKGROUND_VERTICES = 6;
@@ -20,7 +22,6 @@ const PLAYER_MAX_VERTICES = 147;
 
 /** Clip transform (sx, sy, ox, oy): clip = (x*sx + ox, y*sy + oy). */
 export type Xf = [number, number, number, number];
-export const IDENTITY_XF: Xf = [1, 1, 0, 0];
 
 /** Vertex range of one draw call. */
 export interface Span {
@@ -219,17 +220,20 @@ export class Geometry {
     this.putPlayers(scene);
   }
 
+  /** The map backdrop covers the arena only (world 0..arenaW, 0..arenaH, top edge at y 0); outside it is VOID. */
   private putBackground(scene: Scene): void {
     this.reserve(BACKGROUND_VERTICES);
     const top = packRgba(scene.bgTop, 1);
     const bottom = packRgba(scene.bgBottom, 1);
+    const w = Math.max(0, scene.arenaW);
+    const h = Math.max(0, scene.arenaH);
     this.background.first = this.used;
-    this.put(-1, 1, top);
-    this.put(1, 1, top);
-    this.put(1, -1, bottom);
-    this.put(-1, 1, top);
-    this.put(1, -1, bottom);
-    this.put(-1, -1, bottom);
+    this.put(0, 0, top);
+    this.put(w, 0, top);
+    this.put(w, h, bottom);
+    this.put(0, 0, top);
+    this.put(w, h, bottom);
+    this.put(0, h, bottom);
     this.background.count = BACKGROUND_VERTICES;
   }
 

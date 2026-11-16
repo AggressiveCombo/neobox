@@ -4,6 +4,7 @@
 
 import { h } from "./dom";
 import { openModal } from "./kit";
+import { icon } from "./icons";
 
 interface NewsEntry {
   /** ISO date (YYYY-MM-DD). */
@@ -14,10 +15,23 @@ interface NewsEntry {
 /** Newest first. Player-facing wording only. */
 const NEWS: NewsEntry[] = [
   {
+    date: "2026-11-16",
+    items: [
+      "The blue logo is back, and blue is the accent colour again. Buttons and menus have icons, and screens slide into each other.",
+      "The main menu is simpler: your name, Quick play, Browse rooms, and a grid of buttons for everything else.",
+      "The game view keeps the original's 16:10 shape on every screen, with black bars around it instead of a stretched or cropped view.",
+      "New menu and match music, real sound effects for jumps, hits and deaths, and soft interface sounds you can turn off (Settings, Sound).",
+      "Profiles: open a player from the room or your friends list to see their level, games, wins, kills, deaths, time played and maps.",
+      "In lives mode, a bar at the top shows how many lives you have left.",
+      "Phones: Settings, Touch has a Control size slider and a Left-handed layout.",
+      "Fixed: a map could slowly turn into a different map during long matches.",
+    ],
+  },
+  {
     date: "2026-11-15",
     items: [
       "A new look everywhere: clearer screens, bigger type, and a light and a dark theme (Settings, Display; it follows your system by default).",
-      "The main menu plays a match inside the big square. Press Play straight away: you get a guest name you can change.",
+      "The main menu plays a match inside the big square. Press Quick play straight away: you get a guest name you can change.",
       "Rooms: the players are front and centre, the host's settings fold away under All settings, and on phones the lobby has Players, Match and Chat tabs with Start always at the bottom.",
       "Phones: play in landscape with a separate Jump button; in portrait the game asks you to turn your phone, and can switch to full screen.",
       "The match HUD shows your connection: ping, and whether it runs over UDP or the slower fallback.",
@@ -115,8 +129,8 @@ export function openNews(): () => void {
   let index = 0;
   const list = h("div", { class: "news-body" });
   const counter = h("span", { class: "news-count", "aria-live": "polite" });
-  const prev = h("button", { type: "button", onclick: () => show(index - 1) }, "Previous");
-  const next = h("button", { type: "button", class: "primary", onclick: () => show(index + 1) }, "Next");
+  const prev = h("button", { type: "button", onclick: () => show(index - 1) }, icon("arrow-left", 18), "Previous");
+  const next = h("button", { type: "button", class: "primary", onclick: () => show(index + 1) }, "Next", icon("arrow-right", 18));
   const done = h("button", { type: "button", onclick: () => close() }, "Close");
 
   function show(i: number): void {

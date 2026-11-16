@@ -3,7 +3,7 @@
 
 import { prefs, type Theme } from "./prefs";
 
-const GROUND = { light: "#f7f7f7", dark: "#0b1510" } as const;
+const GROUND = { light: "#f7f7f7", dark: "#0a0a0a" } as const;
 
 const systemDark = window.matchMedia("(prefers-color-scheme: dark)");
 

@@ -445,7 +445,7 @@ export function renderInspector(o: InspectorOpts): HTMLElement {
       "div",
       { class: "inspector" },
       h("h2", { class: "inspector-title" }, `${sel.length} selected`),
-      h("p", { class: "hint" }, "Drag to move them, or use the arrow keys."),
+      h("p", { class: "hint" }, "Drag to move. Arrow keys nudge."),
       ...merge,
       h("button", { type: "button", class: "danger", onclick: o.remove }, "Delete"),
     );
@@ -508,7 +508,7 @@ function scopeInspector(doc: Obj, bi: number, body: Obj, shapes: readonly number
       "div",
       { class: "inspector" },
       h("h2", { class: "inspector-title" }, `Body ${num(body, "1", bi)}`),
-      h("p", { class: "hint" }, "Click a shape to select it, or draw one with a shape tool."),
+      h("p", { class: "hint" }, "Click a shape to edit it."),
       shapesBlock(doc, bi, commit),
     );
   }
@@ -518,7 +518,7 @@ function scopeInspector(doc: Obj, bi: number, body: Obj, shapes: readonly number
       "div",
       { class: "inspector" },
       h("h2", { class: "inspector-title" }, `${shapes.length} shapes selected`),
-      h("p", { class: "hint" }, "Drag to move them, or use the arrow keys."),
+      h("p", { class: "hint" }, "Drag to move. Arrow keys nudge."),
       del,
     );
   }
@@ -603,7 +603,7 @@ function mapSettings(doc: Obj, commit: (next: Obj) => void): HTMLElement {
     "div",
     { class: "inspector" },
     h("h2", { class: "inspector-title" }, "Map"),
-    h("p", { class: "hint" }, `${getList(doc, "body").length} bodies, ${getList(doc, "joint").length} joints. Select an item to edit it.`),
+    h("p", { class: "hint" }, `${getList(doc, "body").length} bodies, ${getList(doc, "joint").length} joints`),
     ...fieldGroups(MAP_GROUPS, set, SETTINGS_DEFAULTS, (f, v) =>
       commit({ ...doc, set: withField(set, f.key, stored(f, v), SETTINGS_DEFAULTS) }),
     ),

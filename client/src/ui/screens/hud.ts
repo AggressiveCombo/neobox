@@ -15,6 +15,7 @@ import { cssHex, playerRgb, setPlayerColors } from "../../render/geometry";
 import { CHAT_LIMIT, type AppState, type ChatLine, type Stats } from "../../state";
 import { chatPlaceholder } from "../chat-hint";
 import { h } from "../dom";
+import { icon, type IconName } from "../icons";
 
 const SCORE_INTERVAL_MS = 100;
 const CHAT_SHOWN = 8;
@@ -37,6 +38,7 @@ interface TouchSpec {
   area: string;
   label: string;
   aria: string;
+  icon: IconName;
 }
 
 /** Stick: fraction of the radius before a direction engages. */
@@ -45,11 +47,11 @@ const STICK_DEAD = 0.3;
 const STICK_SECTOR = 2.414;
 
 const ACTIONS: TouchSpec[] = [
-  { bit: BIT.UP, area: "jump", label: "Jump", aria: "Jump" },
-  { bit: BIT.PUSH, area: "push", label: "Push", aria: "Push X" },
-  { bit: BIT.ROCKET, area: "rocket", label: "Rocket", aria: "Rocket Z" },
-  { bit: BIT.BAT, area: "bat", label: "Bat", aria: "Bat C" },
-  { bit: BIT.GRAB, area: "grab", label: "Grab", aria: "Grab V" },
+  { bit: BIT.UP, area: "jump", label: "Jump", aria: "Jump", icon: "move-up" },
+  { bit: BIT.PUSH, area: "push", label: "Push", aria: "Push X", icon: "arrow-right" },
+  { bit: BIT.ROCKET, area: "rocket", label: "Rocket", aria: "Rocket Z", icon: "rocket" },
+  { bit: BIT.BAT, area: "bat", label: "Bat", aria: "Bat C", icon: "swords" },
+  { bit: BIT.GRAB, area: "grab", label: "Grab", aria: "Grab V", icon: "hand" },
 ];
 
 /** Display order of scoreboard teams; unknown teams sort last. */
@@ -84,7 +86,8 @@ function touchButton(ctx: AppCtx, spec: TouchSpec): HTMLButtonElement {
   const btn = h(
     "button",
     { type: "button", class: `hud-touch hud-touch-${spec.area}`, "aria-label": spec.aria, tabindex: -1 },
-    spec.label,
+    icon(spec.icon, 22),
+    h("span", { class: "hud-touch-label" }, spec.label),
   );
   const press = (on: boolean): void => {
     ctx.input.setTouch("buttons", spec.bit, on);
@@ -197,7 +200,8 @@ export function rotateGate(): { el: HTMLElement; destroy(): void } {
   const full = h(
     "button",
     { type: "button", class: "primary", hidden: !document.fullscreenEnabled, onclick: () => void goLandscape() },
-    "Full screen",
+    icon("maximize", 18),
+    h("span", null, "Full screen"),
   );
   const anyway = h(
     "button",
@@ -301,7 +305,8 @@ export const hudScreen: HudFactory = (ctx) => {
   const chatBtn = h(
     "button",
     { type: "button", class: "hud-chat-btn", "aria-expanded": "false", hidden: !isTouchDevice(), onclick: () => (chatOpen ? closeChat() : openChat()) },
-    "Chat",
+    icon("message-square", 18),
+    h("span", { class: "hud-chip-label" }, "Chat"),
   );
 
   // Spectator: a click on the arena follows the next player. Hidden unless spectating.
@@ -311,9 +316,9 @@ export const hudScreen: HudFactory = (ctx) => {
   const spectateLabelEl = h(
     "div",
     { class: "hud-spectate-label", hidden: true },
-    h("button", { type: "button", "aria-label": "Previous player", onclick: () => spectateStep(-1) }, "‹"),
+    h("button", { type: "button", class: "hud-spectate-prev", "aria-label": "Previous player", onclick: () => spectateStep(-1) }, icon("chevron-right", 22)),
     spectateName,
-    h("button", { type: "button", "aria-label": "Next player", onclick: () => spectateStep(1) }, "›"),
+    h("button", { type: "button", "aria-label": "Next player", onclick: () => spectateStep(1) }, icon("chevron-right", 22)),
   );
 
   // Stats overlay.
@@ -329,7 +334,7 @@ export const hudScreen: HudFactory = (ctx) => {
   // Connection chip: transport and ping; only its colour changes when the ping is bad.
   const linkKind = h("span", { class: "hud-link-kind" });
   const linkPing = h("span");
-  const linkEl = h("span", { class: "hud-link", title: "Connection" }, linkKind, linkPing);
+  const linkEl = h("span", { class: "hud-link", title: "Connection" }, icon("wifi", 18), linkKind, linkPing);
 
   // Scoreboard.
   const tbody = h("tbody");
@@ -379,7 +384,8 @@ export const hudScreen: HudFactory = (ctx) => {
   const leaveBtn = h(
     "button",
     { type: "button", class: "hud-leave", onclick: () => ctx.send({ t: "leave_room" }) },
-    "Leave",
+    icon("log-out", 18),
+    h("span", { class: "hud-chip-label" }, "Leave"),
   );
   const connEl = h("div", { class: "hud-conn", role: "status", hidden: true }, "connection lost");
   // Quick play with nobody else in the game yet (the original's matchmaking notification).
@@ -392,8 +398,20 @@ export const hudScreen: HudFactory = (ctx) => {
   // Match menu, the original's in-game menu: the lobby (the match keeps
   // running behind it), fullscreen, volume, menu music, controls, sign out.
   // Leave and End match keep their own buttons.
-  const fullscreenItem = h("button", { type: "button", hidden: !document.fullscreenEnabled, onclick: toggleFullscreen });
-  const muteItem = h("button", { type: "button", onclick: () => prefs.set({ musicMuted: !prefs.value.musicMuted }) });
+  const fullscreenLabel = h("span");
+  const fullscreenItem = h(
+    "button",
+    { type: "button", hidden: !document.fullscreenEnabled, onclick: toggleFullscreen },
+    icon("maximize", 18),
+    fullscreenLabel,
+  );
+  const muteLabel = h("span");
+  const muteItem = h(
+    "button",
+    { type: "button", onclick: () => prefs.set({ musicMuted: !prefs.value.musicMuted }) },
+    icon("volume-2", 18),
+    muteLabel,
+  );
   const volumeInput = h("input", {
     type: "range",
     min: 0,
@@ -401,21 +419,22 @@ export const hudScreen: HudFactory = (ctx) => {
     step: 1,
     oninput: (e: Event) => prefs.set({ volume: Number((e.target as HTMLInputElement).value) / 100 }),
   });
-  const signOutItem = h("button", { type: "button", onclick: () => void signOut() }, "Sign out");
+  const signOutItem = h("button", { type: "button", onclick: () => void signOut() }, icon("log-out", 18), h("span", null, "Sign out"));
   const menuPanel = h(
     "div",
     { class: "hud-menu", id: "hud-menu", hidden: true },
-    h("button", { type: "button", onclick: () => ctx.store.set({ screen: "room" }) }, "Show lobby"),
+    h("button", { type: "button", onclick: () => ctx.store.set({ screen: "room" }) }, icon("users", 18), h("span", null, "Show lobby")),
     fullscreenItem,
-    h("label", { class: "hud-menu-volume" }, h("span", null, "Volume"), volumeInput),
+    h("label", { class: "hud-menu-volume" }, icon("volume-2", 18), h("span", null, "Volume"), volumeInput),
     muteItem,
-    h("button", { type: "button", onclick: () => ctx.store.set({ screen: "settings" }) }, "Change controls"),
+    h("button", { type: "button", onclick: () => ctx.store.set({ screen: "settings" }) }, icon("keyboard", 18), h("span", null, "Change controls")),
     signOutItem,
   );
   const menuBtn = h(
     "button",
     { type: "button", class: "hud-menu-btn", "aria-expanded": "false", "aria-controls": "hud-menu", onclick: () => setMenu(menuPanel.hidden) },
-    "Menu",
+    icon("menu", 18),
+    h("span", { class: "hud-chip-label" }, "Menu"),
   );
 
   function setMenu(open: boolean): void {
@@ -436,8 +455,8 @@ export const hudScreen: HudFactory = (ctx) => {
   }
 
   function syncMenu(): void {
-    fullscreenItem.textContent = document.fullscreenElement !== null ? "Exit fullscreen" : "Fullscreen";
-    muteItem.textContent = prefs.value.musicMuted ? "Unmute music" : "Mute music";
+    fullscreenLabel.textContent = document.fullscreenElement !== null ? "Exit fullscreen" : "Fullscreen";
+    muteLabel.textContent = prefs.value.musicMuted ? "Unmute music" : "Mute music";
     volumeInput.value = String(Math.round(prefs.value.volume * 100));
     signOutItem.hidden = ctx.store.state.account === null;
   }
@@ -463,9 +482,10 @@ export const hudScreen: HudFactory = (ctx) => {
   const unsubPrefs = prefs.subscribe(() => syncMenu());
   document.addEventListener("fullscreenchange", syncMenu);
 
-  const endBtn = h("button", { type: "button", class: "hud-end", hidden: true, onclick: endMatch }, "End match");
+  const endBtn = h("button", { type: "button", class: "hud-end", hidden: true, onclick: endMatch }, icon("flag", 18), h("span", { class: "hud-chip-label" }, "End match"));
   const barLeft = h("div", { class: "hud-bar hud-bar-left" }, menuBtn, linkEl, menuPanel);
   const barRight = h("div", { class: "hud-bar hud-bar-right" }, chatBtn, endBtn, leaveBtn);
+  const releaseChips = [ctx.reserveChrome(barLeft), ctx.reserveChrome(barRight)];
   const rotate = rotateGate();
   const el = h(
     "div",
@@ -747,6 +767,7 @@ export const hudScreen: HudFactory = (ctx) => {
       chatInput.blur();
       latestScene = null;
       setPlayerColors(new Map());
+      for (const release of releaseChips) release();
       el.remove();
     },
   };

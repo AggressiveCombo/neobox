@@ -8,6 +8,7 @@ import type { AppCtx } from "../ctx";
 import { addGuestXp, GUEST_XP_CAP, guestXp, levelOf, xpForLevel } from "../levels";
 import { isTeamMode, type MapMeta, type RoomState, TEAM_SPECTATOR, type XpAward } from "../protocol";
 import { h } from "./dom";
+import { icon, type IconName } from "./icons";
 import { openModal } from "./kit";
 
 /** Wait before the count starts, so the panel is read before it moves. */
@@ -20,10 +21,10 @@ const LEVEL_SOUND = 20;
 
 type Vote = -1 | 0 | 1;
 
-const VOTES: readonly { vote: Vote; label: string }[] = [
-  { vote: -1, label: "Bad" },
-  { vote: 0, label: "Meh" },
-  { vote: 1, label: "Good" },
+const VOTES: readonly { vote: Vote; label: string; glyph: IconName }[] = [
+  { vote: -1, label: "Bad", glyph: "thumbs-down" },
+  { vote: 0, label: "Meh", glyph: "minus" },
+  { vote: 1, label: "Good", glyph: "thumbs-up" },
 ];
 
 /** Library map ids the viewer has voted on this session; those maps are not offered again. */
@@ -40,13 +41,13 @@ function ordinal(n: number): string {
 }
 
 /** The hero line: team modes report won or lost, other modes the placement. Null when nothing was placed. */
-function placeLine(award: XpAward, room: RoomState | null): { big: string; of: string | null } | null {
+function placeLine(award: XpAward, room: RoomState | null): { big: string; of: string | null; first: boolean } | null {
   if (award.placement < 1) return null;
   const mode = room?.settings["game_mode"];
   const teams = typeof mode === "number" && isTeamMode(mode);
-  if (teams) return { big: award.placement === 1 ? "You won!" : "You lost", of: null };
+  if (teams) return { big: award.placement === 1 ? "You won!" : "You lost", of: null, first: award.placement === 1 };
   const players = room === null ? 0 : room.players.filter((p) => p.team !== TEAM_SPECTATOR).length;
-  return { big: ordinal(award.placement), of: players > 0 ? `of ${players}` : null };
+  return { big: ordinal(award.placement), of: players > 0 ? `of ${players}` : null, first: award.placement === 1 };
 }
 
 function limitText(limit: XpAward["limit"]): string | null {
@@ -144,7 +145,7 @@ export function showPostGame(ctx: AppCtx, award: XpAward, map: MapMeta | null): 
   const voteTarget =
     xp !== null && map !== null && account !== null && account.name !== map.author && !votedMaps.has(map.id) ? map : null;
 
-  const voteButtons: HTMLButtonElement[] = VOTES.map(({ vote, label }) => {
+  const voteButtons: HTMLButtonElement[] = VOTES.map(({ vote, label, glyph }) => {
     const btn: HTMLButtonElement = h(
       "button",
       {
@@ -167,6 +168,7 @@ export function showPostGame(ctx: AppCtx, award: XpAward, map: MapMeta | null): 
           );
         },
       },
+      icon(glyph, 18),
       label,
     );
     return btn;
@@ -187,6 +189,7 @@ export function showPostGame(ctx: AppCtx, award: XpAward, map: MapMeta | null): 
       ? h(
           "p",
           { class: "postgame-place" },
+          place.first ? icon("trophy", 36) : null,
           place.big,
           place.of ? h("span", { class: "postgame-of" }, place.of) : null,
         )
@@ -212,7 +215,7 @@ export function showPostGame(ctx: AppCtx, award: XpAward, map: MapMeta | null): 
     status,
   );
 
-  const closeBtn = h("button", { type: "button", class: "primary", onclick: () => close() }, "Back to room");
+  const closeBtn = h("button", { type: "button", class: "primary", onclick: () => close() }, icon("arrow-left", 18), "Back to room");
   const { close } = openModal({
     title: "Game over",
     body: [body],

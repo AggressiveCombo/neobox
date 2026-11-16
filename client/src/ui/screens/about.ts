@@ -3,6 +3,7 @@
 import type { ScreenFactory } from "../../ctx";
 import { h } from "../dom";
 import { page, pageHead } from "../kit";
+import { icon } from "../icons";
 import { openNews } from "../news";
 import { privacyLink } from "./privacy";
 import "./info.css";
@@ -79,6 +80,14 @@ export const THIRD_PARTY: AssetCredit[] = [
     sourceUrl: "https://github.com/lipis/flag-icons",
   },
   {
+    asset: "Interface icons",
+    title: "Lucide",
+    author: "Lucide Contributors (portions Cole Bemis, Feather)",
+    licence: "ISC",
+    licenceUrl: "https://github.com/lucide-icons/lucide/blob/main/LICENSE",
+    sourceUrl: "https://lucide.dev",
+  },
+  {
     asset: "Room distances and flags (IP geolocation)",
     title: "DB-IP IP to City Lite",
     author: "DB-IP",
@@ -106,13 +115,13 @@ export const aboutScreen: ScreenFactory = (ctx) => {
         h(
           "ul",
           { class: "info-links" },
-          h("li", null, h("a", { href: REPO_URL, target: "_blank", rel: "noopener" }, "Source code")),
-          h("li", null, h("a", { href: LICENSE_URL, target: "_blank", rel: "noopener" }, "AGPL-3.0-or-later licence text")),
+          h("li", null, h("a", { href: REPO_URL, target: "_blank", rel: "noopener" }, "Source code", icon("external-link", 16))),
+          h("li", null, h("a", { href: LICENSE_URL, target: "_blank", rel: "noopener" }, "AGPL-3.0-or-later licence text", icon("external-link", 16))),
         ),
         h(
           "div",
           { class: "info-actions" },
-          h("button", { type: "button", onclick: () => openNews() }, "News"),
+          h("button", { type: "button", onclick: () => openNews() }, icon("newspaper", 18), "News"),
           privacyLink(ctx.store),
         ),
       ),

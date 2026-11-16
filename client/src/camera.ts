@@ -3,8 +3,39 @@
 import type { PlayerRec, Scene } from "./frame";
 import { TEAM_SPECTATOR } from "./protocol";
 
-/** The original's view is `viewWidth` wide and `viewWidth / 1.6` high. */
-const ORIGINAL_ASPECT = 1.6;
+/** The original's view is `viewWidth` wide and `viewWidth / VIEW_ASPECT` high: 2:1 for its mobile user agents, 1.6:1 otherwise. */
+const MOBILE_UA = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i;
+const VIEW_ASPECT = MOBILE_UA.test(navigator.userAgent) ? 2 : 1.6;
+
+/** The game view's rect in window CSS px: the largest `VIEW_ASPECT` rectangle, centred (the rest is letterbox). */
+export interface ViewRect {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+export function fitView(winW: number, winH: number): ViewRect {
+  if (winW <= 0 || winH <= 0) return { x: 0, y: 0, w: 0, h: 0 };
+  let w = winW;
+  let h = w / VIEW_ASPECT;
+  if (h > winH) {
+    h = winH;
+    w = h * VIEW_ASPECT;
+  }
+  w = Math.floor(w);
+  h = Math.floor(h);
+  return { x: Math.floor((winW - w) / 2), y: Math.floor((winH - h) / 2), w, h };
+}
+
+/** Publish the view rect as `--view-x/-y/-w/-h` (px) on the root element; the game canvases are placed by them. */
+export function publishView(view: ViewRect): void {
+  const style = document.documentElement.style;
+  style.setProperty("--view-x", `${view.x}px`);
+  style.setProperty("--view-y", `${view.y}px`);
+  style.setProperty("--view-w", `${view.w}px`);
+  style.setProperty("--view-h", `${view.h}px`);
+}
 
 export interface Camera {
   cx: number;
@@ -22,21 +53,9 @@ let lastCentre: { x: number; y: number } | null = null;
 /** Player a spectator follows; -1 none. Only used while the viewer has no local player. */
 let spectateId = -1;
 
-export function computeCamera(scene: Scene, canvasW: number, canvasH: number, local?: PlayerRec): Camera {
-  const aspect = canvasW > 0 && canvasH > 0 ? canvasW / canvasH : ORIGINAL_ASPECT;
-  const baseH = scene.viewWidth / ORIGINAL_ASPECT;
-  // landscape: show at least the original's whole view (extra space on the
-  // long axis); portrait: keep the original's vertical extent and narrow
-  // the view, so players stay big enough to play (DEVIATIONS.md P2)
-  let w: number;
-  let h: number;
-  if (aspect >= ORIGINAL_ASPECT || aspect < 1) {
-    h = baseH;
-    w = h * aspect;
-  } else {
-    w = scene.viewWidth;
-    h = w / aspect;
-  }
+export function computeCamera(scene: Scene, local?: PlayerRec): Camera {
+  const w = scene.viewWidth;
+  const h = w / VIEW_ASPECT;
   let cx: number;
   let cy: number;
   if (local) {
@@ -53,6 +72,18 @@ export function computeCamera(scene: Scene, canvasW: number, canvasH: number, lo
   cx = clampAxis(cx, w, scene.arenaW);
   cy = clampAxis(cy, h, scene.arenaH);
   return { cx, cy, w, h };
+}
+
+/**
+ * Backdrop camera (the main menu's clip, drawn over the whole window): the largest rectangle of the
+ * window's aspect that lies inside the arena, centred on `cam`, so no off-arena colour shows at any
+ * window shape. Decorative: it zooms in on portrait windows.
+ */
+export function coverCamera(scene: Scene, cam: Camera, aspect: number): Camera {
+  const w = Math.min(scene.arenaW, scene.arenaH * aspect);
+  if (!(w > 0) || !(aspect > 0)) return cam;
+  const h = w / aspect;
+  return { cx: clampAxis(cam.cx, w, scene.arenaW), cy: clampAxis(cam.cy, h, scene.arenaH), w, h };
 }
 
 function clampAxis(c: number, view: number, arena: number): number {

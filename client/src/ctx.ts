@@ -10,8 +10,11 @@ import type { Scene } from "./frame";
 import type { AppState, Store } from "./state";
 import type { Net } from "./net";
 
-/** Draws the engine's current frame (renderer, overlay labels, sounds); null when it is empty. */
-export type Present = (names: ReadonlyMap<number, string>, tickHz: number) => Scene | null;
+/**
+ * Draws the engine's current frame (renderer, overlay labels, sounds); null when it is empty.
+ * `chrome: false` draws the world and player names only (menu clips): no objective bar, feed or banners.
+ */
+export type Present = (names: ReadonlyMap<number, string>, tickHz: number, chrome?: boolean) => Scene | null;
 
 /** Engine helpers usable without a running match (map picker). */
 export interface WasmTools {
@@ -52,6 +55,8 @@ export interface AppCtx {
    * the top of a game view, until the returned function is called.
    */
   reserveTop(bar: HTMLElement): () => void;
+  /** Keep the objective bar clear of `bar`, a HUD chip row in the view's top corners, until the returned function is called. */
+  reserveChrome(bar: HTMLElement): () => void;
 }
 
 /** A mounted screen. The app calls `update` after every store change and `destroy` when leaving. */

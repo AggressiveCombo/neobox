@@ -22,6 +22,11 @@
 
 .settings-nav-item {
   flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: var(--control);
+  white-space: nowrap;
 }
 
 .settings-body {
@@ -32,6 +37,12 @@
 
 .settings-section {
   scroll-margin-top: 88px;
+}
+
+.settings-section > h2 {
+  display: flex;
+  align-items: center;
+  gap: 10px;
 }
 
 .settings-sub {
@@ -77,7 +88,7 @@
   width: 100%;
 }
 
-/* Controls: one row per action, its keys as boxes. */
+/* Controls: one compact row per action, its keys as boxes. */
 .bind-list {
   display: grid;
 }
@@ -85,7 +96,7 @@
 .bind-row {
   display: grid;
   gap: 8px;
-  padding: 12px 0;
+  padding: 10px 0;
   border-top: 1px solid var(--line);
 }
 
@@ -133,14 +144,19 @@
 .bind-remove {
   min-width: var(--control);
   min-height: var(--control);
-  padding: 0;
   background: transparent;
-  font-size: var(--step-lead);
-  line-height: 1;
+  color: var(--muted);
+}
+
+.bind-remove:hover {
+  color: var(--ink);
 }
 
 .bind-add,
 .bind-cancel {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
   min-height: var(--control);
 }
 
@@ -300,6 +316,12 @@
 
 .settings-reset .field-hint {
   margin: 0;
+}
+
+.settings-reset .danger {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
 }
 
 @media (min-width: 900px) {

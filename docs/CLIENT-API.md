@@ -139,14 +139,19 @@ damage threshold, at the body's interpolated position.
 
 ## Camera
 
-The original shows a view `W` = header word 9 world units wide and `W / 1.6`
-high. Landscape canvases (aspect ≥ 1) show at least that whole view: wider
-than 1.6 → height `W / 1.6`, width follows the aspect; between 1 and 1.6 →
-width `W`, height follows the aspect. Portrait canvases keep height
-`W / 1.6` and narrow the width. Centre on the local player (or the arena
-centre when spectating), clamped per axis to `[view/2, arena - view/2]`;
-when the arena is smaller than the view on an axis, centre the arena on
-that axis.
+The original shows a view `W` = header word 9 world units wide and `W / A` high,
+where `A` = 1.6, or 2 for its mobile user agents (`VIEW_ASPECT` in `camera.ts`,
+the same user-agent test). The game view is that rect, as large as the window
+allows and centred: `fitView(winW, winH)` returns it, and `publishView` sets
+`--view-x/-y/-w/-h` (px) on `documentElement`. The game canvases and the overlay
+sit on that rect; the window around it is letterbox, painted by `#gl-host`. The
+renderers and overlay draw only inside it. Centre on the local player (or the
+arena centre when spectating), clamped per axis to `[view/2, arena - view/2]`;
+when the arena is smaller than the view on an axis, centre the arena on that axis.
+`present(names, hz, false)` (menu clips) draws names and damage bars only: no
+objective bar, feed, banners or intro. The objective bar sits in the view's top row
+(8 px in); when HUD chip rows (`AppCtx.reserveChrome`, `reserveTop`) cover that row, it
+takes the widest free run between them, else it goes under them, centred.
 
 ## Replays and clips
 

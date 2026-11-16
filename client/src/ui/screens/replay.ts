@@ -7,6 +7,7 @@ import type { Engine, ReplayInfo } from "../../engine";
 import { FrameLoop } from "../../local-loop";
 import type { Screen } from "../../state";
 import { h } from "../dom";
+import { icon, type IconName } from "../icons";
 import { page, pageHead, seg } from "../kit";
 import "./replay.css";
 
@@ -134,7 +135,7 @@ export const replayScreen: ScreenFactory = (ctx) => {
   }
 
   function syncControls(): void {
-    if (playBtn) playBtn.textContent = playing ? "Pause" : "Play";
+    if (playBtn) playBtn.replaceChildren(icon(playing ? "pause" : "play", 20), playing ? "Pause" : "Play");
     speedSeg?.set(String(speed));
   }
 
@@ -264,7 +265,7 @@ export const replayScreen: ScreenFactory = (ctx) => {
         },
       },
       input,
-      h("span", { class: "replay-drop-mark", "aria-hidden": "true" }),
+      h("span", { class: "replay-drop-mark", "aria-hidden": "true" }, icon("upload", 28)),
       h("strong", null, "Choose a .nbreplay file or drop it here"),
       h("span", { class: "replay-drop-hint" }, "Replays saved from online matches, gzip or plain JSON."),
     );
@@ -287,7 +288,7 @@ export const replayScreen: ScreenFactory = (ctx) => {
     const loaded = info;
     root.className = "offline playing";
 
-    playBtn = h("button", { type: "button", class: "primary replay-play", onclick: togglePlay }, "Play");
+    playBtn = h("button", { type: "button", class: "primary replay-play", onclick: togglePlay }, icon("play", 20), "Play");
     seekEl = h("input", {
       type: "range",
       min: String(loaded.first),
@@ -318,8 +319,8 @@ export const replayScreen: ScreenFactory = (ctx) => {
     );
     followSel.value = String(follow);
 
-    const stepBtn = (label: string, onclick: () => void): HTMLButtonElement =>
-      h("button", { type: "button", onclick }, label);
+    const stepBtn = (label: string, name: IconName, onclick: () => void): HTMLButtonElement =>
+      h("button", { type: "button", class: "replay-step-btn", "aria-label": label, title: label, onclick }, icon(name, 20));
     const speedGroup = seg(
       "Speed",
       SPEEDS.map((s) => ({ value: String(s), label: `${s}x` })),
@@ -331,7 +332,7 @@ export const replayScreen: ScreenFactory = (ctx) => {
     const bar = h(
       "div",
       { class: "offline-top offline-overlay" },
-      h("button", { type: "button", onclick: leave }, "Close"),
+      h("button", { type: "button", onclick: leave }, icon("x", 18), "Close"),
       h("span", { class: "offline-title" }, fileName),
       followSel,
     );
@@ -347,10 +348,10 @@ export const replayScreen: ScreenFactory = (ctx) => {
           h(
             "div",
             { class: "replay-step", role: "group", "aria-label": "Jump and step" },
-            stepBtn("Back 5 s", () => jump(-JUMP_SECONDS)),
-            stepBtn("Step back", () => step(-1)),
-            stepBtn("Step forward", () => step(1)),
-            stepBtn("Forward 5 s", () => jump(JUMP_SECONDS)),
+            stepBtn("Back 5 s", "rotate-ccw", () => jump(-JUMP_SECONDS)),
+            stepBtn("Step back", "step-back", () => step(-1)),
+            stepBtn("Step forward", "step-forward", () => step(1)),
+            stepBtn("Forward 5 s", "rotate-cw", () => jump(JUMP_SECONDS)),
           ),
           speedGroup.el,
         ),

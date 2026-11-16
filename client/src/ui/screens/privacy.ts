@@ -5,6 +5,7 @@ import { PRIVACY_CONTACT, PRIVACY_SECTIONS, PRIVACY_UPDATED } from "../../privac
 import type { AppState, Store } from "../../state";
 import { h } from "../dom";
 import { page, pageHead } from "../kit";
+import { icon } from "../icons";
 import "./info.css";
 
 export const privacyScreen: ScreenFactory = (ctx) => {
@@ -31,5 +32,5 @@ export const privacyScreen: ScreenFactory = (ctx) => {
 
 /** A link-styled button to the privacy notice, for footers and forms. */
 export function privacyLink(store: Store<AppState>): HTMLButtonElement {
-  return h("button", { type: "button", class: "quiet", onclick: () => store.set({ screen: "privacy" }) }, "Privacy");
+  return h("button", { type: "button", class: "quiet", onclick: () => store.set({ screen: "privacy" }) }, icon("shield", 18), "Privacy");
 }

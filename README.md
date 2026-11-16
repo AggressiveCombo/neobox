@@ -65,9 +65,11 @@ This is why I have set up some goals that I believe will make the project an imp
   rooms open on the server nearest to you. Hosts manage teams, lock teams,
   kick, ban and unban, hand over the host role, count down and start
   matches, and end them from the room screen or with chat commands (`/help`).
-* **Levels.** Experience for every finished game (more for better places),
-  a post-game screen with your level bar and a vote on the map, and levels
-  shown next to names. Awards are computed by the server.
+* **Levels and profiles.** Experience for every finished game (more for
+  better places), a post-game screen with your level bar and a vote on the
+  map, and levels shown next to names. Every account has a profile with its
+  games, wins, rounds won, kills, deaths and time played. Awards and stats
+  are computed by the server.
 * **Room life.** A YouTube jukebox (paste a link in chat, the host plays it),
   appearance colours, typing indicators, emoji shortcodes such as `:fire:`,
   a profanity filter and friend requests from the lobby.
@@ -82,9 +84,11 @@ This is why I have set up some goals that I believe will make the project an imp
   save any finished match as a replay and watch it with pause, speed and
   seeking; learn the controls in the training hall; practise alone on any
   map without a server.
-* **Your settings.** Key rebinding, volume, menu music, a light and a dark
-  theme (following the system by default), render scale and anti-aliasing,
-  colour-blind palettes, touch control size and a left-handed layout.
+* **Your settings.** Key rebinding, master, music and effects volume (menu
+  and match music each with their own switch, interface sounds), a light and
+  a dark theme (following the system by default), render scale and
+  anti-aliasing, colour-blind palettes, touch control size and a left-handed
+  layout.
 * **Runs everywhere.** WebGPU renderer with a WebGL2 fallback, dynamic
   resolution, any refresh rate; keyboard, gamepad and full touch controls
   laid out for phones in landscape; iOS Safari included. Installable to the
@@ -137,9 +141,9 @@ bash deploy/build.sh && (cd client && bun run e2e)   # browser end-to-end suite 
 
 * **Chaz**, creator of Hitbox.io, whose game this project pays tribute to.
 * Box2D by Erin Catto; Box2DFlash/box2dweb ports by their authors.
-* Third-party music, type and data (menu music, the Hanken Grotesk
-  typeface, emoji names, the profanity word list, flags) are listed in
-  [CREDITS.md](CREDITS.md).
+* Third-party music, sound effects, icons, type and data (menu and match
+  music, sound effects, Lucide icons, the Hanken Grotesk typeface, emoji
+  names, the profanity word list, flags) are listed in [CREDITS.md](CREDITS.md).
 
 ## Licence
 

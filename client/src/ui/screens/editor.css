@@ -74,32 +74,45 @@
   min-height: 0;
 }
 
-/* Tool rail: square tiles, the active tool filled ink. */
+/* Tool rail: icon tiles in groups, a hairline between groups; the active tool is filled ink. */
 
 .editor-tools {
   flex: none;
-  width: 96px;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  padding: 8px;
-  overflow-y: auto;
-  background: var(--ground);
-}
-
-.editor-tool {
-  position: relative;
+  width: 60px;
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: center;
+  gap: 8px;
+  padding: 10px 8px;
+  overflow-y: auto;
+  background: var(--ground);
+  border-right: 1px solid var(--line);
+}
+
+.editor-tool-group {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
   gap: 4px;
   width: 100%;
-  min-height: 76px;
-  padding: 8px 4px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--line);
+}
+
+.editor-tool-group:last-child {
+  padding-bottom: 0;
+  border-bottom: 0;
+}
+
+.editor-tool {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  padding: 0;
   background: var(--surface);
-  font-size: var(--step-small);
-  line-height: 1.15;
 }
 
 .editor-tool:hover:not(:disabled) {
@@ -110,15 +123,6 @@
 .editor-tool[aria-pressed="true"]:hover:not(:disabled) {
   background: var(--ink);
   color: var(--ground);
-}
-
-.editor-tool .key {
-  margin-top: 2px;
-}
-
-.editor-tool[aria-pressed="true"] .key {
-  background: transparent;
-  box-shadow: inset 0 0 0 2px currentColor;
 }
 
 /* ------------------------------------------------------------------- stage */
@@ -172,7 +176,7 @@
 .editor-lag {
   position: absolute;
   left: 12px;
-  bottom: 12px;
+  bottom: 68px;
   max-width: calc(100% - 24px);
   margin: 0;
   padding: 6px 10px;
@@ -201,11 +205,38 @@
   font-size: var(--step-small);
 }
 
-.editor-view {
+.editor-float {
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 6px;
+  justify-content: flex-end;
+  gap: 4px 12px;
+  max-width: calc(100% - 24px);
+  padding: 4px;
+  background: var(--hud);
+  box-shadow: var(--float-shadow);
+}
+
+.editor-float .icon {
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  background: var(--hud-ink);
+  color: var(--ink);
+}
+
+.editor-cluster {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.editor-cluster + .editor-cluster {
+  padding-left: 12px;
+  border-left: 1px solid var(--line);
 }
 
 .editor-colour {
@@ -217,9 +248,15 @@
   cursor: pointer;
 }
 
-/* The inspector toggle exists for phones and narrow windows only. */
-.editor-side-toggle {
+/* The inspector toggle heads the tool rail on phones and narrow windows only. */
+.editor-side-toggle,
+.editor-settings-group {
   display: none;
+}
+
+/* Toasts sit above the footer, not over it. */
+body:has(.screen.editor) #toasts {
+  bottom: 108px;
 }
 
 /* --------------------------------------------------------------- inspector */
@@ -308,6 +345,19 @@
   overflow-y: auto;
   background: var(--surface);
   box-shadow: var(--float-shadow);
+  visibility: hidden;
+  opacity: 0;
+  transform: translateY(-8px);
+  pointer-events: none;
+  transition: opacity 160ms var(--ease), transform 200ms var(--ease), visibility 0s linear 200ms;
+}
+
+.editor-menu[data-open="true"] {
+  visibility: visible;
+  opacity: 1;
+  transform: none;
+  pointer-events: auto;
+  transition: opacity 160ms var(--ease), transform 200ms var(--ease), visibility 0s;
 }
 
 .editor-menu-head {
@@ -349,6 +399,12 @@
   gap: 8px;
 }
 
+.editor-buttons button {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .editor-row input {
   flex: 1 1 160px;
   min-width: 0;
@@ -385,8 +441,12 @@
 
 /* ----------------------------------------------------------------- phones */
 
-/* Below 900px the inspector is a sheet over the stage, opened from the footer. */
+/* Below 900px the inspector is a sheet over the stage, opened from the footer. It slides in and stays out of focus and the accessibility tree while closed. */
 @media (max-width: 899px) {
+  .editor-body {
+    overflow: hidden;
+  }
+
   .editor-side {
     position: absolute;
     z-index: 4;
@@ -394,22 +454,38 @@
     right: 0;
     bottom: 0;
     width: min(340px, 100%);
-    display: none;
     box-shadow: var(--float-shadow);
+    visibility: hidden;
+    transform: translateX(100%);
+    transition: transform 260ms var(--ease), visibility 0s linear 260ms;
   }
 
   .editor-side[data-open="true"] {
-    display: flex;
+    visibility: visible;
+    transform: none;
+    transition: transform 260ms var(--ease), visibility 0s;
   }
 
   .editor-side-toggle {
     display: inline-flex;
     align-items: center;
-    gap: 8px;
+    justify-content: center;
+    width: 44px;
+    height: 44px;
+    padding: 0;
+    background: var(--surface);
+  }
+
+  .editor-settings-group {
+    display: flex;
+  }
+
+  .editor-tools .editor-label {
+    display: none;
   }
 }
 
-/* Portrait phone: rail along the bottom, sheet rises from the bottom. */
+/* Portrait phone: icon rail along the bottom, sheet rises from the bottom. */
 @media (max-width: 600px) and (orientation: portrait) {
   .editor-body {
     flex-direction: column;
@@ -424,21 +500,39 @@
     order: 2;
     width: auto;
     flex-direction: row;
-    gap: 6px;
-    padding: 8px 12px;
+    align-items: center;
+    gap: 0;
+    padding: 6px 28px 6px 10px;
+    /* Fades the right edge: more tools lie past it; scroll to reach them. */
+    -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent);
+    mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent);
     overflow-x: auto;
     overflow-y: hidden;
+    border-right: 0;
+    border-top: 1px solid var(--line);
+  }
+
+  .editor-tool-group {
+    flex: none;
+    flex-direction: row;
+    width: auto;
+    padding: 0 8px;
+    border-bottom: 0;
+    border-right: 1px solid var(--line);
+  }
+
+  .editor-tool-group:first-child {
+    padding-left: 0;
+  }
+
+  .editor-tool-group:last-child {
+    padding-right: 0;
+    border-right: 0;
   }
 
   .editor-tool {
-    flex: none;
-    width: 72px;
-    min-height: 64px;
-    padding: 6px 4px;
-  }
-
-  .editor-tool .key {
-    display: none;
+    width: 44px;
+    height: 44px;
   }
 
   .editor-side {
@@ -446,30 +540,55 @@
     left: 0;
     width: auto;
     height: 52dvh;
+    transform: translateY(100%);
+    transition: transform 260ms var(--ease), visibility 0s linear 260ms;
   }
 
   .editor-top {
-    flex-wrap: wrap;
-    padding: 8px 12px;
-  }
-
-  .editor-top-tools {
-    flex: 1 1 auto;
-    justify-content: flex-end;
+    padding: 8px 10px;
+    gap: 6px;
   }
 
   .editor-name {
-    order: 2;
-    flex: 1 1 100%;
+    flex: 1 1 0;
     max-width: none;
+  }
+
+  .editor-top-tools {
+    flex: none;
+    gap: 4px;
+  }
+
+  .editor-top button {
+    width: 40px;
+    padding: 0;
   }
 
   .editor-top .editor-label {
     display: none;
   }
 
+  /* The hint is still announced (aria-live) but not shown: the controls float on the canvas. */
   .editor-foot {
-    padding: 8px 12px;
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+
+  .editor-float {
+    right: 8px;
+    bottom: 8px;
+  }
+
+  .editor-lag {
+    bottom: 64px;
+  }
+
+  body:has(.screen.editor) #toasts {
+    bottom: calc(128px + env(safe-area-inset-bottom));
   }
 
   .editor-menu {
@@ -479,25 +598,18 @@
   }
 }
 
-/* Landscape phone: a two-column rail on the left; the sheet covers the right. */
+/* Landscape phone: a narrow icon rail on the left (it scrolls when short); the sheet covers the right. */
 @media (max-height: 500px) and (orientation: landscape) {
   .editor-tools {
-    width: 200px;
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    align-content: start;
+    width: 52px;
+    gap: 6px;
+    padding: 6px;
   }
 
-  .editor-tool {
-    min-height: 60px;
-    padding: 6px 4px;
-  }
-
-  .editor-tool .key {
-    position: absolute;
-    top: 3px;
-    right: 3px;
-    margin: 0;
+  .editor-tool,
+  .editor-side-toggle {
+    width: 40px;
+    height: 40px;
   }
 
   .editor-side {

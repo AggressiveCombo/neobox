@@ -13,6 +13,7 @@ import {
   TEAM_FFA,
   TEAM_RED,
   TEAM_SPECTATOR,
+  ROOM_MIN_PLAYERS,
   isTeamMode,
 } from "../../protocol";
 import type { MapMeta, PlayerInfo, RoomState } from "../../protocol";
@@ -34,6 +35,8 @@ import {
 import { filterProfanity } from "../../profanity";
 import { prefs } from "../../prefs";
 import { openColorPicker } from "../color-picker";
+import { icon, type IconName } from "../icons";
+import { showProfile } from "../profile";
 
 interface TeamAction {
   label: string;
@@ -73,6 +76,28 @@ function roomMode(room: RoomState): number | null {
 function modeName(mode: number | null): string {
   return GAME_MODES.find((m) => m.id === mode)?.name ?? "mode";
 }
+
+/** The icon of each game mode, shown on its mode button. */
+const MODE_ICONS: Record<number, IconName> = {
+  0: "swords",
+  1: "heart",
+  2: "timer",
+  3: "flag",
+  4: "users",
+  5: "shield",
+  6: "infinity",
+};
+
+/** One line on what each game mode means, shown in the mode picker. */
+const MODE_BLURBS: Record<number, string> = {
+  0: "Ranked by kills.",
+  1: "Each player has lives; the last one left wins.",
+  2: "Play rounds; the most round wins takes the match.",
+  3: "Red and Blue play rounds; the team with more round wins takes the match.",
+  4: "Red and Blue score kills in an endless match.",
+  5: "Red and Blue share lives; the last team with lives left wins.",
+  6: "Score kills in an endless match.",
+};
 
 /** Column a player is listed under: team modes use red/blue/spectators, others players/spectators. */
 function columnOf(p: PlayerInfo, teams: boolean): number {
@@ -187,6 +212,13 @@ function chatLine(line: ChatLine, myId: number | null, text: string, onPlay: ((v
   );
 }
 
+/** Ping quality tier for the roster bars: under 80 ms good, under 160 fair, otherwise poor. */
+function pingTier(ms: number): string {
+  if (ms < 0) return "is-none";
+  if (ms < 80) return "is-good";
+  return ms < 160 ? "is-fair" : "is-poor";
+}
+
 /** Rebuilds `slot` only when `key` differs from the previous call. */
 function keyed(slot: HTMLElement, build: () => Node[]): (key: string) => void {
   let last: string | null = null;
@@ -215,8 +247,12 @@ export const roomScreen: ScreenFactory = (ctx: AppCtx) => {
   let mapsError: string | null = null;
   let lastMapName: string | null = null;
   let drawnCode: string | null = null;
+  /** The map name whose code was last asked of the server for the preview. */
+  let previewAsked: string | null = null;
   let closeLibrary: (() => void) | null = null;
   let closePicker: (() => void) | null = null;
+  let closeMapPicker: (() => void) | null = null;
+  let closeModePicker: (() => void) | null = null;
   /** Friend relations with the signed-in viewer, by lowercase name; the roster shows them. */
   let relations = new Map<string, FriendState>();
   let relationsSeq = 0;
@@ -313,16 +349,16 @@ export const roomScreen: ScreenFactory = (ctx: AppCtx) => {
   function friendMenuItems(name: string): HTMLElement[] {
     const rel = relations.get(name.toLowerCase());
     if (rel === undefined) {
-      return [menuItem("Add friend", () => friendAction(() => requestFriend(name), `Friend request sent to ${name}.`))];
+      return [menuItem("Add friend", () => friendAction(() => requestFriend(name), `Friend request sent to ${name}.`), { icon: "user-plus" })];
     }
     if (rel === "incoming") {
       return [
-        menuItem("Accept", () => friendAction(() => acceptFriend(name), `You and ${name} are now friends.`)),
-        menuItem("Decline", () => friendAction(() => removeFriend(name), `Declined ${name}'s request.`)),
+        menuItem("Accept", () => friendAction(() => acceptFriend(name), `You and ${name} are now friends.`), { icon: "user-check" }),
+        menuItem("Decline", () => friendAction(() => removeFriend(name), `Declined ${name}'s request.`), { icon: "user-x" }),
       ];
     }
     if (rel === "friend") {
-      return [menuItem("Remove friend", () => friendAction(() => removeFriend(name), `Removed ${name} from friends.`))];
+      return [menuItem("Remove friend", () => friendAction(() => removeFriend(name), `Removed ${name} from friends.`), { icon: "user-x" })];
     }
     return [menuItem("Request sent", null)];
   }
@@ -411,7 +447,7 @@ export const roomScreen: ScreenFactory = (ctx: AppCtx) => {
   }
 
   /** One roster action-menu item. Choosing it closes the menu, then runs `run`; a null `run` leaves it disabled. */
-  function menuItem(label: string, run: (() => void) | null, opts: { role?: string; checked?: boolean; danger?: boolean } = {}): HTMLElement {
+  function menuItem(label: string, run: (() => void) | null, opts: { role?: string; checked?: boolean; danger?: boolean; icon?: IconName } = {}): HTMLElement {
     return h(
       "button",
       {
@@ -425,6 +461,7 @@ export const roomScreen: ScreenFactory = (ctx: AppCtx) => {
           run?.();
         },
       },
+      opts.icon ? icon(opts.icon, 16) : null,
       label,
     );
   }
@@ -433,24 +470,24 @@ export const roomScreen: ScreenFactory = (ctx: AppCtx) => {
   function rowMenuItems(p: PlayerInfo, host: boolean, teams: boolean): HTMLElement[] {
     const items: HTMLElement[] = [];
     if (host) {
-      items.push(menuItem("Make host", () => giveHost(p.id)));
+      items.push(menuItem("Make host", () => giveHost(p.id), { icon: "crown" }));
       for (const a of teams ? TEAM_ACTIONS_TEAMS : TEAM_ACTIONS_FFA) {
         items.push(menuItem(a.label, () => moveTo(p.id, a.team), { role: "menuitemradio", checked: p.team === a.team }));
       }
     }
+    if (p.account) items.push(menuItem("View profile", () => showProfile(ctx, p.name), { icon: "user" }));
     if (st.account !== null && p.account) items.push(...friendMenuItems(p.name));
     if (host) {
-      items.push(menuItem("Kick", () => kick(p.id, false)));
-      items.push(menuItem("Ban", () => kick(p.id, true), { danger: true }));
+      items.push(menuItem("Kick", () => kick(p.id, false), { icon: "user-x" }));
+      items.push(menuItem("Ban", () => kick(p.id, true), { danger: true, icon: "ban" }));
     }
-    items.push(menuItem("Report", () => openPlayerReport(p)));
+    items.push(menuItem("Report", () => openPlayerReport(p), { icon: "flag" }));
     return items;
   }
 
-  /** One roster row: avatar, name with state chips, ping and status, and the action menu for other players. */
+  /** One roster row on one line: avatar, name and its marks, level and ping, and the action menu for other players. */
   function playerRow(p: PlayerInfo, host: boolean, teams: boolean, typing: boolean): HTMLElement {
     const isMe = p.id === st.myId;
-    const ping = p.ping_ms >= 0 ? `${p.ping_ms} ms` : "-";
     const open = menuFor === p.id;
     return h(
       "li",
@@ -458,25 +495,23 @@ export const roomScreen: ScreenFactory = (ctx: AppCtx) => {
       avatar(p.name, p.color),
       h(
         "div",
-        { class: "room-player-body" },
-        h(
-          "div",
-          { class: "room-player-line" },
-          h("span", { class: "room-player-name" }, p.name),
-          isMe ? h("span", { class: "chip" }, "You") : null,
-          p.host ? h("span", { class: "chip ink", title: "room host" }, "Host") : null,
-          p.account ? h("span", { class: "chip", title: "signed-in account" }, "Verified") : null,
-          h("span", { class: "chip room-level", title: p.level > 0 ? "account level" : "playing as a guest" }, p.level > 0 ? `Level ${p.level}` : "Guest"),
-          st.account !== null && p.account && !isMe ? friendChip(p.name) : null,
-        ),
-        h(
-          "div",
-          { class: "room-player-meta" },
-          h("span", { class: "room-ping" }, ping),
-          typing ? h("span", { class: "room-typing", "aria-label": `${p.name} is typing` }, "typing…") : null,
-          p.editing ? h("span", { class: "room-editing", title: "building a map" }, "editing") : null,
-          p.connected ? null : h("span", { class: "room-offline", title: "reconnecting" }, "Reconnecting"),
-        ),
+        { class: "room-player-line" },
+        p.account
+          ? h("button", { type: "button", class: "room-player-name room-profile-link", title: "View profile", onclick: () => showProfile(ctx, p.name) }, p.name)
+          : h("span", { class: "room-player-name" }, p.name),
+        p.host ? h("span", { class: "room-host-mark", title: "Room host", "aria-label": "Room host" }, icon("crown", 14)) : null,
+        p.account ? h("span", { class: "room-verified", title: "Verified account", "aria-label": "Verified account" }, icon("badge-check", 14)) : null,
+        isMe ? h("span", { class: "room-you" }, "you") : null,
+        st.account !== null && p.account && !isMe ? friendChip(p.name) : null,
+        typing ? h("span", { class: "room-typing", "aria-label": `${p.name} is typing` }, "typing…") : null,
+        p.editing ? h("span", { class: "room-editing", title: "building a map" }, "editing") : null,
+        p.connected ? null : h("span", { class: "room-offline", title: "reconnecting" }, "Reconnecting"),
+      ),
+      h(
+        "div",
+        { class: "room-player-stats" },
+        p.level > 0 ? h("span", { class: "room-level", title: "account level" }, `Lv ${p.level}`) : null,
+        h("span", { class: `room-ping ${pingTier(p.ping_ms)}`, title: p.ping_ms >= 0 ? "ping" : "no ping" }, icon("signal", 14), p.ping_ms >= 0 ? `${p.ping_ms} ms` : "-"),
       ),
       isMe
         ? null
@@ -493,7 +528,7 @@ export const roomScreen: ScreenFactory = (ctx: AppCtx) => {
                 "aria-expanded": open ? "true" : "false",
                 onclick: () => (open ? setMenu(null) : setMenu(p.id, true)),
               },
-              "…",
+              icon("ellipsis", 18),
             ),
             open ? h("div", { class: "room-menu", role: "menu", "aria-label": `Actions for ${p.name}` }, rowMenuItems(p, host, teams)) : null,
           ),
@@ -529,56 +564,68 @@ export const roomScreen: ScreenFactory = (ctx: AppCtx) => {
     const teams = mode !== null && isTeamMode(mode);
     const host = isHost();
     const typers = new Set(activeTypers());
-    const columns: { title: string; bucket: number; empty: string }[] = teams
-      ? [
-          { title: "Red", bucket: TEAM_RED, empty: "No one on Red" },
-          { title: "Blue", bucket: TEAM_BLUE, empty: "No one on Blue" },
-          { title: "Spectators", bucket: TEAM_SPECTATOR, empty: "No spectators" },
-        ]
-      : [
-          { title: "Players", bucket: TEAM_FFA, empty: "No players" },
-          { title: "Spectators", bucket: TEAM_SPECTATOR, empty: "No spectators" },
-        ];
     const me = room.players.find((p) => p.id === st.myId);
     const teamActions = teams ? TEAM_ACTIONS_TEAMS : TEAM_ACTIONS_FFA;
-    return [
-      ...columns.map((col) => {
-        const members = room.players.filter((p) => columnOf(p, teams) === col.bucket);
-        return h(
-          "section",
-          { class: "room-roster-group" },
-          h("h3", { class: "room-subtitle" }, `${col.title} (${members.length})`),
-          members.length === 0
-            ? h("p", { class: "room-muted" }, col.empty)
-            : h("ul", { class: "room-roster-list" }, members.map((p) => playerRow(p, host, teams, typers.has(p.id)))),
-        );
-      }),
+    const members = (bucket: number): PlayerInfo[] => room.players.filter((p) => columnOf(p, teams) === bucket);
+    const list = (ps: PlayerInfo[]): HTMLElement =>
+      h("ul", { class: "room-roster-list" }, ps.map((p) => playerRow(p, host, teams, typers.has(p.id))));
+    const nodes: Node[] = [
       h(
         "div",
-        { class: "room-my-team" },
-        seg(
-          "Your team",
-          teamActions.map((a) => ({ value: String(a.team), label: a.label })),
-          String(me?.team ?? ""),
-          (v) => ctx.send({ t: "set_team", team: Number(v) }),
-        ).el,
-        h("button", { type: "button", class: "room-btn", onclick: openAppearance }, "Appearance"),
+        { class: "room-players-head" },
+        h("h2", { class: "room-panel-title" }, "Players", h("span", { class: "room-count" }, `${room.players.length}/${room.max_players}`)),
+        h(
+          "div",
+          { class: "room-team-pick" },
+          seg(
+            teams ? "Your team" : "Join or spectate",
+            teamActions.map((a) => ({ value: String(a.team), label: a.label })),
+            String(me?.team ?? ""),
+            (v) => ctx.send({ t: "set_team", team: Number(v) }),
+          ).el,
+        ),
+        h("button", { type: "button", class: "icon room-appearance", "aria-label": "Appearance", title: "Appearance", onclick: openAppearance }, icon("palette", 18)),
       ),
     ];
+    if (teams) {
+      for (const [title, bucket] of [
+        ["Red", TEAM_RED],
+        ["Blue", TEAM_BLUE],
+      ] as const) {
+        const ps = members(bucket);
+        nodes.push(
+          h(
+            "section",
+            { class: "room-roster-group" },
+            h("h3", { class: "room-subtitle" }, `${title} (${ps.length})`),
+            ps.length === 0 ? h("p", { class: "room-muted" }, `No one on ${title}`) : list(ps),
+          ),
+        );
+      }
+    } else {
+      const ps = members(TEAM_FFA);
+      nodes.push(ps.length === 0 ? h("p", { class: "room-muted" }, "No players yet") : list(ps));
+    }
+    const spectators = members(TEAM_SPECTATOR);
+    if (spectators.length > 0) {
+      nodes.push(h("section", { class: "room-roster-group" }, h("h3", { class: "room-subtitle" }, `Spectating (${spectators.length})`), list(spectators)));
+    }
+    return nodes;
   }
 
   function buildMode(): Node[] {
     const room = st.room;
     if (room === null) return [];
     const mode = roomMode(room);
-    if (!isHost()) return [h("p", { class: "room-mode-name" }, modeName(mode))];
+    const name = h("span", { class: "room-mode-name" }, icon(MODE_ICONS[mode ?? -1] ?? "swords", 18), modeName(mode));
+    if (!isHost()) return [name];
     return [
-      seg(
-        "Game mode",
-        GAME_MODES.map((m) => ({ value: String(m.id), label: m.name })),
-        String(mode),
-        (v) => setMode(Number(v)),
-      ).el,
+      h(
+        "div",
+        { class: "room-mode-row" },
+        name,
+        h("button", { type: "button", class: "room-btn room-btn-small", onclick: openModePicker }, "Change mode"),
+      ),
     ];
   }
 
@@ -590,8 +637,8 @@ export const roomScreen: ScreenFactory = (ctx: AppCtx) => {
       h(
         "div",
         { class: "actions" },
-        h("button", { type: "button", class: "room-btn", onclick: () => setLock(!room.locked) }, room.locked ? "Unlock teams" : "Lock teams"),
-        h("button", { type: "button", class: "room-btn danger", disabled: !room.in_match, onclick: endMatch }, "End match"),
+        h("button", { type: "button", class: "room-btn", onclick: () => setLock(!room.locked) }, icon(room.locked ? "lock-open" : "lock", 16), room.locked ? "Unlock teams" : "Lock teams"),
+        h("button", { type: "button", class: "room-btn danger", disabled: !room.in_match, onclick: endMatch }, icon("x", 16), "End match"),
       ),
       h("p", { class: "room-muted" }, room.locked ? "Players cannot change team." : "Players can change team."),
       h("h3", { class: "room-subtitle" }, "Bans"),
@@ -653,10 +700,21 @@ export const roomScreen: ScreenFactory = (ctx: AppCtx) => {
     }
     try {
       await navigator.clipboard.writeText(url);
+      flashInviteCopied();
       ctx.toast("Invite link copied.");
     } catch {
       ctx.toast(url);
     }
+  }
+
+  /** Shows a check and "Link copied" on the invite button for a moment, so the copy reads as done. */
+  function flashInviteCopied(): void {
+    const btn = header.querySelector<HTMLButtonElement>(".room-invite");
+    if (btn === null) return;
+    btn.replaceChildren(icon("check", 16), "Link copied");
+    setTimeout(() => {
+      btn.replaceChildren(icon("link", 16), "Invite");
+    }, 1600);
   }
 
   /** Save the last finished match as a .nbreplay download. */
@@ -825,13 +883,89 @@ export const roomScreen: ScreenFactory = (ctx: AppCtx) => {
       closeLibrary = null;
       if (!isHost() || !showPreview(m.code)) return;
       ctx.send({ t: "set_library_map", id: m.id });
+      closeMapPicker?.();
     });
   }
 
-  /** Previews the built-in map matching the room's current map name (visible to everyone). */
+  /**
+   * Previews the room's current map (visible to everyone): a built-in by name, otherwise the
+   * code the server holds for the room (asked once per map name).
+   */
   function previewRoomMap(): void {
-    const map = builtins?.find((m) => m.name === lastMapName);
-    if (map) showPreview(map.code);
+    const name = lastMapName;
+    const map = builtins?.find((m) => m.name === name);
+    if (map) {
+      showPreview(map.code);
+      return;
+    }
+    if (!name || previewAsked === name) return;
+    previewAsked = name;
+    ctx.roomMap().then(
+      ({ code }) => {
+        if (alive && code !== "" && lastMapName === name) showPreview(code);
+      },
+      () => {},
+    );
+  }
+
+  /** Opens the built-in maps in a dialog; picking one sets the room's map and closes it. */
+  function openMapPicker(): void {
+    closeMapPicker?.();
+    mapList.replaceChildren(...buildMapList());
+    const modal = openModal({
+      title: "Choose a map",
+      body: [mapList, mapControls],
+      onclose: () => {
+        closeMapPicker = null;
+      },
+    });
+    closeMapPicker = () => modal.close();
+  }
+
+  /** Opens the game modes in a dialog; picking one sets the room's mode and closes it. */
+  function openModePicker(): void {
+    closeModePicker?.();
+    modeList.replaceChildren(...buildModeList());
+    const modal = openModal({
+      title: "Game mode",
+      body: [modeList],
+      onclose: () => {
+        closeModePicker = null;
+      },
+    });
+    closeModePicker = () => modal.close();
+  }
+
+  /** The game modes as a list: icon, name, and one line on what the mode is. */
+  function buildModeList(): Node[] {
+    const current = st.room === null ? null : roomMode(st.room);
+    return GAME_MODES.map((m) =>
+      h(
+        "button",
+        {
+          type: "button",
+          class: "room-mode-option",
+          "aria-pressed": m.id === current ? "true" : "false",
+          onclick: () => {
+            setMode(m.id);
+            closeModePicker?.();
+          },
+        },
+        icon(MODE_ICONS[m.id] ?? "swords", 18),
+        h("span", { class: "room-mode-text" }, h("span", { class: "room-mode-option-name" }, m.name), h("span", { class: "room-mode-option-desc" }, MODE_BLURBS[m.id] ?? "")),
+      ),
+    );
+  }
+
+  /** A map's preview thumbnail, drawn from its code. */
+  function mapThumb(code: string): HTMLCanvasElement {
+    const canvas = h("canvas", { class: "room-map-thumb", "aria-hidden": "true" });
+    try {
+      drawMapPreview(canvas, ctx.wasm.mapPreview(code));
+    } catch {
+      // no thumbnail: the name alone still picks the map
+    }
+    return canvas;
   }
 
   function buildMapList(): Node[] {
@@ -848,10 +982,11 @@ export const roomScreen: ScreenFactory = (ctx: AppCtx) => {
           class: current ? "room-btn is-current" : "room-btn",
           "aria-pressed": current ? "true" : "false",
           onclick: () => {
-            chooseMap(map.code, map.name);
+            if (chooseMap(map.code, map.name)) closeMapPicker?.();
           },
         },
-        map.name,
+        mapThumb(map.code),
+        h("span", null, map.name),
       );
     });
   }
@@ -873,9 +1008,11 @@ export const roomScreen: ScreenFactory = (ctx: AppCtx) => {
           if (m !== null) showFastestTimes(m);
         },
       },
+      icon("trophy", 16),
       "Fastest Times",
     );
-    const actions = h("div", { class: "room-map-actions" }, fastest);
+    const change = isHost() ? h("button", { type: "button", class: "room-btn room-btn-small", onclick: openMapPicker }, icon("map", 16), "Change map") : null;
+    const actions = h("div", { class: "room-map-actions" }, change, fastest);
     if (m === null) return [actions];
     const counts = `${m.up} up · ${m.down} down`;
     const votes =
@@ -901,17 +1038,19 @@ export const roomScreen: ScreenFactory = (ctx: AppCtx) => {
   const header = h("header", { class: "room-header" });
   const notice = h("p", { class: "room-notice", role: "status" });
   const startNotice = h("div", { class: "room-starting", role: "status" });
-  const startButton = h("button", { type: "button", class: "room-btn primary", onclick: () => void start() }, "Start");
+  const startButton = h("button", { type: "button", class: "room-btn primary", onclick: () => void start() }, icon("play", 16), "Start");
   const dockStatus = h("p", { class: "room-dock-status", role: "status" });
   const dock = h("footer", { class: "room-dock", "aria-label": "Match controls" }, dockStatus, h("div", { class: "room-dock-actions" }, startButton));
 
   // Phone: one section at a time. Desktop shows every section and ignores the tab.
   const tabNames = { players: "Players", match: "Match", chat: "Chat" } as const;
   type TabId = keyof typeof tabNames;
+  const tabIcons: Record<TabId, IconName> = { players: "users", match: "gamepad-2", chat: "message-square" };
   const tabButtons = (Object.keys(tabNames) as TabId[]).map((id) =>
     h(
       "button",
       { type: "button", role: "tab", class: "tab", "data-tab": id, "aria-selected": id === "players" ? "true" : "false", onclick: () => selectTab(id) },
+      icon(tabIcons[id], 16),
       tabNames[id],
     ),
   );
@@ -923,9 +1062,10 @@ export const roomScreen: ScreenFactory = (ctx: AppCtx) => {
 
   const playersBody = h("div", { class: "room-players-body" });
   const renderPlayers = keyed(playersBody, buildPlayers);
-  const playersPanel = h("section", { class: "room-panel room-players" }, h("h2", { class: "room-panel-title" }, "Players"), playersBody);
+  const playersPanel = h("section", { class: "room-panel room-players" }, playersBody);
 
   const modeBody = h("div", { class: "room-mode-body" });
+  const modeList = h("div", { class: "room-mode-list" });
   const renderMode = keyed(modeBody, buildMode);
   const modePanel = h("section", { class: "room-panel room-mode-panel" }, h("h2", { class: "room-panel-title" }, "Mode"), modeBody);
 
@@ -955,9 +1095,7 @@ export const roomScreen: ScreenFactory = (ctx: AppCtx) => {
   const mapControls = h(
     "div",
     { class: "room-map-controls" },
-    h("h3", { class: "room-subtitle" }, "Built-in maps"),
-    mapList,
-    h("h3", { class: "room-subtitle" }, "Custom map"),
+    h("h3", { class: "room-subtitle" }, "Paste a map code"),
     textarea,
     h(
       "div",
@@ -968,25 +1106,20 @@ export const roomScreen: ScreenFactory = (ctx: AppCtx) => {
           type: "button",
           class: "room-btn",
           onclick: () => {
-            if (submitMapText(textarea.value)) textarea.value = "";
+            if (submitMapText(textarea.value)) {
+              textarea.value = "";
+              closeMapPicker?.();
+            }
           },
         },
         "Use code",
       ),
-      h("button", { type: "button", class: "room-btn", onclick: openLibrary }, "Library"),
-      h("button", { type: "button", class: "room-btn", onclick: openEditor }, "Editor"),
-      h("label", { class: "room-file" }, "Load file", fileInput),
+      h("button", { type: "button", class: "room-btn", onclick: openLibrary }, icon("library-big", 16), "Library"),
+      h("button", { type: "button", class: "room-btn", onclick: openEditor }, icon("pencil-ruler", 16), "Editor"),
+      h("label", { class: "room-file" }, icon("upload", 16), "Load file", fileInput),
     ),
   );
-  const mapPanel = h(
-    "section",
-    { class: "room-panel room-map-panel" },
-    h("h2", { class: "room-panel-title" }, "Map"),
-    mapName,
-    mapInfo,
-    mapCanvas,
-    mapControls,
-  );
+  const mapPanel = h("section", { class: "room-panel room-map-panel" }, h("h2", { class: "room-panel-title" }, "Map"), mapCanvas, mapName, mapInfo);
 
   const manageBody = h("div", { class: "room-manage-body" });
   const renderManage = keyed(manageBody, buildManage);
@@ -1018,7 +1151,7 @@ export const roomScreen: ScreenFactory = (ctx: AppCtx) => {
       "div",
       { class: "room-chat-form" },
       chatInput,
-      h("button", { type: "button", class: "room-btn", onclick: sendChat }, "Send"),
+      h("button", { type: "button", class: "icon", "aria-label": "Send", title: "Send", onclick: sendChat }, icon("send", 18)),
     ),
   );
 
@@ -1039,32 +1172,25 @@ export const roomScreen: ScreenFactory = (ctx: AppCtx) => {
         "div",
         { class: "room-heading" },
         h("h1", { class: "room-title" }, room.name),
-        h(
-          "div",
-          { class: "actions" },
-          // the lobby opened from the match menu: the match keeps running behind it
-          st.inMatch
-            ? h("button", { type: "button", class: "room-btn", onclick: () => ctx.store.set({ screen: "match" }) }, "Back to game")
-            : null,
-          h("button", { type: "button", class: "room-btn", onclick: () => void shareInvite() }, "Copy invite link"),
-          st.replayReady
-            ? h(
-                "button",
-                { type: "button", class: "room-btn", onclick: () => void saveReplay().catch(toastError) },
-                "Save replay",
-              )
-            : null,
-          h("button", { type: "button", class: "room-btn", onclick: leave }, "Leave"),
-        ),
+        h("dl", { class: "room-facts" }, fact("Code", room.code), room.quick === null ? null : fact("Type", "Quick play")),
       ),
       h(
-        "dl",
-        { class: "room-facts" },
-        fact("Code", room.code),
-        fact("Map", room.map_name),
-        fact("Mode", modeName(roomMode(room))),
-        fact("Players", `${room.players.length} / ${room.max_players}`),
-        room.quick === null ? null : fact("Type", "Quick play"),
+        "div",
+        { class: "actions room-header-actions" },
+        // the lobby opened from the match menu: the match keeps running behind it
+        st.inMatch
+          ? h("button", { type: "button", class: "room-btn", onclick: () => ctx.store.set({ screen: "match" }) }, icon("arrow-left", 16), "Back to game")
+          : null,
+        h("button", { type: "button", class: "room-btn room-invite", "aria-label": "Copy invite link", title: "Copy invite link", onclick: () => void shareInvite() }, icon("link", 16), "Invite"),
+        st.replayReady
+          ? h(
+              "button",
+              { type: "button", class: "room-btn", onclick: () => void saveReplay().catch(toastError) },
+              icon("download", 16),
+              "Save replay",
+            )
+          : null,
+        h("button", { type: "button", class: "room-btn quiet", onclick: leave }, icon("log-out", 16), "Leave"),
       ),
     ];
   }
@@ -1164,10 +1290,21 @@ export const roomScreen: ScreenFactory = (ctx: AppCtx) => {
           open: settingsOpen,
           ontoggle: (e: Event) => (settingsOpen = (e.currentTarget as HTMLDetailsElement).open),
         },
-        h("summary", null, "All settings"),
+        h("summary", null, icon("settings", 16), "More settings"),
         nodes,
       ),
     ];
+  }
+
+  /** The dock's line: the match state, what Start needs for the host, and the wait for guests. */
+  function dockText(room: RoomState, host: boolean): string {
+    if (room.starting) return "Match starting";
+    if (room.in_match) return "Match in progress";
+    if (!host) return "Waiting for host to start";
+    const active = room.players.filter((p) => p.team !== TEAM_SPECTATOR).length;
+    const missing = ROOM_MIN_PLAYERS - active;
+    if (missing > 0) return `Waiting for ${missing} more ${missing === 1 ? "player" : "players"}`;
+    return `${active} ${active === 1 ? "player" : "players"} ready`;
   }
 
   function renderRoom(): void {
@@ -1175,7 +1312,7 @@ export const roomScreen: ScreenFactory = (ctx: AppCtx) => {
     const inNotice = room !== null && room.in_match && !st.inMatch;
     header.hidden = room === null;
     main.hidden = room === null;
-    dock.hidden = room === null || !isHost();
+    dock.hidden = room === null;
     notice.hidden = !inNotice;
     notice.textContent = inNotice ? "match in progress" : "";
     startNotice.hidden = room === null || !room.starting;
@@ -1190,17 +1327,18 @@ export const roomScreen: ScreenFactory = (ctx: AppCtx) => {
       h("span", null, "Match starting"),
       ...(host ? [h("button", { type: "button", class: "room-btn room-btn-small", onclick: abortStart }, "Abort start")] : []),
     );
+    startButton.hidden = !host;
     startButton.disabled = room.in_match || room.starting;
-    dockStatus.textContent = room.starting ? "Match starting" : room.in_match ? "Match in progress" : "Ready when you are";
+    dockStatus.textContent = dockText(room, host);
     refreshPlayers();
     renderMode(`${host}|${mode}`);
     mapName.textContent = room.map_name;
     mapInfo.replaceChildren(...buildMapInfo(room));
-    mapControls.hidden = !host;
     managePanel.hidden = !host;
     renderManage(`${host}|${room.locked}|${room.in_match}|${room.bans.join("\n")}`);
-    // Map buttons carry no input state, so rebuilding them on every room render is safe.
-    mapList.replaceChildren(...buildMapList());
+    // the picker's list is built when it opens; while open it follows builtins and the current map
+    if (closeMapPicker !== null) mapList.replaceChildren(...buildMapList());
+    if (closeModePicker !== null) modeList.replaceChildren(...buildModeList());
     renderSettings(`${host}|${JSON.stringify(room.settings)}`);
   }
 

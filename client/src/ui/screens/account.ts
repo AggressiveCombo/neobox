@@ -1,6 +1,7 @@
 // Account screen: signed out, one form signs in or creates an account. Signed in, the
-// profile (level and XP) sits beside the forms: change password, sign out, delete the
-// account. Signing in or out re-opens the live connection so the server knows the identity.
+// profile (level and XP) leads, with sign out beside it and the password and delete
+// actions behind a Security disclosure. Signing in or out re-opens the live connection
+// so the server knows the identity.
 
 import { applyAccount, changePassword, deleteAccount, errorText, login, logout, register, returnScreen } from "../../account";
 import type { AppCtx, ScreenFactory } from "../../ctx";
@@ -8,7 +9,9 @@ import { guestXp, levelOf, xpForLevel } from "../../levels";
 import { MAX_NAME_LEN, NAME_RE } from "../../protocol";
 import { type Account, type AppState } from "../../state";
 import { h, type Child } from "../dom";
-import { avatar, field, page, pageHead, toggle } from "../kit";
+import { icon } from "../icons";
+import { field, page, pageHead, toggle } from "../kit";
+import { profileSummary } from "../profile";
 import { privacyLink } from "./privacy";
 
 const NAME_ERROR = "Names are 1 to 15 letters, numbers, spaces or _.";
@@ -48,13 +51,22 @@ function levelMeter(xp: number): HTMLElement {
   );
 }
 
+/** One line of the perks list: an icon, then what the account adds. */
+function perk(name: Parameters<typeof icon>[0], text: string): HTMLElement {
+  return h("li", { class: "account-perk" }, h("span", { class: "account-perk-icon" }, icon(name, 18)), h("span", null, text));
+}
+
 /** A panel that asks for a signed-in player, with a button to the account screen. */
 export function signInPrompt(ctx: AppCtx, text: string): HTMLElement {
   return h(
     "section",
     { class: "panel sign-in-prompt" },
     h("p", { class: "lead" }, text),
-    h("div", { class: "actions" }, h("button", { type: "button", class: "primary", onclick: () => ctx.store.set({ screen: "account" }) }, "Sign in")),
+    h(
+      "div",
+      { class: "actions" },
+      h("button", { type: "button", class: "primary", onclick: () => ctx.store.set({ screen: "account" }) }, icon("log-in", 18), "Sign in"),
+    ),
   );
 }
 
@@ -138,22 +150,9 @@ export const accountScreen: ScreenFactory = (ctx) => {
       "div",
       { class: "account-guest" },
       h(
-        "section",
-        { class: "section account-pitch" },
-        h("h2", null, "Why sign in?"),
-        h(
-          "ul",
-          { class: "boxed-list" },
-          h("li", null, "Your settings follow you to any device."),
-          h("li", null, "Add friends and see when they are online."),
-          h("li", null, "Upload maps, vote and star them in the library."),
-        ),
-        levelMeter(guestXp()),
-      ),
-      h(
         "form",
         { class: "panel account-form", onsubmit: signIn },
-        h("h2", null, "Sign in or create an account"),
+        h("h2", null, "Sign in"),
         field("Name", name, "1 to 15 letters, numbers, spaces or _."),
         field("Password", password, PASSWORD_HINT),
         toggle("Stay signed in", false, (on) => {
@@ -161,12 +160,25 @@ export const accountScreen: ScreenFactory = (ctx) => {
         }),
         h(
           "div",
-          { class: "actions" },
-          h("button", { type: "submit", class: "primary" }, "Sign in"),
-          h("button", { type: "button", onclick: createAccount }, "Create account"),
-          privacyLink(store),
+          { class: "actions account-submit" },
+          h("button", { type: "submit", class: "primary" }, icon("log-in", 18), "Sign in"),
+          h("button", { type: "button", onclick: createAccount }, icon("user-plus", 18), "Create account"),
         ),
         status,
+        h("div", { class: "account-foot" }, privacyLink(store)),
+      ),
+      h(
+        "section",
+        { class: "account-aside" },
+        h("h2", null, "Your level"),
+        levelMeter(guestXp()),
+        h(
+          "ul",
+          { class: "account-perks" },
+          perk("settings", "Settings on any device"),
+          perk("users", "Friends and who is online"),
+          perk("map", "Upload, vote and star maps"),
+        ),
       ),
     );
   }
@@ -191,13 +203,6 @@ export const accountScreen: ScreenFactory = (ctx) => {
       });
     }
 
-    function signOut(): void {
-      void act(async () => {
-        await logout();
-        applyAccount(ctx, null);
-      }, "Signed out.");
-    }
-
     function deleteSubmit(e: Event): void {
       e.preventDefault();
       if (confirmName.value.trim() !== account.name) {
@@ -214,61 +219,55 @@ export const accountScreen: ScreenFactory = (ctx) => {
       }, "Account deleted.");
     }
 
-    const profile: Child[] = [
+    const security = h(
+      "details",
+      { class: "panel account-security" },
+      h("summary", null, icon("shield", 18), h("span", null, "Security"), icon("chevron-down", 18)),
       h(
         "div",
-        { class: "account-id" },
-        avatar(account.name, null),
-        h("div", null, h("p", { class: "field-hint" }, "Signed in as"), h("h2", { class: "account-name" }, account.name)),
-      ),
-      levelMeter(account.xp),
-    ];
-
-    return h(
-      "div",
-      { class: "account-member" },
-      h("section", { class: "panel account-profile" }, ...profile),
-      h(
-        "div",
-        { class: "account-forms" },
+        { class: "account-security-body" },
         h(
           "form",
-          { class: "panel account-form", onsubmit: changeSubmit },
-          h("h2", null, "Change password"),
+          { class: "account-subform", onsubmit: changeSubmit },
+          h("h3", null, "Change password"),
           field("Current password", oldPassword),
           field("New password", newPassword, PASSWORD_HINT),
-          h("div", { class: "actions" }, h("button", { type: "submit" }, "Change password")),
-        ),
-        h(
-          "section",
-          { class: "section" },
-          h("h2", null, "Sign out"),
-          h("p", { class: "field-hint" }, "Your settings stay on this device."),
-          h("div", { class: "actions" }, h("button", { type: "button", onclick: signOut }, "Sign out")),
+          h("div", { class: "actions" }, h("button", { type: "submit", class: "primary" }, icon("key-round", 18), "Change password")),
         ),
         h(
           "form",
-          { class: "panel danger-panel", onsubmit: deleteSubmit },
-          h("h2", null, "Delete account"),
+          { class: "account-subform danger-zone", onsubmit: deleteSubmit },
+          h("h3", null, "Delete account"),
           h("p", { class: "field-hint" }, "Deletes your account, friends and uploaded maps. This can't be undone."),
           field("Your name, to confirm", confirmName),
           field("Password", deletePassword),
-          h("div", { class: "actions" }, h("button", { type: "submit", class: "danger" }, "Delete account")),
+          h("div", { class: "actions" }, h("button", { type: "submit", class: "danger" }, icon("trash-2", 18), "Delete account")),
         ),
-        status,
       ),
     );
+
+    return h("div", { class: "account-member" }, profileSummary(account.name), security, status);
   }
 
   function render(state: AppState): void {
     shownId = state.account?.id ?? null;
     body.replaceChildren(state.account ? memberView(state.account) : guestView());
+    signOutBtn.hidden = state.account === null;
     say("");
   }
 
+  function signOut(): void {
+    void act(async () => {
+      await logout();
+      applyAccount(ctx, null);
+    }, "Signed out.");
+  }
+
+  const signOutBtn = h("button", { type: "button", class: "quiet", hidden: true, onclick: signOut }, icon("log-out", 18), "Sign out");
+
   const el = page(
     "account-page",
-    pageHead({ title: "Account", back: () => store.set({ screen: returnScreen(store.state) }) }),
+    pageHead({ title: "Account", back: () => store.set({ screen: returnScreen(store.state) }), actions: [signOutBtn] }),
     body,
   );
 

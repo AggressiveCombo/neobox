@@ -72,12 +72,15 @@ export function fitView(doc: Obj, w: number, h: number): View {
   return { x: (b.minX + b.maxX) / 2, y: (b.minY + b.maxY) / 2, scale };
 }
 
-const BG = "#0b0d10";
-const GRID = "#161b21";
-const AXIS = "#2a323b";
+const BG = "#0a0a0a";
+const GRID = "#1c1c1c";
+const AXIS = "#333333";
 const EDGE = "rgba(255, 255, 255, 0.35)";
 const ACCENT = "#0095ff";
 const ACCENT_FILL = "rgba(0, 149, 255, 0.14)";
+const FRAME = "rgba(0, 149, 255, 0.6)";
+/** The game's default view aspect; the editor frames the map at it. */
+const EDITOR_VIEW_ASPECT = 1.6;
 const JOINT_COLOUR = ["#e8a33b", "#5ab38b", "#4fa3d1"] as const;
 const MARKER_COLOUR: Record<(typeof MARKER_KINDS)[number], string> = {
   spawn: "#5ab38b",
@@ -113,6 +116,7 @@ export function drawMap(canvas: HTMLCanvasElement, doc: Obj, view: View, scene: 
 
   const S = (p: Pt): Pt => screenAt(view, w, h, p);
   drawGrid(c, view, w, h);
+  drawFrame(c, doc, S);
   const scope = scene.scope;
   getList(doc, "body").forEach((b, i) => drawBody(c, b, S, view.scale, scope && i !== scope.bi ? 0.3 : 1));
   c.globalAlpha = scope ? 0.3 : 1;
@@ -156,6 +160,41 @@ function drawGrid(c: CanvasRenderingContext2D, v: View, w: number, h: number): v
   c.moveTo(0, oy);
   c.lineTo(w, oy);
   c.stroke();
+}
+
+/**
+ * The game's default view: centred on the arena middle and held inside it (camera.ts
+ * clampAxis). A view wider than the arena stays centred on it; the frame marks what a
+ * player would see on spawn, in world units (the y axis points down, as in the game).
+ */
+function drawFrame(c: CanvasRenderingContext2D, doc: Obj, S: (p: Pt) => Pt): void {
+  const set = asObj(doc.set);
+  const width = num(set, "3", 30);
+  const height = width / EDITOR_VIEW_ASPECT;
+  const arenaW = num(set, "15", 0);
+  const arenaH = num(set, "16", 0);
+  const cx = clampAxis(arenaW / 2, width, arenaW);
+  const cy = clampAxis(arenaH / 2, height, arenaH);
+  const a = S({ x: cx - width / 2, y: cy - height / 2 });
+  const b = S({ x: cx + width / 2, y: cy + height / 2 });
+  const x = Math.round(a.x) + 0.5;
+  const y = Math.round(a.y) + 0.5;
+  c.save();
+  c.lineWidth = 1;
+  c.strokeStyle = FRAME;
+  c.setLineDash([6, 4]);
+  c.strokeRect(x, y, Math.round(b.x - a.x), Math.round(b.y - a.y));
+  c.setLineDash([]);
+  c.fillStyle = FRAME;
+  c.font = "11px system-ui, sans-serif";
+  c.fillText(`Screen ${width} × ${height.toFixed(1)}`, Math.max(x, 0) + 6, Math.max(y, 0) + 15);
+  c.restore();
+}
+
+/** camera.ts clampAxis: centre a view on `c`, held inside `[0, arena]`; a view wider than the arena is centred on it. */
+function clampAxis(c: number, view: number, arena: number): number {
+  if (arena < view) return arena / 2;
+  return Math.min(Math.max(c, view / 2), arena - view / 2);
 }
 
 function drawBody(c: CanvasRenderingContext2D, body: Obj, S: (p: Pt) => Pt, scale: number, alpha: number): void {

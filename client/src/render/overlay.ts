@@ -3,7 +3,7 @@
 // kill line, the kill feed and the objective bar. Drawn in CSS pixels; resize() takes
 // device pixels.
 
-import type { Camera } from "../camera";
+import type { Camera, ViewRect } from "../camera";
 import { worldXf } from "../camera";
 import type { Scene } from "../frame";
 import { FLAG_LOCAL } from "../frame";
@@ -13,9 +13,12 @@ import { cssHex, playerRgb } from "./geometry";
 const NAME_FONT = "500 12px system-ui, sans-serif";
 const LOCAL_NAME_FONT = "700 13px system-ui, sans-serif";
 const INTRO_FONT = "700 72px system-ui, sans-serif";
+/** Countdown numbers: start this many times their size and settle over INTRO_IN_S seconds. */
+const INTRO_FROM = 1.35;
+const INTRO_IN_S = 0.25;
 const BANNER_TITLE_FONT = "700 22px system-ui, sans-serif";
 const BANNER_SUB_FONT = "500 13px system-ui, sans-serif";
-const BAR_FONT = "600 12px system-ui, sans-serif";
+const BAR_FONT = "500 13px system-ui, sans-serif";
 const PERSONAL_FONT = "700 15px system-ui, sans-serif";
 const FEED_FONT = "600 12px system-ui, sans-serif";
 const OUTLINE = "rgba(0, 0, 0, 0.7)";
@@ -41,6 +44,17 @@ const FEED_GAP = 2;
 /** Kill feed: lifetime in ms and the number of rows kept. */
 const FEED_MS = 4000;
 const FEED_MAX = 4;
+/** Objective bar: height, and its width limits (CSS px). */
+const OBJECTIVE_H = 30;
+const OBJECTIVE_MIN_W = 160;
+const OBJECTIVE_MAX_W = 480;
+/** Objective bar: the HUD chip ink (--hud-solid), the progress rule in the accent blue (lifted for the ink ground) and its height. */
+const CHIP = "#0a0a0a";
+const PROGRESS = "#3d94ff";
+const RULE_H = 3;
+/** Objective bar: its row sits this far below the view's top edge; it keeps CHIP_GAP from reserved bars. */
+const BAR_ROW_INSET = 8;
+const CHIP_GAP = 8;
 
 interface KillEntry {
   killer: number;
@@ -56,6 +70,12 @@ export class Overlay {
   private feedTick = -1;
   /** CSS px at the top taken by a screen's own controls (AppCtx.reserveTop); the top bars go below. */
   topInset = 0;
+  /** The game view's rect in window CSS px (the canvas covers it). */
+  private view: ViewRect = { x: 0, y: 0, w: 0, h: 0 };
+  /** Reserved DOM bars (see reserve) and their window rects. */
+  private readonly reserved = new Set<HTMLElement>();
+  private rects: DOMRect[] = [];
+  private readonly observer = new ResizeObserver(() => this.measure());
 
   constructor(private readonly canvas: HTMLCanvasElement) {
     const ctx = canvas.getContext("2d");
@@ -69,12 +89,39 @@ export class Overlay {
     this.canvas.height = Math.max(1, Math.round(heightPx));
   }
 
+  /** The game view's rect in window CSS px (the canvas covers it). */
+  setView(view: ViewRect): void {
+    this.view = view;
+    this.measure();
+  }
+
+  /** Keep the objective bar clear of `bar` (a HUD chip row or screen top strip) until the returned function is called. */
+  reserve(bar: HTMLElement): () => void {
+    this.reserved.add(bar);
+    this.observer.observe(bar);
+    this.measure();
+    return () => {
+      this.reserved.delete(bar);
+      this.observer.unobserve(bar);
+      this.measure();
+    };
+  }
+
+  /** Window rects of the reserved bars, re-read on resize and when a bar changes size. */
+  private measure(): void {
+    this.rects = [...this.reserved].map((bar) => bar.getBoundingClientRect());
+  }
+
   clear(): void {
     this.ctx.setTransform(1, 0, 0, 1, 0, 0);
     this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
   }
 
-  draw(scene: Scene, cam: Camera, names: ReadonlyMap<number, string>, tickHz: number): void {
+  /**
+   * Draw the labels and bars over the view. `chrome: false` leaves only names and damage bars
+   * (menu clips): no intro, banners, kill lines, kill feed or objective bar.
+   */
+  draw(scene: Scene, cam: Camera, names: ReadonlyMap<number, string>, tickHz: number, chrome = true): void {
     this.clear();
     const dpr = window.devicePixelRatio || 1;
     this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -83,6 +130,7 @@ export class Overlay {
     this.recordKills(scene);
     this.drawDamageBars(scene, cam, cssW, cssH);
     this.drawNames(scene, cam, names, cssW, cssH);
+    if (!chrome) return;
     this.drawIntro(scene, tickHz, cssW, cssH);
     this.drawBanner(scene, names, cssW, cssH);
     this.drawPersonal(scene, names, cssW);
@@ -181,18 +229,29 @@ export class Overlay {
 
   private drawIntro(scene: Scene, tickHz: number, cssW: number, cssH: number): void {
     if (scene.intro < 0) return;
-    const seconds = Math.ceil(scene.intro / (tickHz > 0 ? tickHz : 1));
+    const remaining = scene.intro / (tickHz > 0 ? tickHz : 1);
+    const seconds = Math.ceil(remaining);
     if (seconds < 1) return;
+    // The number has shown for `age` seconds: it settles from INTRO_FROM times its size and fades in.
+    const age = seconds - remaining;
+    const t = Math.min(1, age / INTRO_IN_S);
+    const eased = 1 - (1 - t) ** 3;
     const ctx = this.ctx;
+    ctx.save();
+    ctx.globalAlpha = eased;
+    ctx.translate(cssW / 2, cssH * 0.4);
+    const scale = INTRO_FROM + (1 - INTRO_FROM) * eased;
+    ctx.scale(scale, scale);
     const text = String(seconds);
     ctx.font = INTRO_FONT;
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
     ctx.lineWidth = 6;
     ctx.strokeStyle = OUTLINE;
-    ctx.strokeText(text, cssW / 2, cssH * 0.4);
+    ctx.strokeText(text, 0, 0);
     ctx.fillStyle = TEXT;
-    ctx.fillText(text, cssW / 2, cssH * 0.4);
+    ctx.fillText(text, 0, 0);
+    ctx.restore();
   }
 
   private drawBanner(scene: Scene, names: ReadonlyMap<number, string>, cssW: number, cssH: number): void {
@@ -268,17 +327,56 @@ export class Overlay {
     }
   }
 
+  /**
+   * Objective bar box in view CSS px. Its row sits at the view's top edge and takes the widest run of
+   * that row left between the reserved DOM bars (HUD chips, a screen's top strip), centred in it. When no
+   * run is wide enough it goes under those bars, centred in the view. Always kept inside the view.
+   */
+  private objectiveBox(cssW: number): { left: number; width: number; top: number } {
+    const { x, y, w, h } = this.view;
+    const rowTop = y + BAR_ROW_INSET;
+    const rowBottom = rowTop + OBJECTIVE_H;
+    let below = rowTop;
+    const blocked: [number, number][] = [];
+    for (const r of this.rects) {
+      if (r.top >= rowBottom || r.bottom <= rowTop) continue;
+      blocked.push([r.left - CHIP_GAP, r.right + CHIP_GAP]);
+      below = Math.max(below, r.bottom + CHIP_GAP);
+    }
+    blocked.sort((a, b) => a[0] - b[0]);
+    const viewRight = x + w;
+    let runLeft = x;
+    let runW = 0;
+    let cursor = x;
+    for (const [l, r] of [...blocked, [viewRight, viewRight]] as [number, number][]) {
+      const end = Math.min(l, viewRight);
+      if (end - cursor > runW) {
+        runLeft = cursor;
+        runW = end - cursor;
+      }
+      cursor = Math.max(cursor, r);
+    }
+    if (runW >= OBJECTIVE_MIN_W) {
+      const width = Math.min(OBJECTIVE_MAX_W, runW);
+      return { left: runLeft + (runW - width) / 2 - x, width, top: BAR_ROW_INSET };
+    }
+    const width = Math.min(OBJECTIVE_MAX_W, cssW - 16);
+    const top = Math.min(below, y + h - OBJECTIVE_H - BAR_ROW_INSET) - y;
+    return { left: (cssW - width) / 2, width, top };
+  }
+
   private drawObjectiveBar(scene: Scene, cssW: number): void {
     const ctx = this.ctx;
-    // keep clear of the Menu and Leave buttons at the top right (hud.css)
-    const reserve = 208;
-    const width = Math.min(480, Math.max(160, cssW - 2 * reserve));
-    const left = cssW - 2 * reserve >= width ? (cssW - width) / 2 : Math.max(8, cssW - reserve - width);
-    const top = 8 + this.topInset;
-    const height = 26;
+    const { left, width, top } = this.objectiveBox(cssW);
+    const height = OBJECTIVE_H;
     const mid = top + height / 2;
-    ctx.fillStyle = PANEL;
+    ctx.fillStyle = CHIP;
     ctx.fillRect(left, top, width, height);
+    const progress = objectiveProgress(scene);
+    if (progress !== null) {
+      ctx.fillStyle = PROGRESS;
+      ctx.fillRect(left, top + height - RULE_H, width * progress, RULE_H);
+    }
     ctx.font = BAR_FONT;
     ctx.textBaseline = "middle";
 
@@ -368,6 +466,30 @@ function objectiveLabel(scene: Scene): string {
     default:
       return "";
   }
+}
+
+/** Progress rule of the objective bar, 0..1 of the mode's limit for the local player; null when there is none. */
+function objectiveProgress(scene: Scene): number | null {
+  if (!(scene.objectiveLimit > 0)) return null;
+  const local = scene.scores.find((r) => r.id === scene.localId);
+  if (local === undefined) return null;
+  let value: number;
+  switch (scene.mode) {
+    case 0:
+      value = local.kills;
+      break;
+    case 1:
+    case 5:
+      value = local.lives;
+      break;
+    case 2:
+    case 3:
+      value = local.wins;
+      break;
+    default:
+      return null;
+  }
+  return Math.min(1, Math.max(0, value / scene.objectiveLimit));
 }
 
 /**

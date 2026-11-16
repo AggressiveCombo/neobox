@@ -157,7 +157,7 @@ export function mountMenuClips(ctx: AppCtx, host: HTMLElement, onPlaying?: (on: 
       return;
     }
     eng.replayFrame(p.tick, p.follow);
-    ctx.present(p.names, p.info.hz);
+    ctx.present(p.names, p.info.hz, false);
   }
 
   rafId = requestAnimationFrame(tick);

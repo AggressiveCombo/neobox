@@ -9,7 +9,9 @@ import { PALETTES, cssHex } from "../../render/geometry";
 import type { Screen } from "../../state";
 import { openColorPicker } from "../color-picker";
 import { h, type Child } from "../dom";
-import { openModal, page, pageHead, seg, toggle } from "../kit";
+import { icon, type IconName } from "../icons";
+import { iconButton, openModal, page, pageHead, seg, toggle } from "../kit";
+import { soundSettingsSection } from "../sound-settings";
 
 const PALETTE_LABELS: Record<Palette, string> = {
   default: "Default",
@@ -18,7 +20,11 @@ const PALETTE_LABELS: Record<Palette, string> = {
   tritanopia: "Tritanopia (blue-blind)",
 };
 
-const THEME_LABELS: Record<Theme, string> = { system: "System", light: "Light", dark: "Dark" };
+const THEME_OPTIONS: Record<Theme, { label: string; icon: IconName }> = {
+  system: { label: "System", icon: "monitor" },
+  light: { label: "Light", icon: "sun" },
+  dark: { label: "Dark", icon: "moon" },
+};
 
 interface Slot {
   action: Action;
@@ -33,11 +39,11 @@ interface Conflict extends Slot {
 
 /** The sections, in page order. The id names the section element. */
 const SECTIONS = [
-  { id: "controls", label: "Controls" },
-  { id: "touch", label: "Touch" },
-  { id: "sound", label: "Sound" },
-  { id: "display", label: "Display" },
-  { id: "chat", label: "Chat" },
+  { id: "controls", label: "Controls", icon: "gamepad-2" },
+  { id: "touch", label: "Touch", icon: "hand" },
+  { id: "sound", label: "Sound", icon: "volume-2" },
+  { id: "display", label: "Display", icon: "palette" },
+  { id: "chat", label: "Chat", icon: "message-square" },
 ] as const;
 type SectionId = (typeof SECTIONS)[number]["id"];
 
@@ -125,16 +131,10 @@ export const settingsScreen: ScreenFactory = (ctx) => {
     ACTIONS.flatMap(({ action, label }) => [h("dt", null, label), h("dd", null, GAMEPAD_LABELS[action])]),
   );
 
-  // Sound
-  const volume = rangeField("Volume", 0, 100, 1, (v) => prefs.set({ volume: v / 100 }));
-  const muted = switchField("Mute all sound", null, (on) => prefs.set({ muted: on }));
-  const musicMuted = switchField("Mute menu music", null, (on) => prefs.set({ musicMuted: on }));
-  const jukebox = rangeField("Jukebox volume", 0, 100, 1, (v) => prefs.set({ jukeboxVolume: v / 100 }));
-
   // Display
   const themeSeg = seg(
     "Theme",
-    THEMES.map((value) => ({ value, label: THEME_LABELS[value] })),
+    THEMES.map((value) => ({ value, label: THEME_OPTIONS[value].label, icon: THEME_OPTIONS[value].icon })),
     prefs.value.theme,
     (v) => prefs.set({ theme: v }),
   );
@@ -330,16 +330,7 @@ export const settingsScreen: ScreenFactory = (ctx) => {
           },
           busy ? "Press a key" : keyLabel(code),
         ),
-        h(
-          "button",
-          {
-            type: "button",
-            class: "bind-remove",
-            "aria-label": `Remove ${keyLabel(code)} from ${label}`,
-            onclick: () => removeKey(action, index),
-          },
-          "×",
-        ),
+        iconButton("x", `Remove ${keyLabel(code)} from ${label}`, () => removeKey(action, index), "bind-remove"),
       );
     });
     if (keys.length === 0 && busyIndex < 0) slots.push(h("span", { class: "bind-none" }, "No key"));
@@ -354,7 +345,7 @@ export const settingsScreen: ScreenFactory = (ctx) => {
             "data-slot": slotKey(action, keys.length),
             onclick: () => void bind(action, keys.length),
           },
-          busy ? "Press a key" : "+ Add key",
+          busy ? "Press a key" : [icon("plus", 18), "Add key"],
         ),
       );
     }
@@ -436,8 +427,6 @@ export const settingsScreen: ScreenFactory = (ctx) => {
   function refresh(): void {
     const p = prefs.value;
     themeSeg.set(p.theme);
-    volume.set(Math.round(p.volume * 100));
-    muted.set(p.muted);
     scale.set(Math.round(p.renderScale * 100));
     antialias.set(p.antialias);
     stats.set(store.state.showStats);
@@ -446,8 +435,6 @@ export const settingsScreen: ScreenFactory = (ctx) => {
     leftHanded.set(p.touchLeftHanded);
     touchPreview.style.setProperty("--touch-scale", String(p.touchScale));
     touchPreview.classList.toggle("is-left", p.touchLeftHanded);
-    musicMuted.set(p.musicMuted);
-    jukebox.set(Math.round(p.jukeboxVolume * 100));
     filterProfanity.set(p.filterProfanity);
     syncColor();
   }
@@ -460,10 +447,11 @@ export const settingsScreen: ScreenFactory = (ctx) => {
 
   const bodies = new Map<SectionId, HTMLElement>();
   function section(id: SectionId, title: string, hint: string | null, ...content: Child[]): HTMLElement {
+    const name = SECTIONS.find((s) => s.id === id)?.icon;
     const el = h(
       "section",
       { class: "panel settings-section", "aria-labelledby": `settings-${id}-title`, "data-section": id },
-      h("h2", { id: `settings-${id}-title` }, title),
+      h("h2", { id: `settings-${id}-title` }, name ? icon(name, 22) : null, title),
       hint ? h("p", { class: "field-hint" }, hint) : null,
       ...content,
     );
@@ -474,7 +462,7 @@ export const settingsScreen: ScreenFactory = (ctx) => {
   const sectionNav = h(
     "nav",
     { class: "settings-nav", "aria-label": "Settings sections" },
-    SECTIONS.map(({ id, label }) =>
+    SECTIONS.map(({ id, label, icon: name }) =>
       h(
         "button",
         {
@@ -482,12 +470,14 @@ export const settingsScreen: ScreenFactory = (ctx) => {
           class: "quiet settings-nav-item",
           onclick: () => bodies.get(id)?.scrollIntoView({ block: "start" }),
         },
+        icon(name, 18),
         label,
       ),
     ),
     h(
       "button",
       { type: "button", class: "quiet settings-nav-item", onclick: () => store.set({ screen: "account" }) },
+      icon("circle-user", 18),
       "Account",
     ),
   );
@@ -505,7 +495,7 @@ export const settingsScreen: ScreenFactory = (ctx) => {
         section(
           "controls",
           "Controls",
-          "Click a key to change it. Each action takes up to three keys.",
+          "Click a key to change it. Up to three keys per action.",
           noticeEl,
           bindList,
           h("h3", { class: "settings-sub" }, "Gamepad (fixed)"),
@@ -519,13 +509,12 @@ export const settingsScreen: ScreenFactory = (ctx) => {
           touchPreview,
           leftHanded.el,
         ),
-        section("sound", "Sound", null, volume.el, muted.el, musicMuted.el, jukebox.el),
+        section("sound", "Sound", null, soundSettingsSection()),
         section(
           "display",
           "Display",
           null,
           h("div", { class: "settings-group" }, h("span", { class: "field-label" }, "Theme"), themeSeg.el),
-          h("p", { class: "field-hint" }, "Follow the system, or always light or dark. Applies at once."),
           scale.el,
           h("p", { class: "field-hint" }, "Lower is faster on weak devices."),
           antialias.el,
@@ -539,7 +528,7 @@ export const settingsScreen: ScreenFactory = (ctx) => {
           "section",
           { class: "settings-reset" },
           h("p", { class: "field-hint" }, "Changes save as you make them."),
-          h("button", { type: "button", class: "danger", onclick: confirmReset }, "Reset to defaults"),
+          h("button", { type: "button", class: "danger", onclick: confirmReset }, icon("rotate-ccw", 18), "Reset to defaults"),
         ),
       ),
     ),

@@ -9,6 +9,7 @@ import { type Action, prefs } from "../../prefs";
 import { FrameLoop } from "../../local-loop";
 import type { Screen } from "../../state";
 import { type Child, h } from "../dom";
+import { icon } from "../icons";
 import { page, pageHead } from "../kit";
 import { rotateGate, touchControls } from "./hud";
 
@@ -175,7 +176,7 @@ export const trainingScreen: ScreenFactory = (ctx) => {
       step.classList.toggle("is-done", i < lesson);
       step.classList.toggle("is-current", i === lesson);
     });
-    nextBtn.textContent = last ? "Finish" : "Next";
+    nextBtn.replaceChildren(last ? "Finish" : "Next", icon(last ? "flag" : "arrow-right", 18));
   }
 
   function next(): void {
@@ -210,9 +211,9 @@ export const trainingScreen: ScreenFactory = (ctx) => {
     const bar = h(
       "div",
       { class: "offline-top offline-overlay" },
-      h("button", { type: "button", onclick: leave }, "Leave"),
+      h("button", { type: "button", onclick: leave }, icon("arrow-left", 18), "Leave"),
       h("span", { class: "offline-title" }, "Training hall"),
-      h("button", { type: "button", onclick: replayTutorial }, "Replay tutorial"),
+      h("button", { type: "button", onclick: replayTutorial }, icon("rotate-ccw", 18), "Replay tutorial"),
     );
     const card = h(
       "section",

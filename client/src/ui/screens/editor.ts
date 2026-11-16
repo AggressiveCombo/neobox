@@ -13,55 +13,32 @@ import { emptyDoc, hexColor, type Obj } from "../../editor/schema";
 import { startTestPlay, type TestPlay } from "../../editor/testplay";
 import type { Screen } from "../../state";
 import { h } from "../dom";
+import { icon, type IconName } from "../icons";
 import { field, openModal, seg, uid } from "../kit";
 import { VISIBILITY_LABELS, mapCode } from "../map-list";
 import { signInPrompt } from "./account";
 
-const TOOLS: { tool: Tool; label: string; key: string; icon: string }[] = [
-  { tool: "select", label: "Select", key: "Q", icon: "select" },
-  { tool: "rect", label: "Box", key: "W", icon: "box" },
-  { tool: "circle", label: "Circle", key: "E", icon: "circle" },
-  { tool: "poly", label: "Polygon", key: "R", icon: "poly" },
-  { tool: "joint", label: "Joint", key: "J", icon: "joint" },
-  { tool: "spawn", label: "Spawn", key: "T", icon: "spawn" },
-  { tool: "turret", label: "Turret", key: "I", icon: "turret" },
-  { tool: "grapple", label: "Grapple", key: "G", icon: "grapple" },
-  { tool: "cap", label: "Capture", key: "Y", icon: "capture" },
-  { tool: "fill", label: "Fill", key: "U", icon: "fill" },
+/** Tool groups in rail order; a divider sits between them. */
+const TOOL_GROUPS: { tool: Tool; label: string; key: string; icon: IconName }[][] = [
+  [{ tool: "select", label: "Select", key: "Q", icon: "mouse-pointer-2" }],
+  [
+    { tool: "rect", label: "Box", key: "W", icon: "square" },
+    { tool: "circle", label: "Circle", key: "E", icon: "circle" },
+    { tool: "poly", label: "Polygon", key: "R", icon: "pentagon" },
+    { tool: "fill", label: "Fill", key: "U", icon: "paint-bucket" },
+  ],
+  [{ tool: "joint", label: "Joint", key: "J", icon: "link-2" }],
+  [
+    { tool: "spawn", label: "Spawn", key: "T", icon: "flag" },
+    { tool: "turret", label: "Turret", key: "I", icon: "crosshair" },
+    { tool: "grapple", label: "Grapple", key: "G", icon: "anchor" },
+    { tool: "cap", label: "Capture", key: "Y", icon: "target" },
+  ],
 ];
 const VISIBILITIES: Visibility[] = ["public", "unlisted", "private"];
 
-/** Line icons on a 24 grid, stroke in currentColor. Constant markup, never user input. */
-const ICON_PATHS: Record<string, string> = {
-  select: '<path d="M5 3l13 8-6 1.5L9.5 19z"/>',
-  box: '<rect x="4" y="6" width="16" height="12"/>',
-  circle: '<circle cx="12" cy="12" r="7"/>',
-  poly: '<path d="M5 19L4 9l8-5 8 6-3 9z"/>',
-  joint: '<path d="M7 12h10"/><rect x="2.5" y="9.5" width="5" height="5"/><rect x="16.5" y="9.5" width="5" height="5"/>',
-  spawn: '<path d="M6 21V4"/><path d="M6 5h11l-3 4 3 4H6"/>',
-  turret: '<rect x="7" y="12" width="10" height="6"/><path d="M12 12V6h6"/>',
-  grapple: '<path d="M12 4v8"/><path d="M6 12a6 6 0 0 0 12 0"/>',
-  capture: '<rect x="4" y="4" width="16" height="16"/><path d="M9 9h6v6H9z"/>',
-  fill: '<path d="M5 12l7-7 7 7-7 7z"/><path d="M19 15c0 1.5-1 3-2 3"/>',
-  undo: '<path d="M9 14L4 9l5-5"/><path d="M4 9h10a6 6 0 0 1 0 12h-3"/>',
-  redo: '<path d="M15 14l5-5-5-5"/><path d="M20 9H10a6 6 0 0 0 0 12h3"/>',
-  back: '<path d="M15 5l-7 7 7 7"/>',
-  menu: '<path d="M4 7h16M4 12h16M4 17h16"/>',
-  zoomIn: '<circle cx="11" cy="11" r="6"/><path d="M8 11h6M11 8v6M16 16l4 4"/>',
-  zoomOut: '<circle cx="11" cy="11" r="6"/><path d="M8 11h6M16 16l4 4"/>',
-  reset: '<path d="M4 12a8 8 0 1 0 2.4-5.7"/><path d="M4 4v4h4"/>',
-  sheet: '<path d="M4 15l8-7 8 7"/>',
-  close: '<path d="M6 6l12 12M18 6L6 18"/>',
-};
-
-function icon(name: string): SVGElement {
-  const t = document.createElement("template");
-  t.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">${ICON_PATHS[name] ?? ""}</svg>`;
-  return t.content.firstElementChild as SVGElement;
-}
-
-/** A square icon-only button; `label` is its accessible name. */
-function iconButton(name: string, label: string, onclick: () => void): HTMLButtonElement {
+/** A square icon-only button; `label` is its accessible name and tooltip. */
+function iconButton(name: IconName, label: string, onclick: () => void): HTMLButtonElement {
   return h("button", { type: "button", class: "icon", "aria-label": label, title: label, onclick }, icon(name));
 }
 
@@ -94,29 +71,47 @@ export const editorScreen: ScreenFactory = (ctx) => {
   });
   observer.observe(viewport);
 
+  const inspectorId = uid("editor-inspector");
+  const sideToggleLabel = h("span", { class: "editor-label" }, "Map settings");
+  const sideToggle = h(
+    "button",
+    { type: "button", class: "editor-side-toggle", "aria-expanded": "false", "aria-controls": inspectorId, onclick: () => setSide(sideEl.dataset.open !== "true") },
+    icon("sliders-horizontal"),
+    sideToggleLabel,
+  );
+  // The inspector toggle heads the tool rail on phones and narrow windows (hidden on desktop).
+  const settingsGroup = h("div", { class: "editor-tool-group editor-settings-group" }, sideToggle);
+
   const toolButtons = new Map<Tool, HTMLButtonElement>();
   const toolRail = h(
     "div",
     { class: "editor-tools", role: "toolbar", "aria-label": "Tools" },
-    TOOLS.map(({ tool, label, key, icon: name }) => {
-      const btn = h(
-        "button",
-        { type: "button", class: "editor-tool", "aria-label": label, "aria-keyshortcuts": key, title: `${label} (${key})`, onclick: () => ctrl.setTool(tool) },
-        icon(name),
-        h("span", { class: "editor-tool-name" }, label),
-        h("span", { class: "key", "aria-hidden": "true" }, key),
-      );
-      toolButtons.set(tool, btn);
-      return btn;
-    }),
+    settingsGroup,
+    TOOL_GROUPS.map((group) =>
+      h(
+        "div",
+        { class: "editor-tool-group" },
+        group.map(({ tool, label, key, icon: name }) => {
+          const btn = h(
+            "button",
+            { type: "button", class: "editor-tool", "aria-label": label, "aria-keyshortcuts": key, title: `${label} (${key})`, onclick: () => ctrl.setTool(tool) },
+            icon(name),
+          );
+          toolButtons.set(tool, btn);
+          return btn;
+        }),
+      ),
+    ),
   );
 
-  const undoBtn = iconButton("undo", "Undo", () => ctrl.undo());
-  const redoBtn = iconButton("redo", "Redo", () => ctrl.redo());
-  const mergeBtn = h("button", { type: "button", class: "quiet", title: "Join the selected bodies into one", onclick: () => ctrl.mergeSelected() }, "Merge shapes");
-  const zoomOutBtn = iconButton("zoomOut", "Zoom out", () => ctrl.zoomBy(0.8));
-  const zoomInBtn = iconButton("zoomIn", "Zoom in", () => ctrl.zoomBy(1.25));
-  const resetZoomBtn = iconButton("reset", "Reset zoom", () => ctrl.resetZoom());
+  const undoBtn = iconButton("undo-2", "Undo", () => ctrl.undo());
+  const redoBtn = iconButton("redo-2", "Redo", () => ctrl.redo());
+  const saveBtn = iconButton("save", "Save", () => openSaveDialog());
+  const mergeBtn = iconButton("combine", "Merge shapes", () => ctrl.mergeSelected());
+  const deleteBtn = iconButton("trash-2", "Delete", () => ctrl.removeSelection());
+  const zoomOutBtn = iconButton("zoom-out", "Zoom out", () => ctrl.zoomBy(0.8));
+  const zoomInBtn = iconButton("zoom-in", "Zoom in", () => ctrl.zoomBy(1.25));
+  const resetZoomBtn = iconButton("rotate-ccw", "Reset zoom", () => ctrl.resetZoom());
   const colourInput = h("input", {
     type: "color",
     class: "editor-colour",
@@ -125,10 +120,29 @@ export const editorScreen: ScreenFactory = (ctx) => {
     value: `#${ctrl.fillColour.toString(16).padStart(6, "0")}`,
   });
   colourInput.addEventListener("input", () => ctrl.setFillColour(hexColor(colourInput.value)));
-  const useRoomBtn = h("button", { type: "button", class: "primary", onclick: () => useInRoom() }, "Use in room");
+  const useRoomBtn = h(
+    "button",
+    { type: "button", class: "primary", "aria-label": "Use in room", onclick: () => useInRoom() },
+    icon("door-open"),
+    h("span", { class: "editor-label" }, "Use in room"),
+  );
   useRoomBtn.hidden = !inRoom;
-  // Test play is the screen's one yellow action; in room mode "Use in room" takes that role.
-  const testBtn = h("button", { type: "button", class: inRoom ? "" : "primary", onclick: () => void playTest() }, "Test play");
+  // Test play is the screen's one primary action; in room mode "Use in room" takes that role.
+  const testBtn = h(
+    "button",
+    { type: "button", class: inRoom ? "" : "primary", "aria-label": "Test play", onclick: () => void playTest() },
+    icon("play"),
+    h("span", { class: "editor-label" }, "Test play"),
+  );
+  // Edit and view controls float over the canvas, bottom right.
+  viewport.append(
+    h(
+      "div",
+      { class: "editor-float" },
+      h("div", { class: "editor-cluster", role: "group", "aria-label": "Edit" }, colourInput, mergeBtn, deleteBtn),
+      h("div", { class: "editor-cluster", role: "group", "aria-label": "View" }, zoomOutBtn, zoomInBtn, resetZoomBtn),
+    ),
+  );
 
   const nameInput = h("input", { type: "text", class: "editor-name", placeholder: "Untitled map", maxlength: 40, "aria-label": "Editor map name" });
   nameInput.addEventListener("change", () => {
@@ -145,29 +159,15 @@ export const editorScreen: ScreenFactory = (ctx) => {
   const topbar = h(
     "header",
     { class: "editor-top" },
-    h("button", { type: "button", class: "quiet", "aria-label": "Back", onclick: () => exit() }, icon("back"), h("span", { class: "editor-label" }, "Back")),
+    h("button", { type: "button", class: "quiet", "aria-label": "Back", onclick: () => exit() }, icon("arrow-left"), h("span", { class: "editor-label" }, "Back")),
     h("h1", { class: "editor-sr" }, "Map editor"),
     nameInput,
-    h("div", { class: "editor-top-tools" }, undoBtn, redoBtn, useRoomBtn, testBtn, menuBtn),
+    h("div", { class: "editor-top-tools" }, undoBtn, redoBtn, saveBtn, useRoomBtn, testBtn, menuBtn),
   );
 
-  // Footer under the canvas: the hint, then the view controls. The inspector
-  // toggle shows on phones and narrow windows only, where the inspector is a sheet.
+  // Footer under the canvas: the hint. Phones hide it visually; it is still announced.
   const hintEl = h("p", { class: "editor-hint", role: "status", "aria-live": "polite" });
-  const inspectorId = uid("editor-inspector");
-  const sideToggleLabel = h("span", { class: "editor-label" }, "Map settings");
-  const sideToggle = h(
-    "button",
-    { type: "button", class: "editor-side-toggle", "aria-expanded": "false", "aria-controls": inspectorId, onclick: () => setSide(sideEl.dataset.open !== "true") },
-    icon("sheet"),
-    sideToggleLabel,
-  );
-  const foot = h(
-    "div",
-    { class: "editor-foot" },
-    hintEl,
-    h("div", { class: "editor-view", role: "group", "aria-label": "View" }, zoomOutBtn, zoomInBtn, resetZoomBtn, colourInput, mergeBtn, sideToggle),
-  );
+  const foot = h("div", { class: "editor-foot" }, hintEl);
   const stage = h("div", { class: "editor-stage" }, viewport, foot);
 
   // Inspector: a side column on desktop; a sheet on phones and narrow windows.
@@ -180,7 +180,7 @@ export const editorScreen: ScreenFactory = (ctx) => {
       "div",
       { class: "editor-side-head" },
       sideTitle,
-      h("button", { type: "button", class: "icon", "aria-label": "Close inspector", onclick: () => setSide(false) }, icon("close")),
+      h("button", { type: "button", class: "icon", "aria-label": "Close inspector", onclick: () => setSide(false) }, icon("x")),
     ),
     inspectorHost,
   );
@@ -208,11 +208,11 @@ export const editorScreen: ScreenFactory = (ctx) => {
         h(
           "div",
           { class: "editor-buttons" },
-          h("button", { type: "button", onclick: () => { toggleMenu(false); openSaveDialog(); } }, "Save to library"),
-          h("button", { type: "button", onclick: () => fileInput.click() }, "Load file"),
-          h("button", { type: "button", onclick: () => downloadMap(ctrl.doc) }, "Download"),
-          h("button", { type: "button", onclick: () => void copyCode() }, "Copy map code"),
-          h("button", { type: "button", onclick: () => newMap() }, "New map"),
+          h("button", { type: "button", onclick: () => { toggleMenu(false); openSaveDialog(); } }, icon("save"), "Save to library"),
+          h("button", { type: "button", onclick: () => fileInput.click() }, icon("folder-open"), "Load file"),
+          h("button", { type: "button", onclick: () => downloadMap(ctrl.doc) }, icon("download"), "Download"),
+          h("button", { type: "button", onclick: () => void copyCode() }, icon("copy"), "Copy map code"),
+          h("button", { type: "button", onclick: () => newMap() }, icon("file-plus"), "New map"),
         ),
         fileInput,
       ),
@@ -228,7 +228,7 @@ export const editorScreen: ScreenFactory = (ctx) => {
       h("section", { class: "editor-group" }, h("h3", null, "Map code"), codeBox),
     ),
   );
-  menu.hidden = true;
+  menu.dataset.open = "false";
   menu.addEventListener("keydown", (e) => {
     if (e.key !== "Escape") return;
     e.stopPropagation();
@@ -289,11 +289,15 @@ export const editorScreen: ScreenFactory = (ctx) => {
     scopeBar.hidden = !scope;
     scopeText.textContent = scope ? `Editing shapes inside body ${scope.id}. Esc returns.` : "";
     mergeBtn.disabled = ctrl.sel.filter((r) => r.kind === "body").length < 2;
+    deleteBtn.disabled = ctrl.sel.length === 0;
     const shapes = ctrl.physicsShapes;
     lagEl.textContent = `${shapes} physics shapes: ${lagVerdict(shapes)}`;
     hintEl.textContent = ctrl.message || ctrl.hint;
     if (document.activeElement !== nameInput) nameInput.value = mapName ?? "";
-    sideTitle.textContent = sideToggleLabel.textContent = ctrl.sel.length > 0 || scope ? "Selection" : "Map settings";
+    const sideName = ctrl.sel.length > 0 || scope ? "Selection" : "Map settings";
+    sideTitle.textContent = sideToggleLabel.textContent = sideName;
+    sideToggle.title = sideName;
+    sideToggle.setAttribute("aria-label", sideName);
     refreshInspector();
   }
 
@@ -304,8 +308,8 @@ export const editorScreen: ScreenFactory = (ctx) => {
   }
 
   function toggleMenu(show?: boolean): void {
-    const on = show ?? menu.hidden;
-    menu.hidden = !on;
+    const on = show ?? menu.dataset.open !== "true";
+    menu.dataset.open = String(on);
     menuBtn.setAttribute("aria-expanded", String(on));
     if (on) {
       refreshMenu();

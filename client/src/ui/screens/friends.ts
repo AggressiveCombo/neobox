@@ -15,7 +15,9 @@ import type { AppCtx, ScreenFactory } from "../../ctx";
 import { MAX_NAME_LEN, NAME_RE } from "../../protocol";
 import type { AppState } from "../../state";
 import { h, type Child } from "../dom";
-import { field, page, pageHead } from "../kit";
+import { icon, type IconName } from "../icons";
+import { avatar, iconButton, page, pageHead } from "../kit";
+import { showProfile } from "../profile";
 import { signInPrompt } from "./account";
 
 const REFRESH_MS = 15_000;
@@ -32,6 +34,7 @@ export const friendsScreen: ScreenFactory = (ctx) => {
   const groups = h("div", { class: "friend-groups" });
   const nameInput = h("input", {
     type: "text",
+    placeholder: "Friend's name",
     maxlength: MAX_NAME_LEN,
     autocomplete: "off",
     spellcheck: "false",
@@ -53,10 +56,11 @@ export const friendsScreen: ScreenFactory = (ctx) => {
 
   const addForm = h(
     "form",
-    { class: "panel friend-add", onsubmit: onAdd },
-    h("h2", null, "Add a friend"),
-    field("Friend's name", nameInput, "They need an account. Their name, as they signed up with it."),
-    h("div", { class: "actions" }, h("button", { type: "submit", class: "primary" }, "Send request")),
+    { class: "friend-add", onsubmit: onAdd },
+    h("h2", null, icon("user-plus", 20), "Add a friend"),
+    nameInput,
+    h("button", { type: "submit", class: "primary" }, icon("send", 18), "Send request"),
+    h("p", { class: "field-hint" }, "They need an account."),
   );
 
   /** Run a friend action, show its result, then reload the list. Resolves true on success. */
@@ -86,6 +90,12 @@ export const friendsScreen: ScreenFactory = (ctx) => {
     }
   }
 
+  /** A friend's avatar, with a green dot at its corner while they are online. */
+  function presence(f: Friend): HTMLElement {
+    const dot = f.online ? h("span", { class: "friend-presence", role: "img", "aria-label": "online" }) : null;
+    return h("span", { class: "friend-avatar" }, avatar(f.name, null), dot);
+  }
+
   function row(main: Child[], actions: Child[], online = false): HTMLElement {
     return h(
       "li",
@@ -99,14 +109,12 @@ export const friendsScreen: ScreenFactory = (ctx) => {
     const room = f.room ?? null;
     const where = f.online ? (room ? `in ${room.name}` : "online") : "offline";
     const actions: Child[] = [];
-    if (room) actions.push(h("button", { type: "button", class: "ink", onclick: () => ctx.joinRoom(room.code) }, "Join"));
-    actions.push(h("button", { type: "button", onclick: () => void act(() => removeFriend(f.name), `Removed ${f.name}.`) }, "Remove"));
+    if (room) {
+      actions.push(h("button", { type: "button", class: "ink friend-join", onclick: () => ctx.joinRoom(room.code) }, icon("door-open", 18), "Join"));
+    }
+    actions.push(iconButton("user-minus", "Remove friend", () => void act(() => removeFriend(f.name), `Removed ${f.name}.`), "friend-remove"));
     return row(
-      [
-        h("span", { class: f.online ? "dot online" : "dot", "aria-label": f.online ? "online" : "offline", role: "img" }),
-        h("strong", null, f.name),
-        h("span", { class: "row-sub" }, where),
-      ],
+      [presence(f), h("span", { class: "friend-who" }, h("button", { type: "button", class: "friend-name", "aria-label": `${f.name} profile`, onclick: () => showProfile(ctx, f.name) }, f.name), h("span", { class: "row-sub" }, where))],
       actions,
       f.online,
     );
@@ -115,25 +123,25 @@ export const friendsScreen: ScreenFactory = (ctx) => {
   function requestRow(f: Friend): HTMLElement {
     if (f.state === "incoming") {
       return row(
-        [h("strong", null, f.name), h("span", { class: "row-sub" }, "wants to be friends")],
+        [presence(f), h("span", { class: "friend-who" }, h("strong", null, f.name), h("span", { class: "row-sub" }, "wants to be friends"))],
         [
-          h("button", { type: "button", onclick: () => void act(() => acceptFriend(f.name), `You are now friends with ${f.name}.`) }, "Accept"),
-          h("button", { type: "button", onclick: () => void act(() => removeFriend(f.name), `Declined ${f.name}.`) }, "Decline"),
+          h("button", { type: "button", class: "friend-accept", onclick: () => void act(() => acceptFriend(f.name), `You are now friends with ${f.name}.`) }, icon("check", 18), "Accept"),
+          iconButton("x", "Decline", () => void act(() => removeFriend(f.name), `Declined ${f.name}.`), "friend-remove"),
         ],
       );
     }
     return row(
-      [h("strong", null, f.name), h("span", { class: "row-sub" }, "request sent")],
-      [h("button", { type: "button", onclick: () => void act(() => removeFriend(f.name), `Cancelled ${f.name}.`) }, "Cancel")],
+      [presence(f), h("span", { class: "friend-who" }, h("strong", null, f.name), h("span", { class: "row-sub" }, "request sent"))],
+      [iconButton("x", "Cancel request", () => void act(() => removeFriend(f.name), `Cancelled ${f.name}.`), "friend-remove")],
     );
   }
 
-  function section(title: string, items: HTMLElement[], empty: string): HTMLElement {
+  function section(title: string, name: IconName, items: HTMLElement[], empty: string): HTMLElement {
     const list =
       items.length > 0
         ? h("ul", { class: "friend-list", "aria-label": title }, items)
         : h("p", { class: "empty" }, empty);
-    return h("section", { class: "section friend-section" }, h("h2", null, title), list);
+    return h("section", { class: "section friend-section" }, h("h2", null, icon(name, 18), title), list);
   }
 
   function paint(): void {
@@ -141,9 +149,9 @@ export const friendsScreen: ScreenFactory = (ctx) => {
     const outgoing = friends.filter((f) => f.state === "outgoing");
     const mine = friends.filter((f) => f.state === "friend");
     groups.replaceChildren(
-      ...(incoming.length > 0 ? [section("Requests", incoming.map(requestRow), "")] : []),
-      ...(outgoing.length > 0 ? [section("Sent", outgoing.map(requestRow), "")] : []),
-      section("Friends", mine.map(friendRow), "No friends yet. Add someone by their name to get started."),
+      ...(incoming.length > 0 ? [section("Requests", "bell", incoming.map(requestRow), "")] : []),
+      ...(outgoing.length > 0 ? [section("Sent", "send", outgoing.map(requestRow), "")] : []),
+      section("Friends", "users", mine.map(friendRow), "No friends yet. Add one by name."),
     );
   }
 
@@ -159,7 +167,7 @@ export const friendsScreen: ScreenFactory = (ctx) => {
       body.replaceChildren(signInPrompt(ctx, "Friends need an account. Sign in to add friends and see when they are online."));
       return;
     }
-    body.replaceChildren(h("div", { class: "friends-layout" }, addForm, h("div", { class: "friends-main" }, status, groups)));
+    body.replaceChildren(h("div", { class: "friends-main" }, addForm, status, groups));
     paint();
     void refresh();
     timer = window.setInterval(() => void refresh(), REFRESH_MS);

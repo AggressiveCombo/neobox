@@ -114,15 +114,6 @@
 
 .jukebox svg {
   flex: none;
-  width: 20px;
-  height: 20px;
-}
-
-.jukebox svg path {
-  fill: none;
-  stroke: currentColor;
-  stroke-width: 2;
-  stroke-linejoin: miter;
 }
 
 .jukebox-volume {

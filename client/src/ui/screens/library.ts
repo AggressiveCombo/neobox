@@ -24,6 +24,7 @@ import { sendReport } from "../../api";
 import type { AppCtx, ScreenFactory } from "../../ctx";
 import type { AppState } from "../../state";
 import { h, type Child } from "../dom";
+import { icon } from "../icons";
 import { field, openModal, page, pageHead, seg, uid, type SegOption } from "../kit";
 import {
   SORT_LABELS,
@@ -36,7 +37,6 @@ import {
   previewCode,
   previewThumb,
   tabBar,
-  tabStrip,
   type LibraryTab,
 } from "../map-list";
 import { signInPrompt } from "./account";
@@ -112,13 +112,12 @@ export const libraryScreen: ScreenFactory = (ctx) => {
   let seq = 0;
   let busy = false;
   let detail: Detail | null = null;
-  let searchTimer: ReturnType<typeof setTimeout> | undefined;
-  let previewTimer: ReturnType<typeof setTimeout> | undefined;
+  let searchTimer: number | undefined;
+  let previewTimer: number | undefined;
 
   const status = h("p", { class: "status", role: "status", "aria-live": "polite" });
   const emptyBox = h("div", { class: "library-empty", hidden: true });
   const scopeHost = h("div");
-  const sortHost = h("div", { class: "library-sorts" });
   const gate = h("div", { hidden: true });
 
   const searchInput = h("input", {
@@ -130,9 +129,15 @@ export const libraryScreen: ScreenFactory = (ctx) => {
     maxlength: 50,
     oninput: onSearch,
   });
-  const searchWrap = h("div", { class: "library-search" }, searchInput);
-  const uploadBtn = h("button", { type: "button", class: "primary", onclick: () => openUpload() }, "Upload a map");
-  const toolbar = h("div", { class: "library-toolbar" }, searchWrap, uploadBtn);
+  const searchWrap = h("div", { class: "library-search" }, icon("search", 18), searchInput);
+  const sortSelect = h(
+    "select",
+    { "aria-label": "sort maps", onchange: () => selectSort(sortSelect.value as LibrarySort) },
+    SORTS.map(([value, label]) => h("option", { value }, label)),
+  );
+  const sortWrap = h("div", { class: "library-sort" }, icon("arrow-up-down", 18), sortSelect);
+  const uploadBtn = h("button", { type: "button", class: "primary", onclick: () => openUpload() }, icon("upload", 18), "Upload a map");
+  const toolbar = h("div", { class: "library-toolbar" }, searchWrap, sortWrap, uploadBtn);
 
   const grid = h("ul", { class: "map-grid", "aria-label": "maps" });
   const moreBtn = h(
@@ -154,7 +159,7 @@ export const libraryScreen: ScreenFactory = (ctx) => {
   const makers = h(
     "section",
     { class: "library-makers panel", "aria-label": "top makers this week", hidden: true },
-    h("h2", null, "Top makers this week"),
+    h("h2", null, icon("trophy", 20), "Top makers this week"),
     makersStatus,
     makersList,
   );
@@ -169,9 +174,9 @@ export const libraryScreen: ScreenFactory = (ctx) => {
     scopeHost.replaceChildren(tabBar(tab, selectTab));
     const browse = tab === "browse";
     const signedOut = tab !== "browse" && store.state.account === null;
-    sortHost.replaceChildren(tabStrip("Sort maps", SORTS, sort, selectSort));
-    sortHost.hidden = !browse;
+    sortSelect.value = sort;
     searchWrap.hidden = !browse;
+    sortWrap.hidden = !browse;
     uploadBtn.hidden = tab !== "mine" || signedOut;
     toolbar.hidden = searchWrap.hidden && uploadBtn.hidden;
     makers.hidden = !browse;
@@ -202,7 +207,7 @@ export const libraryScreen: ScreenFactory = (ctx) => {
 
   function onSearch(): void {
     clearTimeout(searchTimer);
-    searchTimer = setTimeout(() => {
+    searchTimer = window.setTimeout(() => {
       searchTimer = undefined;
       q = searchInput.value.trim();
       reload();
@@ -247,16 +252,18 @@ export const libraryScreen: ScreenFactory = (ctx) => {
       if (req === seq) status.textContent = errorText(err);
       return;
     }
-    paintList();
+    paintList(!append);
   }
 
   function emptyText(): string {
-    if (tab === "mine") return "You have not uploaded any maps yet. Upload one; it shows in Browse once an admin approves it.";
-    if (tab === "favourites") return "No favourites yet. Open a map and star it to keep it here.";
+    if (tab === "mine") return "No maps yet. Upload one; it shows in Browse once an admin approves it.";
+    if (tab === "favourites") return "No favourites yet. Star a map to keep it here.";
     return q === "" ? "No maps yet. Maps show here once an admin approves them." : `No maps match "${q}".`;
   }
 
-  function paintList(): void {
+  /** Paint the cards. `fresh` (a new list, not a refresh) lets the cards rise in once. */
+  function paintList(fresh = false): void {
+    grid.classList.toggle("enter", fresh);
     grid.replaceChildren(...maps.map((m) => mapCard(ctx, m, () => openDetail(m), tab === "mine")));
     status.textContent = "";
     const empty = maps.length === 0;
@@ -311,12 +318,11 @@ export const libraryScreen: ScreenFactory = (ctx) => {
     }
   }
 
-
   /** The Fastest Times of a library map: the table, or "No Records" before anyone has raced it. */
   function recordsSection(id: number): HTMLElement {
     const text = h("p", { class: "status", role: "status", "aria-live": "polite" }, "Fetching…");
     const body = h("div");
-    const section = h("section", { class: "map-records" }, h("h3", null, "Fastest Times"), text, body);
+    const section = h("section", { class: "map-records" }, h("h3", null, icon("trophy", 18), "Fastest Times"), text, body);
     listRecords(id).then(
       (rows) => {
         if (!section.isConnected) return;
@@ -340,9 +346,9 @@ export const libraryScreen: ScreenFactory = (ctx) => {
     if (room !== null) {
       const host = room.quick === null && room.players.some((p) => p.id === myId && p.host);
       if (!host) return h("p", { class: "status" }, "Only the room's host can change the room's map.");
-      return h("button", { type: "button", class: "primary", onclick: () => useInRoom(map) }, "Use in my room");
+      return h("button", { type: "button", class: "primary", onclick: () => useInRoom(map) }, icon("play", 18), "Use in my room");
     }
-    return h("button", { type: "button", class: "primary", onclick: () => playInNewRoom(map) }, "Play in a new room");
+    return h("button", { type: "button", class: "primary", onclick: () => playInNewRoom(map) }, icon("play", 18), "Play in a new room");
   }
 
   function useInRoom(map: LibraryMap): void {
@@ -394,7 +400,7 @@ export const libraryScreen: ScreenFactory = (ctx) => {
     // the server refuses votes on your own map
     const voteTitle = own ? "You can't vote on your own map" : undefined;
     info.replaceChildren(
-      h("p", { class: "map-byline" }, `by ${map.author}`, map.pick ? h("span", { class: "chip" }, "Staff pick") : null),
+      h("p", { class: "map-byline" }, `by ${map.author}`, map.pick ? h("span", { class: "chip" }, icon("award", 14), "Staff pick") : null),
       ...(own ? [h("p", { class: "map-state" }, mapState(map))] : []),
       h("p", { class: "map-desc" }, map.description !== "" ? map.description : "No description."),
       h("p", { class: "map-stats num" }, `${plural(map.votes, "vote")} · ${plural(map.plays, "play")}`),
@@ -410,6 +416,7 @@ export const libraryScreen: ScreenFactory = (ctx) => {
             title: voteTitle,
             onclick: () => void vote(map, 1),
           },
+          icon("thumbs-up", 18),
           "Upvote",
         ),
         h(
@@ -421,21 +428,23 @@ export const libraryScreen: ScreenFactory = (ctx) => {
             title: voteTitle,
             onclick: () => void vote(map, -1),
           },
+          icon("thumbs-down", 18),
           "Downvote",
         ),
         h(
           "button",
           { type: "button", "aria-pressed": starred ? "true" : "false", onclick: () => void toggleFavourite(map) },
+          icon("star", 18),
           starred ? "Starred" : "Star",
         ),
-        h("button", { type: "button", onclick: () => void copyCode(map) }, "Copy code"),
+        h("button", { type: "button", onclick: () => void copyCode(map) }, icon("copy", 18), "Copy code"),
       ),
       h("div", { class: "map-play" }, roomAction(map)),
-      ...(own ? [] : [h("button", { type: "button", class: "quiet map-report", onclick: () => openReport(map) }, "Report map")]),
+      ...(own ? [] : [h("button", { type: "button", class: "quiet map-report", onclick: () => openReport(map) }, icon("flag", 18), "Report map")]),
     );
   }
 
-  /** Owner's controls: description, visibility, save and delete. */
+  /** Owner's controls, folded away: description, visibility, save and delete. */
   function ownSection(map: LibraryMap): HTMLElement {
     let visibility = map.visibility;
     const desc = h("textarea", {
@@ -465,6 +474,7 @@ export const libraryScreen: ScreenFactory = (ctx) => {
           if (await act(() => updateMap(map.id, patch), map.id)) ctx.toast("Map saved.");
         },
       },
+      icon("save", 18),
       "Save changes",
     );
     const remove = h(
@@ -485,16 +495,21 @@ export const libraryScreen: ScreenFactory = (ctx) => {
           }
         },
       },
+      icon("trash-2", 18),
       "Delete map",
     );
     return h(
-      "section",
-      { class: "map-owner", "aria-label": "Edit your map" },
-      h("h3", null, "Edit your map"),
-      field("Description", desc),
-      h("div", { class: "field" }, h("span", { class: "field-label" }, "Visibility"), visSeg.el),
-      h("p", { class: "field-hint" }, "Public maps show in Browse once an admin approves them."),
-      h("div", { class: "actions" }, save, remove),
+      "details",
+      { class: "map-owner" },
+      h("summary", null, icon("pencil", 18), "Edit your map"),
+      h(
+        "div",
+        { class: "map-owner-body" },
+        field("Description", desc),
+        h("div", { class: "field" }, h("span", { class: "field-label" }, "Visibility"), visSeg.el),
+        h("p", { class: "field-hint" }, "Public maps show in Browse once an admin approves them."),
+        h("div", { class: "actions" }, save, remove),
+      ),
     );
   }
 
@@ -505,7 +520,7 @@ export const libraryScreen: ScreenFactory = (ctx) => {
     const formId = uid("report");
     const details = h("textarea", { rows: 3, maxlength: 300, autocomplete: "off", spellcheck: "false" });
     const formError = h("p", { class: "field-error", role: "alert" });
-    const send = h("button", { type: "submit", class: "primary", form: formId }, "Send report");
+    const send = h("button", { type: "submit", class: "primary", form: formId }, icon("send", 18), "Send report");
     const cancel = h("button", { type: "button", onclick: () => modal?.close() }, "Cancel");
     const form = h(
       "form",
@@ -571,12 +586,12 @@ export const libraryScreen: ScreenFactory = (ctx) => {
     const previewCanvas = h("canvas", { "aria-hidden": "true" });
     const previewBox = h("div", { class: "map-preview", hidden: true }, previewCanvas);
     const formError = h("p", { class: "field-error", role: "alert" });
-    const submit = h("button", { type: "submit", class: "primary", form: formId }, "Upload map");
+    const submit = h("button", { type: "submit", class: "primary", form: formId }, icon("upload", 18), "Upload map");
     const cancel = h("button", { type: "button", onclick: () => modal?.close() }, "Cancel");
 
     function onCodeInput(): void {
       clearTimeout(previewTimer);
-      previewTimer = setTimeout(() => {
+      previewTimer = window.setTimeout(() => {
         previewTimer = undefined;
         void showPreview();
       }, PREVIEW_DELAY_MS);
@@ -642,9 +657,8 @@ export const libraryScreen: ScreenFactory = (ctx) => {
     "library-page",
     pageHead({ title: "Library", back: () => store.set({ screen: returnScreen(store.state) }) }),
     scopeHost,
-    gate,
-    sortHost,
     toolbar,
+    gate,
     status,
     emptyBox,
     h("div", { class: "library-layout" }, h("div", { class: "library-main" }, grid, moreBtn), makers),

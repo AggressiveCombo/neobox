@@ -4,6 +4,7 @@
 import { errorText, LIBRARY_PAGE_SIZE, type LibraryMap } from "../account";
 import type { AppCtx } from "../ctx";
 import { h } from "./dom";
+import { icon } from "./icons";
 import { openModal } from "./kit";
 import { loadTab, mapCard, mapCode, tabBar, type LibraryTab } from "./map-list";
 
@@ -49,6 +50,7 @@ export function openLibraryPicker(ctx: AppCtx, onPick: (map: PickedMap) => void)
         void load(true);
       },
     },
+    icon("chevron-down", 16),
     "More maps",
   );
 

@@ -1,22 +1,23 @@
-/* Account screen: sign in or create (guest) and the profile, forms and danger zone (member). */
+/* Account screen: sign in or create (guest) and the profile, session and security (member). */
+
+/* The header's Sign out is hidden for guests. */
+.account-page [hidden] {
+  display: none !important;
+}
 
 .account-page .page-inner {
   max-width: 1040px;
 }
 
+.account-page .actions {
+  align-items: center;
+}
+
 .account-guest {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 420px);
+  grid-template-columns: minmax(0, 1fr) minmax(0, 340px);
   gap: 32px;
   align-items: start;
-}
-
-.account-pitch {
-  gap: 20px;
-}
-
-.account-pitch .boxed-list {
-  gap: 10px;
 }
 
 .account-form {
@@ -27,49 +28,67 @@
   display: none;
 }
 
-.account-member {
-  display: grid;
-  grid-template-columns: minmax(0, 300px) minmax(0, 1fr);
-  gap: 32px;
-  align-items: start;
+.account-submit {
+  gap: 12px;
 }
 
-.account-profile {
-  gap: 24px;
-  position: sticky;
-  top: 88px;
+.account-foot {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--step-small);
 }
 
-.account-id {
+.account-foot:empty {
+  display: none;
+}
+
+.account-aside {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  padding-top: 8px;
+}
+
+.account-aside > h2 {
+  margin: 0;
+}
+
+.account-perks {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.account-perk {
   display: flex;
   align-items: center;
-  gap: 16px;
-  min-width: 0;
+  gap: 12px;
 }
 
-.account-id .avatar {
-  width: 72px;
-  height: 72px;
-  font-size: 32px;
+.account-perk-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 36px;
+  height: 36px;
+  background: var(--surface-2);
+  color: var(--accent);
 }
 
-/* No colour of its own yet (a guest-side name): a tone square with ink text. */
-.account-id .avatar:not([style]) {
-  background: var(--surface-3);
-  color: var(--ink);
-}
-
-.account-name {
-  font-size: var(--step-lead);
-  font-weight: 500;
-  overflow-wrap: anywhere;
-}
-
-.account-forms {
+/* Signed in: the profile card, then Security below it. */
+.account-member {
   display: flex;
   flex-direction: column;
   gap: 24px;
-  min-width: 0;
+  max-width: 720px;
+}
+
+.account-subform > h3 {
+  margin: 0;
 }
 
 .account-level {
@@ -90,16 +109,54 @@
   height: 10px;
 }
 
-.account-page .actions {
+/* Security is a disclosure: closed, it is one row with a shield; open, its forms. */
+.account-security {
+  padding: 0;
+}
+
+.account-security > summary {
+  display: flex;
   align-items: center;
+  gap: 12px;
+  min-height: 56px;
+  padding: 0 20px;
+  cursor: pointer;
+  font-weight: 500;
+  list-style: none;
 }
 
-/* Destructive, but at rest it is a tone panel like the others: the red is in the title and the button. */
-.danger-panel {
+.account-security > summary::-webkit-details-marker {
+  display: none;
+}
+
+.account-security > summary > span {
+  flex: 1 1 auto;
+}
+
+.account-security > summary .icon-chevron-down {
+  transition: transform 180ms ease;
+}
+
+.account-security[open] > summary .icon-chevron-down {
+  transform: rotate(180deg);
+}
+
+.account-security-body {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  padding: 0 20px 20px;
+}
+
+.account-subform {
+  display: flex;
+  flex-direction: column;
   gap: 16px;
+  padding-top: 20px;
+  border-top: 1px solid var(--line);
 }
 
-.danger-panel h2 {
+.danger-zone h3 {
   color: var(--danger);
 }
 
@@ -112,26 +169,18 @@
 }
 
 @media (max-width: 860px) {
-  .account-guest,
-  .account-member {
+  .account-guest {
     grid-template-columns: minmax(0, 1fr);
     gap: 24px;
   }
 
-  /* On a phone the sign-in form comes first; the pitch follows it. */
-  .account-guest > .account-form {
-    order: -1;
-  }
-
-  .account-profile {
-    position: static;
+  .account-aside {
+    padding-top: 0;
   }
 }
 
 @media (max-width: 600px) {
-  .account-form,
-  .danger-panel,
-  .account-profile {
+  .account-form {
     padding: 20px;
   }
 

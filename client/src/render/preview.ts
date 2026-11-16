@@ -40,6 +40,10 @@ export function drawMapPreview(canvas: HTMLCanvasElement, fb: FrameView): void {
   const available = Math.floor((u32.length - scene.worldOffset) / WORDS_PER_VERTEX);
   const vertices = Math.max(0, Math.min(scene.worldCount, available));
   const triangles = Math.floor(vertices / 3);
+  // Canvas2D anti-aliases each triangle's edges on its own, which leaves light seams
+  // between neighbours; a hairline stroke in the fill colour closes them.
+  ctx.lineWidth = 1 / scale;
+  ctx.lineJoin = "round";
   for (let t = 0; t < triangles; t++) {
     const v = scene.worldOffset + t * WORDS_PER_TRIANGLE;
     ctx.beginPath();
@@ -47,8 +51,11 @@ export function drawMapPreview(canvas: HTMLCanvasElement, fb: FrameView): void {
     ctx.lineTo(f32[v + 3], f32[v + 4]);
     ctx.lineTo(f32[v + 6], f32[v + 7]);
     ctx.closePath();
-    ctx.fillStyle = averageCss(u32[v + 2], u32[v + 5], u32[v + 8]);
+    const colour = averageCss(u32[v + 2], u32[v + 5], u32[v + 8]);
+    ctx.fillStyle = colour;
+    ctx.strokeStyle = colour;
     ctx.fill();
+    ctx.stroke();
   }
   ctx.setTransform(1, 0, 0, 1, 0, 0);
 }

@@ -1,5 +1,5 @@
 // Quick play, as the original's quick menu: one tile per mode of the server's rotation
-// (/api/rotation, the original's maps2.json), with its title, the players online in it
+// (/api/rotation, the original's maps2.json), with its title, the players playing in it
 // (refreshed every 30 s like playercount.json), its description and a carousel of its map
 // rotation. Play starts a match in that mode. Not connected yet: the name is sent with the
 // connect and the mode is kept in state.intent, so app.ts starts quick play once the server
@@ -11,6 +11,7 @@ import { MAX_NAME_LEN, NAME_RE } from "../../protocol";
 import type { AppState } from "../../state";
 import { h } from "../dom";
 import { field, loading, page, pageHead } from "../kit";
+import { icon } from "../icons";
 import { previewCode } from "../map-list";
 import { readStoredName, sanitizeName, writeStoredName } from "./menu";
 
@@ -112,9 +113,9 @@ export const quickScreen: ScreenFactory = (ctx) => {
       h(
         "div",
         { class: "quick-maps" },
-        h("button", { type: "button", class: "quick-arrow", "aria-label": `Previous ${mode.title} map`, onclick: step(-1) }, "‹"),
+        h("button", { type: "button", class: "quick-arrow", "aria-label": `Previous ${mode.title} map`, onclick: step(-1) }, icon("arrow-left", 20)),
         thumbs,
-        h("button", { type: "button", class: "quick-arrow", "aria-label": `Next ${mode.title} map`, onclick: step(1) }, "›"),
+        h("button", { type: "button", class: "quick-arrow", "aria-label": `Next ${mode.title} map`, onclick: step(1) }, icon("arrow-right", 20)),
       ),
       caption,
     );
@@ -131,14 +132,15 @@ export const quickScreen: ScreenFactory = (ctx) => {
         const count = h("p", { class: "quick-count num" }, "");
         const playButton = h(
           "button",
-          { type: "button", class: "primary big quick-choose", onclick: () => choose(mode.id) },
+          { type: "button", class: "primary quick-choose", onclick: () => choose(mode.id) },
+          icon("play", 18),
           `Play ${mode.title}`,
         );
         const el = h(
           "article",
           { class: "quick-card" },
           h("div", { class: "quick-card-head" }, h("h2", null, mode.title), count),
-          h("p", { class: "quick-text" }, mode.description),
+          h("p", { class: "quick-text", title: mode.description }, mode.description),
           carousel(mode),
           playButton,
         );
@@ -161,7 +163,7 @@ export const quickScreen: ScreenFactory = (ctx) => {
   }
 
   function renderCounts(): void {
-    for (const [id, card] of cards) card.count.replaceChildren(h("span", { class: "quick-count-num num" }, String(counts?.[id] ?? 0)), " players online");
+    for (const [id, card] of cards) card.count.textContent = `${counts?.[id] ?? 0} playing`;
   }
 
   /** While matching: the loader and Cancel. Otherwise the connection state after an attempt. */
@@ -240,7 +242,6 @@ export const quickScreen: ScreenFactory = (ctx) => {
   const el = page(
     "quick",
     head,
-    h("p", { class: "lead" }, "Jump into a room that is already running. Pick a mode and you are matched with other players."),
     account ? null : nameField,
     cardBox,
     waitBox,

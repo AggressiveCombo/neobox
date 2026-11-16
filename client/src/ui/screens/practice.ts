@@ -9,6 +9,7 @@ import { FrameLoop } from "../../local-loop";
 import type { GameSettings, MatchStart } from "../../protocol";
 import type { Screen } from "../../state";
 import { type Child, h } from "../dom";
+import { icon } from "../icons";
 import { field, page, pageHead, seg } from "../kit";
 import { rotateGate, touchControls } from "./hud";
 import "./practice.css";
@@ -152,9 +153,9 @@ export const practiceScreen: ScreenFactory = (ctx) => {
     const bar = h(
       "div",
       { class: "offline-top offline-overlay" },
-      h("button", { type: "button", onclick: () => showSetup() }, "Leave"),
+      h("button", { type: "button", onclick: () => showSetup() }, icon("arrow-left", 18), "Leave"),
       h("span", { class: "offline-title" }, mapName),
-      h("button", { type: "button", onclick: restart }, "Restart"),
+      h("button", { type: "button", onclick: restart }, icon("rotate-ccw", 18), "Restart"),
     );
     root.replaceChildren(touch.el, bar, rotate.el);
     releaseTop = ctx.reserveTop(bar);
@@ -282,7 +283,7 @@ export const practiceScreen: ScreenFactory = (ctx) => {
       },
     );
     const status = h("p", { class: message ? "offline-error" : "offline-status", role: "status" }, message);
-    const startBtn = h("button", { type: "button", class: "primary big block", onclick: () => void start() }, "Start");
+    const startBtn = h("button", { type: "button", class: "primary big block", onclick: () => void start() }, icon("play", 20), "Start");
     setup = { list, hint, start: startBtn, status, code };
 
     const content: Child[] = [

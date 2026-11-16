@@ -1,20 +1,19 @@
-/* Home (ui/screens/menu.ts). Desktop: a two-column composition on the ground colour. The left
-   column holds the wordmark, the sentence, the name and Play, then the destinations as an index.
-   The right side is a giant turned square, cropped by the viewport edge; the clip plays inside it
-   (the GL view is masked to the square by menu.ts). Phone (<=600px): one column in flow. */
+/* Home (ui/screens/menu.ts). Desktop: a grid. The left column holds the wordmark, the name,
+   the two ways in and the destination index; the right side is a giant turned square, cropped
+   by the viewport edge, where a clip plays (the GL view is masked to the square by menu.ts).
+   Phone (<=600px): one column in this order: wordmark, name and play, the index, then the square
+   bleeding off the right edge so the first screen holds everything that matters. */
 
 /* The home page is transparent so the GL view can show through the square. */
 .page.home {
   position: relative;
-  display: grid;
-  grid-template-columns: minmax(0, 560px) minmax(0, 1fr);
-  grid-template-rows: auto auto auto auto auto;
-  align-content: start;
-  gap: 24px 48px;
-  min-height: 100%;
-  padding: 16px var(--margin) calc(24px + env(safe-area-inset-bottom));
   background: transparent;
-  overflow: visible;
+  display: grid;
+  grid-template-columns: minmax(0, 540px) minmax(0, 1fr);
+  grid-template-rows: auto 1fr auto auto;
+  column-gap: 40px;
+  row-gap: 32px;
+  align-content: start;
 }
 
 /* Top bar: account, news, music, fullscreen. */
@@ -23,100 +22,136 @@
   grid-row: 1;
   display: flex;
   justify-content: flex-end;
-  align-items: flex-start;
-  position: relative;
-  z-index: 2;
-  min-height: 0;
+  padding-top: calc(16px + env(safe-area-inset-top));
 }
 
 .home-tools {
   display: flex;
-  flex-wrap: wrap;
-  justify-content: flex-end;
   align-items: center;
-  gap: 8px;
+  gap: 2px;
 }
 
-.home-tools .home-level {
-  color: var(--muted);
-  font-size: var(--step-small);
-  font-variant-numeric: tabular-nums;
-  padding-inline: 4px;
-}
-
+/* Square tool buttons: 40px, no fill until hovered or pressed (button.quiet). */
 .home-tool {
   position: relative;
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
+  display: inline-grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  padding: 0;
 }
 
-/* A square marker: something new in the news. */
+/* Account is one button: the avatar and "Level N", or a sign-in prompt for guests. */
+button.home-account {
+  display: inline-flex;
+  width: auto;
+  gap: 8px;
+  padding: 0 12px 0 4px;
+  color: var(--ink);
+  font-size: var(--step-small);
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.home-account .avatar {
+  width: 32px;
+  height: 32px;
+}
+
+.home-level {
+  font-variant-numeric: tabular-nums;
+}
+
+/* A dot on the news button: something new since it was last opened. */
 .home-unread {
   position: absolute;
-  top: 8px;
-  right: 8px;
+  top: 9px;
+  right: 9px;
   width: 8px;
   height: 8px;
-  background: var(--ink);
-  box-shadow: 0 0 0 2px var(--surface);
+  background: var(--accent-bright);
 }
 
-.home-tools .avatar {
-  width: 24px;
-  height: 24px;
-  font-size: var(--step-small);
-}
-
-/* Left column: the copy and the name form. */
+/* Left column: the wordmark, the name and the two ways in. */
 .home-copy {
   grid-column: 1;
   grid-row: 2;
+  align-self: center;
   display: flex;
   flex-direction: column;
-  align-items: flex-start;
-  gap: 16px;
-  position: relative;
-  z-index: 1;
+  gap: 28px;
+  min-width: 0;
 }
 
 .home-title {
   display: flex;
   align-items: center;
-  gap: 0.16em;
-  font-size: var(--step-display);
+  gap: 16px;
+  font-size: clamp(3.25rem, 1.4rem + 6vw, 7.5rem);
   font-weight: 500;
-  letter-spacing: -0.05em;
+  letter-spacing: -0.045em;
   line-height: 0.9;
 }
 
 .home-title .mark {
-  width: 0.72em;
-  height: 0.72em;
-}
-
-.home-lead {
-  max-width: 34ch;
-  font-size: var(--step-lead);
-  line-height: 1.35;
-}
-
-.menu-online {
-  color: var(--muted);
-  font-size: var(--step-small);
-  font-variant-numeric: tabular-nums;
+  width: 0.55em;
+  height: 0.55em;
 }
 
 .home-form {
   display: flex;
   flex-direction: column;
   gap: 16px;
-  width: 100%;
-  max-width: 460px;
+  max-width: 480px;
 }
 
+/* The name reads as a sentence, "Playing as Name", with a pencil: the input is the name itself. */
 .home-name {
-  max-width: 320px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  align-self: flex-start;
+  max-width: 100%;
+  color: var(--muted);
+  font-size: var(--step-small);
+  white-space: nowrap;
+  cursor: text;
+}
+
+/* (0,2,1): beats the base text-input style (0,1,1) so the name stays plain text. */
+.home-name input.home-name-input {
+  min-width: 0;
+  width: 12em;
+  min-height: 0;
+  padding: 2px 0;
+  border: 0;
+  border-bottom: 1px solid transparent;
+  border-radius: 0;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  font-size: var(--step-body);
+  font-weight: 500;
+  transition: border-color var(--fast) var(--ease);
+}
+
+.home-name input.home-name-input:hover:not(:read-only),
+.home-name input.home-name-input:focus-visible {
+  background: transparent;
+  border-bottom-color: var(--line-strong);
+}
+
+.home-name input.home-name-input:focus-visible {
+  outline: none;
+  border-bottom-color: var(--accent);
+}
+
+.home-name input.home-name-input:read-only {
+  cursor: default;
+}
+
+.home-name > svg {
+  color: var(--muted);
 }
 
 .home-actions {
@@ -125,12 +160,27 @@
   gap: 12px;
 }
 
-.home-actions button.big {
-  min-width: 180px;
+.home-actions button {
+  flex: 1 1 200px;
+  white-space: nowrap;
+}
+
+.menu-online {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  font-size: var(--step-small);
+}
+
+.menu-online::before {
+  content: "";
+  width: 8px;
+  height: 8px;
+  background: var(--good);
 }
 
 .home-copy .status {
-  min-height: 0;
   color: var(--muted);
   font-size: var(--step-small);
 }
@@ -139,32 +189,17 @@
   display: none;
 }
 
-/* First-visit hint: a tone-step panel pointing at Training. */
-.home-hint {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  width: 100%;
-  max-width: 460px;
-  padding: 12px 12px 12px 16px;
-  background: var(--surface);
-}
-
-.home-hint p {
-  font-size: var(--step-small);
-}
-
-.home-hint button {
-  white-space: nowrap;
-}
-
 /* Right side: the square. Absolutely placed over the page, behind the copy. */
 .menu-art {
-  position: absolute;
-  inset: 0;
-  overflow: hidden;
-  pointer-events: none;
+  grid-column: 2;
+  grid-row: 2 / span 2;
+  position: relative;
+  align-self: center;
+  justify-self: end;
+  width: min(64vh, 42vw);
+  aspect-ratio: 1;
+  margin-right: calc(var(--margin) * -2);
+  min-width: 0;
 }
 
 .menu-art * {
@@ -173,23 +208,19 @@
 
 .menu-square {
   position: absolute;
-  top: 50%;
-  right: -14vw;
-  width: min(70vw, 1040px);
-  aspect-ratio: 1;
-  transform: translateY(-50%) rotate(var(--angle));
-  background: var(--accent);
+  inset: 0;
+  background: var(--brand-tile);
+  transform: rotate(var(--angle, -18deg));
+  display: grid;
+  place-items: center;
+  overflow: hidden;
 }
 
 /* Flat field: the mark sits in the middle, counter-rotated to stand upright. */
 .menu-square .mark {
-  position: absolute;
-  left: 50%;
-  top: 50%;
-  width: 22%;
-  height: 22%;
-  transform: translate(-50%, -50%) rotate(calc(-1 * var(--angle)));
-  transition: opacity 260ms var(--ease);
+  width: 34%;
+  height: 34%;
+  transform: rotate(calc(-1 * var(--angle, -18deg)));
 }
 
 /* Live: the clip shows through the square (menu.ts masks the GL view to it). */
@@ -204,230 +235,193 @@
 /* The clip credit, bottom-right of the art, over the clip. */
 .menu-credit {
   position: absolute;
-  right: var(--margin);
-  bottom: 24px;
-  max-width: calc(100% - 2 * var(--margin));
+  right: 12%;
+  bottom: 8%;
+  transform: rotate(0deg);
+  pointer-events: none;
 }
 
-/* Index: the destinations as large text rows. */
+/* The index: destinations as icon tiles, four to a row. */
 .home-index {
   grid-column: 1;
   grid-row: 3;
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  column-gap: 16px;
-  width: 100%;
-  max-width: 560px;
-  position: relative;
-  z-index: 1;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  align-self: end;
 }
 
-.home-row {
-  display: flex;
-  flex-direction: column;
-}
-
+/* Top padding leaves room for the "Start here" chip in the corner. */
 button.home-row-btn {
   position: relative;
-  width: 100%;
-  min-height: 52px;
-  padding: 8px 12px 8px 30px;
-  background: transparent;
-  color: var(--ink);
-  font-size: var(--step-lead);
-  font-weight: 500;
-  letter-spacing: -0.01em;
-  justify-content: flex-start;
-  text-align: left;
-}
-
-button.home-row-btn::before {
-  content: "";
-  position: absolute;
-  left: 12px;
-  top: 50%;
-  width: 0;
-  height: 0;
-  background: var(--ink);
-  transform: translateY(-50%);
-  transition: width 140ms var(--ease), height 140ms var(--ease);
-}
-
-button.home-row-btn:hover:not(:disabled),
-button.home-row-btn:focus-visible {
+  flex-direction: column;
+  justify-content: center;
+  gap: 8px;
+  min-height: 92px;
+  padding: 28px 6px 12px;
   background: var(--surface);
-}
-
-button.home-row-btn:hover:not(:disabled)::before,
-button.home-row-btn:focus-visible::before {
-  width: 10px;
-  height: 10px;
-}
-
-/* On desktop the description shows in the preview line below the index instead. */
-.home-row-desc {
-  display: none;
-}
-
-.home-preview {
-  grid-column: 1;
-  grid-row: 4;
-  min-height: 1.5em;
-  color: var(--muted);
+  color: var(--ink);
   font-size: var(--step-small);
-  position: relative;
-  z-index: 1;
+  font-weight: 500;
+  line-height: 1.2;
 }
 
+button.home-row-btn:hover:not(:disabled) {
+  background: var(--surface-2);
+}
+
+button.home-row-btn svg {
+  color: var(--accent);
+  transition: transform 200ms var(--ease);
+}
+
+button.home-row-btn:hover:not(:disabled) svg {
+  transform: translateY(-2px);
+}
+
+.home-row-label {
+  white-space: nowrap;
+}
+
+/* First visit only: a small chip in the tile's top-right corner, gone once Training is opened. */
+.home-badge {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  padding: 1px 5px;
+  background: var(--accent);
+  color: var(--accent-ink);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+
+/* Footer: one muted line, the makers above it. */
 .home-foot {
   grid-column: 1 / -1;
-  grid-row: 5;
+  grid-row: 4;
   display: flex;
   flex-direction: column;
   gap: 8px;
   color: var(--muted);
   font-size: var(--step-small);
-  position: relative;
-  z-index: 1;
 }
 
-.home-foot .credit,
-.home-foot .menu-makers,
+.home-foot .menu-makers {
+  margin: 0;
+}
+
 .home-links {
-  font-size: var(--step-small);
-  color: var(--muted);
+  margin: 0;
 }
 
-.home-links a {
+.home-links a,
+button.home-privacy {
   color: var(--ink);
+  font: inherit;
+  text-decoration: underline;
+  text-underline-offset: 3px;
 }
 
-/* Touch devices: no hover, so descriptions sit under their row. */
-@media (hover: none) {
-  .home-row-desc {
-    display: block;
-    padding: 0 12px 12px 30px;
-    color: var(--muted);
-    font-size: var(--step-small);
+button.home-privacy {
+  padding: 0;
+  min-height: 0;
+  background: none;
+}
+
+/* Desktop: the square sits behind the title area, so the index keeps the left column. */
+@media (max-width: 1100px) {
+  .page.home {
+    grid-template-columns: minmax(0, 1fr);
   }
 
-  .home-preview {
-    display: none;
+  .menu-art {
+    grid-column: 1;
+    grid-row: 2;
+    justify-self: end;
+    width: min(60vw, 52vh);
+    margin-right: calc(var(--margin) * -2);
+    opacity: 0.98;
+  }
+
+  .home-copy {
+    grid-row: 2;
+    position: relative;
+    z-index: 1;
+    max-width: 540px;
+  }
+
+  .home-index {
+    grid-column: 1;
+    grid-row: 3;
   }
 }
 
-/* Phone: one column in flow. Name and Play first, the square below, then the index. */
+/* Phone: one column in flow. Wordmark, name and play, the index, then the square bleeding off the right. */
 @media (max-width: 600px) {
   .page.home {
     display: flex;
     flex-direction: column;
     gap: 24px;
-    padding: calc(12px + env(safe-area-inset-top)) var(--margin) calc(32px + env(safe-area-inset-bottom));
-  }
-
-  .page.home > * {
-    flex-shrink: 0;
-  }
-
-  /* Phone order: wordmark, copy and Play first; utilities after; then the art and index. */
-  .home-copy {
-    order: 0;
+    padding-bottom: calc(32px + env(safe-area-inset-bottom));
   }
 
   .home-top {
-    order: 1;
+    order: 0;
+    padding-top: calc(8px + env(safe-area-inset-top));
   }
 
-  .menu-art,
-  .home-index,
-  .home-preview,
-  .home-foot {
-    order: 2;
+  .home-copy {
+    order: 1;
+    gap: 20px;
   }
 
   .home-title {
-    font-size: 3.75rem;
-  }
-
-  .home-form,
-  .home-name,
-  .home-hint {
-    max-width: none;
-  }
-
-  .home-form {
-    width: 100%;
-  }
-
-  .home-name {
-    width: 100%;
-  }
-
-  .home-actions {
-    flex-direction: column;
-    width: 100%;
+    font-size: clamp(3rem, 14vw, 4.5rem);
   }
 
   .home-actions button {
-    width: 100%;
-    min-width: 0;
+    flex: 1 1 100%;
   }
 
-  .home-hint {
-    flex-direction: column;
-    align-items: stretch;
-  }
-
-  .home-hint button {
-    width: 100%;
-  }
-
-  .home-tools {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    width: 100%;
-  }
-
-  .home-tools .home-level {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    min-height: 48px;
-  }
-
-  .menu-art {
-    position: relative;
-    inset: auto;
-    height: 84vw;
-    max-height: 420px;
-    overflow: hidden;
-  }
-
-  .menu-square {
-    top: 50%;
-    right: auto;
-    left: 50%;
-    width: 58vw;
-    transform: translate(-50%, -50%) rotate(var(--angle));
-  }
-
-  .menu-credit {
-    right: 0;
-    bottom: 0;
-  }
-
-  .home-index {
-    grid-template-columns: minmax(0, 1fr);
+  .home-form {
     max-width: none;
   }
 
+  .home-index {
+    order: 2;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 6px;
+    align-self: stretch;
+  }
+
   button.home-row-btn {
-    min-height: 48px;
-    font-size: var(--step-body);
-    font-weight: 500;
+    min-height: 84px;
+    padding: 24px 4px 10px;
+  }
+
+  .menu-art {
+    order: 3;
+    width: min(70vw, 42vh);
+    align-self: flex-end;
+    margin: 0 calc(var(--margin) * -1.5) 0 0;
+  }
+
+  .menu-credit {
+    right: 8%;
+    bottom: 6%;
   }
 
   .home-foot {
-    margin-top: 8px;
+    order: 4;
+  }
+}
+
+/* Very narrow phones: the index tiles go two to a row. */
+@media (max-width: 360px) {
+  .home-index {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }

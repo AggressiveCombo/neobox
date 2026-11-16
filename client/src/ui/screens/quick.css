@@ -4,7 +4,7 @@
 .quick-cards {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 24px;
+  gap: 16px;
   align-items: stretch;
 }
 
@@ -12,14 +12,14 @@
   margin: 0;
 }
 
-/* One tile per mode: a panel with the title, the players playing now, the rules and the maps. */
+/* One tile per mode: the mode's name is the hero; the players playing, the rule and the maps follow. */
 .quick-card {
   display: flex;
   flex-direction: column;
-  gap: 20px;
+  gap: 16px;
   min-width: 0;
-  padding: 24px;
-  background: var(--surface);
+  padding: 20px;
+  box-shadow: inset 0 0 0 1px var(--line);
   transition: opacity var(--fast) var(--ease);
 }
 
@@ -29,42 +29,49 @@
 
 .quick-card-head {
   display: flex;
-  flex-wrap: wrap;
-  align-items: flex-end;
-  justify-content: space-between;
-  gap: 12px 16px;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  min-width: 0;
 }
 
 .quick-card-head h2 {
   margin: 0;
-  font-size: var(--step-head);
+  font-size: var(--step-lead);
   font-weight: 500;
-  line-height: 1.05;
+  line-height: 1.1;
   overflow-wrap: anywhere;
 }
 
-/* The players playing now: a big tabular number over a small caption. */
+/* Players playing now: a small line with a green dot. */
 .quick-count {
   display: flex;
-  flex-direction: column;
-  align-items: flex-end;
+  align-items: center;
+  gap: 8px;
   margin: 0;
+  color: var(--muted);
   font-size: var(--step-small);
   line-height: 1.2;
-  color: var(--muted);
   font-variant-numeric: tabular-nums;
 }
 
-.quick-count-num {
-  color: var(--ink);
-  font-size: var(--step-display);
-  font-weight: 500;
-  line-height: 0.9;
+.quick-count::before {
+  content: "";
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--good);
 }
 
+/* The rule in one line; the full text is the tooltip. */
 .quick-text {
   margin: 0;
+  min-width: 0;
+  overflow: hidden;
   color: var(--ink);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* The rotation: prev and next beside the current map, which sits in the middle. */
@@ -72,20 +79,26 @@
 .quick-maps {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 10px;
   min-width: 0;
+}
+
+.quick-carousel {
+  max-width: 400px;
+  width: 100%;
+  margin: 0 auto;
 }
 
 .quick-carousel > .quick-maps {
   flex-direction: row;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
 }
 
 .quick-thumbs {
   display: grid;
   flex: 1 1 auto;
-  grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr) minmax(0, 0.8fr);
+  grid-template-columns: minmax(0, 0.7fr) minmax(0, 1.3fr) minmax(0, 0.7fr);
   align-items: center;
   gap: 8px;
   min-width: 0;
@@ -97,7 +110,7 @@
 }
 
 .quick-thumbs:has(> :only-child) > * {
-  width: min(100%, 320px);
+  width: min(100%, 240px);
 }
 
 .quick-thumb {
@@ -112,12 +125,10 @@
 
 .quick-arrow {
   flex: none;
-  width: 48px;
-  min-width: 48px;
-  height: 48px;
+  width: 36px;
+  min-width: 36px;
+  height: 36px;
   padding: 0;
-  font-size: 1.5rem;
-  line-height: 1;
 }
 
 .quick-map-name {
@@ -174,15 +185,7 @@
 @media (max-width: 600px) {
   .quick-card {
     padding: 16px;
-    gap: 16px;
-  }
-
-  .quick-count-num {
-    font-size: 3.5rem;
-  }
-
-  .quick-card-head {
-    align-items: flex-end;
+    gap: 14px;
   }
 
   .quick-thumbs {
@@ -190,9 +193,9 @@
   }
 
   .quick-arrow {
-    width: 44px;
-    min-width: 44px;
-    height: 44px;
+    width: 40px;
+    min-width: 40px;
+    height: 40px;
   }
 
   .quick-wait {
