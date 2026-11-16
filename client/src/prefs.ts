@@ -56,6 +56,14 @@ export interface Prefs {
   color: number | null;
   /** Main-menu music off. */
   musicMuted: boolean;
+  /** Match music off (the in-game playlist). */
+  matchMusicMuted: boolean;
+  /** Music level (0..1), on top of the master volume. */
+  musicVolume: number;
+  /** Game effects level (0..1), on top of the master volume. */
+  sfxVolume: number;
+  /** Button, toggle, tab, modal and toast sounds. */
+  uiSounds: boolean;
   /** Mask rude words in other players' chat. */
   filterProfanity: boolean;
   /** Jukebox volume (0..1), on top of the master volume. */
@@ -76,6 +84,10 @@ export const DEFAULT_PREFS: Prefs = {
   showStats: false,
   color: null,
   musicMuted: false,
+  matchMusicMuted: false,
+  musicVolume: 0.6,
+  sfxVolume: 0.8,
+  uiSounds: true,
   filterProfanity: true,
   jukeboxVolume: 0.5,
   theme: "system",
@@ -112,6 +124,10 @@ export function sanitizePrefs(raw: unknown): Prefs {
     color:
       typeof o.color === "number" && Number.isInteger(o.color) && o.color >= 0 && o.color <= 0xffffff ? o.color : DEFAULT_PREFS.color,
     musicMuted: typeof o.musicMuted === "boolean" ? o.musicMuted : DEFAULT_PREFS.musicMuted,
+    matchMusicMuted: typeof o.matchMusicMuted === "boolean" ? o.matchMusicMuted : DEFAULT_PREFS.matchMusicMuted,
+    musicVolume: clamp(o.musicVolume, 0, 1, DEFAULT_PREFS.musicVolume),
+    sfxVolume: clamp(o.sfxVolume, 0, 1, DEFAULT_PREFS.sfxVolume),
+    uiSounds: typeof o.uiSounds === "boolean" ? o.uiSounds : DEFAULT_PREFS.uiSounds,
     filterProfanity: typeof o.filterProfanity === "boolean" ? o.filterProfanity : DEFAULT_PREFS.filterProfanity,
     jukeboxVolume: clamp(o.jukeboxVolume, 0, 1, DEFAULT_PREFS.jukeboxVolume),
     theme: THEMES.includes(o.theme as Theme) ? (o.theme as Theme) : DEFAULT_PREFS.theme,

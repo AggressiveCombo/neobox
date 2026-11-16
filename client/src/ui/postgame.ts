@@ -78,6 +78,9 @@ export function showPostGame(ctx: AppCtx, award: XpAward, map: MapMeta | null): 
   const { before, total } = xp === null ? guestGain(award) : { before: Math.max(0, xp - award.gained), total: xp };
 
   const place = placeLine(award, ctx.store.state.room);
+  // A team match is a win or a loss for the viewer; the level-up and count ticks stay engine sounds.
+  if (place?.big === "You won!") ctx.sfx.ui("win");
+  else if (place?.big === "You lost") ctx.sfx.ui("lose");
   const gainEl = h("p", { class: "postgame-gain num" }, "+0 xp");
   const levelName = h("span", { class: "postgame-level-name" });
   const levelRange = h("span", { class: "postgame-level-range num" });

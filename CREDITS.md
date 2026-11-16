@@ -6,11 +6,29 @@ Third-party assets shipped with neobox, with their authors, licences and source 
 
 ### Menu music: `client/public/music/menu.mp3`
 
-- Title: "Menu Loop"
-- Author: Umplix
+- Title: "Electronic music / chiptune 3"
+- Author: 2D_PlatformerGuy
 - Licence: CC0 1.0 Universal (public domain dedication), https://creativecommons.org/publicdomain/zero/1.0/
-- Source: https://opengameart.org/content/menu-loop-0 (WAV file `menu_loop_0.wav`)
-- Changes: transcoded to 44.1 kHz stereo MP3 at 128 kb/s, loudness-normalised to -16 LUFS integrated, 3 s fade-out at the end.
+- Source: https://opengameart.org/content/electronic-music-chiptune-3
+- Changes: decoded from the WAV, a 2 s equal-power crossfade joins the end of the track into its start so it loops seamlessly, loudness-normalised to -18 LUFS integrated, transcoded to 44.1 kHz stereo MP3 at 96 kb/s.
+
+### Match music: `client/public/music/match-1.mp3`, `client/public/music/match-2.mp3`
+
+- Titles: "Action2 - Army Approaching" (match-1), "Action3 - Preparing For Battle" (match-2)
+- Author: Juhani Junkala (packaged by SubspaceAudio)
+- Licence: CC0 1.0 Universal (public domain dedication), https://creativecommons.org/publicdomain/zero/1.0/
+- Source: https://opengameart.org/content/jrpg-pack-5-action (JRPG Music Pack #5 [Action])
+- Changes: decoded from the OGG, loudness-normalised to -20 LUFS integrated, transcoded to 44.1 kHz stereo MP3 at 96 kb/s. Played in order as the in-match playlist.
+
+## Sound effects
+
+### UI, impact, sci-fi, digital and jingle sounds: `client/public/sfx/`
+
+- Authors: Kenney (Kenney Vleugels), https://kenney.nl
+- Packs: Interface Sounds 1.0, Impact Sounds, Sci-fi Sounds, Digital Audio, Music Jingles
+- Licence: CC0 1.0 Universal (public domain dedication), https://creativecommons.org/publicdomain/zero/1.0/
+- Source: https://kenney.nl/assets/interface-sounds, https://kenney.nl/assets/impact-sounds, https://kenney.nl/assets/sci-fi-sounds, https://kenney.nl/assets/digital-audio, https://kenney.nl/assets/music-jingles
+- Changes: selected clips transcoded to MP3 and trimmed; the file-to-event map is in `client/src/audio.ts`.
 
 ## Fonts
 

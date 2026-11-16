@@ -4,6 +4,7 @@
 // The video plays through YouTube's IFrame player API, loaded on first use.
 
 import type { AppCtx } from "../ctx";
+import { music } from "../music";
 import { prefs } from "../prefs";
 import type { JukeboxState } from "../protocol";
 import type { AppState } from "../state";
@@ -250,6 +251,7 @@ export function mountJukebox(ctx: AppCtx): void {
       heardAt = performance.now();
       if (jb !== null) ensurePlayer();
       apply();
+      music.setJukebox(jb?.playing === true);
     }
     if (next.room !== prev.room || next.myId !== prev.myId) render(next);
   });

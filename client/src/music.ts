@@ -1,85 +1,106 @@
-// Main-menu music: one licensed track, played once from the start each time the
-// menu is shown. The track streams through an HTMLAudioElement (no full decode).
+// Background music. The main-menu track loops; the in-match playlist plays its
+// tracks in turn. Both stream through HTMLAudioElements and fade in and out. The
+// room jukebox (YouTube) owns the speakers while it plays, so both stay silent.
 // Browsers refuse audio before the player has interacted with the page, so a
 // refused start waits for the next pointer or key press.
 
 import { prefs } from "./prefs";
 
-/** Relative to the page, like logo.svg; the file lives in client/public/music. */
-const TRACK_URL = "music/menu.mp3";
-/** Track level relative to the master volume; the mix is quiet under the menu UI. */
-const TRACK_VOLUME = 0.3;
+/** Which music the screen wants: the menu track, the match playlist, or none. */
+export type MusicScene = "menu" | "match" | null;
+
+interface ChannelOptions {
+  /** Relative to the page, like logo.svg; the files live in client/public/music. */
+  tracks: readonly string[];
+  /** Repeat the single track forever; otherwise the tracks play in turn. */
+  loop: boolean;
+  /** Level relative to the music volume; the mix sits under the UI and effects. */
+  level: number;
+}
+
+const MENU: ChannelOptions = { tracks: ["music/menu.mp3"], loop: true, level: 0.7 };
+const MATCH: ChannelOptions = { tracks: ["music/match-1.mp3", "music/match-2.mp3"], loop: false, level: 0.5 };
 const FADE_MS = 2000;
 const FADE_TICK_MS = 50;
 
-class MenuMusic {
-  private audio: HTMLAudioElement | null = null;
-  /** The menu wants music: set by start(), cleared by stop() and when the track ends. */
+class Channel {
+  private readonly els: HTMLAudioElement[];
+  private cur = 0;
+  /** Fade position: 0 silent, 1 full. */
+  private fade = 0;
   private wanted = false;
-  /** Multiplier on the volume during a stop fade (1 = no fade). */
-  private fadeLevel = 1;
-  private fadeTimer: number | null = null;
+  private timer: number | null = null;
   private gestureArmed = false;
 
-  constructor() {
-    prefs.subscribe(() => this.onPrefs());
+  constructor(private readonly opts: ChannelOptions) {
+    this.els = opts.tracks.map((src) => {
+      const el = new Audio(src);
+      el.preload = "none";
+      el.loop = opts.loop;
+      el.addEventListener("ended", () => this.onEnded(el));
+      return el;
+    });
   }
 
-  /** Show the menu track. No-op while muted; resumes from the start after a stop. */
-  start(): void {
-    this.wanted = true;
-    this.cancelFade();
-    this.play();
+  /** Fade toward playing (`on`) or silent. Starts the track on the first fade in. */
+  set(on: boolean): void {
+    if (on === this.wanted) return;
+    this.wanted = on;
+    if (on) this.play();
+    this.ensureTimer();
   }
 
-  /** Leave the menu: fade out over 2 s, then rewind so the next start() plays from the beginning. */
-  stop(): void {
-    this.wanted = false;
-    const el = this.audio;
-    if (!el || el.paused || !this.audible()) {
-      this.halt();
-      return;
-    }
-    if (this.fadeTimer !== null) return;
-    const began = Date.now();
-    this.fadeTimer = window.setInterval(() => {
-      const t = (Date.now() - began) / FADE_MS;
-      if (t >= 1) {
-        this.halt();
-        return;
-      }
-      this.fadeLevel = 1 - t;
-      this.applyVolume();
-    }, FADE_TICK_MS);
+  /** Re-apply the volume prefs (master, music level, fade). */
+  applyVolume(): void {
+    const el = this.els[this.cur];
+    el.volume = Math.min(1, Math.max(0, prefs.value.volume * prefs.value.musicVolume * this.opts.level * this.fade));
   }
 
-  private audible(): boolean {
-    return !prefs.value.musicMuted && !prefs.value.muted;
-  }
-
-  private element(): HTMLAudioElement {
-    if (!this.audio) {
-      const el = new Audio(TRACK_URL);
-      el.loop = false;
-      el.preload = "auto";
-      // The track plays once; a finished track must not restart on a later prefs change.
-      el.addEventListener("ended", () => {
-        this.wanted = false;
-      });
-      this.audio = el;
-    }
-    return this.audio;
+  private get current(): HTMLAudioElement {
+    return this.els[this.cur];
   }
 
   private play(): void {
-    if (!this.wanted || !this.audible()) return;
-    const el = this.element();
+    if (!this.wanted) return;
     this.applyVolume();
+    const el = this.current;
     if (!el.paused) return;
     el.play().catch(() => {
-      // Refused without a user gesture (or a stale request); retry on the next press.
-      if (this.wanted && this.audible()) this.armGesture();
+      // Refused without a user gesture: retry on the next press.
+      if (this.wanted) this.armGesture();
     });
+  }
+
+  private ensureTimer(): void {
+    if (this.timer !== null) return;
+    this.timer = window.setInterval(() => this.step(), FADE_TICK_MS);
+  }
+
+  private step(): void {
+    const target = this.wanted ? 1 : 0;
+    const delta = FADE_TICK_MS / FADE_MS;
+    if (this.fade < target) this.fade = Math.min(target, this.fade + delta);
+    else if (this.fade > target) this.fade = Math.max(target, this.fade - delta);
+    this.applyVolume();
+    if (this.fade === target) {
+      window.clearInterval(this.timer ?? undefined);
+      this.timer = null;
+      if (target === 0) this.halt();
+    }
+  }
+
+  /** Faded out: pause and rewind, so the next start plays from the beginning (the playlist moves on). */
+  private halt(): void {
+    const el = this.current;
+    el.pause();
+    el.currentTime = 0;
+    if (!this.opts.loop) this.cur = (this.cur + 1) % this.els.length;
+  }
+
+  private onEnded(el: HTMLAudioElement): void {
+    if (this.opts.loop || el !== this.current) return;
+    this.cur = (this.cur + 1) % this.els.length;
+    this.play();
   }
 
   /** Retry the start on the first pointer or key press after the page loads. */
@@ -95,37 +116,38 @@ class MenuMusic {
     window.addEventListener("pointerdown", go);
     window.addEventListener("keydown", go);
   }
+}
 
-  private onPrefs(): void {
-    if (!this.audible()) {
-      this.halt();
-      return;
-    }
-    this.play();
-    this.applyVolume();
+class Music {
+  private scene: MusicScene = null;
+  private jukebox = false;
+  private readonly menu = new Channel(MENU);
+  private readonly match = new Channel(MATCH);
+
+  constructor() {
+    prefs.subscribe(() => this.sync());
   }
 
-  private applyVolume(): void {
-    if (!this.audio) return;
-    this.audio.volume = TRACK_VOLUME * prefs.value.volume * this.fadeLevel;
+  /** The screen's music: menu track, match playlist, or silence. */
+  setScene(scene: MusicScene): void {
+    this.scene = scene;
+    this.sync();
   }
 
-  private cancelFade(): void {
-    if (this.fadeTimer !== null) {
-      window.clearInterval(this.fadeTimer);
-      this.fadeTimer = null;
-    }
-    this.fadeLevel = 1;
+  /** The room jukebox is playing: both channels fade out until it stops. */
+  setJukebox(playing: boolean): void {
+    this.jukebox = playing;
+    this.sync();
   }
 
-  /** Stop now and rewind; `wanted` is left as the caller set it. */
-  private halt(): void {
-    this.cancelFade();
-    if (!this.audio) return;
-    this.audio.pause();
-    this.audio.currentTime = 0;
-    this.applyVolume();
+  private sync(): void {
+    const p = prefs.value;
+    const audible = !this.jukebox && !p.muted;
+    this.menu.set(audible && this.scene === "menu" && !p.musicMuted);
+    this.match.set(audible && this.scene === "match" && !p.matchMusicMuted);
+    this.menu.applyVolume();
+    this.match.applyVolume();
   }
 }
 
-export const music = new MenuMusic();
+export const music = new Music();

@@ -2,7 +2,7 @@
 // mounting. Screens render from the store; this file reacts to server messages.
 
 import { fetchBuiltinMaps, fetchTicket, wsUrl, wsUrlFor, type BuiltinMap } from "./api";
-import { Sfx } from "./audio";
+import { sfx } from "./audio";
 import { computeCamera, findLocal } from "./camera";
 import type { AppCtx, HudHandle, Present, ScreenFactory, ScreenHandle, WasmTools } from "./ctx";
 import { Engine, loadWasmEngine } from "./engine";
@@ -107,7 +107,6 @@ function syncUrl(code: string | null): void {
 export function start(): void {
   const store = new Store<AppState>(initialState());
   const input = new Input();
-  const sfx = new Sfx();
   const overlay = new Overlay(byId<HTMLCanvasElement>("overlay"));
   const glHost = byId("gl-host");
   const uiRoot = byId("ui");
@@ -195,7 +194,7 @@ export function start(): void {
     overlay.draw(scene, cam, names, tickHz);
     lastPresent = performance.now();
     setViewShown(true);
-    for (const s of scene.sounds) sfx.play(s.kind, s.volume);
+    for (const s of scene.sounds) sfx.play(s.kind, s.volume, (s.x - cam.cx) / (cam.w / 2));
     return scene;
   };
 
@@ -307,11 +306,10 @@ export function start(): void {
     current?.update(state, prev);
   });
 
-  // Menu music plays on the menu screens and stops (fading) in rooms,
-  // matches, training, practice, replays and the editor, like the original.
+  // The main menu plays its track; a match plays the in-match playlist; the other
+  // game screens (rooms, training, practice, replays, editor) are silent.
   const syncMusic = (screen: Screen): void => {
-    if (GAME_SCREENS[screen]) music.stop();
-    else music.start();
+    music.setScene(screen === "match" ? "match" : GAME_SCREENS[screen] ? null : "menu");
   };
   syncMusic(store.state.screen);
   store.subscribe((state, prev) => {

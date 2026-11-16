@@ -24,11 +24,27 @@ export interface AssetCredit {
 export const THIRD_PARTY: AssetCredit[] = [
   {
     asset: "Menu music",
-    title: "Menu Loop",
-    author: "Umplix",
+    title: "Electronic music / chiptune 3",
+    author: "2D_PlatformerGuy",
     licence: "CC0 1.0 (public domain dedication)",
     licenceUrl: "https://creativecommons.org/publicdomain/zero/1.0/",
-    sourceUrl: "https://opengameart.org/content/menu-loop-0",
+    sourceUrl: "https://opengameart.org/content/electronic-music-chiptune-3",
+  },
+  {
+    asset: "Match music",
+    title: "JRPG Pack #5 [Action]: Action2 and Action3",
+    author: "Juhani Junkala (SubspaceAudio pack)",
+    licence: "CC0 1.0 (public domain dedication)",
+    licenceUrl: "https://creativecommons.org/publicdomain/zero/1.0/",
+    sourceUrl: "https://opengameart.org/content/jrpg-pack-5-action",
+  },
+  {
+    asset: "Sound effects",
+    title: "UI, impact, sci-fi, digital and jingle packs",
+    author: "Kenney (kenney.nl)",
+    licence: "CC0 1.0 (public domain dedication)",
+    licenceUrl: "https://creativecommons.org/publicdomain/zero/1.0/",
+    sourceUrl: "https://kenney.nl/assets",
   },
   {
     asset: "Typeface",
