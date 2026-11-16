@@ -227,6 +227,8 @@ struct Game {
     step_max_us: f64,
     /// time spent in consecutive steps slower than real time
     slow_us: f64,
+    /// per-player numbers of this game, for the signed-in players' stats
+    tallies: award::Tallies,
 }
 
 /// A match whose steps stay slower than real time this long is stopped.
@@ -1402,6 +1404,7 @@ impl Room {
             step_count: 0,
             step_max_us: 0.0,
             slow_us: 0.0,
+            tallies: award::Tallies::default(),
         });
         self.broadcast_room();
     }
@@ -1493,14 +1496,32 @@ impl Room {
         let Some(g) = self.game.as_ref() else { return };
         let round = &g.m.state.round;
         let gs = &g.m.start.settings;
+        let mut games = Vec::new();
         let awards: Vec<(u32, i32, u32)> = self
             .players
             .iter()
             .filter_map(|p| {
                 let r = if quick { award::quick_award(round, gs.game_mode, p.id) } else { award::match_award(round, gs, p.id) };
-                r.map(|(place, xp)| (p.id, place, xp))
+                let (place, xp) = r?;
+                if let Some(a) = &p.account {
+                    if let Some(stats) = g.tallies.game(p.id, place) {
+                        games.push((a.id, stats));
+                    }
+                }
+                Some((p.id, place, xp))
             })
             .collect();
+        for (account, stats) in games {
+            let hub = self.hub.clone();
+            tokio::spawn(async move {
+                if let Err(e) = hub.backend.record_stats(account, stats).await {
+                    warn!(account, error = %e, "could not record player stats");
+                }
+            });
+        }
+        if let Some(g) = self.game.as_mut() {
+            g.tallies.reset();
+        }
         for (id, placement, xp) in awards {
             let Some(p) = self.players.iter_mut().find(|p| p.id == id) else { continue };
             match &p.account {
@@ -1631,6 +1652,7 @@ impl Room {
             }
             let t0 = Instant::now();
             let data = g.m.step();
+            g.tallies.observe(&g.m.state.round, period.as_secs_f64());
             let us = t0.elapsed().as_secs_f64() * 1e6;
             g.step_total_us += us;
             g.step_count += 1;

@@ -159,9 +159,9 @@ const SUMMARY: &str = "m.id, m.name, a.id, a.name, m.visibility, m.status, m.siz
      (SELECT COALESCE(SUM(v.value), 0) FROM map_votes v WHERE v.map_id = m.id), m.created, m.updated, \
      m.description, m.pick";
 const MAP_FROM: &str = "maps m JOIN accounts a ON a.id = m.owner_id";
-const SCORE: &str = "(SELECT COALESCE(SUM(v.value), 0) FROM map_votes v WHERE v.map_id = m.id)";
+pub(crate) const SCORE: &str = "(SELECT COALESCE(SUM(v.value), 0) FROM map_votes v WHERE v.map_id = m.id)";
 /// Public, approved maps: the ones anyone may list.
-const LISTED: &str = "m.visibility = 'public' AND m.status = 'approved'";
+pub(crate) const LISTED: &str = "m.visibility = 'public' AND m.status = 'approved'";
 
 fn summary_row(r: &Row<'_>) -> rusqlite::Result<MapSummary> {
     Ok(MapSummary {

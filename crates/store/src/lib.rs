@@ -13,6 +13,7 @@ mod library;
 mod records;
 mod reports;
 mod session;
+mod stats;
 mod xp;
 
 pub use account::{Account, AccountSummary, MAX_PREFS_BYTES};
@@ -26,6 +27,7 @@ pub use session::{MAX_SESSIONS_PER_ACCOUNT, SESSION_TTL};
 pub use xp::{XP_PER_DAY, XP_PER_HOUR, XpGrant, XpLimit};
 pub use records::{Record, MAX_RECORDS};
 pub use reports::{NewReport, Report, ReportChat, ReportKind, ReportStatus, ReportedMap, ReportedPlayer, Reporter, MAX_REASON_CHARS, MAX_REPORT_CHAT};
+pub use stats::{MatchStats, Profile, ProfileMap};
 
 use rusqlite::{Connection, ErrorCode};
 use std::path::Path;
@@ -212,6 +214,14 @@ CREATE TABLE reports (
     resolved INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX reports_status ON reports (status, id);
+"#, r#"
+-- Player statistics: summed over each signed-in player's finished games.
+ALTER TABLE accounts ADD COLUMN games INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE accounts ADD COLUMN wins INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE accounts ADD COLUMN rounds_won INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE accounts ADD COLUMN kills INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE accounts ADD COLUMN deaths INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE accounts ADD COLUMN play_seconds INTEGER NOT NULL DEFAULT 0;
 "#];
 
 impl Store {

@@ -5,6 +5,8 @@
 use neobox_sim::settings::mode;
 use neobox_sim::state::Round;
 use neobox_sim::GameSettings;
+use neobox_store::MatchStats;
+use std::collections::HashMap;
 
 const TEAM_RED: f64 = 2.0;
 const TEAM_BLUE: f64 = 3.0;
@@ -70,6 +72,83 @@ pub fn quick_award(round: &Round, game_mode: i32, me: u32) -> Option<(i32, u32)>
         _ => 0,
     };
     Some((place, xp))
+}
+
+/// What the sim's counters held for one player at the last tick.
+#[derive(Clone, Copy, Default)]
+struct Seen {
+    kills: f64,
+    wins: f64,
+    death: f64,
+    suicide: f64,
+}
+
+/// One player's game so far.
+#[derive(Clone, Copy, Default)]
+struct Totals {
+    kills: i64,
+    rounds_won: i64,
+    deaths: i64,
+    /// Seconds in play (not spectating).
+    play_seconds: f64,
+}
+
+/// Per-player numbers of a game, counted from the authoritative state after
+/// every tick. The sim resets kills and round wins when a round or game
+/// starts, so their growth is counted as it happens and a fall means a reset.
+#[derive(Default)]
+pub struct Tallies {
+    seen: HashMap<u32, Seen>,
+    totals: HashMap<u32, Totals>,
+}
+
+/// How much a counter grew since `before`. After a reset it holds what came since.
+fn grown(before: f64, now: f64) -> i64 {
+    if now >= before { (now - before) as i64 } else { now.max(0.0) as i64 }
+}
+
+impl Tallies {
+    /// Count what happened during one tick of `tick_seconds`.
+    pub fn observe(&mut self, round: &Round, tick_seconds: f64) {
+        for (id, r) in round.players.iter() {
+            let seen = self.seen.entry(id).or_insert(Seen { death: -1.0, suicide: -1.0, ..Seen::default() });
+            let t = self.totals.entry(id).or_default();
+            t.kills += grown(seen.kills, r.kills);
+            t.rounds_won += grown(seen.wins, r.wins);
+            // a death or suicide starts the death banner countdown: its timer rises to BANNER_TICKS
+            if r.death_timer > seen.death {
+                t.deaths += 1;
+            }
+            if r.suicide_timer > seen.suicide {
+                t.deaths += 1;
+            }
+            // team 0 is a spectator
+            if r.team != 0.0 {
+                t.play_seconds += tick_seconds;
+            }
+            *seen = Seen { kills: r.kills, wins: r.wins, death: r.death_timer, suicide: r.suicide_timer };
+        }
+    }
+
+    /// One game's numbers for player `me`, who finished in `place` (1 = won).
+    /// `None` when they never played it.
+    pub fn game(&self, me: u32, place: i32) -> Option<MatchStats> {
+        let t = self.totals.get(&me).filter(|t| t.play_seconds > 0.0)?;
+        Some(MatchStats {
+            games: 1,
+            wins: i64::from(place == 1),
+            rounds_won: t.rounds_won,
+            kills: t.kills,
+            deaths: t.deaths,
+            play_seconds: t.play_seconds as i64,
+        })
+    }
+
+    /// Start counting the next game of a rotation. The baselines carry on, so
+    /// the sim's counters are not counted twice.
+    pub fn reset(&mut self) {
+        self.totals.clear();
+    }
 }
 
 #[cfg(test)]

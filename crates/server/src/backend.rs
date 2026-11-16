@@ -1,7 +1,7 @@
 //! Where accounts, XP and the map library live. The main server owns the
 //! store; a regional game node has none and asks the main server over HTTP.
 
-use neobox_store::{RoomMap, Store, XpGrant};
+use neobox_store::{MatchStats, RoomMap, Store, XpGrant};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::sync::Arc;
 use std::time::Duration;
@@ -37,6 +37,12 @@ pub struct Remote {
 pub struct XpBody {
     pub account: i64,
     pub amount: u32,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct StatsBody {
+    pub account: i64,
+    pub stats: MatchStats,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -152,6 +158,20 @@ impl Backend {
             }
             Backend::Remote(r) => {
                 let _: serde_json::Value = r.send(r.http.post(r.url(&format!("/internal/maps/{map}/play")))).await?;
+                Ok(())
+            }
+        }
+    }
+
+    /// Add one finished game to a signed-in player's stats.
+    pub async fn record_stats(&self, account: i64, stats: MatchStats) -> Result<(), String> {
+        match self {
+            Backend::Local(s) => {
+                let s = s.clone();
+                blocking(move || s.record_stats(account, &stats)).await
+            }
+            Backend::Remote(r) => {
+                let _: serde_json::Value = r.send(json_post(&r.http, r.url("/internal/stats"), &StatsBody { account, stats })).await?;
                 Ok(())
             }
         }

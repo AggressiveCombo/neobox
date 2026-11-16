@@ -3,7 +3,7 @@
 //! is created or closes). Both sides talk over the `/internal` API, which
 //! checks the cluster secret (bearer token).
 
-use crate::backend::{Backend, MapCommandBody, RecordBody, XpBody};
+use crate::backend::{Backend, MapCommandBody, RecordBody, StatsBody, XpBody};
 use crate::geo::distance_km;
 use crate::hub::Hub;
 use crate::room::{gather_evidence, AdminCmd, Evidence, RoomCmd, RoomSummary};
@@ -129,6 +129,7 @@ pub fn router() -> Router<Arc<Hub>> {
         .route("/internal/heartbeat", post(heartbeat))
         .route("/internal/xp", post(xp))
         .route("/internal/records", post(records))
+        .route("/internal/stats", post(stats))
         .route("/internal/map-command", post(map_command))
         .route("/internal/maps/{id}", get(room_map))
         .route("/internal/maps/{id}/play", post(record_play))
@@ -173,6 +174,16 @@ async fn records(State(hub): State<Arc<Hub>>, headers: HeaderMap, Json(b): Json<
     }
     match hub.backend.save_record(b).await {
         Ok(new_best) => Json(new_best).into_response(),
+        Err(e) => failed(e),
+    }
+}
+
+async fn stats(State(hub): State<Arc<Hub>>, headers: HeaderMap, Json(b): Json<StatsBody>) -> Response {
+    if !authorized(&hub, &headers) {
+        return denied();
+    }
+    match hub.backend.record_stats(b.account, b.stats).await {
+        Ok(()) => Json(()).into_response(),
         Err(e) => failed(e),
     }
 }

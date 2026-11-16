@@ -3,7 +3,7 @@
 
 use crate::admin::client_ip;
 use crate::cluster;
-use crate::hub::{AccountRef, Hub};
+use crate::hub::{AccountRef, Hub, Limiter};
 use axum::body::Bytes;
 use axum::extract::{ConnectInfo, DefaultBodyLimit, Path, Query, State};
 use axum::http::{header, HeaderMap, StatusCode};
@@ -12,19 +12,22 @@ use axum::routing::{get, post};
 use axum::{Json, Router};
 use neobox_net::level_of;
 use neobox_store::{
-    Account, Error, FriendState, MapDetail, MapSummary, NewReport, Record, ReportKind, ReportedMap, Reporter, Sort, Status, Store, Visibility,
-    MAX_CODE_BYTES, SESSION_TTL,
+    Account, Error, FriendState, MapDetail, MapSummary, MatchStats, NewReport, Profile, ProfileMap, Record, ReportKind, ReportedMap, Reporter,
+    Sort, Status, Store, Visibility, MAX_CODE_BYTES, SESSION_TTL,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
-use std::net::SocketAddr;
-use std::sync::Arc;
+use std::net::{IpAddr, SocketAddr};
 use std::sync::atomic::Ordering;
+use std::sync::{Arc, LazyLock};
+use std::time::Duration;
 use tracing::error;
 
 const COOKIE: &str = "nb_session";
 /// Maps per library page.
 const PAGE_SIZE: usize = 24;
+/// Player profile lookups per address per minute.
+static PLAYER_LOOKUPS: LazyLock<Limiter<IpAddr>> = LazyLock::new(|| Limiter::new(120, Duration::from_secs(60)));
 
 pub fn router() -> Router<Arc<Hub>> {
     Router::new()
@@ -52,6 +55,7 @@ pub fn router() -> Router<Arc<Hub>> {
         .route("/api/library/{id}/play", post(library_play))
         .route("/api/library/{id}/records", get(library_records))
         .route("/api/report", post(report))
+        .route("/api/players/{name}", get(player))
         .layer(DefaultBodyLimit::max(MAX_CODE_BYTES + 64 * 1024))
 }
 
@@ -657,6 +661,69 @@ async fn library_favourite(
 async fn library_play(State(hub): State<Arc<Hub>>, Path(id): Path<i64>) -> Result<StatusCode, Fail> {
     db(&hub, move |s| s.record_play(id)).await?;
     Ok(StatusCode::NO_CONTENT)
+}
+
+// Players
+
+#[derive(Serialize)]
+struct PlayerJson {
+    name: String,
+    level: u32,
+    xp: u64,
+    joined: String,
+    /// The appearance colour (0xRRGGBB) the player shows in rooms; null when unset.
+    color: Option<u32>,
+    stats: MatchStats,
+    friends: i64,
+    published: i64,
+    maps: Vec<ProfileMap>,
+    records: i64,
+}
+
+impl PlayerJson {
+    fn new(p: Profile, color: Option<u32>) -> PlayerJson {
+        PlayerJson {
+            name: p.name,
+            level: level_of(p.xp),
+            xp: p.xp,
+            joined: iso_time(p.joined),
+            color,
+            stats: p.stats,
+            friends: p.friends,
+            published: p.published,
+            maps: p.maps,
+            records: p.records,
+        }
+    }
+}
+
+/// The appearance colour from a player's stored preferences (already public: rooms show it).
+fn pref_color(prefs: &str) -> Option<u32> {
+    let v: serde_json::Value = serde_json::from_str(prefs).ok()?;
+    let c = v.get("color")?.as_u64()?;
+    u32::try_from(c).ok().filter(|c| *c <= 0xff_ffff)
+}
+
+/// A player's public profile by name (ignoring case). Guests have none.
+async fn player(
+    State(hub): State<Arc<Hub>>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    Path(name): Path<String>,
+) -> Result<Json<PlayerJson>, Fail> {
+    if !PLAYER_LOOKUPS.allow(client_ip(&hub, &headers, peer)) {
+        return Err(Fail::new(StatusCode::TOO_MANY_REQUESTS, "Too many lookups, try again later"));
+    }
+    let found = db(&hub, move |s| {
+        let Some(p) = s.profile(&name)? else { return Ok(None) };
+        let color = pref_color(&s.get_prefs(p.id)?);
+        Ok(Some((p, color)))
+    })
+    .await?;
+    let Some((p, color)) = found else {
+        return Err(Fail::new(StatusCode::NOT_FOUND, "No such player"));
+    };
+    Ok(Json(PlayerJson::new(p, color)))
 }
 
 // Reports
