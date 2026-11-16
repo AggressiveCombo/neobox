@@ -6,7 +6,7 @@
 import { prefs } from "./prefs";
 
 /** Interface sound names; the screens never play sounds themselves, the global hooks do (installUiSounds). */
-export type UiSound = "click" | "tab" | "toggle" | "open" | "close" | "error" | "win" | "lose" | "chat";
+export type UiSound = "hover" | "click" | "tab" | "toggle" | "open" | "close" | "error" | "win" | "lose" | "chat";
 
 /** An engine sound kind (docs/CLIENT-API.md) or an interface sound. */
 type Key = number | UiSound;
@@ -32,6 +32,7 @@ const CLIPS: Partial<Record<Key, readonly string[]>> = {
   18: ["thrusterFire_001", "thrusterFire_004"], // parachute
   19: ["tick_001", "tick_002"], // ghost trail (quiet)
   20: ["jingles_SAX01", "jingles_SAX14"], // fanfare (game over, level up)
+  hover: ["tick_004", "select_001"],
   click: ["click_001", "click_002"],
   tab: ["select_002", "select_003"],
   toggle: ["switch_004", "click_001"],
@@ -48,6 +49,8 @@ const FILES = [...new Set(Object.values(CLIPS).flatMap((clips) => clips ?? []))]
 
 /** Interface sounds sit well under the game effects. */
 const UI_LEVEL = 0.5;
+/** Hover ticks play under the other interface sounds: they fire far more often. */
+const HOVER_LEVEL = 0.4;
 /** A repeat of one key sooner than this is dropped (a burst of ticks reads as noise). */
 const MIN_GAP_MS = 35;
 /** Random playback-rate spread around 1, so repeats never sound identical. */
@@ -57,8 +60,8 @@ export class Sfx {
   private ctx: AudioContext | null = null;
   private buffers = new Map<string, AudioBuffer>();
   private lastPlayed = new Map<Key, number>();
-  /** Silences playback without touching the saved prefs (the menu clip viewer mutes the scene sounds). */
-  muted = false;
+  /** Silences the engine's scene sounds without touching the saved prefs (the menu clip viewer); interface sounds still play. */
+  sceneMuted = false;
 
   /** Call from a user gesture: creates the audio context and loads the clips. */
   unlock(): void {
@@ -74,6 +77,7 @@ export class Sfx {
 
   /** Play an engine sound kind at a volume (0..1), panned (-1 left .. 1 right). Repeats of one kind are rate-limited. */
   play(kind: number, volume: number, pan = 0): void {
+    if (this.sceneMuted) return;
     const level = prefs.value.volume * prefs.value.sfxVolume * clamp01(volume);
     this.trigger(kind, level, pan);
   }
@@ -81,7 +85,7 @@ export class Sfx {
   /** An interface sound, when the "Interface sounds" switch is on. */
   ui(name: UiSound): void {
     if (!prefs.value.uiSounds) return;
-    this.trigger(name, prefs.value.volume * UI_LEVEL, 0);
+    this.trigger(name, prefs.value.volume * UI_LEVEL * (name === "hover" ? HOVER_LEVEL : 1), 0);
   }
 
   /** Short pop for a chat line from another player. */
@@ -101,7 +105,7 @@ export class Sfx {
 
   private trigger(key: Key, level: number, pan: number): void {
     const ctx = this.ctx;
-    if (!ctx || this.muted || prefs.value.muted || ctx.state !== "running") return;
+    if (!ctx || prefs.value.muted || ctx.state !== "running") return;
     const variants = (CLIPS[key] ?? []).map((n) => this.buffers.get(n)).filter((b): b is AudioBuffer => b !== undefined);
     if (variants.length === 0) return;
     const now = performance.now();
@@ -132,11 +136,27 @@ function clamp01(v: number): number {
 /** The one audio engine of the page. */
 export const sfx = new Sfx();
 
+/** What a hover tick marks: the things a click acts on. */
+const HOVERABLE = "button:not(:disabled), a[href], summary, select:not(:disabled), [role='tab'], .seg-option, label:has(> input:not(:disabled))";
+
 /**
- * Interface sounds for everything that is not a game effect: buttons, switches, tabs,
+ * Interface sounds for everything that is not a game effect: hovers, buttons, switches, tabs,
  * dialogs opening and closing, error toasts. Delegated, so screens that mount later are covered.
  */
 export function installUiSounds(): void {
+  // A mouse entering a control ticks once; moving inside it, or a touch, does not.
+  let hovered: Element | null = null;
+  document.addEventListener(
+    "pointerover",
+    (e) => {
+      if (e.pointerType !== "mouse" || !(e.target instanceof Element)) return;
+      const el = e.target.closest(HOVERABLE);
+      if (el === hovered) return;
+      hovered = el;
+      if (el !== null) sfx.ui("hover");
+    },
+    true,
+  );
   document.addEventListener(
     "click",
     (e) => {

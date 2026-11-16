@@ -54,8 +54,8 @@ export function mountMenuClips(ctx: AppCtx, host: HTMLElement, onPlaying?: (on: 
   credit.hidden = true;
   host.append(credit);
 
-  const soundWasMuted = ctx.sfx.muted;
-  ctx.sfx.muted = true;
+  const soundWasMuted = ctx.sfx.sceneMuted;
+  ctx.sfx.sceneMuted = true;
 
   async function fetchPage(): Promise<void> {
     const page = await listClips(clips.at(-1)?.id);
@@ -170,6 +170,6 @@ export function mountMenuClips(ctx: AppCtx, host: HTMLElement, onPlaying?: (on: 
     playing = null;
     eng?.replayClose();
     credit.remove();
-    ctx.sfx.muted = soundWasMuted;
+    ctx.sfx.sceneMuted = soundWasMuted;
   };
 }
