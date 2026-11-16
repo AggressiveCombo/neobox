@@ -300,6 +300,7 @@ All settings are environment variables (in `/etc/neobox.env`).
 | `NEOBOX_PUBLIC_URL` | (empty) | Base URL browsers reach this server at. Required on game nodes. |
 | `NEOBOX_CLUSTER_SECRET` | (empty: no nodes) | Secret shared by the main server and its game nodes. |
 | `NEOBOX_MAIN` | (empty: this is the main server) | On a game node: the main server's base URL. |
+| `NEOBOX_ALLOWED_ORIGINS` | (empty) | Extra origins (`https://host`, comma separated) allowed to open the game socket and call the API from a browser. The server's own host, `NEOBOX_PUBLIC_URL` and `NEOBOX_MAIN` are always allowed; a request with another `Origin` gets 403. Requests without an `Origin` (scripts, bots) are not checked. |
 | `RUST_LOG` | `info` | Log detail (`debug` for more). |
 
 ## Running locally (development)

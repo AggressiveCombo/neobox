@@ -49,11 +49,27 @@ pub struct Config {
     /// Shared secret of the main server and its game nodes (`NEOBOX_CLUSTER_SECRET`;
     /// empty on the main server: no nodes accepted).
     pub cluster_secret: String,
+    /// Origins besides this server's own that may use its game socket and API
+    /// (`NEOBOX_ALLOWED_ORIGINS`, comma separated). The public and main URLs are always included.
+    pub allowed_origins: Vec<String>,
+}
+
+/// Origins that may open the game socket and post to this server: the
+/// configured list plus the public and main URLs (lowercase, no trailing slash).
+fn allowed_origins(list: &str, public_url: &str, main_url: Option<&str>) -> Vec<String> {
+    list.split(',')
+        .chain([public_url, main_url.unwrap_or("")])
+        .map(|o| o.trim().trim_end_matches('/').to_ascii_lowercase())
+        .filter(|o| !o.is_empty())
+        .collect()
 }
 
 impl Config {
     pub fn from_env() -> Config {
         let var = |k: &str, d: &str| std::env::var(k).unwrap_or_else(|_| d.to_string());
+        let public_url = var("NEOBOX_PUBLIC_URL", "").trim().trim_end_matches('/').to_string();
+        let main_url = std::env::var("NEOBOX_MAIN").ok().map(|v| v.trim().trim_end_matches('/').to_string()).filter(|v| !v.is_empty());
+        let allowed_origins = allowed_origins(&var("NEOBOX_ALLOWED_ORIGINS", ""), &public_url, main_url.as_deref());
         Config {
             bind: var("NEOBOX_BIND", "127.0.0.1:8080"),
             static_dir: var("NEOBOX_STATIC", "client").into(),
@@ -85,9 +101,10 @@ impl Config {
             geoip: std::env::var("NEOBOX_GEOIP").ok().filter(|v| !v.is_empty()).map(PathBuf::from),
             region: var("NEOBOX_REGION", "").trim().to_string(),
             location: std::env::var("NEOBOX_LOCATION").ok().and_then(|v| crate::geo::parse_location(&v)),
-            public_url: var("NEOBOX_PUBLIC_URL", "").trim().trim_end_matches('/').to_string(),
-            main_url: std::env::var("NEOBOX_MAIN").ok().map(|v| v.trim().trim_end_matches('/').to_string()).filter(|v| !v.is_empty()),
+            public_url,
+            main_url,
             cluster_secret: var("NEOBOX_CLUSTER_SECRET", ""),
+            allowed_origins,
         }
     }
 }

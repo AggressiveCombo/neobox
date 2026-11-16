@@ -17,6 +17,7 @@ mod geo;
 mod hub;
 mod logbuf;
 mod maps;
+mod origin;
 mod room;
 mod rotation;
 mod rtc;
@@ -125,6 +126,7 @@ async fn main() {
         .layer(SetResponseHeaderLayer::if_not_present(header::REFERRER_POLICY, HeaderValue::from_static("same-origin")))
         .layer(SetResponseHeaderLayer::if_not_present(header::CONTENT_SECURITY_POLICY, HeaderValue::from_static(CSP)))
         .layer(CompressionLayer::new())
+        .layer(middleware::from_fn_with_state(hub.clone(), origin::guard))
         .with_state(hub);
 
     let listener = tokio::net::TcpListener::bind(&bind).await.unwrap_or_else(|e| panic!("cannot listen on {bind}: {e}"));
