@@ -286,7 +286,7 @@ export const replayScreen: ScreenFactory = (ctx) => {
   function showPlaying(): void {
     if (!info) return;
     const loaded = info;
-    root.className = "offline playing";
+    root.className = "offline playing replay-view";
 
     playBtn = h("button", { type: "button", class: "primary replay-play", onclick: togglePlay }, icon("play", 20), "Play");
     seekEl = h("input", {
@@ -330,16 +330,16 @@ export const replayScreen: ScreenFactory = (ctx) => {
     speedSeg = speedGroup;
 
     const bar = h(
-      "div",
+      "header",
       { class: "offline-top offline-overlay" },
       h("button", { type: "button", onclick: leave }, icon("x", 18), "Close"),
-      h("span", { class: "offline-title" }, fileName),
+      h("h1", { class: "offline-title" }, fileName),
       followSel,
     );
     root.replaceChildren(
       bar,
       h(
-        "div",
+        "main",
         { class: "offline-dock offline-overlay replay-dock" },
         h("div", { class: "replay-transport" }, playBtn, seekEl, timeEl),
         h(

@@ -164,3 +164,34 @@
     flex: 1;
   }
 }
+
+/* Playing view. offline.css insets the layer by 8px; the bar's Close and follow select and the dock sit
+   16px from the side edges. Vertical padding stays as offline.css sets it (landscape phones shrink it). */
+#ui > .offline.playing.replay-view {
+  padding-left: calc(env(safe-area-inset-left, 0px) + 16px);
+  padding-right: calc(env(safe-area-inset-right, 0px) + 16px);
+}
+
+/* The file name is the page heading (h1): it keeps the bar's look, and wraps onto as many lines as it needs
+   instead of being cut off (text scaling, zoom). */
+.replay-view .offline-title {
+  font: inherit;
+  font-weight: 500;
+  letter-spacing: normal;
+  text-wrap: wrap;
+  height: auto;
+  min-height: 44px;
+  padding: 10px 12px;
+  overflow: visible;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  text-overflow: clip;
+}
+
+/* Touch rows and narrow screens: the bar and dock controls are at least 48px tall. */
+@media (pointer: coarse), (max-width: 600px) {
+  .replay-view button,
+  .replay-view select {
+    min-height: 48px;
+  }
+}
