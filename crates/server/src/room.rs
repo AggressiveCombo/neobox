@@ -1020,7 +1020,7 @@ impl Room {
         let running = self.game.is_some();
         match msg {
             ClientMsg::Chat { text } => {
-                let text: String = text.chars().take(MAX_CHAT_LEN).collect::<String>().trim().to_string();
+                let text: String = clean_text(&text).chars().take(MAX_CHAT_LEN).collect::<String>().trim().to_string();
                 if text.is_empty() {
                     return;
                 }

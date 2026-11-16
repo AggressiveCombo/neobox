@@ -29,6 +29,40 @@ pub fn valid_name(name: &str) -> bool {
     (1..=MAX_NAME_LEN).contains(&n) && name.chars().all(|c| c.is_ascii_alphanumeric() || c == ' ' || c == '_')
 }
 
+/// Invisible format characters that change how text renders: bidirectional
+/// controls (they reverse the text after them), zero-width spaces and joiners
+/// (they make a line look blank), word joiners and byte-order marks.
+fn is_format(c: char) -> bool {
+    matches!(
+        c,
+        '\u{00AD}' | '\u{0600}'..='\u{0605}' | '\u{061C}' | '\u{06DD}' | '\u{070F}' | '\u{180E}'
+            | '\u{200B}'..='\u{200C}' | '\u{200E}'..='\u{200F}' | '\u{202A}'..='\u{202E}'
+            | '\u{2060}'..='\u{206F}' | '\u{FEFF}' | '\u{FFF9}'..='\u{FFFB}' | '\u{110BD}' | '\u{1D173}'..='\u{1D17A}' | '\u{E0001}'
+    )
+}
+
+/// Text as others see it: the invisible characters of [`is_format`] are
+/// removed. Emoji sequences keep working: a zero-width joiner, a variation
+/// selector or a flag's tag characters are kept when they follow a character
+/// (a joiner only when another character follows it too).
+pub fn clean_text(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut chars = s.chars().peekable();
+    while let Some(c) = chars.next() {
+        let attached = matches!(c, '\u{200D}' | '\u{FE00}'..='\u{FE0F}' | '\u{E0020}'..='\u{E007F}');
+        if attached {
+            let follows = out.chars().next_back().is_some_and(|p| !p.is_whitespace());
+            let joins = c != '\u{200D}' || chars.peek().is_some_and(|n| !n.is_whitespace());
+            if follows && joins {
+                out.push(c);
+            }
+        } else if !is_format(c) {
+            out.push(c);
+        }
+    }
+    out
+}
+
 // ------------------------------------------------------------------ control (JSON)
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
@@ -615,5 +649,37 @@ mod tests {
         };
         assert_eq!(ServerFrame::decode(&s.encode()).unwrap(), s);
         assert!(ClientFrame::decode(&[1, 0x80]).is_err());
+    }
+}
+
+#[cfg(test)]
+mod clean_tests {
+    use super::clean_text;
+
+    #[test]
+    fn bidi_and_zero_width_are_removed() {
+        assert_eq!(clean_text("abc\u{202E}def"), "abcdef");
+        assert_eq!(clean_text("\u{200B}\u{200B}\u{FEFF}"), "");
+        assert_eq!(clean_text("\u{2066}x\u{2069}"), "x");
+        assert_eq!(clean_text("a\u{2060}b"), "ab");
+    }
+
+    #[test]
+    fn emoji_sequences_survive() {
+        let family = "\u{1F468}\u{200D}\u{1F469}\u{200D}\u{1F467}";
+        assert_eq!(clean_text(family), family);
+        let thumbs = "\u{1F44D}\u{1F3FD}";
+        assert_eq!(clean_text(thumbs), thumbs);
+        let heart = "\u{2764}\u{FE0F}";
+        assert_eq!(clean_text(heart), heart);
+        let scotland = "\u{1F3F4}\u{E0067}\u{E0062}\u{E0073}\u{E0063}\u{E0074}\u{E007F}";
+        assert_eq!(clean_text(scotland), scotland);
+    }
+
+    #[test]
+    fn leading_joiners_are_dropped() {
+        assert_eq!(clean_text("\u{200D}hi"), "hi");
+        assert_eq!(clean_text("\u{FE0F}"), "");
+        assert_eq!(clean_text("hi \u{200D} there"), "hi  there");
     }
 }
