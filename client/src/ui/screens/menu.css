@@ -400,7 +400,7 @@ button.home-privacy {
   }
 
   .menu-credit {
-    right: 8%;
+    right: calc(var(--margin) * 2.5 + 8px);
     bottom: 6%;
   }
 
