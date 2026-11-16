@@ -499,8 +499,8 @@ export const roomScreen: ScreenFactory = (ctx: AppCtx) => {
         p.account
           ? h("button", { type: "button", class: "room-player-name room-profile-link", title: "View profile", onclick: () => showProfile(ctx, p.name) }, p.name)
           : h("span", { class: "room-player-name" }, p.name),
-        p.host ? h("span", { class: "room-host-mark", title: "Room host", "aria-label": "Room host" }, icon("crown", 14)) : null,
-        p.account ? h("span", { class: "room-verified", title: "Verified account", "aria-label": "Verified account" }, icon("badge-check", 14)) : null,
+        p.host ? h("span", { class: "room-host-mark", role: "img", title: "Room host", "aria-label": "Room host" }, icon("crown", 14)) : null,
+        p.account ? h("span", { class: "room-verified", role: "img", title: "Verified account", "aria-label": "Verified account" }, icon("badge-check", 14)) : null,
         isMe ? h("span", { class: "room-you" }, "you") : null,
         st.account !== null && p.account && !isMe ? friendChip(p.name) : null,
         typing ? h("span", { class: "room-typing", "aria-label": `${p.name} is typing` }, "typing…") : null,
