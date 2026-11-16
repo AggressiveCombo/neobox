@@ -4,10 +4,28 @@
 
 import type { ScreenFactory } from "../../ctx";
 import { GAMEPAD_LABELS, RESERVED_KEYS, keyLabel } from "../../input";
-import { ACTIONS, DEFAULT_PREFS, MOTIONS, THEMES, prefs, type Action, type KeyBindings, type Motion, type Palette, type Theme } from "../../prefs";
+import {
+  ACTIONS,
+  DEFAULT_PREFS,
+  DEFAULT_TOUCH_LAYOUT,
+  MOTIONS,
+  THEMES,
+  TOUCH_ACTIONS,
+  TOUCH_SLOTS,
+  assignTouchAction,
+  prefs,
+  type Action,
+  type KeyBindings,
+  type Motion,
+  type Palette,
+  type Theme,
+  type TouchAction,
+  type TouchSlot,
+} from "../../prefs";
 import { PALETTES, cssHex } from "../../render/geometry";
 import type { Screen } from "../../state";
 import { openColorPicker } from "../color-picker";
+import { TOUCH_BUTTONS } from "./hud";
 import { h, type Child } from "../dom";
 import { icon, type IconName } from "../icons";
 import { iconButton, openModal, page, pageHead, seg, toggle } from "../kit";
@@ -215,16 +233,59 @@ export const settingsScreen: ScreenFactory = (ctx) => {
   );
   const autoColor = h("button", { type: "button", onclick: () => prefs.set({ color: null }) }, "Automatic");
 
-  // Touch: a small drawing of the on-screen controls that follows the size and side.
+  // Touch: a small drawing of the on-screen controls that follows the size, side and button layout.
   const touchSize = rangeField("Control size", 70, 150, 5, (v) => prefs.set({ touchScale: v / 100 }));
   const leftHanded = switchField("Left-handed layout", "Movement stick on the right, buttons on the left.", (on) =>
     prefs.set({ touchLeftHanded: on }),
   );
+  const touchCells = {} as Record<TouchSlot, HTMLElement>;
   const touchPreview = h(
     "div",
     { class: "touch-preview", "aria-hidden": "true" },
     h("span", { class: "touch-stick" }),
-    h("span", { class: "touch-buttons" }, h("span"), h("span"), h("span"), h("span")),
+    h(
+      "span",
+      { class: "touch-buttons" },
+      TOUCH_SLOTS.map((slot) => {
+        const cell = h("span", { class: "touch-cell", "data-slot": slot });
+        touchCells[slot] = cell;
+        return cell;
+      }),
+    ),
+  );
+  /** Where each slot sits on screen (the drawing above is mirrored when left-handed). */
+  const TOUCH_POSITIONS: Record<TouchSlot, string> = {
+    rocket: "Top left",
+    push: "Top middle",
+    jump: "Tall, right",
+    bat: "Bottom left",
+    grab: "Bottom middle",
+  };
+  const touchSelects = {} as Record<TouchSlot, HTMLSelectElement>;
+  const touchSlotRows = TOUCH_SLOTS.map((slot) => {
+    const select = h(
+      "select",
+      {
+        class: "touch-select",
+        "data-slot": slot,
+        onchange: () => prefs.set({ touchLayout: assignTouchAction(prefs.value.touchLayout, slot, select.value as TouchAction) }),
+      },
+      TOUCH_ACTIONS.map((action) => h("option", { value: action }, TOUCH_BUTTONS[action].label)),
+    );
+    touchSelects[slot] = select;
+    return h("label", { class: "touch-slot" }, h("span", { class: "field-label" }, TOUCH_POSITIONS[slot]), select);
+  });
+  const touchLayout = h(
+    "div",
+    { class: "touch-layout" },
+    h("h3", { class: "settings-sub" }, "Button layout"),
+    h("p", { class: "field-hint" }, "Pick what each button does. An action already in use moves to the button you changed."),
+    h("div", { class: "touch-slots" }, touchSlotRows),
+    h(
+      "div",
+      { class: "settings-group" },
+      h("button", { type: "button", class: "quiet", onclick: () => prefs.set({ touchLayout: DEFAULT_TOUCH_LAYOUT }) }, icon("rotate-ccw", 18), "Default layout"),
+    ),
   );
 
   // Chat
@@ -461,6 +522,11 @@ export const settingsScreen: ScreenFactory = (ctx) => {
     leftHanded.set(p.touchLeftHanded);
     touchPreview.style.setProperty("--touch-scale", String(p.touchScale));
     touchPreview.classList.toggle("is-left", p.touchLeftHanded);
+    for (const slot of TOUCH_SLOTS) {
+      const action = p.touchLayout[slot];
+      touchSelects[slot].value = action;
+      touchCells[slot].replaceChildren(icon(TOUCH_BUTTONS[action].icon, 18));
+    }
     filterProfanity.set(p.filterProfanity);
     syncColor();
   }
@@ -532,6 +598,7 @@ export const settingsScreen: ScreenFactory = (ctx) => {
           touchSize.el,
           touchPreview,
           leftHanded.el,
+          touchLayout,
         ),
         section("sound", "Sound", null, soundSettingsSection()),
         section(

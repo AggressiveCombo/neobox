@@ -9,7 +9,7 @@ import { recordClip } from "../../clips";
 import type { Scene, ScoreRow } from "../../frame";
 import { BIT } from "../../input";
 import { filterProfanity } from "../../profanity";
-import { prefs } from "../../prefs";
+import { TOUCH_SLOTS, prefs, type TouchAction, type TouchSlot } from "../../prefs";
 import { MAX_CHAT_LEN, TEAM_BLUE, TEAM_FFA, TEAM_RED, TEAM_SPECTATOR, type PlayerInfo, type XpAward } from "../../protocol";
 import { cssHex, mixRgb, playerRgb, setPlayerColors } from "../../render/geometry";
 import { CHAT_LIMIT, type AppState, type ChatLine, type Stats } from "../../state";
@@ -43,26 +43,19 @@ function nameText(rgb: number): number {
 const SENT_HISTORY_MAX = 50;
 const sentChat: string[] = [];
 
-interface TouchSpec {
-  bit: number;
-  area: string;
-  label: string;
-  aria: string;
-  icon: IconName;
-}
-
 /** Stick: fraction of the radius before a direction engages. */
 const STICK_DEAD = 0.3;
 /** tan(67.5°): a direction stays on within 67.5° of its axis (8-way). */
 const STICK_SECTOR = 2.414;
 
-const ACTIONS: TouchSpec[] = [
-  { bit: BIT.UP, area: "jump", label: "Jump", aria: "Jump", icon: "move-up" },
-  { bit: BIT.PUSH, area: "push", label: "Push", aria: "Push X", icon: "arrow-right" },
-  { bit: BIT.ROCKET, area: "rocket", label: "Rocket", aria: "Rocket Z", icon: "rocket" },
-  { bit: BIT.BAT, area: "bat", label: "Bat", aria: "Bat C", icon: "swords" },
-  { bit: BIT.GRAB, area: "grab", label: "Grab", aria: "Grab V", icon: "hand" },
-];
+/** What each touch action looks like and feeds the engine. Settings draws the same icons. */
+export const TOUCH_BUTTONS: Record<TouchAction, { bit: number; label: string; icon: IconName }> = {
+  up: { bit: BIT.UP, label: "Jump", icon: "move-up" },
+  push: { bit: BIT.PUSH, label: "Push", icon: "arrow-right" },
+  rocket: { bit: BIT.ROCKET, label: "Rocket", icon: "rocket" },
+  bat: { bit: BIT.BAT, label: "Bat", icon: "swords" },
+  grab: { bit: BIT.GRAB, label: "Grab", icon: "hand" },
+};
 
 /** Display order of scoreboard teams; unknown teams sort last. */
 const TEAM_ORDER: readonly number[] = [TEAM_RED, TEAM_BLUE, TEAM_FFA, TEAM_SPECTATOR];
@@ -92,10 +85,12 @@ function statusText(row: ScoreRow, tickHz: number): string {
   return tickHz > 0 ? `respawn ${(row.respawn / tickHz).toFixed(1)}s` : `respawn ${Math.ceil(row.respawn)} ticks`;
 }
 
-function touchButton(ctx: AppCtx, spec: TouchSpec): HTMLButtonElement {
+/** A touch button in `slot` performing `action`: its name, icon and engine bit follow the action. */
+function touchButton(ctx: AppCtx, slot: TouchSlot, action: TouchAction): HTMLButtonElement {
+  const spec = TOUCH_BUTTONS[action];
   const btn = h(
     "button",
-    { type: "button", class: `hud-touch hud-touch-${spec.area}`, "aria-label": spec.aria, tabindex: -1 },
+    { type: "button", class: `hud-touch hud-touch-${slot}`, "data-action": action, "aria-label": spec.label, tabindex: -1 },
     icon(spec.icon, 22),
     h("span", { class: "hud-touch-label" }, spec.label),
   );
@@ -251,15 +246,19 @@ export function rotateGate(): { el: HTMLElement; destroy(): void } {
  */
 export function touchControls(ctx: AppCtx): { el: HTMLElement; destroy(): void } {
   const touchCapable = isTouchDevice();
-  const el = h(
-    "div",
-    { class: "hud-touch-layer", hidden: !touchCapable },
-    touchStick(ctx),
-    h("div", { class: "hud-actions" }, ...ACTIONS.map((s) => touchButton(ctx, s))),
-  );
+  const actions = h("div", { class: "hud-actions" });
+  const el = h("div", { class: "hud-touch-layer", hidden: !touchCapable }, touchStick(ctx), actions);
+  let layoutJson = "";
   const applyPrefs = (): void => {
     el.style.setProperty("--hud-touch-scale", String(prefs.value.touchScale));
     el.classList.toggle("hud-left-handed", prefs.value.touchLeftHanded);
+    const layout = prefs.value.touchLayout;
+    const json = JSON.stringify(layout);
+    if (json === layoutJson) return;
+    layoutJson = json;
+    // A held button leaves with its old layout: release the bits it set first.
+    ctx.input.clearTouch();
+    actions.replaceChildren(...TOUCH_SLOTS.map((slot) => touchButton(ctx, slot, layout[slot])));
   };
   applyPrefs();
   const unsubscribe = prefs.subscribe(applyPrefs);

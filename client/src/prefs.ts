@@ -32,6 +32,31 @@ export const DEFAULT_KEYS: KeyBindings = {
   grab: ["KeyV"],
 };
 
+/** The actions the on-screen touch buttons carry (each exactly once). */
+export const TOUCH_ACTIONS = ["up", "push", "rocket", "bat", "grab"] as const satisfies readonly Action[];
+export type TouchAction = (typeof TOUCH_ACTIONS)[number];
+
+/** Where a touch button sits on screen; `jump` is the tall block on the right. */
+export type TouchSlot = "rocket" | "push" | "jump" | "bat" | "grab";
+export const TOUCH_SLOTS: readonly TouchSlot[] = ["rocket", "push", "jump", "bat", "grab"];
+
+/** The action each touch slot performs. A permutation of TOUCH_ACTIONS: every action sits in exactly one slot. */
+export type TouchLayout = Record<TouchSlot, TouchAction>;
+
+export const DEFAULT_TOUCH_LAYOUT: TouchLayout = { rocket: "rocket", push: "push", jump: "up", bat: "bat", grab: "grab" };
+
+/**
+ * Put `action` in `slot`. The action that was in `slot` moves to where `action` was,
+ * so the layout stays a permutation (choosing an action in use swaps the two buttons).
+ */
+export function assignTouchAction(layout: TouchLayout, slot: TouchSlot, action: TouchAction): TouchLayout {
+  const next: TouchLayout = { ...layout };
+  const from = TOUCH_SLOTS.find((s) => layout[s] === action);
+  if (from !== undefined) next[from] = layout[slot];
+  next[slot] = action;
+  return next;
+}
+
 /** Team/player colour sets: "default", or palettes that stay distinct for colour-blind players. */
 export type Palette = "default" | "deuteranopia" | "protanopia" | "tritanopia";
 
@@ -56,6 +81,8 @@ export interface Prefs {
   touchScale: number;
   /** Swap the touch stick to the right and buttons to the left. */
   touchLeftHanded: boolean;
+  /** Which action each on-screen touch button performs. */
+  touchLayout: TouchLayout;
   /** Show ping/FPS/rollback numbers (same as F3). */
   showStats: boolean;
   /** Appearance colour (0xRRGGBB); null until the player picks one (the server assigns one meanwhile). */
@@ -93,6 +120,7 @@ export const DEFAULT_PREFS: Prefs = {
   palette: "default",
   touchScale: 1,
   touchLeftHanded: false,
+  touchLayout: DEFAULT_TOUCH_LAYOUT,
   showStats: false,
   color: null,
   musicMuted: false,
@@ -114,6 +142,20 @@ function clamp(v: unknown, lo: number, hi: number, dflt: number): number {
   return typeof v === "number" && Number.isFinite(v) ? Math.min(hi, Math.max(lo, v)) : dflt;
 }
 
+/** A layout is kept only when every slot names an action and no action repeats; otherwise the default. */
+function sanitizeTouchLayout(raw: unknown): TouchLayout {
+  const o = typeof raw === "object" && raw !== null ? (raw as Record<string, unknown>) : {};
+  const layout = { ...DEFAULT_TOUCH_LAYOUT };
+  const used = new Set<unknown>();
+  for (const slot of TOUCH_SLOTS) {
+    const action = o[slot];
+    if (!(TOUCH_ACTIONS as readonly unknown[]).includes(action) || used.has(action)) return { ...DEFAULT_TOUCH_LAYOUT };
+    used.add(action);
+    layout[slot] = action as TouchAction;
+  }
+  return layout;
+}
+
 /** Accept anything (old versions, hand-edited storage, server copies) and return valid prefs. */
 export function sanitizePrefs(raw: unknown): Prefs {
   const o = typeof raw === "object" && raw !== null ? (raw as Record<string, unknown>) : {};
@@ -133,6 +175,7 @@ export function sanitizePrefs(raw: unknown): Prefs {
     palette: palettes.includes(o.palette as Palette) ? (o.palette as Palette) : DEFAULT_PREFS.palette,
     touchScale: clamp(o.touchScale, 0.7, 1.5, DEFAULT_PREFS.touchScale),
     touchLeftHanded: typeof o.touchLeftHanded === "boolean" ? o.touchLeftHanded : DEFAULT_PREFS.touchLeftHanded,
+    touchLayout: sanitizeTouchLayout(o.touchLayout),
     showStats: typeof o.showStats === "boolean" ? o.showStats : DEFAULT_PREFS.showStats,
     color:
       typeof o.color === "number" && Number.isInteger(o.color) && o.color >= 0 && o.color <= 0xffffff ? o.color : DEFAULT_PREFS.color,

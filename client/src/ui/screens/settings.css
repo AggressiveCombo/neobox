@@ -276,11 +276,11 @@
   width: 8px;
 }
 
-/* Touch: the controls drawn at the chosen size, on the chosen side. */
+/* Touch: the controls drawn at the chosen size, on the chosen side, in the chosen layout. */
 .touch-preview {
   --touch-scale: 1;
   position: relative;
-  height: 128px;
+  height: 160px;
   background: var(--ground);
   overflow: hidden;
 }
@@ -301,16 +301,44 @@
 .touch-buttons {
   right: 16px;
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(3, 1fr);
+  grid-template-rows: repeat(2, 1fr);
+  grid-template-areas:
+    "rocket push jump"
+    "bat grab jump";
   gap: 6px;
-  width: calc(124px * var(--touch-scale));
-  height: calc(124px * var(--touch-scale));
+  width: calc(150px * var(--touch-scale));
+  height: calc(92px * var(--touch-scale));
   bottom: 12px;
 }
 
-.touch-buttons > span {
+.touch-cell {
+  display: grid;
+  place-items: center;
   background: var(--surface-2);
   box-shadow: inset 0 0 0 2px var(--ink);
+}
+
+.touch-cell[data-slot="rocket"] { grid-area: rocket; }
+.touch-cell[data-slot="push"] { grid-area: push; }
+.touch-cell[data-slot="jump"] { grid-area: jump; }
+.touch-cell[data-slot="bat"] { grid-area: bat; }
+.touch-cell[data-slot="grab"] { grid-area: grab; }
+
+.touch-layout .settings-sub {
+  margin: 12px 0 0;
+}
+
+.touch-slots {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px 16px;
+}
+
+.touch-slot {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
 }
 
 .touch-preview.is-left .touch-stick {
