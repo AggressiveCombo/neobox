@@ -159,7 +159,11 @@ export const browserScreen: ScreenFactory = (ctx) => {
           modal.close();
         },
       },
-      field("Room name", roomName),
+      field(
+        "Room name",
+        roomName,
+        store.state.name.trim() ? `Leave empty for "${store.state.name.trim()}'s game".` : "Leave empty for a default name.",
+      ),
       field("Password", roomPassword, "Optional. Players type it to join."),
       field("Max players", maxInput, `${ROOM_MIN_PLAYERS} to ${ROOM_MAX_PLAYERS} players`),
       h("label", { class: "check" }, isPublic, "Public"),
