@@ -12,8 +12,15 @@ const check = (ok, message) => {
 
 /** The reconnect banner element. */
 const BANNER = ".reconnect-banner";
-/** The banner must show this long after the link goes silent (the silence limit is 2.5 s, checked every 0.25 s). */
-const BANNER_MS = 3_500;
+/**
+ * The banner budget, from the client's liveness constants (client/src/net.ts). The silence limit counts from the last
+ * inbound frame, which arrived no later than the hole, so the banner shows at SILENT_MS plus one watch tick. The second
+ * tick absorbs one late tick under load; RENDER_MS covers the paint after the DOM change.
+ */
+const SILENT_MS = 2_500;
+const LIVE_TICK_MS = 250;
+const RENDER_MS = 500;
+const BANNER_MS = SILENT_MS + 2 * LIVE_TICK_MS + RENDER_MS;
 /** The browser's own refused reconnect while the emulated network is offline. */
 const OFFLINE_CONSOLE_RE = /console error: WebSocket connection to .* failed: .*net::ERR_INTERNET_DISCONNECTED/;
 /** How long the blackhole holds: past the server's own 10 s silence limit, so the server drops its side too. */
@@ -69,24 +76,40 @@ function relay(link) {
 }
 
 /**
- * Page-side record for the offline case: every socket close with its time and code, and the time the banner
- * first showed. A close from the browser's own network failure (1006) before the banner would mean the
- * socket was not the liveness path's to abandon; `abandon()` closes with 1000.
+ * The page's own clock stamps the first moment the reconnect banner is visible. It is read from a DOM mutation (no
+ * timer), so a loaded host or a slow CDP round trip cannot add to the measured time.
+ */
+const BANNER_WATCH = () => {
+  window.__bannerAt = null;
+  const mark = () => {
+    if (window.__bannerAt !== null) return;
+    const b = document.querySelector(".reconnect-banner");
+    if (b && !b.hidden) window.__bannerAt = Date.now();
+  };
+  new MutationObserver(mark).observe(document, { subtree: true, childList: true, attributes: true, attributeFilter: ["hidden"] });
+};
+
+/** Milliseconds from `since` (Node's clock, the same clock as the page's) to the first moment the banner showed. */
+async function bannerMs(h, since) {
+  const at = await h.page.evaluate(() => window.__bannerAt);
+  check(typeof at === "number", "the banner never showed");
+  return at - since;
+}
+
+/**
+ * Page-side record for the offline case: every socket close with its time and code. A close from the browser's own
+ * network failure (1006) before the banner would mean the socket was not the liveness path's to abandon; `abandon()`
+ * closes with 1000.
  */
 const SPY = () => {
   const Real = window.WebSocket;
   window.__closes = [];
-  window.__bannerAt = null;
   window.WebSocket = class extends Real {
     constructor(...args) {
       super(...args);
       this.addEventListener("close", (e) => window.__closes.push({ t: Date.now(), code: e.code }));
     }
   };
-  setInterval(() => {
-    const b = document.querySelector(".reconnect-banner");
-    if (window.__bannerAt === null && b && !b.hidden) window.__bannerAt = Date.now();
-  }, 20);
 };
 
 /** Each page of the scenario gets a link. `spy` records socket closes instead of routing the socket. */
@@ -95,6 +118,7 @@ function linked(s, { spy = false } = {}) {
   s.open = async (label, opts) => {
     const h = await openOrig(label, opts);
     h.link = { hole: false, cond: null };
+    await h.context.addInitScript(BANNER_WATCH);
     if (spy) await h.context.addInitScript(SPY);
     else await h.page.routeWebSocket(/.*/, relay(h.link));
     return h;
@@ -105,12 +129,12 @@ function linked(s, { spy = false } = {}) {
 async function blackhole(s) {
   const { host } = await matchWithGuest(s, { clipboard: false });
   const banner = host.page.locator(BANNER);
+  const holeAt = Date.now();
   host.link.hole = true;
-  const t0 = Date.now();
   await banner.waitFor({ state: "visible", timeout: BANNER_MS + 6_000 });
-  const shownMs = Date.now() - t0;
+  const shownMs = await bannerMs(host, holeAt);
   check(shownMs <= BANNER_MS, `banner after ${shownMs} ms of silence (budget ${BANNER_MS} ms)`);
-  await sleep(Math.max(0, HOLD_MS - (Date.now() - t0)));
+  await sleep(Math.max(0, HOLD_MS - (Date.now() - holeAt)));
   check(await banner.isVisible(), "the banner hid while the link was still down");
   host.link.hole = false;
   const back = Date.now();
@@ -145,7 +169,7 @@ async function offlineCdp(s) {
   const t0 = Date.now();
   await setOffline(true);
   await banner.waitFor({ state: "visible", timeout: BANNER_MS + 6_000 });
-  const shownMs = Date.now() - t0;
+  const shownMs = await bannerMs(host, t0);
   check(shownMs <= BANNER_MS, `banner after ${shownMs} ms offline (budget ${BANNER_MS} ms)`);
   const { closes, bannerAt } = await host.page.evaluate(() => ({ closes: window.__closes, bannerAt: window.__bannerAt }));
   const early = closes.filter((c) => c.t < bannerAt);
