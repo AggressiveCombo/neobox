@@ -1191,7 +1191,7 @@ dialog.modal:focus {
 }
 
 .reconnect-banner button {
-  min-height: 36px;
+  min-height: var(--control);
   background: var(--accent);
   color: var(--accent-ink);
 }
@@ -1238,23 +1238,23 @@ dialog.modal:focus {
 
 /* Screen entrance: direct children of `.enter` rise in one after another. */
 .enter > * {
-  animation: rise-in 260ms var(--ease) both;
+  animation: rise-in 220ms var(--ease) both;
 }
 
 .enter > :nth-child(2) {
-  animation-delay: 60ms;
+  animation-delay: 40ms;
 }
 
 .enter > :nth-child(3) {
-  animation-delay: 120ms;
+  animation-delay: 80ms;
 }
 
 .enter > :nth-child(4) {
-  animation-delay: 180ms;
+  animation-delay: 120ms;
 }
 
 .enter > :nth-child(n + 5) {
-  animation-delay: 240ms;
+  animation-delay: 160ms;
 }
 
 /* Screen changes (ui/transition.ts): the new screen slides in from where you are
