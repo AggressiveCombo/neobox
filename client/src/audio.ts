@@ -59,6 +59,8 @@ const RATE_SPREAD = 0.03;
 export class Sfx {
   private ctx: AudioContext | null = null;
   private buffers = new Map<string, AudioBuffer>();
+  /** Set when the page starts leaving: pending audio work then rejects by design, not by failure. */
+  private leaving = false;
   private lastPlayed = new Map<Key, number>();
   /** Silences the engine's scene sounds without touching the saved prefs (the menu clip viewer); interface sounds still play. */
   sceneMuted = false;
@@ -70,9 +72,12 @@ export class Sfx {
       const Ctor = window.AudioContext ?? w.webkitAudioContext;
       if (!Ctor) return;
       this.ctx = new Ctor();
+      // beforeunload comes before a reload or navigation cancels pending fetches, so a load aborted by it is not a failure.
+      window.addEventListener("beforeunload", () => (this.leaving = true), { once: true });
+      window.addEventListener("pagehide", () => (this.leaving = true), { once: true });
       void this.load(this.ctx);
     }
-    void this.ctx.resume();
+    this.ctx.resume().catch((err: unknown) => this.report("Audio could not resume:", err));
   }
 
   /** Play an engine sound kind at a volume (0..1), panned (-1 left .. 1 right). Repeats of one kind are rate-limited. */
@@ -100,7 +105,12 @@ export class Sfx {
         if (!res.ok) throw new Error(`sound ${name}: HTTP ${res.status}`);
         this.buffers.set(name, await ctx.decodeAudioData(await res.arrayBuffer()));
       }),
-    ).catch((err: unknown) => console.error("Sound effects failed to load:", err));
+    ).catch((err: unknown) => this.report("Sound effects failed to load:", err));
+  }
+
+  /** Logs an audio failure, except one the page causes by leaving: Firefox then rejects pending audio work with "Navigated away from page". */
+  private report(what: string, err: unknown): void {
+    if (!this.leaving) console.error(what, err);
   }
 
   private trigger(key: Key, level: number, pan: number): void {

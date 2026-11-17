@@ -65,7 +65,13 @@ async function cacheThenNetwork(name, req, store) {
   const cache = await caches.open(name);
   const hit = await cache.match(req);
   if (hit) return hit;
-  const res = await fetch(req);
+  // A fetch the page abandons (reload, navigation) rejects; answer with a network error rather than a worker exception.
+  let res;
+  try {
+    res = await fetch(req);
+  } catch {
+    return Response.error();
+  }
   if (store && res.ok) void cache.put(req, res.clone()).catch(() => {});
   return res;
 }
