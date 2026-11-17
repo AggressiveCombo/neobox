@@ -4,6 +4,7 @@
 // subscribes for changes; only the settings screen writes.
 
 import { PREFS_KEY } from "./storage-keys";
+import { local } from "./storage";
 
 export type Action = "left" | "right" | "up" | "down" | "push" | "rocket" | "bat" | "grab";
 
@@ -200,7 +201,7 @@ class PrefsStore {
   constructor() {
     let stored: unknown = null;
     try {
-      stored = JSON.parse(window.localStorage.getItem(PREFS_KEY) ?? "null");
+      stored = JSON.parse(local.getItem(PREFS_KEY) ?? "null");
     } catch {
       stored = null;
     }
@@ -212,7 +213,7 @@ class PrefsStore {
     const prev = this.value;
     this.value = sanitizePrefs({ ...prev, ...patch });
     try {
-      window.localStorage.setItem(PREFS_KEY, JSON.stringify(this.value));
+      local.setItem(PREFS_KEY, JSON.stringify(this.value));
     } catch {
       // storage full or blocked (private mode): keep the session copy
     }

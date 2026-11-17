@@ -6,6 +6,7 @@ import { h } from "./dom";
 import { openModal } from "./kit";
 import { icon } from "./icons";
 import { NEWS_SEEN_KEY } from "../storage-keys";
+import { local } from "../storage";
 
 interface NewsEntry {
   /** ISO date (YYYY-MM-DD). */
@@ -103,7 +104,7 @@ const NEWS: NewsEntry[] = [
 
 function readSeen(): number {
   try {
-    const n = Number(window.localStorage.getItem(NEWS_SEEN_KEY));
+    const n = Number(local.getItem(NEWS_SEEN_KEY));
     return Number.isFinite(n) ? n : 0;
   } catch {
     return 0;
@@ -112,7 +113,7 @@ function readSeen(): number {
 
 function writeSeen(count: number): void {
   try {
-    window.localStorage.setItem(NEWS_SEEN_KEY, String(count));
+    local.setItem(NEWS_SEEN_KEY, String(count));
   } catch {
     // Storage blocked (private mode, quota): the news shows as unread next time.
   }

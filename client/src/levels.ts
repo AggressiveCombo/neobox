@@ -3,6 +3,7 @@
 // browser, capped below level 2 ("create an account to level up").
 
 import { GUEST_XP_KEY } from "./storage-keys";
+import { local } from "./storage";
 
 /** Level of an experience total: floor(sqrt(xp) / 10) + 1. */
 export function levelOf(xp: number): number {
@@ -21,7 +22,7 @@ export const GUEST_XP_CAP = xpForLevel(2) - 1;
 /** The guest's experience in this browser. */
 export function guestXp(): number {
   try {
-    const n = Number(window.localStorage.getItem(GUEST_XP_KEY));
+    const n = Number(local.getItem(GUEST_XP_KEY));
     return Number.isFinite(n) ? Math.min(GUEST_XP_CAP, Math.max(0, Math.floor(n))) : 0;
   } catch {
     return 0;
@@ -32,7 +33,7 @@ export function guestXp(): number {
 export function addGuestXp(n: number): number {
   const total = Math.min(GUEST_XP_CAP, guestXp() + Math.max(0, Math.floor(n)));
   try {
-    window.localStorage.setItem(GUEST_XP_KEY, String(total));
+    local.setItem(GUEST_XP_KEY, String(total));
   } catch {
     // storage blocked: the total still shows for this game
   }

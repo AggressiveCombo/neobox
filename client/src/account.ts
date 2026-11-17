@@ -6,6 +6,7 @@ import type { AppCtx } from "./ctx";
 import { NAME_RE } from "./protocol";
 import { prefs, sanitizePrefs } from "./prefs";
 import { NAME_STORAGE_KEY, REMEMBER_KEY } from "./storage-keys";
+import { local } from "./storage";
 import { type Account, type AppState, type Screen } from "./state";
 
 export class ApiError extends Error {
@@ -68,7 +69,7 @@ export const fetchMe = (): Promise<Account | null> => request<Account | null>("G
 /** Sign in or register; `remember` keeps the session after the browser closes (the original's "Stay logged in"). */
 async function startSession(path: string, name: string, password: string, remember: boolean): Promise<Account> {
   const account = await request<Account>("POST", path, { name, password, remember });
-  localStorage.setItem(REMEMBER_KEY, remember ? "1" : "0");
+  local.setItem(REMEMBER_KEY, remember ? "1" : "0");
   return account;
 }
 
@@ -81,7 +82,7 @@ export const login = (name: string, password: string, remember: boolean): Promis
 export const logout = (): Promise<void> => request<void>("POST", "/api/account/logout");
 
 export const changePassword = (old: string, next: string): Promise<void> =>
-  request<void>("POST", "/api/account/password", { old, new: next, remember: localStorage.getItem(REMEMBER_KEY) === "1" });
+  request<void>("POST", "/api/account/password", { old, new: next, remember: local.getItem(REMEMBER_KEY) === "1" });
 
 export const deleteAccount = (password: string): Promise<void> =>
   request<void>("POST", "/api/account/delete", { password });
@@ -354,7 +355,7 @@ export function applyAccount(ctx: AppCtx, account: Account | null): void {
 
 function readStoredName(): string {
   try {
-    return window.localStorage.getItem(NAME_STORAGE_KEY) ?? "";
+    return local.getItem(NAME_STORAGE_KEY) ?? "";
   } catch {
     return "";
   }

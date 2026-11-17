@@ -7,6 +7,7 @@ import { h } from "./dom";
 import { icon } from "./icons";
 import { wordmark } from "./kit";
 import { PHONE_SPLASH_SEEN_KEY } from "../storage-keys";
+import { local } from "../storage";
 
 /**
  * Show the welcome sheet on touch-only devices (a finger is the only pointer), once per device.
@@ -14,8 +15,8 @@ import { PHONE_SPLASH_SEEN_KEY } from "../storage-keys";
  */
 export function showPhoneSplash(): void {
   if (!matchMedia("(pointer: coarse)").matches || matchMedia("(any-pointer: fine)").matches) return;
-  if (localStorage.getItem(PHONE_SPLASH_SEEN_KEY) !== null) return;
-  localStorage.setItem(PHONE_SPLASH_SEEN_KEY, "1");
+  if (local.getItem(PHONE_SPLASH_SEEN_KEY) !== null) return;
+  local.setItem(PHONE_SPLASH_SEEN_KEY, "1");
   const play = h("button", { type: "button", class: "primary big" }, icon("play", 20), "Play");
   const notNow = h("button", { type: "button", class: "quiet big" }, "Not now");
   const sheet = h(
