@@ -2,8 +2,12 @@
    rules sit in a panel beside them, Start below it. On phones it is one column
    and Start sticks to the bottom. The in-game bar is styled by offline.css. */
 
-.practice-page .page-inner {
+/* The page's column box is the same on every screen (style.css .page-inner); this screen's
+   content is capped and centred inside it, so the column's edges do not move between screens. */
+.practice-page .page-inner > * {
+  width: 100%;
   max-width: 1040px;
+  margin-inline: auto;
 }
 
 .practice-grid {

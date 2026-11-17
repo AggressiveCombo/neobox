@@ -42,7 +42,7 @@ import { h } from "./ui/dom";
 import { closeModalsAbove, modalPopPending, openModal, takeModalPop } from "./ui/kit";
 import { needsServer, offlinePage } from "./ui/offline-page";
 import { showToast } from "./ui/toast";
-import { playScreenTransition, transitionKind } from "./ui/transition";
+import { playScreenTransition } from "./ui/transition";
 
 const SCREEN_FACTORIES: Record<Exclude<Screen, "match">, ScreenFactory> = {
   menu: menuScreen,
@@ -331,7 +331,7 @@ export function start(): Store<AppState> {
     // Pages never draw the game view: hide it now, not after the idle timeout, so the
     // last frame does not show through the page sliding in.
     if (!GAME_SCREENS[screen] && screen !== "menu") setViewShown(false);
-    if (from !== null) playScreenTransition(uiRoot, leaving, handle.el, transitionKind(from, screen), scrollTop);
+    if (from !== null) playScreenTransition(uiRoot, leaving, handle.el, scrollTop);
   }
 
   store.subscribe((state, prev) => {
@@ -379,7 +379,7 @@ export function start(): Store<AppState> {
     h("button", { type: "button", onclick: () => disconnect() }, "Leave"),
   );
   banner.hidden = true;
-  document.body.append(banner);
+  document.body.prepend(banner);
   store.subscribe((state) => {
     banner.hidden = !state.reconnecting;
   });
@@ -923,13 +923,20 @@ export function start(): Store<AppState> {
   document.addEventListener("visibilitychange", () => {
     if (!document.hidden) retryNow();
   });
-  window.addEventListener("online", retryNow);
+  // The network came back or went away: check the socket now, and retry a pending reconnect at once.
+  window.addEventListener("online", () => {
+    net.probe();
+    retryNow();
+  });
   // A server screen gives way to the offline page while the connection is gone, and comes back with it.
   const onConnectionChange = (): void => {
     if (mounted !== null && needsServer(mounted) && offlineShown !== !navigator.onLine) mount(mounted);
   };
   window.addEventListener("online", onConnectionChange);
-  window.addEventListener("offline", onConnectionChange);
+  window.addEventListener("offline", () => {
+    net.probe();
+    onConnectionChange();
+  });
 
   // Screens are history entries, so the browser's Back and Forward move between them. A room's screens
   // (room, match, the host's editor) share one entry; each entry records the screen it was entered from.

@@ -3,10 +3,18 @@
    replay plays, the root is a fixed layer over the canvas: only its controls
    take pointer events. Over the game the chips are solid --hud, as in hud.css. */
 
+/* The root that practice, replay and training mount into is a flex item of #ui; without a width it
+   shrinks to its page's content and the screen jumps narrower. Fill the row like every other page. */
+.offline {
+  width: 100%;
+}
+
 /* Setup pages */
 
-.offline-page .page-inner {
+.offline-page .page-inner > * {
+  width: 100%;
   max-width: 880px;
+  margin-inline: auto;
 }
 
 .offline-status {

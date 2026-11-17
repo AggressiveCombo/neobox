@@ -277,6 +277,8 @@ button,
   z-index: 2;
   display: flex;
   overflow-y: auto;
+  /* A scrollbar appearing on a longer page would shift the centred column; keep its room on every page. */
+  scrollbar-gutter: stable;
   pointer-events: none;
 }
 
@@ -336,13 +338,19 @@ button,
 @media (max-width: 600px) {
   .page-head {
     position: static;
-    flex-wrap: wrap;
+    /* Back and title always share row 1 at the same place; actions take row 2 so a page
+       with buttons never pushes the title down or moves the column under it. */
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    align-items: center;
+    column-gap: 12px;
     row-gap: 4px;
     padding-bottom: 8px;
   }
 
   .page-head .page-actions {
-    margin-left: auto;
+    grid-column: 1 / -1;
+    justify-content: flex-end;
   }
 }
 
@@ -1077,6 +1085,11 @@ table.data .r {
   color: var(--danger-ink);
 }
 
+/* While a toast shows, the page stops above the stack (toast.ts publishes its height) instead of under it. */
+body.has-toasts #ui {
+  bottom: calc(var(--toast-stack, 0px) + 36px + env(safe-area-inset-bottom));
+}
+
 /* Modal dialogs (<dialog>): the ground colour, a scrim behind, a shadow because they float. */
 dialog.modal {
   width: min(calc(100vw - 32px), 520px);
@@ -1177,14 +1190,17 @@ dialog.modal:focus {
 .reconnect-banner {
   position: fixed;
   top: calc(12px + env(safe-area-inset-top));
-  left: 50%;
+  left: 0;
+  right: 0;
+  margin-inline: auto;
   z-index: 5;
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 12px;
+  width: max-content;
   max-width: calc(100% - 24px);
   padding: 8px 8px 8px 16px;
-  transform: translateX(-50%);
   background: var(--ink);
   color: var(--ground);
   box-shadow: var(--float-shadow);
@@ -1220,25 +1236,20 @@ dialog.modal:focus {
 .boot-mark {
   width: 56px;
   height: 56px;
-  animation: rise-in 360ms var(--ease) both;
+  animation: appear 360ms var(--ease) both;
 }
 
 /* --------------------------------------------------------------- motion */
 
-@keyframes rise-in {
+@keyframes appear {
   from {
     opacity: 0;
-    transform: translateY(12px);
-  }
-  to {
-    opacity: 1;
-    transform: none;
   }
 }
 
-/* Screen entrance: direct children of `.enter` rise in one after another. */
+/* Screen entrance: direct children of `.enter` fade in one after another. Content does not travel. */
 .enter > * {
-  animation: rise-in 220ms var(--ease) both;
+  animation: appear 220ms var(--ease) both;
 }
 
 .enter > :nth-child(2) {
@@ -1257,48 +1268,32 @@ dialog.modal:focus {
   animation-delay: 160ms;
 }
 
-/* Screen changes (ui/transition.ts): the new screen slides in from where you are
-   heading; a frozen copy of the old one fades out above it. */
+/* Screen changes (ui/transition.ts): a crossfade. The new screen fades in while a frozen copy
+   of the old one fades out over it. Nothing travels, so the shared chrome (head, back, title)
+   stays where it is. */
 .screen-in {
-  animation: screen-in 260ms var(--ease) both;
+  animation: screen-in 240ms var(--ease) both;
 }
 
-.screen-in-forward {
-  --screen-from: 40px;
-}
-
-.screen-in-back {
-  --screen-from: -40px;
-}
-
-.screen-out {
+#ui > .screen-out {
+  /* Id-level specificity: a screen's own `position: relative` must not win, or the copy stays in the row and halves the entering page. */
   position: absolute;
   left: 0;
   right: 0;
   z-index: 1;
   pointer-events: none !important;
-  animation: screen-out 180ms var(--ease) both;
-}
-
-.screen-out-forward {
-  --screen-to: -24px;
-}
-
-.screen-out-back {
-  --screen-to: 24px;
+  animation: screen-out 160ms var(--ease) both;
 }
 
 @keyframes screen-in {
   from {
     opacity: 0;
-    transform: translateX(var(--screen-from, 0));
   }
 }
 
 @keyframes screen-out {
   to {
     opacity: 0;
-    transform: translateX(var(--screen-to, 0));
   }
 }
 

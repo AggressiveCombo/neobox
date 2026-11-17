@@ -18,10 +18,6 @@
   display: none !important;
 }
 
-.account-page .page-inner {
-  max-width: 1040px;
-}
-
 .account-page .actions {
   align-items: center;
 }

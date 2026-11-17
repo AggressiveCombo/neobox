@@ -29,10 +29,6 @@
 
 /* ------------------------------------------------------------- friends */
 
-.friends-page .page-inner {
-  max-width: 1040px;
-}
-
 /* Add a friend: one slim row above the list (heading, name, send), its hint on a line below. */
 .friend-add {
   display: flex;
