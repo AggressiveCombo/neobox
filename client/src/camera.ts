@@ -52,6 +52,9 @@ export interface Camera {
 let lastCentre: { x: number; y: number } | null = null;
 /** Player a spectator follows; -1 none. Only used while the viewer has no local player. */
 let spectateId = -1;
+/** QA hook (client/qa/playfield.mjs): the view the last computed frame was drawn with. The game never reads it. */
+const qaView = { cx: 0, cy: 0, w: 0, h: 0, tick: -1 };
+Object.assign(globalThis, { __qaCam: qaView });
 
 export function computeCamera(scene: Scene, local?: PlayerRec): Camera {
   const w = scene.viewWidth;
@@ -71,6 +74,11 @@ export function computeCamera(scene: Scene, local?: PlayerRec): Camera {
   }
   cx = clampAxis(cx, w, scene.arenaW);
   cy = clampAxis(cy, h, scene.arenaH);
+  qaView.cx = cx;
+  qaView.cy = cy;
+  qaView.w = w;
+  qaView.h = h;
+  qaView.tick = scene.tick;
   return { cx, cy, w, h };
 }
 
