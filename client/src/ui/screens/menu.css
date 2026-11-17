@@ -147,7 +147,8 @@ button.home-account {
 }
 
 .home-name input.home-name-input:focus-visible {
-  outline: none;
+  outline: 2px solid var(--ink);
+  outline-offset: 2px;
   border-bottom-color: var(--accent);
 }
 
