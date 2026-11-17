@@ -65,7 +65,8 @@ export function trackPage(page, handle) {
     const url = msg.location().url ?? "";
     const text = msg.text();
     const line = `${handle.label}: console error: ${text}${url ? ` (${url})` : ""}`;
-    (isInduced(handle, text, url) ? handle.induced : handle.problems).push(line);
+    if (BROWSER_ERRORS.some((re) => re.test(text))) (handle.browserErrors ??= []).push(line);
+    else (isInduced(handle, text, url) ? handle.induced : handle.problems).push(line);
   });
   page.on("dialog", (dialog) => {
     handle.problems.push(`${handle.label}: unexpected dialog: ${dialog.message()}`);
@@ -171,6 +172,12 @@ const BROWSER_WARNINGS = [
   /^\[JavaScript Warning: "Request for fullscreen was denied because requesting element is not in the currently focused tab\." \{file: "[^"]*" line: \d+\}\]$/,
   /^Service Worker registration blocked by Playwright$/,
 ];
+
+/**
+ * Browser-originated console errors (rubric rev7f C07, exact text): Firefox logs this when a page navigates while one of
+ * its sockets is still connecting. Listed in details.browserErrors, not counted.
+ */
+const BROWSER_ERRORS = [/^The connection to wss?:\/\/[^/\s]+\/ws(\?\S*)? was interrupted while the page was loading\.$/];
 
 /** Warning classes: the browser's own notice, the state's injected fault, or the app (the only class that counts). */
 function warningClass(h, warning) {
@@ -331,6 +338,8 @@ export async function measureState(page, { row, fit = false, dialog = false, han
   // What each state failed on purpose, and every other failure, so an instrument verdict can be checked.
   const induced = handles.flatMap((h) => [...(h.induced ?? []), ...(h.netExpected ?? [])]);
   if (induced.length) details.induced = induced;
+  const browserErrors = handles.flatMap((h) => h.browserErrors ?? []);
+  if (browserErrors.length) details.browserErrors = browserErrors;
   const problems = handles.flatMap((h) => h.problems);
   if (problems.length) details.problems = problems;
   const netFailed = handles.flatMap((h) => h.netFailed ?? []);
