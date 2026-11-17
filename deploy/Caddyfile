@@ -2,10 +2,12 @@
 # Copy to /etc/caddy/Caddyfile and run `systemctl reload caddy`.
 neobox.aggressivecombo.com {
 	encode zstd gzip
+	header Strict-Transport-Security "max-age=31536000; includeSubDomains"
 	reverse_proxy 127.0.0.1:8080
 }
 
 # On a regional game node's own server, its block instead (the node's name):
 #us.neobox.aggressivecombo.com {
+#	header Strict-Transport-Security "max-age=31536000; includeSubDomains"
 #	reverse_proxy 127.0.0.1:8080
 #}
