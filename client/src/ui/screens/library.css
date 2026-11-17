@@ -16,6 +16,19 @@
   display: none;
 }
 
+/* Tabs share the strip so "Favourites" keeps its whole word; at phone widths the glyphs go to make room. */
+.library-page .tabs .tab {
+  flex: 1 1 auto;
+  padding: 0 10px;
+  white-space: nowrap;
+}
+
+@media (max-width: 420px) {
+  .library-page .tabs .tab > .icon {
+    display: none;
+  }
+}
+
 /* Toolbar: search, sort and the upload action on one row. */
 .library-toolbar {
   display: flex;
@@ -123,6 +136,12 @@
   background: var(--surface-2);
 }
 
+/* The card is a fixed-height grid cell that clips at its edge; its parts keep their own height so text scale grows the card, never the text. */
+.map-card > *,
+.map-body > * {
+  flex: none;
+}
+
 .map-thumb,
 .map-card .map-thumb {
   display: block;
@@ -163,6 +182,7 @@
   display: block;
   max-width: 100%;
   overflow: hidden;
+  line-height: 1.35;
   font-weight: 500;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -175,9 +195,17 @@
   max-width: 100%;
   overflow: hidden;
   color: var(--muted);
+  line-height: 1.35;
   font-size: var(--step-small);
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* Names and makers wrap at large text scale rather than truncate; the card grows with them. */
+.map-name,
+.map-meta {
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 /* Vote and play counts with their icons. */
