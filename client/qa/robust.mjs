@@ -1,5 +1,5 @@
 // Robustness instrument: console and network health, slow network, disconnect and reconnect,
-// reload, back navigation, resize, phone rotation, tab switch, and a bad room code. Every case
+// kick, app close, reload, back navigation, resize, phone rotation, tab switch, and a bad room code. Every case
 // fails on uncaught page errors, unexpected console errors, and unexpected failed or >= 400
 // requests. Deliberate faults (offline windows, the bad room) are marked expected and recorded
 // as netExpected, not failed.
@@ -48,6 +48,9 @@ const RECONNECT_CYCLES = 3;
 const BANNER_BUDGET_MS = 10000;
 const RECOVER_BUDGET_MS = 30000;
 const OFFLINE_HOLD_MS = 20000;
+const BLIP_HOLD_MS = 4000;
+const GIVE_UP_BUDGET_MS = 100000;
+const GIVE_UP_TEXT = "could not reconnect to the room";
 const HIDDEN_HOLD_MS = 60000;
 const SLOW_TIMEOUT_MS = 90000;
 // Whole-case budget (see withBudget); a hung case fails as 'timeout' instead of hanging the run.
@@ -392,6 +395,185 @@ async function networkOffCase(s, cdp) {
   };
 }
 
+const playerRow = (page, name) => page.locator("li.room-player").filter({ hasText: name });
+
+/** A room with a host and a guest in its lobby (no match), the guest joined by the host's invite. */
+async function lobbyPair(s) {
+  const hostName = uniqueName("host");
+  const guestName = uniqueName("guest");
+  const roomName = uniqueName("room");
+  const host = await s.open("host", { name: hostName });
+  const code = await createRoom(host, s.base, roomName, { isPublic: true });
+  const guest = await s.open("guest", { name: guestName });
+  await joinByInvite(guest, s.base, code, roomName);
+  await playerRow(host.page, guestName).waitFor();
+  await playerRow(guest.page, hostName).waitFor();
+  return { host, guest, code, roomName, hostName, guestName };
+}
+
+/**
+ * A brief loss of the link while in a room (BLIP_HOLD_MS): the host shows the reconnect banner and the guest marks the
+ * host's seat as reconnecting. When the link is back both clear, and the host is still in the room.
+ */
+async function blipCase(s, cdp) {
+  prepare(s);
+  trackSockets = true;
+  gateSockets = true;
+  let pair;
+  try {
+    pair = await lobbyPair(s);
+  } finally {
+    trackSockets = false;
+    gateSockets = false;
+  }
+  const { host, guest, roomName, hostName } = pair;
+  const banner = host.page.locator(".reconnect-banner");
+  const seat = playerRow(guest.page, hostName).locator(".room-offline");
+  const session = cdp ? await host.context.newCDPSession(host.page) : null;
+  offline = true;
+  blockSockets = true;
+  const cut = await dropSockets(host.page);
+  await setNetworkOff(host, session, true);
+  const shown = await banner.waitFor({ state: "visible", timeout: BANNER_BUDGET_MS }).then(() => true, () => false);
+  const away = await seat.waitFor({ state: "visible", timeout: BANNER_BUDGET_MS }).then(() => true, () => false);
+  await sleep(BLIP_HOLD_MS);
+  await setNetworkOff(host, session, false);
+  blockSockets = false;
+  offline = false;
+  const back = await banner.waitFor({ state: "hidden", timeout: RECOVER_BUDGET_MS }).then(() => true, () => false);
+  const seatBack = await seat.waitFor({ state: "detached", timeout: RECOVER_BUDGET_MS }).then(() => true, () => false);
+  const inRoom = await roomTitle(host.page, roomName).isVisible();
+  const pass = cut > 0 && shown && away && back && seatBack && inRoom;
+  return {
+    pass,
+    metrics: { "blip.bannerShown": shown, "blip.seatMarked": away, "blip.resumed": back && seatBack && inRoom },
+    detail: pass ? undefined : `sockets cut ${cut}, banner shown ${shown}, seat marked ${away}, banner gone ${back}, seat back ${seatBack}, in room ${inRoom}`,
+  };
+}
+
+/**
+ * The link stays down past the reconnect deadline: every attempt fails, so the host is taken back to the menu and
+ * told the room could not be reached.
+ */
+async function giveUpCase(s, cdp) {
+  prepare(s);
+  trackSockets = true;
+  gateSockets = true;
+  let pair;
+  try {
+    pair = await lobbyPair(s);
+  } finally {
+    trackSockets = false;
+    gateSockets = false;
+  }
+  const { host } = pair;
+  const banner = host.page.locator(".reconnect-banner");
+  const session = cdp ? await host.context.newCDPSession(host.page) : null;
+  offline = true;
+  blockSockets = true;
+  let cut = 0;
+  let shown = false;
+  let gaveUp = false;
+  let menu = false;
+  try {
+    cut = await dropSockets(host.page);
+    await setNetworkOff(host, session, true);
+    shown = await banner.waitFor({ state: "visible", timeout: BANNER_BUDGET_MS }).then(() => true, () => false);
+    gaveUp = await host.page
+      .getByText(GIVE_UP_TEXT, { exact: true })
+      .waitFor({ state: "visible", timeout: GIVE_UP_BUDGET_MS })
+      .then(() => true, () => false);
+    menu = await menuName(host.page).isVisible();
+  } finally {
+    await setNetworkOff(host, session, false);
+    blockSockets = false;
+    offline = false;
+  }
+  const pass = cut > 0 && shown && gaveUp && menu;
+  return {
+    pass,
+    metrics: { "giveUp.bannerShown": shown, "giveUp.toldPlayer": gaveUp, "giveUp.backInMenu": menu },
+    detail: pass ? undefined : `sockets cut ${cut}, banner shown ${shown}, told ${gaveUp}, in menu ${menu}`,
+  };
+}
+
+/**
+ * The room's server goes away for good: the reconnect attempts are refused until the deadline, then the host is taken
+ * back to the menu with the same notice. The case stops the server it is given.
+ */
+async function serverStopCase(s, server) {
+  prepare(s);
+  const { host } = await lobbyPair(s);
+  const banner = host.page.locator(".reconnect-banner");
+  offline = true;
+  let shown = false;
+  let gaveUp = false;
+  let menu = false;
+  try {
+    await server.stop();
+    shown = await banner.waitFor({ state: "visible", timeout: BANNER_BUDGET_MS }).then(() => true, () => false);
+    gaveUp = await host.page
+      .getByText(GIVE_UP_TEXT, { exact: true })
+      .waitFor({ state: "visible", timeout: GIVE_UP_BUDGET_MS })
+      .then(() => true, () => false);
+    menu = await menuName(host.page).isVisible();
+  } finally {
+    offline = false;
+  }
+  const pass = shown && gaveUp && menu;
+  return {
+    pass,
+    metrics: { "serverStop.bannerShown": shown, "serverStop.toldPlayer": gaveUp, "serverStop.backInMenu": menu },
+    detail: pass ? undefined : `banner shown ${shown}, told ${gaveUp}, in menu ${menu}`,
+  };
+}
+
+/** The host kicks the guest from the lobby: the guest is told so, and gets no reconnect banner. */
+async function kickedCase(s) {
+  prepare(s);
+  const { host, guest, guestName } = await lobbyPair(s);
+  await playerRow(host.page, guestName).getByRole("button", { name: `Actions for ${guestName}`, exact: true }).click();
+  await host.page.getByRole("menuitem", { name: "Kick", exact: true }).click();
+  const notice = guest.page.locator(".browser-notice").filter({ hasText: "kicked from the room" });
+  const shown = await notice.waitFor({ state: "visible", timeout: LOAD_TIMEOUT_MS }).then(() => true, () => false);
+  await sleep(2000);
+  const banner = await guest.page.locator(".reconnect-banner").isVisible();
+  const pass = shown && !banner;
+  return {
+    pass,
+    metrics: { "kicked.noticeShown": shown, "kicked.reconnectBanner": banner },
+    detail: pass ? undefined : `notice shown ${shown}, reconnect banner shown ${banner}`,
+  };
+}
+
+/**
+ * The host's page goes away with its socket open (navigated to about:blank): the page closes the socket quietly, so
+ * no error is logged, the server holds the seat (the guest sees it reconnecting), and opening the room again takes it back.
+ */
+async function appClosedCase(s) {
+  prepare(s);
+  const { host, guest, code, roomName, hostName } = await lobbyPair(s);
+  const seat = playerRow(guest.page, hostName);
+  await host.page.goto("about:blank");
+  const held = await seat
+    .locator(".room-offline")
+    .waitFor({ state: "visible", timeout: LOAD_TIMEOUT_MS })
+    .then(() => true, () => false);
+  await host.page.goto(`${s.base}/${code}`);
+  await roomTitle(host.page, roomName).waitFor({ timeout: LOAD_TIMEOUT_MS });
+  const back = await seat
+    .locator(".room-offline")
+    .waitFor({ state: "detached", timeout: LOAD_TIMEOUT_MS })
+    .then(() => true, () => false);
+  const entries = await seat.count();
+  const pass = held && back && entries === 1;
+  return {
+    pass,
+    metrics: { "appClosed.seatHeld": held, "appClosed.resumed": back },
+    detail: pass ? undefined : `seat held ${held}, resumed ${back}, guest lists the host ${entries} times`,
+  };
+}
+
 async function resizeMatchCase(s) {
   prepare(s);
   const { host } = await matchWithGuest(s, { clipboard: false });
@@ -613,6 +795,12 @@ for (const engine of engines) {
   await runCase(results, "badroom", (s) => badRoomCase(s, base), { ...opts, ignore: [CONSOLE_OFFLINE] });
   await runCase(results, "reconnect.match", (s) => reconnectCase(s), noisy);
   await runCase(results, "net.offline20s.match", (s) => networkOffCase(s, cdp), noisy);
+  await runCase(results, "net.blip4s.room", (s) => blipCase(s, cdp), noisy);
+  await runCase(results, "net.giveUp60s.room", (s) => giveUpCase(s, cdp), noisy);
+  const dying = await startServer();
+  await runCase(results, "reconnect.givenUp.server", (s) => serverStopCase(s, dying), { ...noisy, base: dying.base });
+  await runCase(results, "kicked.room", (s) => kickedCase(s), opts);
+  await runCase(results, "app.closed.room", (s) => appClosedCase(s), opts);
 
   if (cdp) {
     await runCase(results, "net.slow3g.practice", (s) => slowNetCase(s, base, "webgpu"), opts);

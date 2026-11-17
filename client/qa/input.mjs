@@ -14,7 +14,7 @@
 // (LEFT+UP+PUSH on three keys), keys.rebind (third key, conflict move, persisted, plays), keys.rebind.touch
 // (touch actions rebindable), keys.chatLeak (game keys typed in chat do not move the player), input.latency
 // (p95 of 30 keydown-to-pixel-change samples at full canvas resolution), drag.noAlternative (sliders and the map editor by keyboard),
-// touch.buttons and touch.stick (phone layout), touch.chord (stick left and
+// touch.buttons and touch.stick (phone layout), touch.targets (hit areas at each Control size), touch.chord (stick left and
 // jump on two fingers), gamepad.buttons (standard mapping: d-pad, A, X, B, Y, RB, LB), gamepad.stick
 // (injected pad), input.switch (keyboard, then touch, then gamepad in one match).
 // Touch uses real CDP touch on chromium, mouse on webkit, and synthetic touch pointers on firefox
@@ -98,6 +98,8 @@ const POLL_MS = 100; // readiness poll interval (Node-side, not rAF: firefox hea
 const IDLE_TIMEOUT_MS = 8000; // longest wait for a bat swing from earlier input to end before a window opens
 const STILL_MS = 500; // the local player must not move this long: a jump needs the previous landing done
 const LANDSCAPE = { width: 844, height: 390 }; // phone viewport for the touch cases
+const TOUCH_MIN_PX = 48; // the hud.css --hud-btn floor: every touch control stays this big at every Control size
+const TOUCH_SCALES = [0.7, 1, 1.5]; // settings.ts Control size 70..150 (prefs.ts clamps touchScale to 0.7..1.5)
 
 // Walk toward the wall on the opposite side first, so the pressed direction has room to show.
 const SETUP = {
@@ -627,6 +629,73 @@ async function touchButtonsCase(s, base, engine) {
   const out = summarise(rows);
   out.metrics["input.touch.layerVisible"] = (await h.page.locator(".hud-touch-layer").isVisible()) ? 1 : 0;
   return out;
+}
+
+/** Writes the Control size pref (prefs.ts touchScale; settings.ts sets it as v / 100). The next load applies it. */
+const setTouchScale = (page, scale) =>
+  page.evaluate((v) => {
+    const prefs = JSON.parse(localStorage.getItem("neobox.prefs") ?? "{}");
+    localStorage.setItem("neobox.prefs", JSON.stringify({ ...prefs, touchScale: v }));
+  }, scale);
+
+/**
+ * The touch controls as laid out: the viewport and touch support, the Control size on the layer (hud.ts applyPrefs),
+ * whether the landscape gate is up (by its box, not its text), and each control's box and whether it is the hit target at its centre.
+ */
+const TOUCH_BOXES = () => {
+  const shown = (el) => {
+    const st = getComputedStyle(el);
+    const r = el.getBoundingClientRect();
+    return st.display !== "none" && st.visibility !== "hidden" && r.width > 0 && r.height > 0;
+  };
+  const layer = document.querySelector(".hud-touch-layer");
+  const gate = document.querySelector(".hud-rotate");
+  const controls = [...document.querySelectorAll(".hud-touch-layer .hud-touch, .hud-touch-layer .hud-stick")];
+  return {
+    viewport: [innerWidth, innerHeight],
+    touchPoints: navigator.maxTouchPoints,
+    // The HUD shows touch controls for a coarse pointer or any touch points (hud.ts). Firefox reports no
+    // maxTouchPoints for a touch context, so the coarse pointer is the signal there.
+    coarse: matchMedia("(pointer: coarse)").matches,
+    scale: layer ? getComputedStyle(layer).getPropertyValue("--hud-touch-scale").trim() : "",
+    gateUp: gate !== null && shown(gate),
+    controls: controls.map((el) => {
+      const r = el.getBoundingClientRect();
+      const top = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+      return { name: el.dataset.action ?? "stick", w: r.width, h: r.height, hit: top !== null && el.contains(top) };
+    }),
+  };
+};
+
+/**
+ * Touch hit areas at each Control size, in the landscape phone layout: every control at least TOUCH_MIN_PX both ways,
+ * and each is the element a touch lands on. The phone context carries hasTouch on every engine (firefox included).
+ */
+async function touchTargetsCase(s, base) {
+  const h = await practicePhone(s, base, []);
+  const checks = {};
+  const sizes = {};
+  const small = [];
+  for (const scale of TOUCH_SCALES) {
+    const pct = Math.round(scale * 100);
+    await h.page.goto(base);
+    await setTouchScale(h.page, scale);
+    await startPhonePractice(h.page, base);
+    const m = await h.page.evaluate(TOUCH_BOXES);
+    const bad = m.controls.filter((c) => c.w < TOUCH_MIN_PX || c.h < TOUCH_MIN_PX);
+    checks[`viewport.${pct}`] = m.viewport[0] === LANDSCAPE.width && m.viewport[1] === LANDSCAPE.height;
+    checks[`touchPoints.${pct}`] = m.touchPoints > 0 || m.coarse;
+    checks[`scale.${pct}`] = Number(m.scale) === scale;
+    checks[`gate.${pct}`] = !m.gateUp;
+    checks[`count.${pct}`] = m.controls.length === TOUCH_AREAS.length + 1;
+    checks[`hit.${pct}`] = m.controls.every((c) => c.hit);
+    checks[`touch48.${pct}`] = bad.length === 0;
+    sizes[`input.targets.small.${pct}`] = bad.length;
+    small.push(...bad.map((c) => `${pct}% ${c.name} ${c.w.toFixed(1)}x${c.h.toFixed(1)}`));
+  }
+  const v = verdict("input.targets", checks, small.join(", ") || undefined);
+  Object.assign(v.metrics, sizes);
+  return v;
 }
 
 async function touchStickCase(s, base, engine) {
@@ -1376,6 +1445,7 @@ for (const engine of selectedEngines()) {
   if (want("keys.reserved")) await results.case("keys.reserved", (s) => reservedCase(s, base), opts);
   if (want("keys.chord")) await results.case("keys.chord", (s) => chordCase(s, base), opts);
   if (want("touch.buttons")) await results.case("touch.buttons", (s) => touchButtonsCase(s, base, engine), opts);
+  if (want("touch.targets")) await results.case("touch.targets", (s) => touchTargetsCase(s, base), opts);
   if (want("touch.stick")) await results.case("touch.stick", (s) => touchStickCase(s, base, engine), opts);
   if (want("touch.chord")) await results.case("touch.chord", (s) => touchChordCase(s, base, engine), opts);
   if (want("gamepad.buttons")) await results.case("gamepad.buttons", (s) => gamepadButtonsCase(s, base), opts);
