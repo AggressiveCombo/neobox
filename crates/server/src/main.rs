@@ -83,10 +83,13 @@ async fn api_not_found() -> Response {
     (StatusCode::NOT_FOUND, Json(serde_json::json!({ "error": "not found" }))).into_response()
 }
 
-async fn ws(State(hub): State<Arc<Hub>>, ConnectInfo(peer): ConnectInfo<SocketAddr>, headers: HeaderMap, upgrade: WebSocketUpgrade) -> impl IntoResponse {
+async fn ws(State(hub): State<Arc<Hub>>, ConnectInfo(peer): ConnectInfo<SocketAddr>, headers: HeaderMap, upgrade: WebSocketUpgrade) -> Response {
     let ip = admin::client_ip(&hub, &headers, peer);
+    let Some(slot) = conn::take_ip_slot(&hub, ip) else {
+        return StatusCode::TOO_MANY_REQUESTS.into_response();
+    };
     let account = api::socket_account(&hub, &headers).await;
-    upgrade.max_message_size(room::MAX_MAP_CODE + 8192).on_upgrade(move |socket| conn::serve(hub, socket, ip, account))
+    upgrade.max_message_size(room::MAX_MAP_CODE + 8192).on_upgrade(move |socket| conn::serve(hub, socket, ip, slot, account))
 }
 
 async fn map_list(State(hub): State<Arc<Hub>>) -> impl IntoResponse {

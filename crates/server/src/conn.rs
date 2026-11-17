@@ -22,35 +22,42 @@ const MAX_BINARY: usize = 4096;
 /// Messages per second before a connection is dropped.
 const MAX_MSG_RATE: u32 = 400;
 
-/// Serve one WebSocket. `account`: the signed-in account of the request's
-/// session cookie, if any.
-pub async fn serve(hub: Arc<Hub>, mut socket: WebSocket, ip: IpAddr, account: Option<AccountRef>) {
-    let admitted = {
-        let mut per_ip = hub.ip_conns.lock().unwrap();
-        let n = per_ip.entry(ip).or_insert(0);
-        let admitted = *n < hub.cfg.max_conns_per_ip;
-        if admitted {
-            *n += 1;
+/// One of an address's connection slots; released when dropped.
+pub struct IpSlot {
+    hub: Arc<Hub>,
+    ip: IpAddr,
+}
+
+impl Drop for IpSlot {
+    fn drop(&mut self) {
+        let mut per_ip = self.hub.ip_conns.lock().unwrap();
+        if let Some(n) = per_ip.get_mut(&self.ip) {
+            *n -= 1;
+            if *n == 0 {
+                per_ip.remove(&self.ip);
+            }
         }
-        admitted
-    };
-    if !admitted {
-        info!(%ip, "too many connections from this address");
-        let frame = CloseFrame { code: close::TOO_MANY.code, reason: Utf8Bytes::from_static(close::TOO_MANY.reason) };
-        let _ = socket.send(Message::Close(Some(frame))).await;
-        return;
     }
+}
+
+/// Claim one of `ip`'s slots, or `None` when it is at the cap. Called before
+/// the WebSocket upgrade so an over-cap client gets an HTTP 429.
+pub fn take_ip_slot(hub: &Arc<Hub>, ip: IpAddr) -> Option<IpSlot> {
+    let mut per_ip = hub.ip_conns.lock().unwrap();
+    if per_ip.get(&ip).copied().unwrap_or(0) >= hub.cfg.max_conns_per_ip {
+        return None;
+    }
+    *per_ip.entry(ip).or_insert(0) += 1;
+    Some(IpSlot { hub: hub.clone(), ip })
+}
+
+/// Serve one WebSocket. `account`: the signed-in account of the request's
+/// session cookie, if any. `_slot` holds the address's slot until this returns.
+pub async fn serve(hub: Arc<Hub>, socket: WebSocket, ip: IpAddr, _slot: IpSlot, account: Option<AccountRef>) {
     hub.conns.fetch_add(1, Ordering::Relaxed);
     let conn_id = hub.next_conn.fetch_add(1, Ordering::Relaxed);
     run(&hub, socket, ip, conn_id, account).await;
     hub.conns.fetch_sub(1, Ordering::Relaxed);
-    let mut per_ip = hub.ip_conns.lock().unwrap();
-    if let Some(n) = per_ip.get_mut(&ip) {
-        *n -= 1;
-        if *n == 0 {
-            per_ip.remove(&ip);
-        }
-    }
 }
 
 struct Session {
