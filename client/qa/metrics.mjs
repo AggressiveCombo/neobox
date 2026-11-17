@@ -311,10 +311,11 @@ export function domMeasure(opts) {
     const frags = paint(el);
     if (frags.length === 0) continue;
     const gap = Math.min(...frags.map((sh) => Math.min(sh.stripL ? Infinity : sh.l, sh.stripR ? Infinity : W - sh.r)));
-    if (gap >= 16) continue;
+    // Firefox lays out in 1/60px units: a 16px gutter can measure 15.99x and print as 16.00. Allow that slack only.
+    if (gap >= 16 - 0.05) continue;
     touching++;
     if (gap < 8) touching8++;
-    note("edges.touching", `${describe(el)} at x=${Math.round(r.left)}..${Math.round(r.right)}`);
+    note("edges.touching", `${describe(el)} at x=${r.left.toFixed(2)}..${r.right.toFixed(2)} viewport=${W} gap=${gap.toFixed(2)} shown=${frags.map((sh) => `${sh.l.toFixed(2)}..${sh.r.toFixed(2)}`).join(",")}`);
   }
 
   // edges.coveredByFixed: a control or text under a fixed bar, measured at top and at full scroll
