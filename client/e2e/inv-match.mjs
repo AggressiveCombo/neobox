@@ -1,7 +1,7 @@
 // Inventory rows for the match HUD, its menu, chat, input, offline, phone and editor screens. Each scenario names
 // the rows it proves in `inv`; every check asserts a row's "shows" column, with role/name locators where they exist.
 
-import { button, matchWithGuest, roomTitle } from "./lib.mjs";
+import { button, createRoom, joinByInvite, matchWithGuest, probeChanges, roomTitle, sleep, startMatch, uniqueName, waitForPixels, waitQuiet } from "./lib.mjs";
 
 const check = (ok, message) => {
   if (!ok) throw new Error(message);
@@ -171,29 +171,184 @@ async function matchChat(s) {
   return "chat open, send, recall, close, length cap and typing line checked";
 }
 
-/** Controls rows: the Change button arms a key capture ("Press a key"), a reserved key is refused with its notice, and Escape cancels the capture. */
+/** Controls rows: the Change button arms a key capture ("Press a key"); each reserved key is refused with its notice; Escape cancels. */
 async function matchKeys(s) {
   const { host } = await matchWithGuest(s, { clipboard: true });
   const { page } = host;
+  const busy = () => page.getByText("Press a key", { exact: true }).first();
   await page.locator(".hud-root").waitFor({ state: "visible" });
   await page.locator(".hud-menu-btn").click();
   await menuItem(page, "Change controls").click();
   const bind = page.getByRole("button", { name: /key 1: .*\. Change$/ }).first();
   await bind.waitFor({ state: "visible" });
+  // kb-reserved: each reserved key is refused with its notice, and the capture ends.
+  for (const key of ["F3", "Tab", "Enter"]) {
+    await bind.click();
+    await busy().waitFor({ state: "visible" });
+    await page.keyboard.press(key);
+    await page.getByText(`${key} is used by the game or browser. Pick another key.`).first().waitFor({ state: "visible" });
+    await busy().waitFor({ state: "hidden" });
+  }
+  // Escape cancels a capture.
   await bind.click();
-  await page.getByText("Press a key", { exact: true }).first().waitFor({ state: "visible" });
-  // kb-reserved: F3 is the game's own stats key, so the capture refuses it and says why.
-  await page.keyboard.press("F3");
-  await page.getByText(/F3 is used by the game or browser\. Pick another key\./).waitFor({ state: "visible" });
-  // Escape cancels the capture: no "Press a key" left.
+  await busy().waitFor({ state: "visible" });
   await page.keyboard.press("Escape");
-  await page.getByText("Press a key", { exact: true }).first().waitFor({ state: "hidden" });
-  return "Change arms a key capture; F3 refused with its notice; Escape cancels";
+  await busy().waitFor({ state: "hidden" });
+  return "Change arms a key capture; F3, Tab, Enter refused with notices; Escape cancels";
 }
+
+/** kb-default-bindings: the default keys move and jump the player (D right, A left, Space jump). */
+async function matchDefaults(s) {
+  const { host } = await matchWithGuest(s, { clipboard: true });
+  const { page } = host;
+  await waitForPixels(host, "match canvas");
+  // Frames freeze during the start countdown (see roomMatch in scenarios.mjs); wait it out before holding keys.
+  await sleep(4000);
+  const held = async (code) => {
+    await waitQuiet(page);
+    const before = await probeChanges(page);
+    await page.keyboard.down(code);
+    await sleep(600);
+    await page.keyboard.up(code);
+    return (await probeChanges(page)) - before;
+  };
+  check((await held("KeyD")) > 0, "holding KeyD (right) does not change the canvas");
+  check((await held("KeyA")) > 0, "holding KeyA (left) does not change the canvas");
+  check((await held("Space")) > 0, "holding Space (jump) does not change the canvas");
+  return "KeyD, KeyA and Space change the match canvas";
+}
+
+/** mouse-input: a pointer hover then click opens the match menu; Escape closes it. */
+async function matchMouse(s) {
+  const { host } = await matchWithGuest(s, { clipboard: true });
+  const { page } = host;
+  await page.locator(".hud-root").waitFor({ state: "visible" });
+  await menuBtn(page).hover();
+  await menuBtn(page).click();
+  await menuPanel(page).waitFor({ state: "visible" });
+  check((await menuBtn(page).getAttribute("aria-expanded")) === "true", "menu button is not aria-expanded after click");
+  await page.keyboard.press("Escape");
+  await menuPanel(page).waitFor({ state: "hidden" });
+  return "hover then click opens the menu (aria-expanded=true); Escape closes it";
+}
+
+/**
+ * gamepad-map: a standard-mapping pad (getGamepads overridden as in qa/input.mjs) moves the player on the d-pad and jumps on A.
+ * Push, bat, rocket and grab have no visible effect in an empty match, so they are not proven here.
+ */
+async function matchPad(s) {
+  const { host } = await matchWithGuest(s, { clipboard: true });
+  const { page } = host;
+  await waitForPixels(host, "match canvas");
+  // Frames freeze during the start countdown (see roomMatch in scenarios.mjs); wait it out before pressing the pad.
+  await sleep(4000);
+  await page.evaluate(() => {
+    const pad = {
+      id: "qa-pad (STANDARD GAMEPAD)",
+      index: 0,
+      connected: true,
+      mapping: "standard",
+      buttons: Array.from({ length: 17 }, () => ({ pressed: false, value: 0 })),
+      axes: [0, 0, 0, 0],
+    };
+    window.__e2ePad = pad;
+    Object.defineProperty(navigator, "getGamepads", { value: () => [pad], configurable: true });
+  });
+  const pressPad = (index, down) =>
+    page.evaluate(([i, d]) => {
+      window.__e2ePad.buttons[i] = { pressed: d, value: d ? 1 : 0 };
+    }, [index, down]);
+  for (const [name, index] of [["DPadRight", 15], ["DPadLeft", 14], ["A", 0]]) {
+    await waitQuiet(page);
+    const before = await probeChanges(page);
+    await pressPad(index, true);
+    await sleep(1000);
+    await pressPad(index, false);
+    const moved = (await probeChanges(page)) - before;
+    check(moved > 0, `${name} did not change the match canvas (${moved} changes)`);
+  }
+  return "DPadRight, DPadLeft and A change the match canvas";
+}
+
+/** Void map: no ground, three spawns at different heights, so the players fall out one at a time. */
+const SPECTATE_MAP = '{"b":[],"j":[],"s":[{"1":15,"2":10},{"1":25,"2":40},{"1":35,"2":70}],"p":[],"tu":[],"tc":[],"gp":[],"c":[],"set":{"3":40,"15":40,"16":25}}';
+
+/**
+ * hud-spectate (a) and chat-spectate-step: one life each on the void map; the first player to fall out is eliminated
+ * and the spectator bar follows the living players. ArrowRight moves the followed player.
+ */
+async function matchSpectate(s) {
+  const host = await s.open("sp-host", { name: uniqueName("sph") });
+  const roomName = uniqueName("sp");
+  const code = await createRoom(host, s.base, roomName, { isPublic: false });
+  const guests = [];
+  const names = [];
+  for (const id of ["spa", "spb"]) {
+    const name = uniqueName(id);
+    const guest = await s.open(id, { name });
+    await joinByInvite(guest, s.base, code, roomName);
+    guests.push(guest);
+    names.push(name);
+  }
+  for (const name of names) await host.page.locator("li.room-player").filter({ hasText: name }).waitFor();
+  const { page } = host;
+  await button(page, "Change map").click();
+  await page.getByLabel("Map code or JSON", { exact: true }).fill(SPECTATE_MAP);
+  await button(page, "Use code").click();
+  const chat = page.getByLabel("Chat message", { exact: true });
+  await chat.fill("/mode 1");
+  await chat.press("Enter");
+  await chat.fill("/set objectiveLimit 1");
+  await chat.press("Enter");
+  await page.locator("div.room-chat-log").getByText("objectiveLimit: 1").waitFor();
+  await startMatch(host, guests);
+  const spectator = await Promise.any(
+    [host, ...guests].map((h) =>
+      h.page
+        .locator(".hud-spectate-label")
+        .waitFor({ state: "visible", timeout: 60_000 })
+        .then(() => h),
+    ),
+  );
+  const name = spectator.page.locator(".hud-spectate-name");
+  const first = await name.textContent();
+  check(first.startsWith("Spectating"), `spectator bar reads "${first}", expected "Spectating ..."`);
+  await spectator.page.keyboard.press("ArrowRight");
+  await spectator.page.locator(".hud-spectate-name").filter({ hasNotText: first }).waitFor({ timeout: 5000 });
+  return `eliminated player sees the spectator bar ("${first}") and ArrowRight moves to another player`;
+}
+
+/** hud-spectate (b): a player who joins a running match spectates it; the bar shows after Back to game. */
+async function matchSpectateJoin(s) {
+  const { code } = await matchWithGuest(s, { clipboard: true });
+  const late = await s.open("spc", { name: uniqueName("spl") });
+  // a running match moves the joiner straight to the HUD, so the room title may pass unseen; accept either
+  await late.page.goto(`${s.base}/${code}`);
+  await late.page.locator("h1.room-title").or(late.page.locator(".hud-root")).first().waitFor();
+  await late.page.locator(".hud-root").waitFor({ state: "visible" });
+  await openMenu(late.page);
+  await menuItem(late.page, "Show lobby").click();
+  await late.page.locator(".room-team-pick").getByText("Spectate", { exact: true }).click();
+  const back = button(late.page, "Back to game");
+  const label = late.page.locator(".hud-spectate-label");
+  await back.or(label).first().waitFor();
+  if (await back.isVisible()) await back.click();
+  await late.page.locator(".hud-root").waitFor({ state: "visible" });
+  await label.waitFor({ state: "visible" });
+  const text = await late.page.locator(".hud-spectate-name").textContent();
+  check(text.startsWith("Spectating"), `late joiner's spectator bar reads "${text}"`);
+  return `mid-match joiner chooses Spectate in the lobby; the spectator bar shows ("${text}")`;
+}
+
 export const matchInvScenarios = [
   { name: "inv match hud and menu", inv: ["hud-main", "hud-menu", "hud-menu (Volume)", "hud-menu (Mute music)", "hud-menu (Fullscreen)", "hud-menu (Change controls)", "hud-stats", "hud-scores", "hud-end (host End match)"], run: matchHudMenu },
   { name: "inv match menu lobby", inv: ["hud-menu (Show lobby)"], run: matchMenuLobby },
   { name: "inv match leave", inv: ["hud-leave"], run: matchLeave },
   { name: "inv match chat", inv: ["chat-open-enter", "chat-send", "chat-history", "chat-close", "chat-escape-menu", "chat-length", "hud-typing"], run: matchChat },
   { name: "inv match keys", inv: ["kb-reserved (F3/Tab/Enter in capture)"], run: matchKeys },
+  { name: "inv match defaults", inv: ["kb-default-bindings"], run: matchDefaults },
+  { name: "inv match mouse", inv: ["mouse-input"], run: matchMouse },
+  { name: "inv match gamepad", inv: ["gamepad-map"], run: matchPad },
+  { name: "inv match spectate", inv: ["hud-spectate", "chat-spectate-step"], run: matchSpectate },
+  { name: "inv match spectate join", inv: ["hud-spectate"], run: matchSpectateJoin },
 ];
