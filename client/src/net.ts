@@ -54,11 +54,33 @@ interface Rtc {
 
 /** At most one WebRTC attempt per this many milliseconds. */
 const RTC_RETRY_MS = 30_000;
+/** Liveness is checked every LIVE_TICK_MS (the browser never shows us a dead TCP link on its own): worst case the banner shows SILENT_MS + one tick after the last frame. */
+const LIVE_TICK_MS = 250;
+/** Silence before a ping goes out: a quiet link is tested, not assumed alive. */
+const PING_AFTER_MS = 1_000;
+/** Silence after which the socket is abandoned and reconnected: the banner shows about this long after the link dies. */
+const SILENT_MS = 2_500;
+/** A probe (the network changed) leaves this much of the silence limit to run out. */
+const PROBE_GRACE_MS = 1_500;
+/** A socket still connecting after this long is abandoned. */
+const CONNECT_MS = 8_000;
+/** A tick this late means the page was frozen or throttled, so the silence before it is not the network's. */
+const FREEZE_MS = 1_500;
+/** Tags of the app-level ping and its pong (crates/net protocol.rs). */
+const C_PING = 2;
+const S_PONG = 0x82;
 
 export class Net {
   private ws: WebSocket | null = null;
   private rtc: Rtc | null = null;
   private rtcRetryAt = 0;
+  private watch: number | null = null;
+  private lastInbound = 0;
+  private lastTick = 0;
+  private connectStarted = 0;
+  private lastPing = Number.NEGATIVE_INFINITY;
+  /** Client times of our pings still unanswered: their pongs are liveness only, never the engine's. */
+  private pings: number[] = [];
   status: NetStatus = "closed";
 
   constructor(private readonly handlers: NetHandlers) {}
@@ -73,11 +95,22 @@ export class Net {
     ws.binaryType = "arraybuffer";
     this.ws = ws;
     this.setStatus("connecting");
+    const now = performance.now();
+    this.lastInbound = now;
+    this.lastTick = now;
+    this.connectStarted = now;
+    this.pings = [];
+    this.lastPing = Number.NEGATIVE_INFINITY;
+    this.watch = window.setInterval(() => this.watchTick(ws), LIVE_TICK_MS);
     ws.onopen = () => {
-      if (this.ws === ws) this.setStatus("open");
+      if (this.ws === ws) {
+        this.lastInbound = performance.now();
+        this.setStatus("open");
+      }
     };
     ws.onmessage = (ev: MessageEvent<unknown>) => {
       if (this.ws !== ws) return;
+      this.lastInbound = performance.now();
       if (typeof ev.data === "string") {
         const msg = parseServerMsg(ev.data);
         if (msg === null) return;
@@ -93,11 +126,12 @@ export class Net {
         }
         this.handlers.onMessage(msg);
       } else if (ev.data instanceof ArrayBuffer) {
-        this.handlers.onBinary(new Uint8Array(ev.data));
+        this.inBinary(new Uint8Array(ev.data));
       }
     };
     ws.onclose = (ev: CloseEvent) => {
       if (this.ws !== ws) return;
+      this.stopWatch();
       this.ws = null;
       this.dropRtc();
       this.setStatus("closed", closeNotice(ev.reason, ev.wasClean), true);
@@ -124,10 +158,19 @@ export class Net {
 
   close(): void {
     const ws = this.ws;
+    this.stopWatch();
     this.ws = null;
     this.dropRtc();
     if (ws && ws.readyState <= WebSocket.OPEN) ws.close(1000, "bye");
     if (this.status !== "closed") this.setStatus("closed");
+  }
+
+  /** The network may have changed (window online or offline): check the socket now, not after the silence limit. */
+  probe(): void {
+    const ws = this.ws;
+    if (ws === null || ws.readyState !== WebSocket.OPEN) return;
+    this.lastInbound = Math.min(this.lastInbound, performance.now() - (SILENT_MS - PROBE_GRACE_MS));
+    this.watchTick(ws);
   }
 
   /** Begin the WebRTC offer after `welcome`; silently does nothing when unsupported or rate-limited. */
@@ -145,7 +188,7 @@ export class Net {
       const cur = rtc;
       this.rtc = cur;
       dc.onmessage = (ev: MessageEvent<unknown>) => {
-        if (this.rtc === cur && ev.data instanceof ArrayBuffer) this.handlers.onBinary(new Uint8Array(ev.data));
+        if (this.rtc === cur && ev.data instanceof ArrayBuffer) this.inBinary(new Uint8Array(ev.data));
       };
       dc.onclose = () => this.dropRtc();
       dc.onerror = () => this.dropRtc();
@@ -185,6 +228,68 @@ export class Net {
     cur.dc.onmessage = null;
     cur.dc.close();
     cur.pc.close();
+  }
+
+  /** One liveness check of `ws`: the connect deadline, the silence limit, and a ping on a quiet link. */
+  private watchTick(ws: WebSocket): void {
+    if (this.ws !== ws) {
+      this.stopWatch();
+      return;
+    }
+    const now = performance.now();
+    if (now - this.lastTick > FREEZE_MS) {
+      this.lastInbound = now;
+      this.connectStarted = now;
+    }
+    this.lastTick = now;
+    if (ws.readyState === WebSocket.CONNECTING) {
+      if (now - this.connectStarted > CONNECT_MS) this.abandon(ws);
+      return;
+    }
+    const silent = now - this.lastInbound;
+    if (silent >= SILENT_MS) {
+      this.abandon(ws);
+    } else if (ws.readyState === WebSocket.OPEN && silent >= PING_AFTER_MS && now - this.lastPing >= PING_AFTER_MS) {
+      this.lastPing = now;
+      this.pings = [...this.pings.slice(-7), now];
+      const frame = new Uint8Array(9);
+      frame[0] = C_PING;
+      new DataView(frame.buffer).setFloat64(1, now, true);
+      ws.send(frame);
+    }
+  }
+
+  /** A binary frame from the server, over the socket or the data channel. A pong to one of our pings stops here. */
+  private inBinary(data: Uint8Array): void {
+    this.lastInbound = performance.now();
+    if (data.byteLength >= 9 && data[0] === S_PONG) {
+      const sent = new DataView(data.buffer, data.byteOffset, data.byteLength).getFloat64(1, true);
+      const i = this.pings.indexOf(sent);
+      if (i >= 0) {
+        this.pings = this.pings.slice(i + 1);
+        return;
+      }
+    }
+    this.handlers.onBinary(data);
+  }
+
+  /** Give up on a socket gone quiet: its close handshake may never finish, so its handlers go and the reconnect starts now. */
+  private abandon(ws: WebSocket): void {
+    this.stopWatch();
+    this.ws = null;
+    ws.onopen = null;
+    ws.onmessage = null;
+    ws.onclose = null;
+    ws.onerror = null;
+    if (ws.readyState <= WebSocket.OPEN) ws.close(1000, "bye");
+    this.dropRtc();
+    this.setStatus("closed", closeNotice("", false), true);
+  }
+
+  private stopWatch(): void {
+    if (this.watch === null) return;
+    window.clearInterval(this.watch);
+    this.watch = null;
   }
 
   private setStatus(status: NetStatus, notice?: CloseNotice, unexpected = false): void {
