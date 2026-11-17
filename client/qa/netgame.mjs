@@ -17,8 +17,8 @@
 //   net.desync.count        clients whose Snapshot row showed a desync reason ("gap a-b" or
 //                           "hash t") during play. The reason is sticky per session, so each
 //                           client counts at most once. Threshold 0.
-//   net.rollback.depth.p95  max over the clients and samples of the HUD "Rollback p95" row (ticks).
-//                           Threshold <= 8 at 100 ms RTT.
+//   net.rollback.depth.p95  last HUD "Rollback p95" sample (ticks), worst of the two clients.
+//                           Threshold <= 8 at 100 ms RTT. Starved runs are flagged (res.starved).
 //   net.impair.pass         1 on the impair condition (150 ms RTT, 50 ms jitter, 2% loss) when
 //                           the match completes with no resync, no desync, both canvases
 //                           still changing and the scoreboards agree. Threshold 1.
@@ -48,6 +48,8 @@ const OUT = outDir();
 const EVID = path.join(OUT, "evidence");
 const LOG = path.join(OUT, `netgame-${engine}.jsonl`);
 const DUR = Number(process.env.JN_DUR ?? 30000);
+const STARVED_FPS = 20;
+const STARVED_RTT_MS = 100;
 writeFileSync(LOG, "");
 const rec = (r) => {
   appendFileSync(LOG, `${JSON.stringify(r)}\n`);
@@ -235,16 +237,21 @@ async function netRun(browser, renderer, cond) {
       host: [...new Set(samples.host.map((x) => x.Snapshot).filter(isDesync))],
       guest: [...new Set(samples.guest.map((x) => x.Snapshot).filter(isDesync))],
     };
-    // The HUD row is a rolling p95 in ticks. A sample after the match ends has no rows, so
-    // take the maximum over the samples that have it: the worst the session showed.
+    // The HUD row is a rolling p95 in ticks, so the last sample that has it is the settled
+    // value at the end of play. A sample after the match ends has no rows, so filter first.
+    // The maximum over the samples is a diagnostic only: a transient spike during clock
+    // convergence should not decide the verdict.
     const p95Series = (rows) => rows.map((x) => statNum(x, "Rollback p95")).filter((x) => x !== null);
+    const lastOf = (arr) => (arr.length ? arr[arr.length - 1] : null);
     const rollbackP95 = {
-      host: pct(p95Series(samples.host), 100),
-      guest: pct(p95Series(samples.guest), 100),
-      hostMedian: pct(p95Series(samples.host), 50),
-      guestMedian: pct(p95Series(samples.guest), 50),
+      host: lastOf(p95Series(samples.host)),
+      guest: lastOf(p95Series(samples.guest)),
+      hostMax: pct(p95Series(samples.host), 100),
+      guestMax: pct(p95Series(samples.guest), 100),
       statSamples: { host: samples.host.filter((x) => "Rollback p95" in x).length, total: samples.host.length },
     };
+    const fpsMedian = (rows) => pct(rows.map((x) => statNum(x, "FPS")).filter((x) => x !== null), 50);
+    const fps = { host: fpsMedian(samples.host), guest: fpsMedian(samples.guest) };
     const pred = samples.host.map((x) => statNum(x, "Prediction")).filter((x) => x !== null);
     const rb = samples.host.map((x) => statNum(x, "Rollbacks")).filter((x) => x !== null);
     const rtt = samples.guest.map((x) => statNum(x, "RTT")).filter((x) => x !== null);
@@ -262,7 +269,16 @@ async function netRun(browser, renderer, cond) {
     res.rollbacksPerSec = { hostP95: pct(rb, 95), hostMax: pct(rb, 100) };
     res.desyncReasons = desyncReasons;
     res.rollbackP95 = rollbackP95;
+    res.fps = fps;
+    // Starved: the host is too busy to measure (FPS under 20 or no FPS row), or the measured RTT
+    // is far above the injected one (the relay and page timers slip under load). Such a run
+    // says nothing about the netcode at that RTT.
+    const rttMed = Math.max(res.rttMs.hostMedian ?? 0, res.rttMs.guestMedian ?? 0);
+    res.starved =
+      fps.host === null || fps.guest === null || fps.host < STARVED_FPS || fps.guest < STARVED_FPS ||
+      rttMed > cond.rtt + STARVED_RTT_MS;
     res.lastStats = { host: samples.host.at(-1), guest: samples.guest.at(-1) };
+    writeFileSync(path.join(EVID, `netgame-${tag}-samples.json`), JSON.stringify(samples));
 
     const shot = (h, f) => h.page.screenshot({ path: path.join(EVID, `netgame-${tag}-${f}.png`) }).catch(() => {});
     await shot(host, "host");
