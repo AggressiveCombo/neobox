@@ -72,11 +72,16 @@ const INJECT = {
 
 const inventoryText = readFileSync(INVENTORY, "utf8");
 const inventoryLower = inventoryText.toLowerCase();
-const inventoryIds = inventoryText
-  .split("\n")
-  .filter((line) => line.startsWith("- ") && line.includes(" | "))
-  .map((line) => line.slice(2).split("|")[0].trim());
-const knownIds = new Set([...STATES.map((st) => st.id), ...scenarios.map((sc) => sc.name)]);
+const inventoryIds = [
+  ...new Set(
+    inventoryText
+      .split("\n")
+      .filter((line) => line.startsWith("- ") && line.includes(" | "))
+      .map((line) => line.slice(2).split("|")[0].trim()),
+  ),
+];
+// An INVENTORY row is covered by a state of that id, a scenario of that name, or a scenario that lists it in `inv`.
+const knownIds = new Set([...STATES.map((st) => st.id), ...scenarios.flatMap((sc) => [sc.name, ...(sc.inv ?? [])])]);
 const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 const mentionsName = (name) => new RegExp(`(?<![a-z0-9])${escapeRe(name.toLowerCase())}(?![a-z0-9])`).test(inventoryLower);
 const firstLine = (err) => String(err?.message ?? err).split("\n")[0];
