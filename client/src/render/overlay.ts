@@ -55,6 +55,12 @@ const RULE_H = 3;
 /** Objective bar: its row sits this far below the view's top edge; it keeps CHIP_GAP from reserved bars. */
 const BAR_ROW_INSET = 8;
 const CHIP_GAP = 8;
+/** Edge indicators (off-screen opponents): inset of the arrow from the view edge, arrow length, chip height, padding and gap. */
+const AWAY_EDGE = 16;
+const AWAY_ARROW = 9;
+const AWAY_CHIP_H = 18;
+const AWAY_CHIP_PAD = 5;
+const AWAY_CHIP_GAP = 4;
 
 interface KillEntry {
   killer: number;
@@ -131,6 +137,7 @@ export class Overlay {
     this.drawDamageBars(scene, cam, cssW, cssH);
     this.drawNames(scene, cam, names, cssW, cssH);
     if (!chrome) return;
+    this.drawAway(scene, cam, names, cssW, cssH);
     this.drawIntro(scene, tickHz, cssW, cssH);
     this.drawBanner(scene, names, cssW, cssH);
     this.drawPersonal(scene, names, cssW);
@@ -177,6 +184,56 @@ export class Overlay {
       if (local && scene.maxStamina > 0) {
         this.drawStamina(p.stamina / scene.maxStamina, x, centreY + bodyHalf + 4);
       }
+    }
+  }
+
+  /**
+   * Edge indicators for the live opponents outside the view (`cam.away`): an arrow on the view's edge
+   * in the direction of the opponent, with its name chip just inside it. Drawn with the chrome only.
+   */
+  private drawAway(scene: Scene, cam: Camera, names: ReadonlyMap<number, string>, cssW: number, cssH: number): void {
+    if (cam.away.length === 0) return;
+    const ctx = this.ctx;
+    const [sx, sy, ox, oy] = worldXf(cam);
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.font = NAME_FONT;
+    for (const id of cam.away) {
+      const p = scene.players.find((q) => q.id === id);
+      if (!p) continue;
+      const dx = ((p.x * sx + ox) + 1) * cssW / 2 - cssW / 2;
+      const dy = (1 - (p.y * sy + oy)) * cssH / 2 - cssH / 2;
+      const len = Math.hypot(dx, dy) || 1;
+      const ux = dx / len;
+      const uy = dy / len;
+      // Scale the ray from the view centre onto the edge rect inset by AWAY_EDGE.
+      const hx = cssW / 2 - AWAY_EDGE;
+      const hy = cssH / 2 - AWAY_EDGE;
+      const t = Math.min(ux !== 0 ? hx / Math.abs(ux) : Infinity, uy !== 0 ? hy / Math.abs(uy) : Infinity);
+      const ex = cssW / 2 + ux * t;
+      const ey = cssH / 2 + uy * t;
+      const colour = this.colourCss(playerRgb(p.team, p.id));
+      // Arrow: tip outward from the edge point, base just inside it.
+      const px = -uy;
+      const py = ux;
+      ctx.beginPath();
+      ctx.moveTo(ex + ux * AWAY_ARROW, ey + uy * AWAY_ARROW);
+      ctx.lineTo(ex + px * AWAY_ARROW * 0.6, ey + py * AWAY_ARROW * 0.6);
+      ctx.lineTo(ex - px * AWAY_ARROW * 0.6, ey - py * AWAY_ARROW * 0.6);
+      ctx.closePath();
+      ctx.fillStyle = colour;
+      ctx.fill();
+      const name = names.get(id);
+      if (name === undefined) continue;
+      const width = ctx.measureText(name).width + AWAY_CHIP_PAD * 2;
+      const height = AWAY_CHIP_H;
+      const inward = AWAY_ARROW + AWAY_CHIP_GAP + height / 2;
+      const chipX = Math.min(Math.max(ex - ux * inward, width / 2 + 2), cssW - width / 2 - 2);
+      const chipY = Math.min(Math.max(ey - uy * inward, height / 2 + 2), cssH - height / 2 - 2);
+      ctx.fillStyle = PANEL;
+      ctx.fillRect(chipX - width / 2, chipY - height / 2, width, height);
+      ctx.fillStyle = colour;
+      ctx.fillText(name, chipX, chipY + 0.5);
     }
   }
 
