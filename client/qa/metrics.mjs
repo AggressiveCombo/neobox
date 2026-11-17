@@ -216,15 +216,31 @@ export function domMeasure(opts) {
     }
     return paintCache.get(el);
   };
-  // Two shown parts meet when their shared area is over 2px each way and the topmost element at its centre is one of the two.
+  // Opaque painted background (not transparent, not partly transparent).
+  const opaque = (e) => {
+    const bg = cs(e).backgroundColor;
+    if (bg === "" || bg === "transparent") return false;
+    const m = bg.match(/^rgba\((.*)\)$/);
+    return !m || m[1].split(",").length < 4 || parseFloat(m[1].split(",")[3]) >= 1;
+  };
+  // Text under an opaque element painted above it (a sticky header, a panel) is hidden, not visibly overlapped:
+  // an opaque element that is neither a container nor a contained element of `e`, and sits above it at the point.
+  const hiddenUnder = (e, list) => {
+    const at = list.findIndex((x) => e.contains(x));
+    if (at < 0) return false;
+    return list.slice(0, at).some((x) => !x.contains(e) && !e.contains(x) && opaque(x));
+  };
+  // Two shown parts meet when their shared area is over 2px each way and the topmost element at its centre is one of the two,
+  // and neither is hidden under an opaque element above it.
   const meetAt = (a, b, fa, fb) => {
     const l = Math.max(fa.l, fb.l);
     const rt = Math.min(fa.r, fb.r);
     const t = Math.max(fa.t, fb.t);
     const bt = Math.min(fa.b, fb.b);
     if (rt - l <= 2 || bt - t <= 2) return false;
-    const hit = document.elementFromPoint((l + rt) / 2, (t + bt) / 2);
-    return hit !== null && (a.contains(hit) || b.contains(hit));
+    const list = document.elementsFromPoint((l + rt) / 2, (t + bt) / 2);
+    const hit = list[0] ?? null;
+    return hit !== null && (a.contains(hit) || b.contains(hit)) && !hiddenUnder(a, list) && !hiddenUnder(b, list);
   };
 
   // text.overflow: text wider or taller than its box is a defect only when the box clips it (overflow not

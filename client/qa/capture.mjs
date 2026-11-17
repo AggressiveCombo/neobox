@@ -168,6 +168,7 @@ export class QaScenario extends Scenario {
 const BROWSER_WARNINGS = [
   /^\[JavaScript Warning: "WebGPU is disabled by blocklist\." \{file: "[^"]*" line: \d+\}\]$/,
   /^\[JavaScript Warning: "The execution of microtasks on this page was reordered to avoid unsafe execution\." \{file: "[^"]*" line: \d+\}\]$/,
+  /^\[JavaScript Warning: "Request for fullscreen was denied because requesting element is not in the currently focused tab\." \{file: "[^"]*" line: \d+\}\]$/,
   /^Service Worker registration blocked by Playwright$/,
 ];
 
@@ -348,11 +349,36 @@ async function settle(page) {
     const boot = document.getElementById("boot");
     return boot === null || boot.hidden;
   });
-  // A transition still running is a moving rect and colour: wait for every finite animation to end.
+  // The screen is idle when no screen change is in progress (transition.ts marks the entering and the frozen leaving
+  // copy; the copy is removed 160 ms after it starts), no animation or transition is pending or running with a finite
+  // length, no element that is faded or transformed is still moving (a timer-driven fade has no CSS animation, and
+  // axe blends the colours of an element with its translucent ancestors), and that holds for three frames in a row.
+  // Infinite animations (the game canvas, spinners) are allowed.
+  await page.evaluate(() => {
+    window.__idleFrames = 0;
+    window.__idleSig = null;
+  });
   await page.waitForFunction(
-    () => document.getAnimations().every((a) => a.playState !== "running" || a.effect?.getComputedTiming().endTime === Infinity),
+    () => {
+      const busy =
+        document.querySelector(".screen-in, .screen-out") !== null ||
+        document
+          .getAnimations()
+          .some((a) => a.playState === "pending" || (a.playState === "running" && a.effect?.getComputedTiming().endTime !== Infinity));
+      let sig = "";
+      for (const el of document.querySelectorAll("body *")) {
+        const cs = getComputedStyle(el);
+        if (cs.opacity === "1" && cs.transform === "none") continue;
+        const r = el.getBoundingClientRect();
+        sig += `${cs.opacity}|${cs.transform}|${cs.visibility}|${r.x},${r.y},${r.width},${r.height};`;
+      }
+      const stable = sig === window.__idleSig;
+      window.__idleSig = sig;
+      window.__idleFrames = busy || !stable ? 0 : window.__idleFrames + 1;
+      return window.__idleFrames >= 3;
+    },
     null,
-    { timeout: 10000 },
+    { timeout: 10000, polling: "raf" },
   );
   await nextFrames(page);
 }
