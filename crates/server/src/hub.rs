@@ -113,7 +113,11 @@ impl Config {
 #[derive(Debug)]
 pub enum Out {
     Text(String),
+    /// A binary frame that may go over the WebRTC data channel when the client has one.
     Binary(Vec<u8>),
+    /// A binary frame that always goes over the WebSocket: liveness answers, which the client
+    /// reads on the socket it pinged on, so they must not travel the unreliable channel.
+    WsBinary(Vec<u8>),
     Close(Close),
 }
 
@@ -193,7 +197,7 @@ impl ConnInfo {
     pub fn send(&self, o: Out) {
         let n = match &o {
             Out::Text(t) => t.len(),
-            Out::Binary(b) => b.len(),
+            Out::Binary(b) | Out::WsBinary(b) => b.len(),
             Out::Close(_) => 0,
         };
         self.stats.bytes_out.fetch_add(n as u64, Ordering::Relaxed);

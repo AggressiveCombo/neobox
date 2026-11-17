@@ -287,6 +287,8 @@ pub struct Room {
     next_id: u32,
     locked: bool,
     bans: Vec<Ban>,
+    /// Keys (`conn_keys`) of the players the host muted; a rejoin under one of them starts muted.
+    mutes: Vec<Vec<String>>,
     game: Option<Game>,
     /// Account grants still in flight: the match's end waits for them.
     pending_xp: usize,
@@ -399,6 +401,7 @@ pub fn spawn(
         next_id: 0,
         locked: false,
         bans: Vec::new(),
+        mutes: Vec::new(),
         game: None,
         pending_xp: 0,
         finishing: None,
@@ -729,7 +732,7 @@ impl Room {
             last_bytes: (0, 0),
             rate: (0, 0),
             record_seen: None,
-            muted: false,
+            muted: self.mutes.iter().any(|m| m.iter().any(|k| keys.contains(k))),
         });
         // quick-play rooms have no host
         if self.host.is_none() && self.quick.is_none() {
@@ -1031,13 +1034,13 @@ impl Room {
                 if text.is_empty() {
                     return;
                 }
-                if self.player(id).is_some_and(|p| p.muted) {
-                    return self.error(id, "muted", "The host has muted you");
-                }
                 // commands are the same actions the UI sends as plain messages,
                 // which are not throttled; only chat lines are
                 if let Some(cmd) = text.strip_prefix('/') {
                     return self.command(id, cmd);
+                }
+                if self.player(id).is_some_and(|p| p.muted) {
+                    return self.error(id, "muted", "The host has muted you");
                 }
                 if !self.take_chat_token(id) {
                     return self.error(id, "rate_limited", "You're doing that too much!");
@@ -1261,12 +1264,18 @@ impl Room {
                 if !host {
                     return self.error(id, "not_host", "Only the host can mute players");
                 }
-                if player == id {
+                // a host may unmute themselves (a muted host keeps the seat); muting oneself is refused
+                if player == id && muted {
                     return;
                 }
                 let Some(p) = self.player_mut(player) else { return };
                 p.muted = muted;
+                let keys = conn_keys(&p.ip, p.account.as_ref());
                 let name = p.name.clone();
+                self.mutes.retain(|m| !m.iter().any(|k| keys.contains(k)));
+                if muted {
+                    self.mutes.push(keys);
+                }
                 if muted {
                     self.notice(player, "The host muted you: your chat lines are not sent");
                     self.system_chat(&format!("{name} was muted"));
@@ -1500,7 +1509,7 @@ impl Room {
                     None => (0, 0.0),
                 };
                 if let Some(p) = self.player(id) {
-                    p.send(Out::Binary(ServerFrame::Pong { client_time, server_tick: tick, tick_phase: phase }.encode()));
+                    p.send(Out::WsBinary(ServerFrame::Pong { client_time, server_tick: tick, tick_phase: phase }.encode()));
                 }
             }
             ClientFrame::Input(f) => {
@@ -1946,7 +1955,62 @@ fn map_label(name: Option<&str>) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::map_label;
+    use super::*;
+    use crate::conn::tests::start;
+    use crate::hub::ConnStats;
+
+    /// A connection from `ip`; the test reads what the room sends it through the receiver.
+    fn conn(name: &str, ip: &str) -> (ConnInfo, mpsc::UnboundedReceiver<Out>) {
+        let (out, rx) = mpsc::unbounded_channel();
+        let info = ConnInfo {
+            name: name.into(),
+            out,
+            stats: Arc::new(ConnStats::default()),
+            ip: ip.parse::<IpAddr>().unwrap(),
+            connected: Instant::now(),
+            account: None,
+            color: None,
+            xp: None,
+        };
+        (info, rx)
+    }
+
+    fn new_room(hub: Arc<Hub>) -> RoomHandle {
+        spawn(hub, "TEST01".into(), "test".into(), None, 8, false, RoomSetup::Custom { map: None, defaults: None })
+    }
+
+    async fn join(room: &RoomHandle, info: ConnInfo) -> u32 {
+        let (reply, rx) = oneshot::channel();
+        let _ = room.tx.send(RoomCmd::Join { conn: info, password: None, resume: None, reply });
+        rx.await.unwrap().unwrap().0
+    }
+
+    fn say(room: &RoomHandle, player: u32, out: &mpsc::UnboundedSender<Out>, text: &str) {
+        let msg = ClientMsg::Chat { text: text.into() };
+        let _ = room.tx.send(RoomCmd::Msg { player, msg, out: out.clone() });
+    }
+
+    fn mute(room: &RoomHandle, host: u32, host_out: &mpsc::UnboundedSender<Out>, player: u32, muted: bool) {
+        let msg = ClientMsg::Mute { player, muted };
+        let _ = room.tx.send(RoomCmd::Msg { player: host, msg, out: host_out.clone() });
+    }
+
+    /// Waits until the room has handled every command sent before this call.
+    async fn settle(room: &RoomHandle) {
+        let (reply, rx) = oneshot::channel();
+        let _ = room.tx.send(RoomCmd::View { reply });
+        let _ = rx.await;
+    }
+
+    /// The text messages received so far.
+    fn texts(rx: &mut mpsc::UnboundedReceiver<Out>) -> Vec<String> {
+        std::iter::from_fn(|| rx.try_recv().ok())
+            .filter_map(|o| match o {
+                Out::Text(t) => Some(t),
+                _ => None,
+            })
+            .collect()
+    }
 
     #[test]
     fn map_names_are_cleaned_and_capped() {
@@ -1954,5 +2018,76 @@ mod tests {
         assert_eq!(map_label(Some("\u{3164}")), "Custom map");
         assert_eq!(map_label(None), "Custom map");
         assert_eq!(map_label(Some(&"x".repeat(80))).chars().count(), 60);
+    }
+
+    #[tokio::test]
+    async fn muted_player_can_use_commands_but_not_chat() {
+        let (hub, _) = start().await;
+        let room = new_room(hub);
+        let (host, mut host_rx) = conn("Host", "10.0.0.1");
+        let host_out = host.out.clone();
+        let host_id = join(&room, host).await;
+        let (guest, mut guest_rx) = conn("Guest", "10.0.0.2");
+        let guest_out = guest.out.clone();
+        let guest_id = join(&room, guest).await;
+        mute(&room, host_id, &host_out, guest_id, true);
+        say(&room, guest_id, &guest_out, "/help");
+        say(&room, guest_id, &guest_out, "hello");
+        settle(&room).await;
+        let got = texts(&mut guest_rx);
+        assert!(got.iter().any(|t| t.contains("Commands: /set <key>")), "{got:?}");
+        assert!(got.iter().any(|t| t.contains("The host has muted you")), "{got:?}");
+        assert!(!texts(&mut host_rx).iter().any(|t| t.contains("\"text\":\"hello\"")));
+    }
+
+    #[tokio::test]
+    async fn mute_survives_leave_and_rejoin_until_lifted() {
+        let (hub, _) = start().await;
+        let room = new_room(hub);
+        let (host, mut host_rx) = conn("Host", "10.0.0.1");
+        let host_out = host.out.clone();
+        let host_id = join(&room, host).await;
+        let (guest, _guest_rx) = conn("Guest", "10.0.0.2");
+        let guest_out = guest.out.clone();
+        let guest_id = join(&room, guest).await;
+        mute(&room, host_id, &host_out, guest_id, true);
+        let _ = room.tx.send(RoomCmd::Leave { player: guest_id, out: guest_out });
+        // a rejoin from the same address starts muted
+        let (rejoin, mut rejoin_rx) = conn("Guest", "10.0.0.2");
+        let rejoin_out = rejoin.out.clone();
+        let rejoin_id = join(&room, rejoin).await;
+        say(&room, rejoin_id, &rejoin_out, "first");
+        settle(&room).await;
+        assert!(texts(&mut rejoin_rx).iter().any(|t| t.contains("The host has muted you")));
+        // lifting the mute is kept: the next rejoin chats
+        mute(&room, host_id, &host_out, rejoin_id, false);
+        let _ = room.tx.send(RoomCmd::Leave { player: rejoin_id, out: rejoin_out });
+        let (again, mut again_rx) = conn("Guest", "10.0.0.2");
+        let again_out = again.out.clone();
+        let again_id = join(&room, again).await;
+        say(&room, again_id, &again_out, "second");
+        settle(&room).await;
+        assert!(!texts(&mut again_rx).iter().any(|t| t.contains("The host has muted you")));
+        assert!(texts(&mut host_rx).iter().any(|t| t.contains("\"text\":\"second\"")));
+    }
+
+    #[tokio::test]
+    async fn muted_host_can_unmute_themselves() {
+        let (hub, _) = start().await;
+        let room = new_room(hub);
+        let (host, _host_rx) = conn("Host", "10.0.0.1");
+        let host_out = host.out.clone();
+        let host_id = join(&room, host).await;
+        let (guest, mut guest_rx) = conn("Guest", "10.0.0.2");
+        let guest_out = guest.out.clone();
+        let guest_id = join(&room, guest).await;
+        mute(&room, host_id, &host_out, guest_id, true);
+        // the muted guest takes the host seat; as host, they lift their own mute
+        let msg = ClientMsg::GiveHost { player: guest_id };
+        let _ = room.tx.send(RoomCmd::Msg { player: host_id, msg, out: host_out });
+        mute(&room, guest_id, &guest_out, guest_id, false);
+        say(&room, guest_id, &guest_out, "hi");
+        settle(&room).await;
+        assert!(texts(&mut guest_rx).iter().any(|t| t.contains("\"text\":\"hi\"")));
     }
 }

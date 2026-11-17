@@ -342,7 +342,7 @@ impl Session {
             let _ = r.tx.send(RoomCmd::Frame { player: *id, frame, out: self.out.clone() });
         } else if let ClientFrame::Ping { client_time } = frame {
             let pong = ServerFrame::Pong { client_time, server_tick: 0, tick_phase: 0.0 }.encode();
-            let _ = self.out.send(Out::Binary(pong));
+            let _ = self.out.send(Out::WsBinary(pong));
         }
     }
 
@@ -391,6 +391,7 @@ async fn run(hub: &Arc<Hub>, socket: WebSocket, ip: IpAddr, conn_id: u64, accoun
                             }
                             _ => Message::Binary(b.into()),
                         },
+                        Some(Out::WsBinary(b)) => Message::Binary(b.into()),
                         Some(Out::Close(c)) => {
                             let frame = CloseFrame { code: c.code, reason: Utf8Bytes::from_static(c.reason) };
                             let _ = sink.send(Message::Close(Some(frame))).await;
@@ -509,7 +510,7 @@ async fn run(hub: &Arc<Hub>, socket: WebSocket, ip: IpAddr, conn_id: u64, accoun
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::hub::Config;
     use futures_util::StreamExt;
@@ -517,7 +518,7 @@ mod tests {
     use tokio_tungstenite::tungstenite::Message as ClientMsg;
 
     /// A hub with an empty store and the real `/ws` route on a free local port.
-    async fn start() -> (Arc<Hub>, String) {
+    pub(crate) async fn start() -> (Arc<Hub>, String) {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let port = listener.local_addr().unwrap().port();
         let dir = std::env::temp_dir().join(format!("neobox-conn-test-{}-{port}", std::process::id()));
@@ -567,5 +568,32 @@ mod tests {
         tokio::time::sleep(Duration::from_millis(200)).await;
         hub.shutdown.send_replace(true);
         assert_eq!(read_close(&mut ws).await, Some((close::SHUTDOWN.code, close::SHUTDOWN.reason.to_string())));
+    }
+
+    #[tokio::test]
+    async fn liveness_pong_goes_out_on_the_websocket() {
+        // a pong must never travel the unreliable WebRTC channel: the client reads it on the socket it pinged on
+        let (hub, _) = start().await;
+        let (out_tx, mut out_rx) = mpsc::unbounded_channel::<Out>();
+        let (rtc_tx, _rtc_rx) = mpsc::unbounded_channel::<Vec<u8>>();
+        let s = Session {
+            hub,
+            info: None,
+            room: None,
+            out: out_tx,
+            stats: Arc::new(ConnStats::default()),
+            ip: "127.0.0.1".parse().unwrap(),
+            conn_id: 1,
+            account: None,
+            presence: None,
+            rtc_in: rtc_tx,
+        };
+        s.binary(&ClientFrame::Ping { client_time: 1.5 }.encode());
+        match out_rx.try_recv() {
+            Ok(Out::WsBinary(b)) => {
+                assert_eq!(ServerFrame::decode(&b).unwrap(), ServerFrame::Pong { client_time: 1.5, server_tick: 0, tick_phase: 0.0 });
+            }
+            other => panic!("expected a WebSocket pong, got {other:?}"),
+        }
     }
 }
