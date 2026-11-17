@@ -432,7 +432,7 @@ export function uniqueName(prefix) {
 
 /**
  * Each browser context gets its own client address: the server limits account
- * attempts per IP (5 a minute) and trusts X-Forwarded-For (NEOBOX_TRUST_PROXY defaults on).
+ * attempts per IP (5 a minute); startServer turns NEOBOX_TRUST_PROXY on, so the loopback peer's X-Forwarded-For is read.
  */
 let clientIps = 0;
 export function nextClientIp() {
