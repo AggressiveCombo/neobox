@@ -1,13 +1,15 @@
 // Runs the rubric capture plan (plan.mjs) and writes summary.json and summary.md. Headless only.
 //
 // Usage (from client/): bun qa/sweep.mjs --dist <build dir> [--plan] [--tiers P,F,A,S] [--states a,b]
-//   [--rows T1-M,...] [--engines chromium,firefox,webkit] [--themes light,dark] [--jobs 3] [--out DIR] [--label NAME] [--resume]
+//   [--rows T1-M,...] [--engines chromium,firefox,webkit] [--themes light,dark] [--jobs 3] [--out DIR] [--label NAME] [--resume] [--rerun-failed DIR]
 // --resume reuses the records already in --out: a cell with a clean <state>.json is skipped; an errored one is recaptured.
+// --rerun-failed DIR captures again only the runs that DIR/summary.json lists as failing (within the other filters).
+// Its passing runs are copied into --out and marked carried in summary.json, so --out holds the full plan.
 // --dist (or NEOBOX_DIST) is required: there is no default build. --plan prints the coverage per tier
 // against the rubric counts and runs nothing. Default out: neobox-scratch/qa/capture/<dist basename>.
 // Cells the engine cannot run (notch rows, webgpu) are never planned; see plan.mjs.
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { EXPECTED, EXPECTED_TOTAL, describeTier, filterCells, planCells, uniqueRuns } from "./plan.mjs";
@@ -99,6 +101,26 @@ function coverage(cells, results) {
   return out;
 }
 
+/** Identity of one run: a summary.json result and a planned cell give the same key (used by --rerun-failed). */
+const runKey = (r) => [r.engine, r.theme, r.row?.id ?? r.row, r.axis ?? "none", r.renderer ?? "", r.state].join("|");
+
+/**
+ * Copies the carried-over passes of a --rerun-failed source into outRoot, so the merged summary reads one tree.
+ * Returns the carried results, marked `carried`.
+ */
+async function carryOver(fromRoot, outRoot, carried) {
+  const { captureDir } = await import("./capture.mjs");
+  return carried.map((r) => {
+    const opts = { engine: r.engine, theme: r.theme, row: { id: r.row?.id ?? r.row }, axis: r.axis, renderer: r.renderer };
+    const src = captureDir(fromRoot, opts);
+    const dst = captureDir(outRoot, opts);
+    mkdirSync(dst, { recursive: true });
+    for (const f of [`${r.state}.json`, `${r.state}.png`]) if (existsSync(path.join(src, f))) cpSync(path.join(src, f), path.join(dst, f));
+    if (existsSync(path.join(src, r.state))) cpSync(path.join(src, r.state), path.join(dst, r.state), { recursive: true });
+    return { ...r, carried: true };
+  });
+}
+
 async function main() {
   const planOnly = process.argv.includes("--plan");
   const dist = planOnly ? null : requireDist();
@@ -113,7 +135,22 @@ async function main() {
     themes: split("themes"),
   };
   const all = planCells();
-  const cells = filterCells(all, filters);
+  const scope = filterCells(all, filters);
+  // --rerun-failed DIR: only the runs DIR/summary.json lists as failing (within the filters) are captured again.
+  const rerunFrom = cliArg("rerun-failed", null);
+  let cells = scope;
+  let carried = [];
+  if (rerunFrom) {
+    const prev = JSON.parse(readFileSync(path.join(rerunFrom, "summary.json"), "utf8"));
+    const inScope = new Set(scope.map((c) => runKey(c)));
+    const mine = prev.filter((r) => inScope.has(runKey(r)));
+    const known = new Set(mine.map((r) => runKey(r)));
+    const failed = new Set(mine.filter((r) => r.failures.length > 0).map((r) => runKey(r)));
+    carried = mine.filter((r) => r.failures.length === 0);
+    // Failing runs, and in-scope runs the source never recorded, are captured; passing runs are carried.
+    cells = scope.filter((c) => failed.has(runKey(c)) || !known.has(runKey(c)));
+    console.log(`rerun-failed: ${uniqueRuns(cells).length} runs to capture (${failed.size} failing and the rest unrecorded in ${rerunFrom}); ${carried.length} passing runs carried over`);
+  }
   const filtered = Object.values(filters).some(Boolean);
 
   // Every planned state id must name a real state, so a typo or a removed state fails loudly here.
@@ -137,13 +174,17 @@ async function main() {
   if (filtered) console.log(`filtered: ${cells.length} cells, ${uniqueRuns(cells).length} distinct runs`);
 
   const outRoot = cliArg("out", `C:/Users/aggressivecombo/neobox-scratch/qa/capture/${path.basename(dist)}`);
+  if (rerunFrom && path.resolve(outRoot) === path.resolve(rerunFrom)) throw new Error("--out must differ from the --rerun-failed source");
   const label = cliArg("label", path.basename(outRoot));
   const jobs = Number(cliArg("jobs", "3"));
   const resume = process.argv.includes("--resume");
-  const results = await runSweep({ cells, jobs, outRoot, resume });
-  await writeSummary(outRoot, label);
+  const fresh = await runSweep({ cells, jobs, outRoot, resume });
+  const results = fresh.concat(rerunFrom ? await carryOver(rerunFrom, outRoot, carried) : []);
+  if (rerunFrom) writeFileSync(path.join(outRoot, "summary.json"), `${JSON.stringify(results, null, 2)}\n`);
+  const note = rerunFrom ? `Merged with ${rerunFrom}: ${carried.length} passing runs carried over (marked carried in summary.json); ${fresh.length} re-captured.` : "";
+  await writeSummary(outRoot, label, note);
   const passed = results.filter((r) => r.failures.length === 0).length;
-  const cov = coverage(cells, results);
+  const cov = coverage(scope, results);
   for (const t of tiers)
     console.log(`coverage ${t}: planned ${cov[t].planned} cells, ${cov[t].runs} runs, ${cov[t].passing} passing`);
   console.log(`${passed}/${results.length} runs pass; summary in ${outRoot}/summary.md`);

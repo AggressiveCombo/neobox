@@ -250,15 +250,19 @@ export function domMeasure(opts) {
   for (const el of textLeaves) {
     const s = cs(el);
     if (s.display === "inline") continue;
-    const ow = !/auto|scroll/.test(s.overflowX) && el.scrollWidth - el.clientWidth > 1;
-    const oh = !/auto|scroll/.test(s.overflowY) && el.scrollHeight - el.clientHeight > 1;
+    // WebKit reports scrollWidth/scrollHeight equal to the box for overflow:visible, so the glyph boxes set the extent too.
+    const frags = paint(el);
+    const box = el.getBoundingClientRect();
+    const reachX = frags.reduce((m, f) => Math.max(m, f.r), -Infinity) - (box.left + el.clientLeft + el.clientWidth);
+    const reachY = frags.reduce((m, f) => Math.max(m, f.b), -Infinity) - (box.top + el.clientTop + el.clientHeight);
+    const ow = !/auto|scroll/.test(s.overflowX) && (el.scrollWidth - el.clientWidth > 1 || reachX > 1);
+    const oh = !/auto|scroll/.test(s.overflowY) && (el.scrollHeight - el.clientHeight > 1 || reachY > 1);
     if (!ow && !oh) continue;
     const ellipsis = s.textOverflow === "ellipsis";
     if (ellipsis && (el.title || el.getAttribute("aria-label"))) continue;
     const lines = s.getPropertyValue("-webkit-line-clamp");
     const clamped = lines !== "" && lines !== "none";
     const clipped = (ow && /hidden|clip/.test(s.overflowX)) || (oh && /hidden|clip/.test(s.overflowY)) || ellipsis || clamped;
-    const frags = paint(el);
     const onOther = content.find((other) => {
       if (other === el || other.contains(el) || el.contains(other) || toast(other)) return false;
       return frags.some((f) => paint(other).some((g) => meetAt(el, other, f, g)));
@@ -500,20 +504,35 @@ export function domMeasure(opts) {
   const themeOk = opts.expectTheme ? (document.documentElement.dataset.theme === opts.expectTheme ? 1 : 0) : null;
 
   // forcedColors.issues (forced axis, approximate): forced colours strip backgrounds and borders, so an
-  // icon-only control without a border is invisible, and text with a transparent colour is lost
+  // icon-only control without a border is invisible, text with a transparent colour is lost, and a control
+  // whose label colour is its own background reads as blank (the room "Join" segment under forced colours).
   let forcedIssues = null;
   if (opts.forced) {
     forcedIssues = 0;
+    const clear = (c) => /rgba\(\s*[\d.]+[ ,]+[\d.]+[ ,]+[\d.]+[ ,/]+0(\.0*)?\s*\)|transparent/.test(c);
+    // The nearest ancestor-or-self background that paints (null when none does).
+    const paintedBg = (el) => {
+      for (let a = el; a; a = a.parentElement) {
+        const bg = cs(a).backgroundColor;
+        if (!clear(bg)) return bg;
+      }
+      return null;
+    };
     for (const el of interactive) {
       const s = cs(el);
       const bordered = parseFloat(s.borderTopWidth) > 0 && s.borderTopStyle !== "none";
-      if (!bordered && (el.textContent ?? "").trim() === "" && s.backgroundImage !== "none") {
+      const label = (el.textContent ?? "").trim();
+      if (!bordered && label === "" && s.backgroundImage !== "none") {
         forcedIssues++;
         note("forcedColors.issues", `${describe(el)} icon-only, no border`);
       }
+      if (label !== "" && !clear(s.color) && s.color === paintedBg(el)) {
+        forcedIssues++;
+        note("forcedColors.issues", `${describe(el)} label colour ${s.color} equals its background`);
+      }
     }
     for (const el of textLeaves) {
-      if (/rgba\(\s*[\d.]+[ ,]+[\d.]+[ ,]+[\d.]+[ ,/]+0(\.0*)?\s*\)|transparent/.test(cs(el).color)) {
+      if (clear(cs(el).color)) {
         forcedIssues++;
         note("forcedColors.issues", `${describe(el)} text colour is transparent`);
       }
@@ -683,11 +702,12 @@ export async function axeCounts(page) {
       runOnly: { type: "tag", values: ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa", "best-practice"] },
       resultTypes: ["violations"],
     });
-    const out = { critical: 0, serious: 0, moderate: 0, minor: 0, rules: [] };
+    const out = { critical: 0, serious: 0, moderate: 0, minor: 0, rules: [], nodes: [] };
     for (const v of res.violations) {
       const impact = v.impact ?? "minor";
       out[impact] = (out[impact] ?? 0) + v.nodes.length;
       out.rules.push(`${impact}:${v.id}(${v.nodes.length})`);
+      for (const n of v.nodes) out.nodes.push({ impact, rule: v.id, target: n.target.flat(Infinity).join(" "), html: n.html.slice(0, 240) });
     }
     return out;
   });

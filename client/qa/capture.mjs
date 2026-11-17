@@ -59,7 +59,7 @@ export function trackPage(page, handle) {
   handle.induced = handle.induced ?? [];
   page.setDefaultTimeout(15_000);
   const expectedUrl = (url) => (handle.expected ?? []).some((re) => re.test(url));
-  page.on("pageerror", (err) => handle.problems.push(`${handle.label}: page error: ${err.message}`));
+  page.on("pageerror", (err) => handle.problems.push(`${handle.label}: page error: ${err.stack || err.message}`));
   page.on("console", (msg) => {
     if (msg.type() !== "error") return;
     const url = msg.location().url ?? "";
@@ -124,6 +124,12 @@ export class QaScenario extends Scenario {
     // A service worker fetches on its own, past context.route: a state that stubs a request sets "block".
     if (serviceWorkers) options.serviceWorkers = serviceWorkers;
     const context = await this.env.browser.newContext(options);
+    // The row is the viewport: a fullscreen request (phone splash tap, HUD button) resizes headless Firefox to the screen (1366x768).
+    await context.addInitScript(() => {
+      Element.prototype.requestFullscreen = function requestFullscreen() {
+        return Promise.reject(new DOMException("QA harness: fullscreen denied, the viewport is the row", "NotAllowedError"));
+      };
+    });
     // As e2e/lib.mjs: the clipboard is granted where the engine accepts the grant; elsewhere the app shows the link in its toast.
     if (clipboard && this.env.browser.clipboard) {
       await context.grantPermissions(["clipboard-read", "clipboard-write"], { origin: this.base });
@@ -249,6 +255,22 @@ async function reflowAt(page, row, opts, vw, vh) {
   return dom;
 }
 
+/** Fails the capture when the page's layout viewport is not the row's viewport (a silent emulation drift). */
+async function assertViewport(page, row) {
+  const [w, h] = await page.evaluate(() => [innerWidth, innerHeight]);
+  if (w !== row.W || h !== row.H) throw new Error(`viewport ${w}x${h} != row ${row.W}x${row.H}`);
+}
+
+/** Fails the capture when the PNG is not the row's viewport at its device scale factor. */
+function assertScreenshotSize(png, row) {
+  const w = png.readUInt32BE(16);
+  const h = png.readUInt32BE(20);
+  const dsf = row.dsf ?? 1;
+  const ew = Math.round(row.W * dsf);
+  const eh = Math.round(row.H * dsf);
+  if (w !== ew || h !== eh) throw new Error(`screenshot ${w}x${h} != row ${ew}x${eh} (viewport ${row.W}x${row.H} at dsf ${dsf})`);
+}
+
 /**
  * Records one reflow pass: the problem count under `key`, and the problems behind it (element
  * details) under the same key. A failed precondition (`failure`, e.g. a font scale that did not
@@ -263,7 +285,7 @@ function recordReflow(metrics, details, key, dom, failure = null) {
  * Every measurement of one page at one viewport row. The page must already show the state.
  * Returns { metrics, details, info, png }. Leaves the viewport as it found it.
  */
-export async function measureState(page, { row, fit = false, dialog = false, handles = [], axis = "none", expectTheme = null, lap = () => {} }) {
+export async function measureState(page, { row, fit = false, dialog = false, handles = [], axis = "none", expectTheme = null, lap = () => {}, evidenceDir = null }) {
   const opts = { profile: profileOf(row), fit, notch: row.notch ?? null, expectTheme, forced: axis === "forced" };
 
   if (row.pseudo) await pseudoLocalise(page);
@@ -274,6 +296,7 @@ export async function measureState(page, { row, fit = false, dialog = false, han
   // Layout, edges, targets, labels; then the screenshot on the same frame.
   const dom = await page.evaluate(domMeasure, opts);
   const png = await page.screenshot({ animations: "disabled", caret: "hide" });
+  assertScreenshotSize(png, row);
   const pixels = analyseScreenshot(png, { W: row.W, H: row.H, texts: dom.texts, controls: dom.controls });
   const metrics = { ...dom.metrics, ...pixels.metrics };
   const details = { ...dom.details, ...pixels.details };
@@ -284,6 +307,7 @@ export async function measureState(page, { row, fit = false, dialog = false, han
   const axe = await axeCounts(page);
   for (const impact of ["critical", "serious", "moderate", "minor"]) metrics[`axe.${impact}`] = axe[impact] ?? 0;
   details["axe.rules"] = axe.rules.slice(0, 60);
+  details["axe.nodes"] = axe.nodes.slice(0, 60).map((n) => `${n.impact} ${n.rule} ${n.target} | ${n.html}`);
   lap("axe");
 
   const motion = await reducedMotion(page, axis === "reduce" ? "reduce" : "no-preference");
@@ -292,7 +316,7 @@ export async function measureState(page, { row, fit = false, dialog = false, han
   lap("reducedMotion");
 
   // Keyboard: Tab once through the order (focus visibility, order jumps, dialog trap).
-  const focus = await focusWalk(page, { dialog, indicator: row.id === "T1-K" });
+  const focus = await focusWalk(page, { dialog, indicator: row.id === "T1-K", evidenceDir });
   Object.assign(metrics, focus.metrics);
   Object.assign(details, focus.details);
   metrics["focus.steps"] = focus.steps;
@@ -431,16 +455,19 @@ export async function captureOne({ base, browser, engine, theme, row, state, out
     timing[name] = Math.round(now - mark);
     mark = now;
   };
+  let h = null;
   try {
-    const h = await state.prepare(s);
+    h = await state.prepare(s);
     lap("prepare");
     if (isTouch(row) && !state.splash) await dismissPhoneSplash(h.page);
     await settle(h.page);
     lap("settle");
+    await assertViewport(h.page, row);
+    lap("viewport");
     record.navigatorGpu = await h.page.evaluate(() => Boolean(navigator.gpu));
     // The app's own theme is the resolved scheme: "system" follows the emulated OS scheme.
     const expectTheme = theme === "system" ? THEMES.system.scheme : theme;
-    const m = await measureState(h.page, { row, fit: state.fit, dialog: state.dialog, handles: s.handles, axis, expectTheme, lap });
+    const m = await measureState(h.page, { row, fit: state.fit, dialog: state.dialog, handles: s.handles, axis, expectTheme, lap, evidenceDir: path.join(dir, state.id) });
     lap("measure");
     writeFileSync(path.join(dir, `${state.id}.png`), m.png);
     Object.assign(record.metrics, m.metrics);
@@ -448,6 +475,10 @@ export async function captureOne({ base, browser, engine, theme, row, state, out
     record.info = { ...(h.info ?? {}), ...m.info };
   } catch (err) {
     record.error = err instanceof Error ? err.message.split("\n")[0] : String(err);
+    // The page as the state left it, while a page is still open: the first thing to look at for a failed state.
+    const page = [h?.page, ...s.handles.map((x) => x.page)].find((p) => p && !p.isClosed());
+    const shot = page ? await page.screenshot({ animations: "disabled", caret: "hide", timeout: 5_000 }).catch(() => null) : null;
+    if (shot) writeFileSync(path.join(dir, `${state.id}.png`), shot);
   } finally {
     await s.close();
     lap("close");

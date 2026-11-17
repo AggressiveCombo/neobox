@@ -2,7 +2,7 @@
 // against thresholds.json, and writes outRoot/summary.md: failures by metric, then by engine, theme,
 // size and state, with example screenshot paths. Imports nothing from the browser stack.
 
-import { readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { validateRecord } from "./thresholds.mjs";
 
@@ -37,10 +37,11 @@ function tally(map, key) {
 const sortedTop = (map, n = TOP) => [...map.entries()].sort((a, b) => b[1] - a[1]).slice(0, n);
 
 /** Writes summary.md and returns its text. */
-export function writeSummary(outRoot, label = path.basename(outRoot)) {
+export function writeSummary(outRoot, label = path.basename(outRoot), note = "") {
   const all = [];
   for (const { record, file } of records(outRoot)) {
-    all.push({ record, png: file.replace(/\.json$/, ".png"), failures: validateRecord(record) });
+    const png = file.replace(/\.json$/, ".png");
+    all.push({ record, png: existsSync(png) ? png : null, failures: validateRecord(record) });
   }
 
   const failing = all.filter((c) => c.failures.length > 0);
@@ -60,12 +61,13 @@ export function writeSummary(outRoot, label = path.basename(outRoot)) {
   const lines = [];
   lines.push(`# ${label}`, "");
   lines.push(`Captures: ${all.length}. Passing: ${all.length - failing.length}. Failing: ${failing.length}. Capture errors: ${errors.length}.`, "");
+  if (note) lines.push(note, "");
   lines.push("## Failing metrics", "");
   lines.push("| metric | captures failing | worst value | example |", "| --- | ---: | ---: | --- |");
   const ranked = [...byMetric.entries()].sort((a, b) => b[1].captures.length - a[1].captures.length);
   for (const [key, { captures, values }] of ranked) {
     const worst = values.length ? Math.max(...values) : "-";
-    lines.push(`| ${key} | ${captures.length} | ${worst} | ${captures[0].png} |`);
+    lines.push(`| ${key} | ${captures.length} | ${worst} | ${captures.find((c) => c.png)?.png ?? "no png"} |`);
   }
   lines.push("");
 
@@ -85,7 +87,7 @@ export function writeSummary(outRoot, label = path.basename(outRoot)) {
     lines.push("- examples:");
     for (const c of captures.slice(0, MAX_EXAMPLES)) {
       const detail = c.failures.find((f) => keyOf(f) === key);
-      lines.push(`  - ${c.record.engine} ${c.record.theme} ${c.record.viewport.W}x${c.record.viewport.H} ${c.record.state}: ${detail} -> ${c.png}`);
+      lines.push(`  - ${c.record.engine} ${c.record.theme} ${c.record.viewport.W}x${c.record.viewport.H} ${c.record.state}: ${detail} -> ${c.png ?? "no png"}`);
     }
     lines.push("");
   }

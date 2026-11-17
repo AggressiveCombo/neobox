@@ -10,6 +10,9 @@ import { launchEngine, runCleanups } from "../e2e/lib.mjs";
 import { measureState, trackPage } from "./capture.mjs";
 import { nextFrames } from "./metrics.mjs";
 import { THRESHOLDS, validateRecord } from "./thresholds.mjs";
+import { mkdtempSync, readdirSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 
 const FIXTURE_ROW = { id: "fixture", W: 1280, H: 800, dsf: 1, input: "M" };
 const TOUCH_ROW = { id: "fixture-T", W: 390, H: 844, dsf: 2, input: "T" };
@@ -63,7 +66,7 @@ const FIXTURES = [
   {
     name: "text.overflow overlap",
     keys: ["text.overflow"],
-    html: doc(main(`<span style="display:inline-block;width:40px;white-space:nowrap">Overhang glyph</span><button style="position:absolute;left:60px;top:0">Go</button>`)),
+    html: doc(main(`<span style="display:inline-block;width:40px;white-space:nowrap">Overhang glyph</span><button style="position:absolute;left:60px;top:0;background:transparent">Go</button>`)),
   },
   {
     // A link wrapped onto two lines: line 2 sits left of the button, and only the link's bounding box reaches it.
@@ -81,7 +84,7 @@ const FIXTURES = [
     keys: ["overlap.interactive"],
     html: doc(
       main(
-        `<div style="position:absolute;left:16px;top:200px"><a href="#" style="line-height:20px">Terms of service and<br>policy</a><button style="position:absolute;left:90px;top:2px">Accept</button></div>`,
+        `<div style="position:absolute;left:16px;top:200px"><a href="#" style="line-height:20px">Terms of service and<br>policy</a><button style="position:absolute;left:90px;top:2px;background:transparent">Accept</button></div>`,
       ),
     ),
   },
@@ -96,19 +99,19 @@ const FIXTURES = [
     ),
   },
   {
-    // The same label with its glyphs over the control: text.overflow must fire.
+    // The same label with its glyphs over the control (transparent, as overlap.wrappedLink.covered): text.overflow must fire.
     name: "text.overflow.lineBoxCovered",
     keys: ["text.overflow"],
     html: doc(
       main(
-        `<div style="position:absolute;left:16px;top:200px;width:300px;height:20px;line-height:40px;white-space:nowrap">Line box label</div><button style="position:absolute;left:16px;top:214px">Next</button>`,
+        `<div style="position:absolute;left:16px;top:200px;width:300px;height:20px;line-height:40px;white-space:nowrap">Line box label</div><button style="position:absolute;left:16px;top:214px;background:transparent">Next</button>`,
       ),
     ),
   },
   {
     name: "overlap.interactive",
     keys: ["overlap.interactive"],
-    html: doc(main(`<div style="position:relative;height:60px"><button style="position:absolute;left:10px;top:10px">One</button><button style="position:absolute;left:40px;top:10px">Two</button></div>`)),
+    html: doc(main(`<div style="position:relative;height:60px"><button style="position:absolute;left:10px;top:10px;background:transparent">One</button><button style="position:absolute;left:40px;top:10px;background:transparent">Two</button></div>`)),
   },
   {
     // A control clipped by its scroll region: its hidden part sits under the control below, which is outside the region.
@@ -316,6 +319,7 @@ const FIXTURES = [
     name: "focus.invisible",
     keys: ["focus.invisible"],
     row: { ...FIXTURE_ROW, id: "T1-K", input: "K" },
+    evidence: true,
     html: doc(main(`<button class="plain">One</button> <button class="plain">Two</button>`), "button.plain:focus{outline:none}"),
   },
   {
@@ -449,6 +453,20 @@ const FIXTURES = [
     html: doc(main(`<p style="color:transparent;forced-color-adjust:none">Hidden words: author opted out of forced colours</p>`)),
   },
   {
+    // The room "Join" case: a selected segment option whose label colour is the background it sits on under forced colours.
+    name: "forcedColors.labelOnBackground",
+    keys: ["forcedColors.issues"],
+    axis: "forced",
+    html: doc(main(`<div style="display:inline-block;background:#fff;forced-color-adjust:none;padding:8px"><button style="background:transparent;color:#fff;border:0;forced-color-adjust:none">Join</button></div>`)),
+  },
+  {
+    // Ordinary controls under forced colours keep label and background apart: nothing may fire.
+    name: "forcedColors.clean",
+    keys: [],
+    axis: "forced",
+    html: doc(main(`<h1>Forced colours</h1><button>Continue</button><p>Plain text under forced colours</p>`)),
+  },
+  {
     name: "safe.notch.ok",
     keys: ["safe.notch.ok"],
     row: NOTCH_ROW,
@@ -504,7 +522,7 @@ const FIXTURES = [
   {
     name: "console.warnings browser",
     keys: [],
-    html: doc(main(`<h1>Browser notice</h1>`)) + `<script>console.warn("WebGPU is disabled by blocklist")</script>`,
+    html: doc(main(`<h1>Browser notice</h1>`)) + `<script>console.warn('[JavaScript Warning: "WebGPU is disabled by blocklist." {file: "chunk.js" line: 1}]')</script>`,
   },
   {
     name: "page.errors",
@@ -531,6 +549,7 @@ async function runFixture(browser, fixture) {
   const options = { viewport: { width: row.W, height: row.H }, deviceScaleFactor: row.dsf, colorScheme: "light" };
   if (axis === "forced") options.forcedColors = "active";
   if (axis === "more") options.contrast = "more";
+  const evidenceDir = fixture.evidence ? mkdtempSync(path.join(tmpdir(), "validate-evidence-")) : null;
   const context = await browser.newContext(options);
   try {
     const page = await context.newPage();
@@ -546,13 +565,19 @@ async function runFixture(browser, fixture) {
       handles: [handle],
       axis,
       expectTheme: fixture.expectTheme ?? "light",
+      evidenceDir,
     });
-    const record = { fit: fixture.fit ?? false, metrics: m.metrics, details: m.details };
+    const evidence = evidenceDir ? readdirSync(evidenceDir) : [];
+    const record = { fit: fixture.fit ?? false, metrics: m.metrics, details: m.details, evidence };
     return { failures: validateRecord(record), record };
   } finally {
     await context.close().catch(() => {});
+    if (evidenceDir) rmSync(evidenceDir, { recursive: true, force: true });
   }
 }
+
+// The two crops focus.invisible writes for its first failure (focus.mjs saveFocusEvidence).
+const FOCUS_CROPS = ["focus-invisible-1-focused.png", "focus-invisible-1-blurred.png"];
 
 const covered = new Set(FIXTURES.flatMap((f) => f.keys));
 const missing = Object.keys(THRESHOLDS).filter((key) => !covered.has(key));
@@ -592,7 +617,7 @@ for (const engine of engines) {
       if (failures.length === 0) console.log(`ok    ${label} clean: 0 failures`);
       else {
         const where = Object.entries(record.details)
-          .filter(([k]) => failures.some((f) => f.startsWith(`${k}=`)) || (k === "axe.rules" && failures.some((f) => f.startsWith("axe."))))
+          .filter(([k]) => failures.some((f) => f.startsWith(`${k}=`)) || (k.startsWith("axe.") && failures.some((f) => f.startsWith("axe."))))
           .map(([k, v]) => `${k}: ${v.slice(0, 3).map((x) => (typeof x === "string" ? x : JSON.stringify(x))).join(" | ")}`);
         bad.push(`${engine} ${fixture.name}: clean fixture reports ${failures.join("; ")}`);
         console.log(`FAIL  ${label} clean fixture reports ${failures.join("; ")}`);
@@ -608,6 +633,14 @@ for (const engine of engines) {
       else {
         bad.push(`${engine} ${fixture.name}: ${key} did not fire (value ${JSON.stringify(record.metrics[key])}, details ${JSON.stringify(record.details[key] ?? null)})`);
         console.log(`MISS  ${label} ${key} did not fire (value ${JSON.stringify(record.metrics[key])})`);
+      }
+      if (hit && fixture.evidence) {
+        checks++;
+        const lacking = FOCUS_CROPS.filter((f) => !record.evidence.includes(f));
+        if (lacking.length) {
+          bad.push(`${engine} ${fixture.name}: ${key} fired without crops ${lacking.join(", ")}`);
+          console.log(`MISS  ${label} crops not written: ${lacking.join(", ")}`);
+        } else console.log(`ok    ${label} crops ${FOCUS_CROPS.join(", ")}`);
       }
     }
   }

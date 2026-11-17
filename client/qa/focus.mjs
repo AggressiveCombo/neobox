@@ -3,11 +3,15 @@
 // element, every Tab stop), focus.order.jumps (visual backward jumps) and focus.trapBroken (focus leaves an
 // open modal dialog).
 
+import { mkdirSync, writeFileSync } from "node:fs";
+import path from "node:path";
 import { differingPixels } from "./image.mjs";
 import { nextFrames } from "./metrics.mjs";
 
 // A focus indicator must change at least this many pixels (by colour distance > 24) in the crop.
 const MIN_RING_PIXELS = 6;
+// Context around the element in the indicator crop: a 2px ring with a 2px offset lies 4px out, so 8px keeps it whole.
+const RING_MARGIN = 8;
 // A backward move counts as a jump when it goes up by more than this many element heights.
 const JUMP_ROWS = 1.5;
 
@@ -124,22 +128,38 @@ async function settle(page) {
   await nextFrames(page);
 }
 
-/** Compares a crop of the focused element with and without focus; returns false if no indicator is drawn. */
-async function focusIndicatorVisible(page, cur) {
+/** The crop of the focused element the indicator test compares (element plus RING_MARGIN), or null when too small. */
+async function cropOf(page, cur) {
   const vw = await page.evaluate(() => ({ w: innerWidth, h: innerHeight }));
-  const x0 = Math.max(0, cur.rect.x - 4);
-  const y0 = Math.max(0, cur.rect.y - 4);
-  const x1 = Math.min(vw.w, cur.rect.x + cur.rect.w + 4);
-  const y1 = Math.min(vw.h, cur.rect.y + cur.rect.h + 4);
-  if (x1 - x0 < 2 || y1 - y0 < 2) return true;
-  const clip = { x: x0, y: y0, width: x1 - x0, height: y1 - y0 };
-  const withFocus = await page.screenshot({ clip, animations: "disabled", caret: "hide" });
+  const x0 = Math.max(0, cur.rect.x - RING_MARGIN);
+  const y0 = Math.max(0, cur.rect.y - RING_MARGIN);
+  const x1 = Math.min(vw.w, cur.rect.x + cur.rect.w + RING_MARGIN);
+  const y1 = Math.min(vw.h, cur.rect.y + cur.rect.h + RING_MARGIN);
+  if (x1 - x0 < 2 || y1 - y0 < 2) return null;
+  return { x: x0, y: y0, width: x1 - x0, height: y1 - y0 };
+}
+
+/**
+ * Compares a crop of the focused element with and without focus. Returns { visible, focused, blurred }: `visible`
+ * is false when no indicator is drawn; the PNG crops are null when the element is too small to test.
+ */
+async function focusIndicatorVisible(page, cur) {
+  const clip = await cropOf(page, cur);
+  if (!clip) return { visible: true, focused: null, blurred: null };
+  const focused = await page.screenshot({ clip, animations: "disabled", caret: "hide" });
   await page.evaluate((id) => window.__qaById.get(id)?.blur(), cur.id);
   await settle(page);
-  const without = await page.screenshot({ clip, animations: "disabled", caret: "hide" });
+  const blurred = await page.screenshot({ clip, animations: "disabled", caret: "hide" });
   await page.evaluate((id) => window.__qaById.get(id)?.focus({ preventScroll: true }), cur.id);
-  const diff = differingPixels(withFocus, without);
-  return diff < 0 ? true : diff >= MIN_RING_PIXELS;
+  const diff = differingPixels(focused, blurred);
+  return { visible: diff < 0 ? true : diff >= MIN_RING_PIXELS, focused, blurred };
+}
+
+/** Writes the crops behind failure `n` of focus.invisible (focused, and blurred when taken) into `dir`. */
+function saveFocusEvidence(dir, n, { focused, blurred }) {
+  mkdirSync(dir, { recursive: true });
+  if (focused) writeFileSync(path.join(dir, `focus-invisible-${n}-focused.png`), focused);
+  if (blurred) writeFileSync(path.join(dir, `focus-invisible-${n}-blurred.png`), blurred);
 }
 
 /**
@@ -147,8 +167,9 @@ async function focusIndicatorVisible(page, cur) {
  * `dialog` = true when a modal is expected to trap focus (the walk then reports escapes).
  * `indicator` = true only on T1-K, the one row the rubric assigns focus.invisible to (section 3 D07);
  * other rows walk order and dialog traps only, and emit no focus.invisible key.
+ * `evidenceDir` = directory that receives the focused and blurred crops of each focus.invisible failure.
  */
-export async function focusWalk(page, { maxSteps = 80, dialog = false, indicator = false } = {}) {
+export async function focusWalk(page, { maxSteps = 80, dialog = false, indicator = false, evidenceDir = null } = {}) {
   const metrics = { "focus.obscured": 0, "focus.order.jumps": 0, "focus.trapBroken": 0 };
   const details = { "focus.obscured": [], "focus.order.jumps": [], "focus.trapBroken": [] };
   if (indicator) {
@@ -202,9 +223,15 @@ export async function focusWalk(page, { maxSteps = 80, dialog = false, indicator
     if (indicator && cur.covered) {
       metrics["focus.invisible"]++;
       push("focus.invisible", `${where} covered by another element`);
-    } else if (indicator && cur.inView && !(await focusIndicatorVisible(page, cur))) {
-      metrics["focus.invisible"]++;
-      push("focus.invisible", `${where} shows no focus indicator`);
+      const clip = evidenceDir && (await cropOf(page, cur));
+      if (clip) saveFocusEvidence(evidenceDir, metrics["focus.invisible"], { focused: await page.screenshot({ clip, animations: "disabled", caret: "hide" }) });
+    } else if (indicator && cur.inView) {
+      const shot = await focusIndicatorVisible(page, cur);
+      if (!shot.visible) {
+        metrics["focus.invisible"]++;
+        push("focus.invisible", `${where} shows no focus indicator`);
+        if (evidenceDir) saveFocusEvidence(evidenceDir, metrics["focus.invisible"], shot);
+      }
     }
 
     prev = cur;
