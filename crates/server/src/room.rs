@@ -486,7 +486,9 @@ fn personal_best_line(name: &str, ticks: i64) -> String {
 impl Room {
     async fn run(mut self, mut rx: mpsc::UnboundedReceiver<RoomCmd>) {
         info!(room = %self.code, name = %self.name, "room created");
-        let mut stats = tokio::time::interval(Duration::from_secs(1));
+        // The first tick is a second out: an immediate tick would run before the creator's Join is handled and close the
+        // room as empty (the loop ends on an empty player list after every branch).
+        let mut stats = tokio::time::interval_at(tokio::time::Instant::now() + Duration::from_secs(1), Duration::from_secs(1));
         stats.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         self.update_summary();
         loop {
