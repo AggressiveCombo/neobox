@@ -164,7 +164,7 @@ export const median = (values) => percentile(values, 50);
 
 /** Matches a media file URL: a navigation can cancel these loads, which is not a failure. */
 const MEDIA_URL = /\.(mp3|ogg|wav|m4a|webm)(\?|$)/i;
-const ABORT_ERRORS = new Set(["net::ERR_ABORTED", "NS_BINDING_ABORTED"]);
+const ABORT_ERRORS = new Set(["net::ERR_ABORTED", "NS_BINDING_ABORTED", "Load request cancelled"]); // WebKit: a request cancelled by navigation or tab close
 
 /**
  * Network/console capture for a page; `expected(url)` marks deliberate failures. A media request
@@ -266,6 +266,7 @@ export class Results {
         if (saved) evidence.push(rel(saved));
       }
     }
+    await s.close(); // free this case's pages; live game loops from earlier cases starve later ones
     const rec = {
       id,
       verdict: isInfo ? "info" : pass ? "pass" : "fail",
@@ -348,7 +349,7 @@ export function writeIndex() {
     }
   }
   writeFileSync(path.join(dir, "summary.json"), `${JSON.stringify({ runs: runs.length, fails, rows }, null, 2)}\n`);
-  const lines = ["# QA round 0 summary (perf, robust, input)", "", `${runs.length} runs, ${rows.length} cases, ${fails} failing.`, ""];
+  const lines = ["# QA summary (perf, robust, input)", "", `${runs.length} runs, ${rows.length} cases, ${fails} failing.`, ""];
   lines.push("| instrument | engine | self-test | case | verdict | detail |");
   lines.push("| --- | --- | --- | --- | --- | --- |");
   for (const r of rows) {

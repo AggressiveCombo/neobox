@@ -254,10 +254,16 @@ async function slowNetCase(s, base, renderer) {
   return { pass: true, metrics: { "net.slow3g.readyMs": Date.now() - t0 } };
 }
 
-/** Drops the live websocket of every page in the match, as a server-side close would. */
+/** Drops the live websocket of every page in the match, as a server-side close would. Returns how many were open. */
 async function dropSockets(page) {
-  await page.evaluate(() => {
-    for (const socket of window.__ws ?? []) if (socket.readyState === WebSocket.OPEN) socket.close(4000, "qa drop");
+  return page.evaluate(() => {
+    let cut = 0;
+    for (const socket of window.__ws ?? []) {
+      if (socket.readyState !== WebSocket.OPEN) continue;
+      socket.close(4000, "qa drop");
+      cut++;
+    }
+    return cut;
   });
 }
 
@@ -339,7 +345,7 @@ async function networkOffCase(s, cdp) {
   const t0 = Date.now();
   // A real Wi-Fi loss kills the live socket. Close it while online: taking the network down first leaves the close
   // handshake waiting for a server reply that never comes, so no close event fires (states.mjs dropAndGoOffline).
-  await dropSockets(host.page);
+  const cut = await dropSockets(host.page);
   const shownAt = await banner
     .waitFor({ state: "visible", timeout: BANNER_BUDGET_MS })
     .then(() => Date.now() - t0, () => null);
@@ -368,16 +374,21 @@ async function networkOffCase(s, cdp) {
     .then(() => true, () => false);
   const recoverMs = Date.now() - back;
   const hud = await host.page.locator(".hud-leave").isVisible();
-  const pass = shownAt !== null && shownAt <= BANNER_BUDGET_MS && heldToEnd && gone && hud;
+  const pass = cut > 0 && shownAt !== null && shownAt <= BANNER_BUDGET_MS && heldToEnd && gone && hud;
   return {
     pass,
     metrics: {
       "offline.bannerAfterMs": shownAt,
+      "offline.socketsCut": cut,
       "offline.heldToEnd": heldToEnd,
       "offline.recoverMs": gone ? recoverMs : null,
       "offline.hudBack": hud,
     },
-    detail: pass ? undefined : `banner after ${shownAt ?? "never"} ms, recovered: ${gone}; timeline ${JSON.stringify(timeline)}`,
+    detail: pass
+      ? undefined
+      : cut === 0
+        ? "not exercised: no open socket to cut"
+        : `banner after ${shownAt ?? "never"} ms, recovered: ${gone}; timeline ${JSON.stringify(timeline)}`,
   };
 }
 

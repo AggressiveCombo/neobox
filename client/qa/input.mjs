@@ -95,6 +95,7 @@ const MOVE_MIN = 0.5; // world units of travel that count as movement
 const WALK_MS = 1500; // setup walk toward the opposite wall
 const READY_TIMEOUT_MS = 30000; // longest wait for the local player to be in frame with full stamina
 const POLL_MS = 100; // readiness poll interval (Node-side, not rAF: firefox headless can stall rAF)
+const IDLE_TIMEOUT_MS = 8000; // longest wait for a bat swing from earlier input to end before a window opens
 const STILL_MS = 500; // the local player must not move this long: a jump needs the previous landing done
 const LANDSCAPE = { width: 844, height: 390 }; // phone viewport for the touch cases
 
@@ -164,6 +165,7 @@ const HOOK = () => {
         if (now >= window.__qaKeyT && (Math.abs(x - acc.ref.x) > 1e-4 || Math.abs(y - acc.ref.y) > 1e-4)) acc.stateT = now;
       }
       const flags = u[b + 6];
+      acc.health = f[b + 9];
       acc.stamina = f[b + 5];
       if (acc.first === null) {
         acc.first = { x, y };
@@ -178,6 +180,13 @@ const HOOK = () => {
       acc.flags |= flags;
       acc.rocketMax = Math.max(acc.rocketMax, f[b + 10]);
       acc.found++;
+    }
+    // local score row: lives and alive (diagnostics for a sample whose player cannot move)
+    for (let i = 0, rc = u[7], ro = u[8]; i < rc; i++) {
+      const o = ro + i * 15;
+      if (u[o] !== localId) continue;
+      acc.lives = f[o + 4];
+      acc.alive = u[o + 5] !== 0;
     }
     // ready: the local player is in the frame with full stamina (header word 25 = max stamina);
     // a rocket or push starts only with stamina to pay for it
@@ -330,17 +339,30 @@ async function holdKey(page, code, ms) {
   await page.keyboard.up(code);
 }
 
-/** Presses for one window and returns the engine's view of it. `before` runs first, then a settle. */
-async function window1({ page, press, release, before, settle = 300 }) {
+/** Flag 16 (bat swing in progress) stays set for the whole swing, so a window that starts inside one misses its transition. */
+const batIdle = (acc) => acc.flagsStart !== null && (acc.flagsStart & 16) === 0;
+
+/**
+ * Presses for one window and returns the engine's view of it. `before` runs first, then a settle. `idle`, when given,
+ * must hold for the probe taken just before the press; the probe is retried until it does or IDLE_TIMEOUT_MS passes.
+ */
+async function window1({ page, press, release, before, settle = 300, idle }) {
   await before?.();
   await sleep(settle);
   const ready = await waitReady(page);
-  await resetAcc(page);
-  await sleep(150);
-  const preMask = (await readAcc(page)).mask;
+  let idleWaitMs = 0;
+  let pre;
+  for (;;) {
+    await resetAcc(page);
+    await sleep(150);
+    pre = await readAcc(page);
+    if (!idle || idle(pre) || idleWaitMs >= IDLE_TIMEOUT_MS) break;
+    await sleep(POLL_MS);
+    idleWaitMs += POLL_MS + 150;
+  }
   await press();
   await sleep(WINDOW_MS);
-  const acc = { ...(await readAcc(page)), ready, preMask };
+  const acc = { ...(await readAcc(page)), ready, preMask: pre.mask, idleWaitMs, idleOk: idle ? idle(pre) : true };
   await release();
   return acc;
 }
@@ -402,8 +424,11 @@ function judge(name, action, acc, extra = {}) {
           ? "mask bit never reached the engine"
           : effect === false
             ? `mask reached the engine but the sim showed no effect (${travel}, held before press: ${Object.keys(BIT).filter((n) => (acc.preMask & BIT[n]) !== 0).join("+") || "none"}, engine calls ${acc.calls}${action === "bat" ? `, bat flag16 at window start ${(acc.flagsStart & 16) !== 0}, set during window ${(acc.flags & 16) !== 0}, stamina at start ${acc.staminaStart}` : ""})`
-            : undefined;
-  const ok = acc.ready === true && found && mask && effect !== false && (extra.hit ?? true);
+            : extra.exact === true && acc.mask !== BIT[action]
+              ? `mask ${acc.mask} is not exactly ${BIT[action]}: extra bits set`
+              : undefined;
+  const ok =
+    acc.ready === true && found && mask && effect !== false && (extra.hit ?? true) && (extra.exact !== true || acc.mask === BIT[action]);
   return {
     name,
     ok,
@@ -670,7 +695,15 @@ async function padPractice(s, base) {
       },
       [index, pressed],
     );
-  const setAxis = (value) => h.page.evaluate((v) => (window.__qaPad.axes[0] = v), value);
+  // the left stick: axes 0 (x) and 1 (y), each -1..1
+  const setAxis = (x, y = 0) =>
+    h.page.evaluate(
+      ([ax, ay]) => {
+        window.__qaPad.axes[0] = ax;
+        window.__qaPad.axes[1] = ay;
+      },
+      [x, y],
+    );
   return { h, setButton, setAxis };
 }
 
@@ -692,7 +725,7 @@ async function gamepadButtonsCase(s, base) {
       press: () => setButton(index, true),
       release: () => setButton(index, false),
     });
-    rows.push(judge(`gamepad.${name}.${action}`, action, acc));
+    rows.push(judge(`gamepad.${name}.${action}`, action, acc, { exact: true }));
   }
   return summarise(rows);
 }
@@ -700,24 +733,22 @@ async function gamepadButtonsCase(s, base) {
 async function gamepadStickCase(s, base) {
   const { h, setAxis } = await padPractice(s, base);
   // walk the stick toward the opposite wall first, so the pressed direction has room to show
-  const walk = async (dir) => {
-    await setAxis(dir);
+  const walk = async (x) => {
+    await setAxis(x, 0);
     await sleep(WALK_MS);
-    await setAxis(0);
+    await setAxis(0, 0);
   };
-  const left = await window1({
-    page: h.page,
-    before: () => walk(1),
-    press: () => setAxis(-1),
-    release: () => setAxis(0),
-  });
-  const right = await window1({
-    page: h.page,
-    before: () => walk(-1),
-    press: () => setAxis(1),
-    release: () => setAxis(0),
-  });
-  return summarise([judge("gamepad.stick.left", "left", left), judge("gamepad.stick.right", "right", right)]);
+  const stick = (x, y) => ({ page: h.page, press: () => setAxis(x, y), release: () => setAxis(0, 0) });
+  const left = await window1({ ...stick(-1, 0), before: () => walk(1) });
+  const right = await window1({ ...stick(1, 0), before: () => walk(-1) });
+  const up = await window1({ ...stick(0, -1) });
+  const down = await window1({ ...stick(0, 1) });
+  return summarise([
+    judge("gamepad.stick.left", "left", left, { exact: true }),
+    judge("gamepad.stick.right", "right", right, { exact: true }),
+    judge("gamepad.stick.up", "up", up, { exact: true }),
+    judge("gamepad.stick.down", "down", down, { exact: true }),
+  ]);
 }
 
 /** Keys: LEFT, UP and PUSH held together must all reach the engine and all take effect in one window. */
@@ -987,6 +1018,7 @@ async function touchRebindCase(s, base, engine) {
       page,
       press: () => touch.down(sel, x, y),
       release: () => touch.up(sel),
+      idle: action === "bat" ? batIdle : undefined,
     });
     rows.push(judge(`touch.${area}`, action, acc, { hit }));
   }
@@ -1139,18 +1171,20 @@ function rank(xs, q) {
 }
 
 /**
- * input.latency: in a started match, 30 samples. Each walks the player to the left wall, waits until the full-res frame
+ * input.latency: in a started match, LATENCY_SAMPLES valid samples (default 30). Each walks the player to the left wall, waits until the full-res frame
  * has been still for 500 ms (player at rest), then presses ArrowRight. latency = keydown to the first presented frame
  * whose pixels differ from the rest frame at full canvas resolution. stateMs = keydown to the first engine frame in
  * which the local player's state differs from rest. Pass: p95 within the band, no sample without a change, and no
- * change in a frame before the keydown.
+ * change in a frame before the keydown. A sample whose rest precondition fails is retried, not counted.
  */
 async function latencyCase(s, base, engine) {
   const h = await roomDesktop(s, base);
   const { page } = h;
   await page.evaluate(PIXEL_PROBE);
   const samples = [];
-  for (let i = 0; i < LATENCY_SAMPLES; i++) {
+  let skipped = 0; // rest-precondition misses, retried
+  for (let attempts = 0; samples.length < LATENCY_SAMPLES && attempts < LATENCY_SAMPLES * 3; attempts++) {
+    const i = samples.length;
     await holdKey(page, "ArrowLeft", 1200); // back to the left wall, so ArrowRight has room to move
     await page.evaluate(() => {
       const p = window.__latProbe;
@@ -1162,7 +1196,7 @@ async function latencyCase(s, base, engine) {
       await page.evaluate(() => {
         window.__latProbe.phase = "off";
       });
-      samples.push({ i, error: "the scene never settles" });
+      skipped++;
       continue;
     }
     const control0 = await page.evaluate(() => {
@@ -1179,7 +1213,7 @@ async function latencyCase(s, base, engine) {
       await page.evaluate(() => {
         window.__latProbe.phase = "off";
       });
-      samples.push({ i, error: "the scene changed before the key" });
+      skipped++;
       continue;
     }
     await page.keyboard.down("ArrowRight");
@@ -1206,6 +1240,10 @@ async function latencyCase(s, base, engine) {
           ready: window.__qa.ready,
           stamina: window.__qa.stamina,
           focus: document.activeElement?.tagName ?? null,
+          health: window.__qa.health,
+          lives: window.__qa.lives,
+          alive: window.__qa.alive,
+          calls: window.__qa.calls,
         }))
       : undefined;
     samples.push({
@@ -1237,11 +1275,12 @@ async function latencyCase(s, base, engine) {
   const file = `evidence/input-${engine}/latency-samples.json`;
   writeFileSync(path.join(outDir(), file), JSON.stringify({ samples, raf }));
   return {
-    pass: Number.isFinite(p95) && p95 <= LATENCY_P95_MS && misses === 0 && flips === 0,
+    pass: Number.isFinite(p95) && p95 <= LATENCY_P95_MS && misses === 0 && flips === 0 && samples.length === LATENCY_SAMPLES,
     metrics: {
       "input.latency.ms": ms(p95),
       "input.latency.p50": ms(p50),
       "input.latency.misses": misses,
+      "input.latency.retries": skipped,
       "input.latency.stateMs": ms(sp95),
       "input.latency.stateP50": ms(sp50),
       "input.latency.controlFlips": flips,
@@ -1250,7 +1289,7 @@ async function latencyCase(s, base, engine) {
       "input.rafMs.on.p50": ms1(on50),
       "input.rafMs.on.p95": ms1(on95),
     },
-    detail: `p95 ${fmt(p95)} over ${samples.length} samples (band ${LATENCY_P95_MS} ms), p50 ${fmt(p50)}; stateMs p95 ${fmt(sp95)}, p50 ${fmt(sp50)}; rAF p50/p95 ${ms1(off50) ?? "n/a"}/${ms1(off95) ?? "n/a"} ms probe off, ${ms1(on50) ?? "n/a"}/${ms1(on95) ?? "n/a"} ms probe on; ${misses} without a presented change, ${flips} control flips`,
+    detail: `p95 ${fmt(p95)} over ${samples.length}/${LATENCY_SAMPLES} samples (band ${LATENCY_P95_MS} ms), p50 ${fmt(p50)}; stateMs p95 ${fmt(sp95)}, p50 ${fmt(sp50)}; rAF p50/p95 ${ms1(off50) ?? "n/a"}/${ms1(off95) ?? "n/a"} ms probe off, ${ms1(on50) ?? "n/a"}/${ms1(on95) ?? "n/a"} ms probe on; ${misses} without a presented change, ${flips} control flips, ${skipped} retried for a missed rest precondition`,
     evidence: [file],
   };
 }
