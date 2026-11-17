@@ -8,9 +8,9 @@ export const PRIVACY_UPDATED = "2026-11-15";
 // Operator address (placeholder): confirm before release.
 export const PRIVACY_CONTACT = "neobox@aggressivecombo.com";
 
-/** The keys kept in one storage area, each with what it holds: "a (x), b (y) and c (z)". */
+/** The purposes of the keys kept in one storage area, as "a, b and c". Raw key names are never shown. */
 function describe(scope: StorageKey["scope"]): string {
-  const items = STORAGE_KEYS.filter((k) => k.scope === scope).map((k) => `${k.key} (${k.purpose})`);
+  const items = STORAGE_KEYS.filter((k) => k.scope === scope).map((k) => k.purpose);
   const last = items.pop() ?? "";
   return items.length > 0 ? `${items.join(", ")} and ${last}` : last;
 }
@@ -61,7 +61,7 @@ export const PRIVACY_SECTIONS: { heading: string; paragraphs: string[] }[] = [
   {
     heading: "Third parties",
     paragraphs: [
-      "The jukebox plays YouTube videos. Your browser loads the YouTube player only when the jukebox plays, and room lists load video thumbnails from i.ytimg.com. When a YouTube link is posted, the server asks YouTube's oEmbed service for its title, sending only the video id. YouTube's privacy policy applies to those requests.",
+      "The jukebox plays YouTube videos. Your browser loads the YouTube player only when the jukebox plays, and room lists load video thumbnails from YouTube's image servers. When a YouTube link is posted, the server asks YouTube's oEmbed service for its title, sending only the video id. YouTube's privacy policy applies to those requests.",
       "Regional game servers run by the operator receive a signed ticket with your account id, name and XP when you join, and they can see your IP address. No other third party receives your data.",
     ],
   },

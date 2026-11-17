@@ -25,13 +25,13 @@ export interface StorageKey {
 }
 
 export const STORAGE_KEYS: readonly StorageKey[] = [
-  { key: REMEMBER_KEY, scope: "local", purpose: "whether you chose to stay signed in" },
+  { key: REMEMBER_KEY, scope: "local", purpose: "your choice to stay signed in" },
   { key: NAME_STORAGE_KEY, scope: "local", purpose: "the name you last played under" },
-  { key: PREFS_KEY, scope: "local", purpose: "settings used while you are a guest" },
-  { key: GUEST_XP_KEY, scope: "local", purpose: "XP earned as a guest" },
-  { key: NEWS_SEEN_KEY, scope: "local", purpose: "news items you have read" },
-  { key: DRAFT_KEY, scope: "local", purpose: "an unsaved map editor draft" },
-  { key: PHONE_SPLASH_SEEN_KEY, scope: "local", purpose: "whether the phone welcome has been shown" },
-  { key: TRAINING_SEEN_KEY, scope: "local", purpose: "whether the Training badge has been dismissed" },
-  { key: SEAT_STORAGE_KEY, scope: "session", purpose: "the room you are seated in and a resume token, so a reload can rejoin the match" },
+  { key: PREFS_KEY, scope: "local", purpose: "your settings while you are a guest" },
+  { key: GUEST_XP_KEY, scope: "local", purpose: "XP you earned as a guest" },
+  { key: NEWS_SEEN_KEY, scope: "local", purpose: "the news items you have read" },
+  { key: DRAFT_KEY, scope: "local", purpose: "an unsaved map draft from the editor" },
+  { key: PHONE_SPLASH_SEEN_KEY, scope: "local", purpose: "whether you have seen the phone welcome" },
+  { key: TRAINING_SEEN_KEY, scope: "local", purpose: "whether you have dismissed the Training badge" },
+  { key: SEAT_STORAGE_KEY, scope: "session", purpose: "the room seat you hold, so a reload can rejoin the match" },
 ];
