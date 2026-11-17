@@ -137,6 +137,8 @@ pub mod close {
     pub const IDLE: Close = Close { code: close_code::POLICY, reason: "idle" };
     /// Sent too many messages per second.
     pub const FLOOD: Close = Close { code: close_code::POLICY, reason: "flood" };
+    /// Sent nothing for too long, not even a pong: the network is gone or the client is frozen.
+    pub const SILENT: Close = Close { code: close_code::POLICY, reason: "silent" };
     /// A message exceeded the size limit.
     pub const TOO_BIG: Close = Close { code: close_code::SIZE, reason: "too_big" };
     /// Too many sockets from one address.

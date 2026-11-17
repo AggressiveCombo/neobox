@@ -419,13 +419,35 @@ async fn match_end_awards_experience() {
     host.send(&ClientMsg::Start).await;
 
     let deadline = Instant::now() + Duration::from_secs(60);
+    // the guest is read here too: the server pings every 2 s and drops a client that answers nothing for 10 s
+    let mut guest_award = None;
+    let mut guest_open = true;
     let award = loop {
         let left = deadline.saturating_duration_since(Instant::now());
-        let next = tokio::time::timeout(left, host.ws.next()).await.expect("no experience before the deadline");
-        if let Some(Ok(Message::Text(t))) = next {
-            if let Ok(ServerMsg::Xp(a)) = serde_json::from_str::<ServerMsg>(t.as_str()) {
-                break a;
+        let found = tokio::select! {
+            next = host.ws.next() => match next {
+                Some(Ok(Message::Text(t))) => match serde_json::from_str::<ServerMsg>(t.as_str()) {
+                    Ok(ServerMsg::Xp(a)) => Some(a),
+                    _ => None,
+                },
+                _ => None,
+            },
+            next = guest.ws.next(), if guest_open => {
+                match next {
+                    Some(Ok(Message::Text(t))) => {
+                        if let Ok(ServerMsg::Xp(a)) = serde_json::from_str::<ServerMsg>(t.as_str()) {
+                            guest_award = Some(a);
+                        }
+                    }
+                    Some(Ok(_)) => {}
+                    _ => guest_open = false,
+                }
+                None
             }
+            _ = tokio::time::sleep(left) => panic!("no experience before the deadline"),
+        };
+        if let Some(a) = found {
+            break a;
         }
     };
     assert!(!award.quick);
@@ -434,11 +456,16 @@ async fn match_end_awards_experience() {
     let (_, _, me) = server.http("GET", "/api/account/me", Some(&alice), None).await;
     assert_eq!(me["xp"], award.gained, "{me}");
     // guests get the same award message, without an account total
-    let guest_award = guest.until("guest award", |m| match m {
-        ServerMsg::Xp(a) => Some(Ok(a.clone())),
-        _ => None,
-    });
-    let guest_award = guest_award.await.unwrap();
+    let guest_award = match guest_award {
+        Some(a) => a,
+        None => guest
+            .until("guest award", |m| match m {
+                ServerMsg::Xp(a) => Some(Ok(a.clone())),
+                _ => None,
+            })
+            .await
+            .unwrap(),
+    };
     assert_eq!((guest_award.xp, guest_award.level), (None, 0));
     host.until("match end", |m| matches!(m, ServerMsg::MatchEnd { .. }).then_some(Ok(()))).await.unwrap();
 }

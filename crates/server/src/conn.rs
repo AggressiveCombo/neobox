@@ -363,6 +363,9 @@ impl Session {
     }
 }
 
+/// A client that sends nothing for this long, not even a pong to our ping, is dropped: its network is gone or it is frozen.
+const SILENT_AFTER: Duration = Duration::from_secs(10);
+
 async fn run(hub: &Arc<Hub>, socket: WebSocket, ip: IpAddr, conn_id: u64, account: Option<AccountRef>) {
     let (mut sink, mut stream) = socket.split();
     let (out_tx, mut out_rx) = mpsc::unbounded_channel::<Out>();
@@ -412,6 +415,8 @@ async fn run(hub: &Arc<Hub>, socket: WebSocket, ip: IpAddr, conn_id: u64, accoun
         }
     });
     let mut window = Instant::now();
+    let mut last_seen = Instant::now();
+    let mut idle = tokio::time::interval(Duration::from_secs(2));
     let mut count = 0u32;
     let mut stop = hub.shutdown.subscribe();
     // why the server closes this socket, if it does: sent as the close frame. subscribe() marks the current value as
@@ -434,7 +439,15 @@ async fn run(hub: &Arc<Hub>, socket: WebSocket, ip: IpAddr, conn_id: u64, accoun
                 closing = Some(close::SHUTDOWN);
                 break;
             }
+            _ = idle.tick() => {
+                if last_seen.elapsed() >= SILENT_AFTER {
+                    closing = Some(close::SILENT);
+                    break;
+                }
+                continue;
+            }
         };
+        last_seen = Instant::now();
         count += 1;
         if window.elapsed() >= Duration::from_secs(1) {
             window = Instant::now();
