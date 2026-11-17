@@ -9,8 +9,8 @@ import type { AppState, Store } from "./state";
 export function watchServiceWorker(store: Store<AppState>): void {
   if (!("serviceWorker" in navigator)) return;
   const sw = navigator.serviceWorker;
-  // Only a page that already had a controller can be taken over; a first install never reloads.
-  const hadController = sw.controller !== null;
+  // The first controllerchange is the first install's claim: it never reloads. Later ones are updates.
+  let hadController = sw.controller !== null;
   let pending = false;
 
   store.subscribe((state, prev) => {
@@ -30,7 +30,9 @@ export function watchServiceWorker(store: Store<AppState>): void {
   });
 
   sw.addEventListener("controllerchange", () => {
-    if (!hadController) return;
+    const firstInstall = !hadController;
+    hadController = true;
+    if (firstInstall) return;
     const { screen, inMatch } = store.state;
     if (screen === "menu" && !inMatch) {
       location.reload();

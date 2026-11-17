@@ -7,6 +7,9 @@ const out = process.env.NEOBOX_CLIENT_OUT || `${root}/dist`;
 
 await rm(out, { recursive: true, force: true });
 
+// The wasm URL carries this hash (src/engine-loader.ts): an older build's worker misses its cache and fetches this build's copy.
+const wasmFile = Bun.file(`${root}/public/neobox.wasm`);
+const wasmVersion = (await wasmFile.exists()) ? new Bun.CryptoHasher("sha256").update(await wasmFile.bytes()).digest("hex").slice(0, 16) : "";
 const result = await Bun.build({
   entrypoints: [`${root}/index.html`],
   outdir: out,
@@ -15,6 +18,7 @@ const result = await Bun.build({
   target: "browser",
   // Fonts are served from public/fonts (also used by the server's admin page), not inlined.
   external: ["/fonts/*"],
+  define: { WASM_VERSION: JSON.stringify(wasmVersion) },
 });
 
 if (!result.success) {

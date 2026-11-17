@@ -11,6 +11,8 @@ const PRECACHE = __PRECACHE__;
 const SERVER_PATH = /^\/(api|ws|admin|internal|healthz)(\/|$)/;
 // Sounds and music load on demand and are kept for later offline play.
 const MEDIA_PATH = /^\/(sfx|music|flags)\//;
+// Bundle output is named by content hash (name-8chars.ext): a copy cached under that name is always right.
+const HASHED = /-[a-z0-9]{8}\.[a-z0-9]+$/;
 
 self.addEventListener("install", (event) => {
   event.waitUntil(
@@ -43,8 +45,10 @@ self.addEventListener("fetch", (event) => {
   } else if (MEDIA_PATH.test(url.pathname)) {
     // Range requests (seeking in audio) go to the network: the cache holds whole files only.
     if (!req.headers.has("range")) event.respondWith(cacheThenNetwork(MEDIA, req, true));
-  } else {
+  } else if (HASHED.test(url.pathname)) {
     event.respondWith(cacheThenNetwork(SHELL, req, false));
+  } else {
+    event.respondWith(networkThenShell(req));
   }
 });
 
@@ -54,16 +58,29 @@ async function networkFirst(req) {
   try {
     return await fetch(req);
   } catch {
-    const cached = await (await caches.open(SHELL)).match("/index.html");
+    const cached = await matchCached(SHELL, "/index.html");
     if (cached) return cached;
     return Response.error();
   }
 }
 
-// Files are named by content hash, so a cached copy under the same name is always right.
+// Shell files that keep their name across builds (fonts/, logo.svg, training.json, ...) come from the network:
+// an old worker must not hand this build's page the previous build's copy. This build's precache answers only
+// when the network is unreachable. neobox.wasm is requested with a build-id query (engine-loader.ts): the precache
+// ignores the query offline.
+async function networkThenShell(req) {
+  try {
+    return await fetch(req);
+  } catch {
+    return (await matchCached(SHELL, req, { ignoreSearch: true })) ?? Response.error();
+  }
+}
+
+// Content-hashed files (HASHED): a cached copy under the same name is always right.
+// The cache is an optimisation: when it throws (storage full, cache not yet open) the page gets
+// the network response instead. An exception escaping respondWith is a page error in Firefox.
 async function cacheThenNetwork(name, req, store) {
-  const cache = await caches.open(name);
-  const hit = await cache.match(req);
+  const hit = await matchCached(name, req);
   if (hit) return hit;
   // A fetch the page abandons (reload, navigation) rejects; answer with a network error rather than a worker exception.
   let res;
@@ -72,6 +89,22 @@ async function cacheThenNetwork(name, req, store) {
   } catch {
     return Response.error();
   }
-  if (store && res.ok) void cache.put(req, res.clone()).catch(() => {});
+  if (store && res.ok) void remember(name, req, res.clone());
   return res;
+}
+
+async function matchCached(name, req, options) {
+  try {
+    return await (await caches.open(name)).match(req, options);
+  } catch {
+    return undefined;
+  }
+}
+
+async function remember(name, req, res) {
+  try {
+    await (await caches.open(name)).put(req, res);
+  } catch {
+    // not stored; the next request goes to the network again
+  }
 }
