@@ -146,12 +146,12 @@ export function openNews(): () => void {
     next.disabled = index === NEWS.length - 1;
   }
 
+  show(0);
   const { close } = openModal({
     title: "Update news",
     body: [list, h("div", { class: "news-pager" }, prev, counter, next)],
     actions: [done],
   });
-  show(0);
   return () => close();
 }
 
