@@ -12,7 +12,7 @@
   gap: 12px;
   width: min(calc(100% - 16px), 40rem);
   max-height: calc(100% - 9.5rem - 8.5rem);
-  overflow-y: auto;
+  overflow: hidden;
   padding: 16px 18px;
   background: var(--ground);
   color: var(--ink);
@@ -24,7 +24,7 @@
     top: 3.5rem;
     /* Leaves the touch row (two button rows at the bottom edge) clear; long lessons scroll inside the card. */
     max-height: calc(100% - 3.5rem - 8.5rem);
-    overflow-y: auto;
+    overflow: hidden;
     gap: 6px;
     padding: 8px 14px;
   }
@@ -66,8 +66,17 @@
   box-shadow: inset 0 0 0 2px var(--ink);
 }
 
+.training-progress,
+.training-next {
+  flex-shrink: 0;
+}
+
+/* A long lesson scrolls here, so the progress squares and Next stay on the card. */
 .training-text {
+  flex: 0 1 auto;
+  min-height: 0;
   margin: 0;
+  overflow-y: auto;
   font-size: var(--step-lead);
   line-height: 1.45;
 }

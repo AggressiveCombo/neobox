@@ -265,7 +265,7 @@ export const trainingScreen: ScreenFactory = (ctx) => {
       renderText();
       syncStart();
     });
-    lessonEl = h("p", { class: "training-text", "aria-live": "polite" });
+    lessonEl = h("p", { class: "training-text", tabindex: "0", "aria-live": "polite" });
     countEl = h("span", { class: "training-count" });
     stepEls = lessons().map(() => h("span", { class: "training-step", "aria-hidden": "true" }));
     startKey = h("span", { class: "key" }, "Start");
