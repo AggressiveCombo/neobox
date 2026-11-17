@@ -7,6 +7,9 @@
   min-height: min(12rem, 30dvh);
   max-height: min(56dvh, 460px);
   overflow-y: auto;
+  /* The foot fades out so a bullet cut at the edge reads as scrolled, not clipped. */
+  padding-bottom: 24px;
+  mask-image: linear-gradient(to bottom, #000 calc(100% - 24px), transparent);
 }
 
 .news-date {
@@ -24,19 +27,6 @@
   font-size: var(--step-body);
   line-height: 1.5;
   overflow-wrap: anywhere;
-}
-
-.news-pager {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--gap);
-  margin-top: var(--gap);
-}
-
-.news-pager button {
-  flex: none;
 }
 
 .news-count {
