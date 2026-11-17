@@ -53,6 +53,8 @@ const EXPECT = {
 };
 // Destructive or irreversible controls are not clicked by the dead-control scan.
 const DEAD_SKIP = /\b(leave|delete|reset|sign out|log out|remove|kick|ban|forfeit|quit|report|block|unfriend|disband|decline|reject|abandon|revoke)\b/i;
+// Names the harness generates as fixture data (room, player, password, map, roster rows): user content, not product controls.
+const FIXTURE_NAME = /^(room|pw|host|guest|user)[a-z0-9]{6,8}(?![a-z])|^Actions for guest[a-z0-9]+|^map[a-z0-9]{5,9} by [a-z0-9]+ \d+ votes ?\d+ plays$/;
 const DEAD_SCREENS = process.env.QA_DEAD_SCREENS ? process.env.QA_DEAD_SCREENS.split(",").map((s) => s.trim()) : STATES.map((st) => st.id);
 const TOKEN_SCREENS = ["menu-anon", "settings-controls", "library-grid", "room-host"];
 const TOKEN_THEMES = ["light", "dark"];
@@ -211,6 +213,25 @@ const closeHandle = (h) => h.context.close().catch(() => {});
 const placeholderHits = (text) =>
   [...text.matchAll(PLACEHOLDER)].map((m) => text.slice(Math.max(0, m.index - 30), m.index + m[0].length + 30).replace(/\s+/g, " "));
 
+/** Failed-request lines a network-down state causes (chromium, firefox, webkit wordings). */
+const OFFLINE_ERR = /ERR_INTERNET_DISCONNECTED|NS_ERROR_OFFLINE|NetworkError when attempting|Failed to fetch|WebSocket connection to .* failed|can.t establish a connection/;
+
+/**
+ * States fail things on purpose and declare them (`h.expected` URL patterns, `h.expectedWarnings` text, as capture.mjs
+ * isInduced). The Scenario does not filter them, so the audit drops them from each handle before a case is judged.
+ * A state that took the network down (`h.offline`, set by states.mjs goOffline) owns the failed-request lines it causes.
+ */
+function pruneInduced(s) {
+  for (const h of s.handles) {
+    h.problems = h.problems.filter((p) => {
+      if (h.offline && OFFLINE_ERR.test(p)) return false;
+      const named = [p.match(/\((https?:\/\/[^()\s]*)\)$/)?.[1] ?? "", ...(p.match(/(?:https?|wss?):\/\/[^\s'")]+/g) ?? []).map((u) => u.replace(/[.,;:]+$/, ""))];
+      const byUrl = named.some((u) => u !== "" && (h.expected ?? []).some((re) => re.test(u)));
+      return !byUrl && !(h.expectedWarnings ?? []).some((re) => re.test(p));
+    });
+  }
+}
+
 /** Builds every state at desktop and phone size once per engine; shared by the coverage and copy cases. */
 async function harvestAll(s) {
   if (memo) return memo;
@@ -235,6 +256,7 @@ async function harvestAll(s) {
       }
     }
   }
+  pruneInduced(s);
   return memo;
 }
 
@@ -254,8 +276,6 @@ async function copyCase(s) {
 
 async function coverageCase(s) {
   const m = await harvestAll(s);
-  // Names the harness generates as fixture data (room, player, password, map, roster rows): user content, not product controls.
-  const FIXTURE_NAME = /^(room|pw|host|guest|user)[a-z0-9]{6,8}(?![a-z])|^Actions for guest[a-z0-9]+|^map[a-z0-9]{5,9} by [a-z0-9]+ \d+ votes ?\d+ plays$/;
   const screensOf = new Map();
   for (const sc of [...m.desktop, ...m.phone]) {
     for (const c of sc.controls) {
@@ -355,6 +375,7 @@ async function deadCase(s) {
   const dead = [];
   const skipped = [];
   const unclickable = [];
+  const worked = []; // controls whose click produced an effect, with the effect kinds (the per-control verification)
   let clicked = 0;
   for (const id of DEAD_SCREENS) {
     let cur = null;
@@ -374,8 +395,8 @@ async function deadCase(s) {
         skipped.push(`${label} (disabled)`);
         continue;
       }
-      if (c.covered) {
-        skipped.push(`${label} (covered by an open overlay)`);
+      if (FIXTURE_NAME.test(c.name)) {
+        skipped.push(`${label} (fixture data)`);
         continue;
       }
       if (DEAD_SKIP.test(c.name)) {
@@ -386,29 +407,55 @@ async function deadCase(s) {
         skipped.push(`${label} (external link)`);
         continue;
       }
+      // Behind the state's modal: the screen's own controls are scanned in its base state, and closing the modal here would drop the picker's own controls.
+      if (c.covered) {
+        skipped.push(`${label} (behind modal)`);
+        continue;
+      }
       if (cur.dirty) {
         await open();
-        if (cur.controls[c.i]?.name !== c.name) {
+        if (!cur.controls.some((f) => f.name === c.name)) {
           unclickable.push(`${label}: screen did not return to the same controls`);
+          continue;
+        }
+      }
+      // A re-render since the last click can drop a control without a navigation; reopen the state and look again before calling it unclickable.
+      const hasControl = async () => (await cur.h.page.evaluate(HARVEST)).some((f) => f.name === c.name);
+      if (!(await hasControl())) {
+        await open();
+        if (!(await hasControl())) {
+          const now = (await cur.h.page.evaluate(HARVEST)).map((f) => f.name);
+          unclickable.push(`${label}: control "${c.name}" is no longer on screen after reopening the state [${now.length} on screen: ${now.slice(0, 4).join(" | ")}]`);
           continue;
         }
       }
       const h = cur.h;
       const page = h.page;
       const url = page.url();
+      // Scroll is reset first: a control that only scrolls to a section (settings nav) would read as dead when that section is already in view.
+      await page.evaluate(() => document.querySelectorAll("*").forEach((e) => { if (e.scrollTop) e.scrollTop = 0; if (e.scrollLeft) e.scrollLeft = 0; }));
       const before = await page.evaluate(EFFECT_STATE);
       h.reqs = 0;
       clicked += 1;
       let k = c.i;
       try {
-        // Re-tag and re-find the control by name: a re-render since open() can move or drop data-qa-i.
-        const fresh = await settledHarvest(page);
-        await page.evaluate(() => {
-          window.__qaMut = 0; // the re-tag itself is a DOM mutation; it is not the click's effect
-        });
-        k = fresh[c.i]?.name === c.name ? c.i : fresh.findIndex((f) => f.name === c.name);
-        if (k < 0) throw new Error(`control "${c.name}" is no longer on screen`);
-        await page.locator(`[data-qa-i="${k}"]`).click({ timeout: 3000 });
+        // Re-tag and re-find the control by name: a re-render since open() can move or drop data-qa-i. A click that
+        // cannot reach its tagged element (a re-render replaced it) is retried on a fresh harvest, up to 3 tries.
+        for (let attempt = 1; ; attempt++) {
+          const fresh = await settledHarvest(page);
+          await page.evaluate(() => {
+            window.__qaMut = 0; // the re-tag itself is a DOM mutation; it is not the click's effect
+          });
+          k = fresh[c.i]?.name === c.name ? c.i : fresh.findIndex((f) => f.name === c.name);
+          if (k < 0) throw new Error(`control "${c.name}" is no longer on screen`);
+          try {
+            await page.locator(`[data-qa-i="${k}"]`).click({ timeout: 3000 });
+            break;
+          } catch (err) {
+            if (attempt >= 3) throw err;
+            await sleep(300);
+          }
+        }
         // Up to 1 s for any effect (DOM mutation, request, navigation, state change); stop early once one shows.
         let mut = 0;
         let moved = false;
@@ -421,7 +468,10 @@ async function deadCase(s) {
         }
         if (mut === 0 && h.reqs === 0 && !moved && !changed) dead.push(label);
         // Reopen only when the click navigated or changed the control list; a toggle keeps the page (reopening after each one made the scan too slow).
-        else cur.dirty = moved || !sameControls(cur.controls, await page.evaluate(HARVEST));
+        else {
+          worked.push(`${label}: ${[mut && "DOM", h.reqs && "request", moved && "route", changed && "state"].filter(Boolean).join(", ")}`);
+          cur.dirty = moved || !sameControls(cur.controls, await settledHarvest(page));
+        }
       } catch (err) {
         // What sits on top of the control's centre point (a modal or overlay blocks the click; the harness should say so).
         const cover = await page
@@ -439,7 +489,8 @@ async function deadCase(s) {
     }
     if (cur) await closeHandle(cur.h);
   }
-  const file = writeEvidence("dead-controls", { dead, skipped, unclickable });
+  pruneInduced(s);
+  const file = writeEvidence("dead-controls", { dead, skipped, unclickable, worked });
   return {
     pass: dead.length === 0,
     detail: `${dead.length} dead controls of ${clicked} clicked (${dead.slice(0, 10).join("; ") || "none"}); ${skipped.length} skipped; ${unclickable.length} not clickable`,
@@ -448,6 +499,7 @@ async function deadCase(s) {
       "deadControl.clicked": clicked,
       "deadControl.skipped": skipped.length,
       "deadControl.unclickable": unclickable.length,
+      "deadControl.worked": worked.length,
     },
     evidence: [rel(file)],
   };

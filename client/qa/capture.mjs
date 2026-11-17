@@ -266,9 +266,11 @@ function assertScreenshotSize(png, row) {
   const w = png.readUInt32BE(16);
   const h = png.readUInt32BE(20);
   const dsf = row.dsf ?? 1;
-  const ew = Math.round(row.W * dsf);
-  const eh = Math.round(row.H * dsf);
-  if (w !== ew || h !== eh) throw new Error(`screenshot ${w}x${h} != row ${ew}x${eh} (viewport ${row.W}x${row.H} at dsf ${dsf})`);
+  // Engines round device pixels differently (firefox: 412*2.625 -> 1081, not 1082); accept either.
+  const ok = (got, css) => [Math.floor(css * dsf), Math.round(css * dsf)].includes(got);
+  if (!ok(w, row.W) || !ok(h, row.H)) {
+    throw new Error(`screenshot ${w}x${h} != row ${row.W * dsf}x${row.H * dsf} (viewport ${row.W}x${row.H} at dsf ${dsf})`);
+  }
 }
 
 /**

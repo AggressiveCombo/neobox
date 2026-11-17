@@ -7,6 +7,7 @@ import os from "node:os";
 import path from "node:path";
 import {
   ADMIN_PASSWORD,
+  DESKTOP,
   PASSWORD,
   builtinMaps,
   button,
@@ -80,6 +81,8 @@ async function approvedMap(s) {
   const map = (await builtinMaps(s.base))[0];
   const name = uniqueName("map");
   const { page } = maker;
+  // Seeding only: the scenario viewport can be a phone-sized one where the upload controls sit below the fold.
+  await page.setViewportSize(DESKTOP.viewport);
   await navTo(page, "Library");
   await page.getByRole("tab", { name: "Mine", exact: true }).or(button(page, "Mine")).first().click();
   await page.getByRole("button", { name: "Upload a map", exact: true }).click();
@@ -185,6 +188,12 @@ async function dropSockets(page) {
   });
 }
 
+/** Takes the handle's network down. Its console errors from then on are the state's own (audit.mjs `deliberate`). */
+async function goOffline(h) {
+  h.offline = true;
+  await h.context.setOffline(true);
+}
+
 /**
  * Drops the host's socket while online, waits for the banner, then takes the network down so the reconnect cannot
  * finish and the banner stays. The order matters: offline first and then close(4000) leaves the close handshake waiting
@@ -195,7 +204,7 @@ async function dropAndGoOffline(h, timeout) {
   h.expected = [SOCKET_URL];
   await dropSockets(h.page);
   await h.page.locator(".reconnect-banner").waitFor({ state: "visible", timeout });
-  await h.context.setOffline(true);
+  await goOffline(h);
 }
 
 /** A room with `max` player slots, created from the menu; returns its code (createRoom has no max option). */
@@ -294,7 +303,7 @@ export const STATES = [
     await menuName(h.page).waitFor();
     // The first visit installs the worker; activate claims the page, so wait until it controls the page.
     await h.page.waitForFunction(() => navigator.serviceWorker.controller !== null, null, { timeout: 30_000 });
-    await h.context.setOffline(true);
+    await goOffline(h);
     await h.page.reload();
     await menuName(h.page).waitFor();
     await navTo(h.page, "Library");
@@ -338,15 +347,9 @@ export const STATES = [
   state("error-404-room", { dialog: true }, async (s) => {
     // Invite link to a code that is not open: the "Room not found" modal, with Browse rooms.
     const h = await s.open("guest", { name: uniqueName("guest") });
+    // Mark the phone welcome seen so the "Room not found" modal is the only dialog over the page.
+    await h.context.addInitScript(() => localStorage.setItem("neobox.phoneSplashSeen", "1"));
     await h.page.goto(`${s.base}/AAAAAA`);
-    // A fresh phone device shows the welcome, and the "Room not found" modal opens over it: the welcome's Play is
-    // covered, so its click is dispatched to the button (the same handler a tap runs) instead of hit-tested.
-    const welcome = h.page.getByRole("dialog", { name: "Welcome", exact: true });
-    await welcome.waitFor({ timeout: 2000 }).catch(() => undefined);
-    if ((await welcome.count()) === 1) {
-      await welcome.getByRole("button", { name: "Play", exact: true }).dispatchEvent("click");
-      await welcome.waitFor({ state: "detached" });
-    }
     await h.page.getByText("Room not found", { exact: true }).waitFor();
     await button(h.page, "Browse rooms").waitFor();
     return h;
@@ -356,7 +359,6 @@ export const STATES = [
     const h = await s.open("anon", { serviceWorkers: "block" });
     // The failures are injected: their requests and console messages are induced, not defects.
     h.expected = [/\/api\/maps(\?|$)/, /\/offline-maps\.json(\?|$)/];
-    h.expectedWarnings = [/service worker: TypeError: Cannot read properties of undefined \(reading 'update'\)/];
     await h.context.route(/\/(api\/maps|offline-maps\.json)(\?|$)/, (route) => route.fulfill({ status: 500, contentType: "text/plain", body: "server error" }));
     await h.page.goto(s.base);
     await menuName(h.page).waitFor();
@@ -371,19 +373,19 @@ export const STATES = [
   state("room-tab-match", {}, async (s) => roomTab((await hostRoom(s)).h, "Match")),
   state("room-tab-chat", {}, async (s) => roomTab((await hostRoom(s)).h, "Chat")),
   state("picker-mode", { dialog: true }, async (s) => {
-    const { h } = await hostRoom(s);
+    const h = await roomTab((await hostRoom(s)).h, "Match");
     await button(h.page, "Change mode").click();
     await h.page.getByRole("dialog", { name: "Game mode" }).waitFor();
     return h;
   }),
   state("picker-map", { dialog: true }, async (s) => {
-    const { h } = await hostRoom(s);
+    const h = await roomTab((await hostRoom(s)).h, "Match");
     await button(h.page, "Change map").click();
     await h.page.getByRole("dialog", { name: "Choose a map" }).waitFor();
     return h;
   }),
   state("picker-library", { dialog: true }, async (s) => {
-    const { h } = await hostRoom(s);
+    const h = await roomTab((await hostRoom(s)).h, "Match");
     await button(h.page, "Change map").click();
     await button(h.page, "Library").click();
     await h.page.getByRole("dialog", { name: "Pick a map" }).waitFor();
@@ -436,7 +438,13 @@ export const STATES = [
   }),
 
   // Match
-  state("match-running", { fit: true }, async (s) => (await inMatch(s)).host),
+  state("match-running", { fit: true }, async (s) => {
+    const { host } = await inMatch(s);
+    // The capture is the match: wait for the HUD leave control, and for the menu to be gone.
+    await host.page.locator(".hud-leave").waitFor({ state: "visible" });
+    await menuName(host.page).waitFor({ state: "hidden" });
+    return host;
+  }),
   state("match-hud", { fit: true }, async (s) => (await inMatch(s)).host),
   state("match-menu", { fit: true }, async (s) => {
     const { host } = await inMatch(s);
@@ -467,10 +475,11 @@ export const STATES = [
   }),
   state("match-disconnected", {}, async (s) => {
     // Playwright cannot send a 1006 close from page script, so the socket is dropped as robust.mjs does;
-    // then the network stays down so the reconnect cannot finish. The only action is Leave (no Retry exists).
+    // then the network stays down so the reconnect cannot finish. "Retry now" cannot connect while offline; Leave is the exit.
     trackSockets(s);
     const { host } = await inMatch(s);
     await dropAndGoOffline(host, 10_000);
+    await dismissRotateGate(host.page);
     return host;
   }),
   state("offline-match", {}, async (s) => {
@@ -522,6 +531,7 @@ export const STATES = [
     await h.page.locator(".offline-list .offline-choice").first().click();
     await button(h.page, "Start").click();
     await h.page.locator(".offline.playing").waitFor();
+    await dismissRotateGate(h.page);
     return h;
   }),
   state("replay-empty", {}, async (s) => {
@@ -612,6 +622,8 @@ export const STATES = [
   }),
   state("account-security", {}, async (s) => {
     const h = await signedIn(s, "user");
+    // A fresh phone device shows the welcome over the menu after sign-in; it covers the account button and the security summary.
+    await dismissPhoneSplash(h.page);
     await h.page.locator(".home-account").click();
     await h.page.locator("details.account-security summary").click();
     return h;
@@ -636,10 +648,13 @@ export const STATES = [
 
   // Library
   state("library-grid", {}, async (s) => {
+    // Browse lists approved public maps: approve one first so the capture shows the populated list (empty-library covers "No maps yet").
+    const name = await approvedMap(s);
     const h = await signedIn(s, "user");
     await navTo(h.page, "Library");
     await h.page.getByLabel("search maps").waitFor();
     await h.page.locator("ul[aria-label=maps]").waitFor({ state: "attached" });
+    await h.page.locator("ul[aria-label=maps] li").filter({ hasText: name }).first().waitFor();
     // The makers panel fills from its own fetch; wait for the list or the status line it sets.
     await h.page.waitForFunction(() => {
       const panel = document.querySelector('[aria-label="top makers this week"]');
