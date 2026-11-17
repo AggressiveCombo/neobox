@@ -289,6 +289,8 @@ button,
 .page {
   width: 100%;
   min-height: 100%;
+  /* #ui is a row flex box: a stretched page would take the viewport's height and its head and content would shrink into it. Size to the content; min-height still fills the viewport. */
+  align-self: flex-start;
   background: var(--ground);
   padding: 0 var(--margin) calc(48px + env(safe-area-inset-bottom));
   display: flex;
@@ -333,6 +335,7 @@ button,
 
 @media (max-width: 600px) {
   .page-head {
+    position: static;
     flex-wrap: wrap;
     row-gap: 4px;
     padding-bottom: 8px;
@@ -1084,7 +1087,7 @@ dialog.modal {
   background: var(--ground);
   color: var(--ink);
   box-shadow: var(--float-shadow);
-  overflow: auto;
+  overflow: hidden;
 }
 
 dialog.modal::backdrop {
@@ -1092,6 +1095,8 @@ dialog.modal::backdrop {
 }
 
 dialog.modal[open] {
+  display: flex;
+  flex-direction: column;
   animation: rise-in 220ms var(--ease);
 }
 
@@ -1137,25 +1142,35 @@ dialog.modal:focus {
   outline: none;
 }
 
+/* The head and the actions stay in view; only the body between them scrolls when the viewport is short. */
+.modal-head {
+  flex: none;
+  padding: 24px 24px 0;
+  min-width: 0;
+}
+
+.modal-head h2 {
+  min-width: 0;
+  overflow-wrap: break-word;
+}
+
 .modal-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
   display: flex;
   flex-direction: column;
   gap: 16px;
-  padding: 24px;
-}
-
-.modal-head {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 16px;
+  padding: 16px 24px;
 }
 
 .modal-actions {
+  flex: none;
   display: flex;
   flex-wrap: wrap;
   justify-content: flex-end;
   gap: 8px;
+  padding: 0 min(24px, 8vw) 24px;
 }
 
 /* Shown over every screen while the connection to a room is being restored. */

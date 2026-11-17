@@ -208,7 +208,9 @@ export function openModal(opts: ModalOptions): { dialog: HTMLDialogElement; clos
   const dialog = h(
     "dialog",
     { class: "modal", "aria-labelledby": titleId },
-    h("div", { class: "modal-body" }, h("h2", { id: titleId }, opts.title), ...opts.body, h("div", { class: "modal-actions" }, ...actions)),
+    h("div", { class: "modal-head" }, h("h2", { id: titleId }, opts.title)),
+    h("div", { class: "modal-body", tabindex: "0" }, ...opts.body),
+    h("div", { class: "modal-actions" }, ...actions),
   );
   const entry = { dialog, id, silent: false };
   // Close at once, so the page is interactive and focus is back where it was before the exit

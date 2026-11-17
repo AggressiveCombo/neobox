@@ -1,12 +1,8 @@
 /* Settings: a section list beside the sections. On phones the list is a row of
    choices above one column. */
 
-/* #ui is a row flex box: a stretched page has the viewport's height, and its content shrinks into it. Size to the content (min-height still fills the viewport). */
-.settings-page {
-  align-self: flex-start;
-}
-
 .settings-page .settings-layout {
+  grid-template-columns: minmax(0, 1fr);
   display: grid;
   gap: 16px;
   align-items: start;
@@ -48,6 +44,7 @@
 
 .settings-body {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 24px;
   min-width: 0;
 }
@@ -214,6 +211,7 @@
 /* Palettes: a radio, a name, and the team colours as squares. */
 .palette-group {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 8px;
   margin: 0;
   padding: 0;
@@ -260,8 +258,10 @@
 
 .palette-swatches {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 4px;
+  min-width: 0;
 }
 
 .swatch {
@@ -326,7 +326,11 @@
 .touch-cell[data-slot="grab"] { grid-area: grab; }
 
 .touch-layout .settings-sub {
-  margin: 12px 0 0;
+  margin: 12px 0 4px;
+}
+
+.touch-layout > .settings-group {
+  margin-top: 12px;
 }
 
 .touch-slots {

@@ -7,6 +7,13 @@
   align-items: start;
 }
 
+/* Long unbroken runs (URLs, pasted strings, translated filler) wrap instead of widening the column. */
+.info-main,
+.info-credits,
+.doc {
+  overflow-wrap: anywhere;
+}
+
 .info-main {
   display: grid;
   gap: 18px;
@@ -59,6 +66,7 @@
   padding: 0;
   list-style: none;
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 12px;
 }
 
