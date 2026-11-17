@@ -199,17 +199,29 @@ export interface ModalOptions {
 
 /** Open modals, top last. Each one owns a history entry; Back closes the top one (popstate in app.ts closes the modals above it). */
 const openStack: { dialog: HTMLDialogElement; id: string; silent: boolean }[] = [];
-/** History pops that page-side modal closes asked for and that have not landed yet (history.back() is async). */
-let pagePops = 0;
-/** True while such a pop is in flight: the nav subscriber holds screen changes until it lands. */
+/** Entries of modals closed from the page whose pop has not been asked for yet. */
+let deadEntries = 0;
+/** The history.go() that page-side closes asked for, not yet landed: the nav subscriber holds screen changes until it does. */
+let popInFlight = false;
 export function modalPopPending(): boolean {
-  return pagePops > 0;
+  return popInFlight || deadEntries > 0;
 }
-/** Called from popstate: true, with one pop accounted for, if this Back is a page-side modal close's pop. */
+/**
+ * Called from popstate: true, with that pop accounted for, if this Back is a page-side modal close's pop. The next
+ * queued pop is asked for only now: WebKit drops a history traversal queued behind one still in flight.
+ */
 export function takeModalPop(): boolean {
-  if (pagePops === 0) return false;
-  pagePops--;
+  if (!popInFlight) return false;
+  popInFlight = false;
+  flushModalPops();
   return true;
+}
+function flushModalPops(): void {
+  if (popInFlight || deadEntries === 0) return;
+  const n = deadEntries;
+  deadEntries = 0;
+  popInFlight = true;
+  history.go(-n);
 }
 
 /**
@@ -245,12 +257,12 @@ export function openModal(opts: ModalOptions): { dialog: HTMLDialogElement; clos
   dialog.addEventListener("close", () => {
     const i = openStack.indexOf(entry);
     if (i >= 0) openStack.splice(i, 1);
-    // Closed from the page rather than by Back: this modal's entry is still in history, so pop it. Left in place it
-    // would be a dead entry: Back would land on the screen the modal opened over. The pop is async, so several page-side
-    // closes queue one pop each (top first, as the entries sit); screen changes made until they land wait (app.ts).
+    // Closed from the page rather than by Back: this modal's entry is still in history, so it is popped. Left in place it
+    // would be a dead entry: Back would land on the screen the modal opened over. Page-side closes queue their pops
+    // one at a time (flushModalPops); screen changes made until they land wait (app.ts).
     if (!entry.silent) {
-      pagePops++;
-      history.back();
+      deadEntries++;
+      flushModalPops();
     }
     opts.onclose?.();
     if (reducedMotion()) {
