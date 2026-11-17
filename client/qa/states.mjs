@@ -359,9 +359,15 @@ export const STATES = [
   state("error-api", {}, async (s) => {
     // The server's map list (/api/maps) fails and so does the bundled fallback (/offline-maps.json): both HTTP 500.
     const h = await s.open("anon", { serviceWorkers: "block" });
-    // The failures are injected: their requests and console messages are induced, not defects.
-    h.expected = [/\/api\/maps(\?|$)/, /\/offline-maps\.json(\?|$)/];
-    await h.context.route(/\/(api\/maps|offline-maps\.json)(\?|$)/, (route) => route.fulfill({ status: 500, contentType: "text/plain", body: "server error" }));
+    // The failures are injected in the page's fetch: WebKit does not reliably apply context routes to these requests.
+    await h.context.addInitScript(() => {
+      const real = window.fetch.bind(window);
+      window.fetch = (input, init) => {
+        const url = typeof input === "string" ? input : input instanceof Request ? input.url : String(input);
+        if (/\/(api\/maps|offline-maps\.json)(\?|$)/.test(url)) return Promise.resolve(new Response("server error", { status: 500, headers: { "content-type": "text/plain" } }));
+        return real(input, init);
+      };
+    });
     await h.page.goto(s.base);
     await menuName(h.page).waitFor();
     await navTo(h.page, "Practice");

@@ -220,7 +220,7 @@ const placeholderHits = (text) =>
   [...text.matchAll(PLACEHOLDER)].map((m) => text.slice(Math.max(0, m.index - 30), m.index + m[0].length + 30).replace(/\s+/g, " "));
 
 /** Failed-request lines a network-down state causes (chromium, firefox, webkit wordings). */
-const OFFLINE_ERR = /ERR_INTERNET_DISCONNECTED|NS_ERROR_OFFLINE|NetworkError when attempting|Failed to fetch|WebSocket connection to .* failed|can.t establish a connection/;
+const OFFLINE_ERR = /ERR_INTERNET_DISCONNECTED|NS_ERROR_OFFLINE|NetworkError when attempting|Failed to fetch|WebSocket connection to .* failed|can.t establish a connection|WebKit encountered an internal error/;
 
 /**
  * States fail things on purpose and declare them (`h.expected` URL patterns, `h.expectedWarnings` text, as capture.mjs
