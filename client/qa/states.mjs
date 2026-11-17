@@ -92,6 +92,8 @@ async function approvedMap(s) {
   await page.getByRole("button", { name: "Upload map", exact: true }).click();
   await page.locator("ul[aria-label=maps] li").filter({ hasText: name }).waitFor();
   const admin = await s.open("admin");
+  // Seeding only, as the maker page: the admin page's sticky header covers the maps table on a short scenario viewport.
+  await admin.page.setViewportSize(DESKTOP.viewport);
   await admin.page.goto(`${s.base}/admin`);
   await admin.page.locator("#pw").fill(ADMIN_PASSWORD);
   await button(admin.page, "Log in").click();

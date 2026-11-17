@@ -385,13 +385,19 @@ async function deadCase(s) {
   let clicked = 0;
   for (const id of DEAD_SCREENS) {
     let cur = null;
+    const release = async () => {
+      if (!cur) return;
+      await closeHandle(cur.h);
+      await closeSeeds(s, cur.from, cur.h);
+    };
     const open = async () => {
-      if (cur) await closeHandle(cur.h);
+      await release();
+      const from = s.handles.length;
       const h = track(await stateById(id).prepare(s));
       await inject(h.page);
       const controls = await settledHarvest(h.page);
       await h.page.evaluate(INSTALL_MUTATION);
-      cur = { h, controls, dirty: false };
+      cur = { h, controls, dirty: false, from };
     };
     await open();
     console.error(`dead ${id}: ${cur.controls.length} controls, ${new Date().toISOString().slice(11, 19)}`);
@@ -493,7 +499,7 @@ async function deadCase(s) {
         cur.dirty = true;
       }
     }
-    if (cur) await closeHandle(cur.h);
+    await release();
   }
   pruneInduced(s);
   const file = writeEvidence("dead-controls", { dead, skipped, unclickable, worked });
