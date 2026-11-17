@@ -149,8 +149,8 @@ async fn play(
                                 s.on_ticks(&ticks);
                                 s.input_ack(input_ack);
                                 c.on_margin(margin16 as f64 / 16.0);
-                                if s.desynced {
-                                    s.desynced = false;
+                                if s.desync.is_some() {
+                                    s.desync = None;
                                     tx.send(send_json(&ClientMsg::Resync)).await.map_err(|e| e.to_string())?;
                                 }
                             }
@@ -160,6 +160,7 @@ async fn play(
                                 s.on_checksum(tick, hash);
                             }
                         }
+                        Ok(ServerFrame::Hint { .. }) => {}
                         Ok(ServerFrame::Pong { client_time, .. }) => {
                             let now = begin.elapsed().as_secs_f64() * 1000.0;
                             let sample = now - client_time;
