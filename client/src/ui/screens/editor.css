@@ -511,22 +511,19 @@
   }
 
   .editor-stage {
-    order: 1;
     flex: 1 1 auto;
   }
 
   .editor-tools {
-    order: 2;
     width: auto;
     flex-direction: row;
     align-items: center;
     gap: 0;
-    padding: 6px 28px 6px 16px;
-    /* Fades the right edge: more tools lie past it; scroll to reach them. */
-    -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent);
-    mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent);
-    overflow-x: auto;
-    overflow-y: hidden;
+    padding: 4px 16px;
+    flex-wrap: wrap;
+    align-content: center;
+    row-gap: 4px;
+    overflow: hidden;
     border-right: 0;
     border-top: 1px solid var(--line);
   }

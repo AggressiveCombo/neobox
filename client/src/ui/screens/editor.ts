@@ -239,6 +239,13 @@ export const editorScreen: ScreenFactory = (ctx) => {
   });
 
   const layout = h("div", { class: "editor-body" }, toolRail, stage, sideEl);
+  // Tab order follows the screen: on portrait phones the rail sits under the stage, so the DOM moves with it.
+  const portraitPhone = matchMedia("(max-width: 600px) and (orientation: portrait)");
+  const placeRail = (): void => {
+    layout.insertBefore(toolRail, portraitPhone.matches ? sideEl : stage);
+  };
+  placeRail();
+  portraitPhone.addEventListener("change", placeRail);
   const toolsPart = [topbar, layout, menu];
 
   fileInput.addEventListener("change", () => {
