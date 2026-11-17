@@ -12,7 +12,7 @@ neobox-net = { path = "../net" }
 neobox-store = { path = "../store" }
 neobox-wasm = { path = "../wasm" }
 axum = { version = "0.8", features = ["ws"] }
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "sync", "net", "signal"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "sync", "net", "signal", "fs"] }
 tower-http = { version = "0.6", features = ["fs", "compression-gzip", "compression-br", "set-header"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }

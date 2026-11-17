@@ -6,7 +6,7 @@ import { Engine, loadWasmEngine } from "./engine";
 // build.ts defines WASM_VERSION (a hash of neobox.wasm). The query names this build's copy, so a service worker
 // from an older build, which caches the bare name, cannot answer with the previous engine.
 declare const WASM_VERSION: string | undefined;
-const WASM_URL = typeof WASM_VERSION === "string" && WASM_VERSION ? `./neobox.wasm?v=${WASM_VERSION}` : "./neobox.wasm";
+const WASM_URL = typeof WASM_VERSION === "string" && WASM_VERSION ? `/neobox.wasm?v=${WASM_VERSION}` : "/neobox.wasm";
 
 export type EngineState =
   | { status: "loading"; loaded: number; total: number }

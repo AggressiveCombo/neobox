@@ -16,6 +16,9 @@ const result = await Bun.build({
   minify: true,
   sourcemap: "linked",
   target: "browser",
+  // Absolute asset URLs: a relative "./chunk-*.js" in index.html resolves under the page path, so a deep
+  // unknown route would request a missing chunk and get the app shell back.
+  publicPath: "/",
   // Fonts are served from public/fonts (also used by the server's admin page), not inlined.
   external: ["/fonts/*"],
   define: { WASM_VERSION: JSON.stringify(wasmVersion) },

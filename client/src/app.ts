@@ -94,12 +94,25 @@ function decodeSnapshot(state: string): Uint8Array {
   return Uint8Array.from(atob(state), (c) => c.charCodeAt(0));
 }
 
-/** A room code given as `/CODE` or `?room=CODE` (invite links), or null. */
-function inviteFromUrl(): string | null {
+/** What the page address asks for: a room code (`/CODE` or `?room=CODE`), an address that names no room, or null for the plain menu. */
+type UrlInvite = { code: string } | { error: "malformed" | "unknown" } | null;
+
+/** The room code the address names, or why it names none. */
+function inviteFromUrl(): UrlInvite {
   const fromQuery = new URLSearchParams(location.search).get("room");
-  const fromPath = location.pathname.replace(/^\/+|\/+$/g, "");
-  const code = (fromQuery ?? fromPath).trim().toUpperCase();
-  return ROOM_CODE_RE.test(code) ? code : null;
+  if (fromQuery !== null) {
+    const code = fromQuery.trim().toUpperCase();
+    return ROOM_CODE_RE.test(code) ? { code } : { error: "malformed" };
+  }
+  let path: string;
+  try {
+    path = decodeURIComponent(location.pathname).replace(/^\/+|\/+$/g, "").trim();
+  } catch {
+    return { error: "malformed" };
+  }
+  if (path === "") return null;
+  const code = path.toUpperCase();
+  return ROOM_CODE_RE.test(code) ? { code } : { error: "unknown" };
 }
 
 /** A history entry: the screen it shows, the screen it was entered from, and the modal it opened, if any. */
@@ -308,7 +321,7 @@ export function start(): Store<AppState> {
   // A signed-in player joins under the account's name, so the invite waits for the account lookup.
   const invite = inviteFromUrl();
   startAccountSync(ctx, () => {
-    if (invite !== null) joinRoom(invite);
+    if (invite !== null && "code" in invite) joinRoom(invite.code);
   });
   mountJukebox(ctx);
 
@@ -692,7 +705,8 @@ export function start(): Store<AppState> {
             serverGone();
           } else {
             leaveRoom();
-            toast(msg.code === "room_not_found" ? "That room has closed, so you cannot rejoin it." : `could not rejoin the room: ${msg.message}`, "error");
+            if (msg.code === "room_not_found") store.set({ notice: "That room has closed, so you cannot rejoin it." });
+            else toast(`could not rejoin the room: ${msg.message}`, "error");
           }
           return;
         }
@@ -811,8 +825,15 @@ export function start(): Store<AppState> {
     if (store.state.reconnecting) store.set({ reconnecting: false });
   }
 
+  /** Open a fresh socket for the resume. A stalled attempt is replaced; nothing happens while the link is up. */
   function connectForResume(): void {
-    if (net.status === "closed") net.connect(socketUrl());
+    if (net.status === "open") return;
+    switching = true;
+    try {
+      net.connect(socketUrl());
+    } finally {
+      switching = false;
+    }
   }
 
   /** Schedule the next attempt, or give up once the deadline has passed. */
@@ -846,11 +867,12 @@ export function start(): Store<AppState> {
     scheduleReconnect();
   }
 
-  /** Retry now (instead of waiting out the backoff) when the page is shown again or the network returns. */
+  /** Retry now, from the start of the backoff and replacing a stalled attempt, when the page is shown again or the network returns. */
   function retryNow(): void {
-    if (!store.state.reconnecting || net.status !== "closed") return;
+    if (!store.state.reconnecting) return;
     if (reconnectTimer !== null) window.clearTimeout(reconnectTimer);
     reconnectTimer = null;
+    reconnectAttempt = 0;
     connectForResume();
   }
 
@@ -1075,6 +1097,36 @@ export function start(): Store<AppState> {
     });
   }
 
+  /** An address that names no room: say so, with a way back to the menu. */
+  function badLink(error: "malformed" | "unknown"): void {
+    let m: { close(): void } | null = null;
+    const browse = h(
+      "button",
+      {
+        type: "button",
+        onclick: () => {
+          store.set({ screen: "browse" });
+          m?.close();
+        },
+      },
+      "Browse rooms",
+    );
+    const menu = h("button", { type: "button", onclick: () => m?.close() }, "Back to menu");
+    m = openModal(
+      error === "malformed"
+        ? {
+            title: "Link not recognised",
+            body: [h("p", null, "This link is not valid, so it does not open a room. Check the address, or browse the open rooms.")],
+            actions: [browse, menu],
+          }
+        : {
+            title: "Page not found",
+            body: [h("p", null, "There is nothing at this address. Check the link, or go back to the menu.")],
+            actions: [menu],
+          },
+    );
+  }
+
   // The first history entry is the screen this page opened on, at the URL it opened at.
   history.replaceState({ screen: store.state.screen, prev: null }, "");
   resizeAll();
@@ -1086,5 +1138,6 @@ export function start(): Store<AppState> {
       boot.hidden = true;
     }, 180);
   }
+  if (invite !== null && "error" in invite) badLink(invite.error);
   return store;
 }

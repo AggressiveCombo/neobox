@@ -26,18 +26,18 @@ mod ticket;
 mod youtube;
 
 use axum::extract::{ConnectInfo, Request, State, WebSocketUpgrade};
-use axum::http::{header, HeaderMap, HeaderValue, StatusCode};
+use axum::http::{header, HeaderMap, HeaderValue, StatusCode, Uri};
 use axum::middleware;
-use axum::response::{IntoResponse, Response};
+use axum::response::{Html, IntoResponse, Response};
 use axum::routing::{any, get};
 use axum::{Json, Router};
 use hub::{Config, Hub};
 use neobox_store::Store;
 use std::net::SocketAddr;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tower_http::compression::CompressionLayer;
-use tower_http::services::{ServeDir, ServeFile};
+use tower_http::services::ServeDir;
 use tower_http::set_header::SetResponseHeaderLayer;
 use tracing::info;
 use tracing_subscriber::layer::SubscriberExt;
@@ -61,6 +61,21 @@ async fn no_store_entry(req: Request, next: middleware::Next) -> Response {
         res.headers_mut().insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
     }
     res
+}
+
+/// Serves the app shell for an unknown page path. A path whose last segment has an extension names an
+/// asset, so a missing one is a 404 rather than HTML handed to a script or stylesheet request.
+async fn spa_fallback(uri: Uri, index: PathBuf) -> Response {
+    if uri.path().rsplit('/').next().is_some_and(|last| last.contains('.')) {
+        return StatusCode::NOT_FOUND.into_response();
+    }
+    match tokio::fs::read(&index).await {
+        Ok(bytes) => Html(bytes).into_response(),
+        Err(e) => {
+            tracing::error!(path = %index.display(), "cannot read app shell: {e}");
+            StatusCode::INTERNAL_SERVER_ERROR.into_response()
+        }
+    }
 }
 
 /// Unknown `/api` paths answer 404 JSON, never the web shell.
@@ -117,7 +132,11 @@ async fn main() {
     spawn_housekeeping(hub.clone());
     cluster::spawn_heartbeat(hub.clone());
 
-    let files = ServeDir::new(&static_dir).fallback(ServeFile::new(static_dir.join("index.html")));
+    // Unknown paths get the app shell so the client can show its own not-found screen. A missing asset
+    // (the last segment has an extension) is a real 404: serving HTML in its place breaks the module load.
+    let index = static_dir.join("index.html");
+    let spa = Router::new().fallback(move |uri: Uri| spa_fallback(uri, index.clone()));
+    let files = ServeDir::new(&static_dir).fallback(spa);
     // A regional node serves the game, `/healthz` and `/internal`; everything else goes to the main server.
     let routes = if hub.cfg.main_url.is_some() {
         Router::new()
