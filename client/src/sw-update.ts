@@ -20,6 +20,8 @@ export function watchServiceWorker(store: Store<AppState>): void {
   window.addEventListener("load", () => {
     sw.register("/sw.js", { updateViaCache: "none" })
       .then((reg) => {
+        // Engines that block service workers (automation, some privacy modes) resolve no registration: nothing to update.
+        if (!reg) return;
         const check = () => reg.update().catch((err: unknown) => console.warn("service worker update:", err));
         check();
         document.addEventListener("visibilitychange", () => {
