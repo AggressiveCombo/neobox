@@ -167,11 +167,13 @@ pub struct ServerMatch {
 }
 
 /// Result of processing a client input frame.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 pub struct InputReceipt {
     /// Ticks early (positive) or late (negative) the client's heartbeat
     /// arrived.
     pub margin: i64,
+    /// Changes taken, as (tick, mask), for forwarding to the other players ahead of their batches.
+    pub taken: Vec<(u32, u8)>,
 }
 
 impl ServerMatch {
@@ -206,6 +208,7 @@ impl ServerMatch {
         }
         // inputs stamped further ahead than any client predicts are clamped
         let horizon = self.tick + MAX_PREDICTION * 2;
+        let mut taken = Vec::new();
         for &(seq, tick, mask) in &frame.changes {
             if seq <= self.input_seqs[p] {
                 continue;
@@ -218,8 +221,9 @@ impl ServerMatch {
             }
             let at = tick.min(horizon).max(self.tick).max(latest.map_or(0, |l| l.0 + 1));
             self.inputs.record(player, at, mask);
+            taken.push((at, mask));
         }
-        InputReceipt { margin: frame.now as i64 - self.tick as i64 }
+        InputReceipt { margin: frame.now as i64 - self.tick as i64, taken }
     }
 
     /// Newest input change sequence number processed for `player`.
@@ -334,6 +338,9 @@ pub struct ClientSession {
     /// local input changes (sequence number, tick, mask), ascending; kept
     /// until acknowledged and confirmed
     pending: Vec<(u32, u32, u8)>,
+    /// Per player, the changes the server forwarded ahead of their batches, ascending by tick.
+    /// They are predicted until the batch of their tick confirms them.
+    hints: Vec<Vec<(u32, u8)>>,
     next_seq: u32,
     acked_seq: u32,
     states: VecDeque<State>,
@@ -431,6 +438,7 @@ impl ClientSession {
             inputs: InputLog::default(),
             events: VecDeque::new(),
             pending: Vec::new(),
+            hints: Vec::new(),
             next_seq: 1,
             acked_seq: 0,
             states,
@@ -594,6 +602,9 @@ impl ClientSession {
             // others keep their last known input
             self.inputs.masks_at(self.known - 1, out);
         }
+        if tick >= self.known {
+            self.apply_hints(tick, out);
+        }
         if let Some(l) = self.local {
             let l = l as usize;
             if out.len() <= l {
@@ -633,9 +644,7 @@ impl ClientSession {
             if let Some((u, had)) = self.used.get(i) {
                 let mut actual = std::mem::take(&mut self.scratch);
                 self.inputs.masks_at(t.tick, &mut actual);
-                let n = u.len().max(actual.len());
-                let differs = (0..n).any(|k| u.get(k).copied().unwrap_or(0) != actual.get(k).copied().unwrap_or(0))
-                    || *had != !t.events.is_empty();
+                let differs = !Self::same_masks(u, &actual) || *had != !t.events.is_empty();
                 self.scratch = actual;
                 if differs {
                     self.mark_dirty(t.tick);
@@ -643,7 +652,63 @@ impl ClientSession {
             }
         }
         self.drop_settled_inputs();
+        self.drop_settled_hints();
         self.settle();
+    }
+
+    /// A remote player's change the server accepted but has not confirmed yet, sent on arrival
+    /// ahead of the batch of its tick. It is predicted from now on and the batch confirms it; a
+    /// change that disagrees with a prediction already made rolls back at its tick.
+    pub fn on_hint(&mut self, player: u32, tick: u32, mask: u8) {
+        if self.local == Some(player) || tick < self.known {
+            return;
+        }
+        let p = player as usize;
+        if self.hints.len() <= p {
+            self.hints.resize_with(p + 1, Vec::new);
+        }
+        let log = &mut self.hints[p];
+        match log.binary_search_by_key(&tick, |e| e.0) {
+            Ok(i) => log[i].1 = mask,
+            Err(i) => log.insert(i, (tick, mask)),
+        }
+        if tick < self.head() {
+            let mut masks = std::mem::take(&mut self.scratch);
+            self.inputs_for(tick, &mut masks);
+            let differs = self.used.get((tick - self.base) as usize).is_some_and(|(u, _)| !Self::same_masks(u, &masks));
+            self.scratch = masks;
+            if differs {
+                self.mark_dirty(tick);
+                self.resimulate();
+            }
+        }
+    }
+
+    /// Overlay the forwarded changes that take effect by `tick` onto `out`.
+    fn apply_hints(&self, tick: u32, out: &mut Vec<u8>) {
+        for (p, log) in self.hints.iter().enumerate() {
+            let i = log.partition_point(|e| e.0 <= tick);
+            if i > 0 {
+                if out.len() <= p {
+                    out.resize(p + 1, 0);
+                }
+                out[p] = log[i - 1].1;
+            }
+        }
+    }
+
+    /// Forget forwarded changes that the confirmed batches have passed.
+    fn drop_settled_hints(&mut self) {
+        let known = self.known;
+        for log in &mut self.hints {
+            log.retain(|e| e.0 >= known);
+        }
+    }
+
+    /// Equal masks, where a missing player counts as 0.
+    fn same_masks(a: &[u8], b: &[u8]) -> bool {
+        let n = a.len().max(b.len());
+        (0..n).all(|k| a.get(k).copied().unwrap_or(0) == b.get(k).copied().unwrap_or(0))
     }
 
     /// Resimulate if needed, then drop states no longer needed (keeping the
@@ -1032,8 +1097,16 @@ mod tests {
         warm: bool,
         /// (arrival ms, input frame) on the way to the server
         to_server: VecDeque<(f64, InputFrame)>,
-        /// (arrival ms, tick, server input ack, margin in ticks) from the server
-        to_client: VecDeque<(f64, TickData, u32, f64)>,
+        /// (arrival ms, what the server sent) from the server
+        to_client: VecDeque<(f64, Down)>,
+    }
+
+    /// What the server sends a client, in order on one stream.
+    enum Down {
+        /// a tick's confirmed data, the server's input ack and margin in ticks
+        Batch(TickData, u32, f64),
+        /// a change forwarded ahead of its batch: player, tick, mask
+        Hint(u32, u32, u8),
     }
 
     enum Ev {
@@ -1142,7 +1215,7 @@ mod tests {
                     let data = server.step();
                     for (i, p) in peers.iter_mut().enumerate() {
                         let at = jittered(&mut p.rng, net, t + owl, p.to_client.back().map(|b| b.0));
-                        p.to_client.push_back((at, data.clone(), server.input_ack(i as u32), margins[i]));
+                        p.to_client.push_back((at, Down::Batch(data.clone(), server.input_ack(i as u32), margins[i])));
                     }
                     next_step += tick_ms;
                 }
@@ -1153,17 +1226,31 @@ mod tests {
                 }
                 Ev::Up(i) => {
                     let (arr, f) = peers[i].to_server.pop_front().unwrap();
-                    let m = server.submit(i as u32, &f).margin;
+                    let receipt = server.submit(i as u32, &f);
+                    // the server forwards each accepted change to the other players at once
+                    for &(tick, mask) in &receipt.taken {
+                        for (j, q) in peers.iter_mut().enumerate() {
+                            if j != i {
+                                let at = jittered(&mut q.rng, net, t + owl, q.to_client.back().map(|b| b.0));
+                                q.to_client.push_back((at, Down::Hint(i as u32, tick, mask)));
+                            }
+                        }
+                    }
                     // the server's margin counts the part of its current tick already elapsed
                     let to_next = ((next_step - arr) / tick_ms).clamp(0.0, 1.0);
-                    margins[i] = ((m as f64 - (1.0 - to_next)) * 16.0).round() / 16.0;
+                    margins[i] = ((receipt.margin as f64 - (1.0 - to_next)) * 16.0).round() / 16.0;
                 }
                 Ev::Down(i) => {
-                    let (_, data, ack, margin) = peers[i].to_client.pop_front().unwrap();
+                    let (_, msg) = peers[i].to_client.pop_front().unwrap();
                     let p = &mut peers[i];
-                    p.session.on_ticks(&[data]);
-                    p.session.input_ack(ack);
-                    p.clock.on_margin(margin);
+                    match msg {
+                        Down::Batch(data, ack, margin) => {
+                            p.session.on_ticks(&[data]);
+                            p.session.input_ack(ack);
+                            p.clock.on_margin(margin);
+                        }
+                        Down::Hint(player, tick, mask) => p.session.on_hint(player, tick, mask),
+                    }
                 }
             }
         }

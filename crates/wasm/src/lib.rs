@@ -301,6 +301,12 @@ pub unsafe extern "C" fn nb_server_frame(ptr: u32, len: u32, now_ms: f64) -> i32
                 }
                 0
             }
+            ServerFrame::Hint { player, tick, mask } => {
+                if let Some(s) = a.session.as_mut() {
+                    s.on_hint(player, tick, mask);
+                }
+                0
+            }
             ServerFrame::Checksum { tick, hash } => {
                 if let Some(s) = a.session.as_mut() {
                     let was = s.desync.is_some();

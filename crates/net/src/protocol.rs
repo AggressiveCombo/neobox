@@ -497,6 +497,8 @@ pub enum ServerFrame {
     Batch { ticks: Vec<TickData>, input_ack: u32, margin16: i32 },
     Pong { client_time: f64, server_tick: u32, tick_phase: f64 },
     Checksum { tick: u32, hash: u64 },
+    /// A change the server accepted for `player`, sent ahead of the batch of its tick.
+    Hint { player: u32, tick: u32, mask: u8 },
 }
 
 const C_INPUT: u8 = 1;
@@ -504,6 +506,7 @@ const C_PING: u8 = 2;
 const S_BATCH: u8 = 0x81;
 const S_PONG: u8 = 0x82;
 const S_CHECKSUM: u8 = 0x83;
+const S_HINT: u8 = 0x84;
 
 impl ClientFrame {
     pub fn encode(&self) -> Vec<u8> {
@@ -600,6 +603,12 @@ impl ServerFrame {
                 w.var(*tick as u64);
                 w.u64(*hash);
             }
+            ServerFrame::Hint { player, tick, mask } => {
+                w.u8(S_HINT);
+                w.var(*player as u64);
+                w.var(*tick as u64);
+                w.u8(*mask);
+            }
         }
         w.buf
     }
@@ -643,6 +652,7 @@ impl ServerFrame {
             }
             S_PONG => ServerFrame::Pong { client_time: r.f64()?, server_tick: r.var32()?, tick_phase: r.f64()? },
             S_CHECKSUM => ServerFrame::Checksum { tick: r.var32()?, hash: r.u64()? },
+            S_HINT => ServerFrame::Hint { player: r.var32()?, tick: r.var32()?, mask: r.u8()? },
             _ => return Err(DecodeError),
         };
         if !r.done() {
@@ -669,6 +679,8 @@ mod tests {
             margin16: -9,
         };
         assert_eq!(ServerFrame::decode(&s.encode()).unwrap(), s);
+        let h = ServerFrame::Hint { player: 3, tick: 1234, mask: 5 };
+        assert_eq!(ServerFrame::decode(&h.encode()).unwrap(), h);
         assert!(ClientFrame::decode(&[1, 0x80]).is_err());
     }
 }
