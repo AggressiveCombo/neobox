@@ -216,7 +216,7 @@ export function showPostGame(ctx: AppCtx, award: XpAward, map: MapMeta | null): 
   );
 
   const closeBtn = h("button", { type: "button", class: "primary", onclick: () => close() }, icon("arrow-left", 18), "Back to room");
-  const { close } = openModal({
+  const { close, dialog } = openModal({
     title: "Game over",
     body: [body],
     actions: [closeBtn],
@@ -225,5 +225,6 @@ export function showPostGame(ctx: AppCtx, award: XpAward, map: MapMeta | null): 
       if (ctx.store.state.xp === award) ctx.store.set({ xp: null });
     },
   });
+  dialog.classList.add("postgame-dialog");
   return close;
 }
