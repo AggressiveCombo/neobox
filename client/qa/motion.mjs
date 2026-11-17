@@ -90,6 +90,32 @@ function animatedMask(a, b) {
   return { mask, masked };
 }
 
+/**
+ * Masks the live clip square (menu arena) by its on-screen box. A modal's scrim dims the clip, so its
+ * idle change falls under PIXEL_DELTA and animatedMask misses it; the clip then keeps the frame above
+ * CHANGE for as long as it plays behind the dialog. The square is what the idle frame showed as live.
+ */
+async function maskLiveSquare(page, mask, width) {
+  const boxes = await page.evaluate(() =>
+    [...document.querySelectorAll(".menu-square.is-live")].map((el) => {
+      const r = el.getBoundingClientRect();
+      return { x0: r.left, y0: r.top, x1: r.right, y1: r.bottom, dpr: window.devicePixelRatio };
+    }),
+  );
+  let added = 0;
+  for (const b of boxes) {
+    for (let y = Math.max(0, Math.floor(b.y0 * b.dpr)); y < Math.ceil(b.y1 * b.dpr); y++) {
+      for (let x = Math.max(0, Math.floor(b.x0 * b.dpr)); x < Math.min(width, Math.ceil(b.x1 * b.dpr)); x++) {
+        if (!mask[y * width + x]) {
+          mask[y * width + x] = 1;
+          added++;
+        }
+      }
+    }
+  }
+  return added;
+}
+
 /** Fraction of unmasked pixels that changed between two decoded frames. */
 function changedFraction(a, b, mask, masked) {
   let n = 0;
@@ -125,13 +151,14 @@ function median(xs) {
  * Measures one transition. `trigger` performs the action; `arrived` rejects unless the destination
  * is on screen. Never throws for a slow or unstable transition: returns pass false with a detail.
  */
-async function measure(page, { id, limit, trigger, arrived }) {
+async function measure(page, { id, limit, trigger, arrived, liveSquare = false }) {
   const shot = () => page.screenshot({ animations: "allow", caret: "hide", timeout: 8000 });
   // Two idle frames before the trigger: pixels that still move between them are masked for the case.
   const idle = decode(await shot());
   await page.waitForTimeout(BASELINE_MS);
   const ref = decode(await shot());
-  const { mask, masked } = animatedMask(idle, ref);
+  const { mask, masked: idleMasked } = animatedMask(idle, ref);
+  const masked = idleMasked + (liveSquare ? await maskLiveSquare(page, mask, ref.width) : 0);
   const total = ref.width * ref.height;
   if (masked > total / 2) {
     return {
@@ -208,6 +235,7 @@ const CASES = [
       return measure(page, {
         id: "ui.modal.open.news",
         limit: 300,
+        liveSquare: true,
         trigger: () => button(page, "News").click(),
         arrived: () => dialog.waitFor({ state: "visible", timeout: MAX_MS }),
       });
@@ -225,6 +253,7 @@ const CASES = [
       return measure(page, {
         id: "ui.modal.close.news",
         limit: 300,
+        liveSquare: true,
         trigger: () => page.keyboard.press("Escape"),
         arrived: () => dialog.waitFor({ state: "detached", timeout: MAX_MS }),
       });
