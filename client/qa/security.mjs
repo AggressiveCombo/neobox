@@ -11,13 +11,22 @@
 //                             chat (filter on), and shows unmasked after the viewer turns the profanity filter off.
 //   sec.mod.muteBlocked        1 when a muted guest's chat is refused with a `muted` error and never reaches the host.
 //   sec.mod.kickVisible        1 when a kicked guest receives the `kicked` notice with a reason.
-//   sec.chat.dupDelivered      extra deliveries of one chat line to a watcher (0 passes; raw WebSocket).
-//   sec.typing.relayed         typing signals from a muted guest that reach the host (0 passes; raw WebSocket).
+//   sec.chat.dupDelivered      1 when a host's chat line reaches a watcher exactly once (raw WebSocket).
+//   sec.chat.extraCopies       extra deliveries of that line beyond the first (0 passes).
+//   sec.chat.multiSocketDelivered  lines from three raw tabs on one address (one 3-line burst each) that reach the
+//                             host. Passes at 1-3: sockets on one address share one chat budget.
+//   sec.chat.commandReplies   `/help` replies to 20 slash commands sent in one tick. Passes at 1-3 (commands spend
+//                             the chat budget), with rate_limited errors for the rest.
+//   sec.typing.relayed        1 when a guest's typing reaches the host before any mute (raw WebSocket).
+//   sec.typing.mutedRelayed   typing signals from a muted guest that reach the host (0 passes).
+//   *.phone                   chat rate and profanity cases re-run in a phone viewport (sec.chat.rateLimited.phone,
+//                             sec.profanity.viewerMasked.phone).
 //
 // Run: cd client && QA_OUT=<dir> node qa/security.mjs     (QA_ENGINES=chromium to narrow)
 // Output: <QA_OUT>/security-<engine>.{json,md}; evidence under <QA_OUT>/evidence/security-<engine>/.
-// The XSS, chat rate and profanity cases run on every selected engine. Raw WebSocket origin, name and moderation
-// cases run on chromium only; other engines get an info row.
+// The XSS, chat rate and profanity cases run on every selected engine (chat rate and profanity also in a phone
+// viewport). Raw WebSocket origin, name, moderation, multi-socket and command cases run on chromium only; other
+// engines get an info row.
 //
 // Self-test: QA_SELF_TEST=<mode> runs only that key's case with a known fault; that case must FAIL.
 //   xss        innerHTML of a marked payload into h1.room-title (a real unsafe DOM insertion)
@@ -26,6 +35,7 @@
 //   ratelimit  sends 3 chats (within the server burst) where the case expects 20 to be limited
 //   profanity  sends a clean line where the case expects the viewer to see a masked profane word
 //   mute       skips the host's mute frame where the case expects the guest to be refused
+//   multisocket  gives each tab of the three-tab burst its own forwarded address where the case expects one budget
 // Use a separate QA_OUT for self-tests (each run overwrites <instrument>-<engine>.json).
 
 import http from "node:http";
@@ -59,9 +69,9 @@ const PAYLOADS = [
 ];
 const NAME_PAYLOADS = ["<b id=QAX4>", '"><b id=QAX5>', "<i id=QAX6>"];
 
-// Runs before page code in every page. Records the page's sockets and received frames, and counts any
-// element added to the DOM that carries a QAX marker (attribute value or script text). Markup the app
-// renders as text creates no element, so it is not a hit.
+// Runs before page code in every page. Records the page's sockets and received frames, and counts any element the
+// page inserts into the DOM with a QAX<n> id (the payloads' marker). Markup the app renders as text creates no
+// element, so it is not a hit.
 const INIT = () => {
   window.__ws = [];
   window.__frames = [];
@@ -82,8 +92,7 @@ const INIT = () => {
       return socket;
     },
   });
-  const marked = (el) =>
-    [...el.attributes].some((a) => a.value.includes("QAX")) || (el.localName === "script" && el.textContent.includes("QAX"));
+  const marked = (el) => /^QAX\d+$/.test(el.id);
   const scan = (node) => {
     if (node.nodeType !== 1) return;
     for (const el of [node, ...node.querySelectorAll("*")]) if (marked(el)) window.__xssHits.push(el.localName);
@@ -93,8 +102,8 @@ const INIT = () => {
   }).observe(document, { childList: true, subtree: true });
 };
 
-async function openPage(s, label) {
-  const h = await s.open(label);
+async function openPage(s, label, { phone = false } = {}) {
+  const h = await s.open(label, { phone });
   await h.context.addInitScript(INIT);
   watchPage(h);
   return h;
@@ -119,8 +128,25 @@ async function nameSurface(page, base, payload) {
   if (!(await page.locator(".home-browse").isDisabled())) throw new Error(`name accepted: ${payload}`);
 }
 
+// The server strips '<' and '>' from room names (clean_label), so the title shows the stored form. The raw payload
+// is still sent, so the server's stripping is part of what this case exercises.
+const storedName = (typed) => typed.replace(/[<>]/g, "");
+async function createRoomRaw(h, base, typed, { isPublic }) {
+  const { page } = h;
+  await page.goto(base);
+  await menuName(page).waitFor();
+  await playFromMenu(page, null);
+  await button(page, "New room").click();
+  await page.getByRole("heading", { name: "Create a room", exact: true }).waitFor();
+  await page.getByLabel("room name", { exact: true }).fill(typed);
+  const box = page.getByLabel("Public", { exact: true });
+  if ((await box.isChecked()) !== isPublic) await box.setChecked(isPublic);
+  await button(page, "Create room").click();
+  await page.locator("h1.room-title").filter({ hasText: storedName(typed) }).waitFor();
+}
+
 async function roomSurface(host, browse, base, payload) {
-  await createRoom(host, base, payload, { isPublic: true });
+  await createRoomRaw(host, base, payload, { isPublic: true });
   await browse.page.goto(base);
   await playFromMenu(browse.page, null);
   await browse.page.locator('ul[aria-label="rooms"]').waitFor();
@@ -175,10 +201,11 @@ async function xssCase(s, base) {
   };
 }
 
-async function chatRateCase(s, base) {
-  const h = await openPage(s, "rate");
+async function chatRateCase(s, base, { phone = false } = {}) {
+  const h = await openPage(s, "rate", { phone });
   const page = h.page;
   await createRoom(h, base, uniqueName("rate"), { isPublic: false });
+  if (phone) await page.locator('button[data-tab="chat"]').click();
   await page.locator(".room-chat-input").waitFor();
   const n = MODE === "ratelimit" ? 3 : 20;
   await page.evaluate((count) => {
@@ -293,8 +320,8 @@ class RawWs {
   }
 }
 
-/** Opens /ws with an optional Origin header. Resolves with the HTTP status and the RawWs (null when not upgraded). */
-function connect(base, origin) {
+/** Opens /ws with an optional Origin and extra request headers. Resolves with the HTTP status and the RawWs (null when not upgraded). */
+function connect(base, origin, extra = {}) {
   const url = new URL(base);
   const headers = {
     Connection: "Upgrade",
@@ -303,6 +330,7 @@ function connect(base, origin) {
     "Sec-WebSocket-Key": randomBytes(16).toString("base64"),
   };
   if (origin) headers.Origin = origin;
+  Object.assign(headers, extra);
   return new Promise((resolve, reject) => {
     const req = http.request({ host: url.hostname, port: url.port, path: "/ws", headers });
     req.on("upgrade", (res, socket, head) => resolve({ status: res.statusCode, raw: new RawWs(socket, head) }));
@@ -415,13 +443,109 @@ async function modCase(base) {
       metrics: {
         "sec.mod.muteBlocked": muteBlocked,
         "sec.mod.kickVisible": kickVisible,
-        "sec.chat.dupDelivered": Math.max(0, delivered - 1),
-        "sec.typing.relayed": relayed,
+        "sec.chat.dupDelivered": delivered === 1 ? 1 : 0,
+        "sec.chat.extraCopies": Math.max(0, delivered - 1),
+        "sec.typing.relayed": control ? 1 : 0,
+        "sec.typing.mutedRelayed": relayed,
       },
       detail: `control typing ${control ? "relayed" : "not relayed"}; line delivered ${delivered}x; muted chat ${refused ? "refused" : "not refused"}, reached host ${leaked}; muted typing relayed ${relayed}; kick notice ${kicked ? JSON.stringify(kicked.reason) : "none"}`,
     };
   } finally {
     closeAll();
+  }
+}
+
+/**
+ * Chat budget across sockets. A host and three raw tabs on one address (no forwarded header) share one room.
+ * Each tab sends a 3-line burst in one tick. Chat is budgeted per player, per address and per account, so the
+ * tabs share the address's single burst: the host gets at most one burst (3 lines) between them. The
+ * `multisocket` self-test gives each tab its own forwarded address, which multiplies the burst and must fail.
+ */
+async function multiSocketCase(base) {
+  const nonce = randomBytes(3).toString("hex");
+  const burst = 3;
+  const forwarded = (i) => (MODE === "multisocket" ? { "X-Forwarded-For": `10.9.0.${i}` } : {});
+  const socks = await Promise.all([
+    connect(base),
+    connect(base, undefined, forwarded(1)),
+    connect(base, undefined, forwarded(2)),
+    connect(base, undefined, forwarded(3)),
+  ]);
+  const closeAll = () => socks.forEach((s) => s.raw?.close());
+  if (socks.some((s) => !s.raw)) {
+    closeAll();
+    return {
+      pass: false,
+      metrics: { "sec.chat.multiSocketDelivered": 0 },
+      detail: `upgrade status ${socks.map((s) => s.status).join("/")}`,
+    };
+  }
+  try {
+    const [host, ...tabs] = socks.map((s) => s.raw);
+    for (const [x, name] of [
+      [host, `QAHost${nonce}`],
+      ...tabs.map((x, i) => [x, `QATab${i}${nonce}`]),
+    ]) {
+      x.send({ t: "hello", version: 1, name });
+      await x.until((f) => f.t === "welcome" || f.t === "error", 4000);
+    }
+    host.send({ t: "create_room", name: `QA sockets ${nonce}`, password: null, max_players: 8, public: false });
+    const created = await host.until((f) => f.t === "room", 4000);
+    if (!created) return { pass: false, metrics: { "sec.chat.multiSocketDelivered": 0 }, detail: "no room frame after create_room" };
+    for (const x of tabs) x.send({ t: "join_room", room: created.room.code, password: null });
+    const joined = await Promise.all(tabs.map((x) => x.until((f) => f.t === "joined", 4000)));
+    if (joined.some((j) => !j)) {
+      return {
+        pass: false,
+        metrics: { "sec.chat.multiSocketDelivered": 0 },
+        detail: `${joined.filter(Boolean).length} of 3 tabs joined`,
+      };
+    }
+    tabs.forEach((x, i) => {
+      for (let j = 0; j < burst; j++) x.send({ t: "chat", text: `QA tab${i} ${nonce} ${j}` });
+    });
+    await sleep(1500);
+    const delivered = host.frames.filter(
+      (f) => f.t === "chat" && typeof f.text === "string" && f.text.startsWith("QA tab") && f.text.includes(nonce),
+    ).length;
+    const limited = tabs.reduce((n, x) => n + x.frames.filter((f) => f.t === "error" && f.code === "rate_limited").length, 0);
+    return {
+      pass: delivered >= 1 && delivered <= burst,
+      metrics: { "sec.chat.multiSocketDelivered": delivered },
+      detail: `3 tabs x ${burst} lines on one address: delivered ${delivered}, rate_limited errors ${limited}`,
+    };
+  } finally {
+    closeAll();
+  }
+}
+
+/**
+ * Slash commands share the chat budget. A host sends 20 `/help` lines in one tick: at most one burst gets a reply,
+ * and the rest are refused with `rate_limited`.
+ */
+async function commandCase(base) {
+  const nonce = randomBytes(3).toString("hex");
+  const sock = await connect(base);
+  if (!sock.raw) return { pass: false, metrics: { "sec.chat.commandReplies": 0 }, detail: `upgrade status ${sock.status}` };
+  const raw = sock.raw;
+  try {
+    raw.send({ t: "hello", version: 1, name: `QACmd${nonce}` });
+    await raw.until((f) => f.t === "welcome" || f.t === "error", 4000);
+    raw.send({ t: "create_room", name: `QA commands ${nonce}`, password: null, max_players: 8, public: false });
+    if (!(await raw.until((f) => f.t === "room", 4000))) {
+      return { pass: false, metrics: { "sec.chat.commandReplies": 0 }, detail: "no room frame after create_room" };
+    }
+    for (let i = 0; i < 20; i++) raw.send({ t: "chat", text: "/help" });
+    await sleep(1500);
+    const replies = raw.frames.filter((f) => f.t === "chat" && typeof f.text === "string" && f.text.startsWith("Commands")).length;
+    const limited = raw.frames.filter((f) => f.t === "error" && f.code === "rate_limited").length;
+    return {
+      pass: replies >= 1 && replies <= 3 && limited >= 1,
+      metrics: { "sec.chat.commandReplies": replies },
+      detail: `sent 20 /help: replies ${replies}, rate_limited errors ${limited}`,
+    };
+  } finally {
+    raw.close();
   }
 }
 
@@ -442,7 +566,7 @@ const seenInChat = (page, needle) =>
  * A raw-WebSocket host (client bypassed) posts profane lines into its room. The browser viewer's own client must
  * mask them with the filter on, and show them as typed after the viewer turns the filter off in settings.
  */
-async function profanityCase(s, base) {
+async function profanityCase(s, base, { phone = false } = {}) {
   const clean = MODE === "profanity";
   const first = clean ? "hello there" : "fuck";
   const second = "shit";
@@ -459,7 +583,7 @@ async function profanityCase(s, base) {
   }
   const { code, name: roomName } = created.room;
 
-  const viewer = await s.open("viewer", { name: uniqueName("pview") });
+  const viewer = await s.open("viewer", { name: uniqueName("pview"), phone });
   const page = viewer.page;
   await joinByInvite(viewer, base, code, roomName);
 
@@ -507,14 +631,18 @@ for (const engine of engines) {
   if (engine === "chromium") {
     if (want("xss")) await results.case("xss.hits", (s) => xssCase(s, base), opts);
     if (want("ratelimit")) await results.case("chat.rateLimited", (s) => chatRateCase(s, base), opts);
+    if (want("ratelimit")) await results.case("chat.rateLimited.phone", (s) => chatRateCase(s, base, { phone: true }), opts);
     if (want("namelimit")) await results.case("server.nameLimit", () => nameCase(base), opts);
     if (want("origin")) await results.case("ws.originRejected", () => originCase(base), opts);
     if (want("mute")) await results.case("mod", () => modCase(base), opts);
+    if (want("multisocket")) await results.case("chat.multiSocket", () => multiSocketCase(base), opts);
+    if (MODE === null) await results.case("chat.commandFlood", () => commandCase(base), opts);
   } else {
     // Firefox reports requests the instrument's own page.goto aborts as "Navigated away from page" (one per
     // aborted request: problems == net.abortedOther in the run record). Only those are ignored, on non-chromium.
     if (want("xss")) await results.case("xss.hits", (s) => xssCase(s, base), { ...opts, ignore: [/Navigated away from page/] });
     if (want("ratelimit")) await results.case("chat.rateLimited", (s) => chatRateCase(s, base), opts);
+    if (want("ratelimit")) await results.case("chat.rateLimited.phone", (s) => chatRateCase(s, base, { phone: true }), opts);
     await results.case(
       "raw.skipped",
       () => ({ detail: "raw WebSocket cases (nameLimit, originRejected, mod) run on chromium only" }),
@@ -525,6 +653,7 @@ for (const engine of engines) {
   // "Navigated away from page". Chromium does not, so its run keeps every error.
   const profanityOpts = engine === "chromium" ? opts : { ...opts, ignore: [/Navigated away from page/] };
   if (want("profanity")) await results.case("profanity.viewerMasked", (s) => profanityCase(s, base), profanityOpts);
+  if (want("profanity")) await results.case("profanity.viewerMasked.phone", (s) => profanityCase(s, base, { phone: true }), profanityOpts);
 
   results.save();
   await browser.close().catch(() => undefined);
