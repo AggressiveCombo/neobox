@@ -1559,11 +1559,17 @@ impl Room {
                 if !f.changes.is_empty() {
                     p.active = Instant::now();
                 }
-                let m = g.m.submit(id, &f).margin;
+                let receipt = g.m.submit(id, &f);
                 // fraction of the current tick already elapsed counts against the margin
                 let to_next = g.next_tick.saturating_duration_since(Instant::now()).as_secs_f64() * self.tick_hz;
-                let precise = m as f64 - (1.0 - to_next.clamp(0.0, 1.0));
+                let precise = receipt.margin as f64 - (1.0 - to_next.clamp(0.0, 1.0));
                 p.margin16 = (precise * 16.0).round().clamp(-30000.0, 30000.0) as i32;
+                // peers learn each accepted change now rather than with the next batch
+                for &(tick, mask) in &receipt.taken {
+                    for q in self.players.iter().filter(|q| q.id != id && q.in_match) {
+                        q.send(Out::Binary(ServerFrame::Hint { player: id, tick, mask }.encode()));
+                    }
+                }
             }
         }
     }
