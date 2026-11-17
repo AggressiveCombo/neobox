@@ -14,10 +14,9 @@
 //                              the server's NEOBOX_MAX_PLAYERS, default 32; crates/server/src/hub.rs).
 //   social.ping.error.ms       max |HUD ping badge - stats-overlay RTT| over a 3 s sample. Pass <= 10.
 //                              social.ping.updateMs: ms from HUD shown until the badge shows a number.
-//                              NOTE: the badge is the server's smoothed WebSocket ping (conn.rs Pong,
-//                              ConnStats.rtt_ms, sent in the room roster); the RTT row is the client's
-//                              clock-sync Pong (wasm lib.rs ServerFrame::Pong). Two paths, so the gap
-//                              is a measurement difference as well as a display error (see README).
+//                              NOTE: the HUD badge and the RTT row both show state.stats.rttMs (game.ts,
+//                              engine.rtt(); hud.ts renderLink/renderStats), so a gap is a stale or
+//                              mid-update read, not two different measurements (see README).
 //   social.roomList.counts.ok  1 when the Browse list shows the server's public room count (rows and
 //                              "N open") and excludes the private room.
 //   social.presence.latencyMs  max(join, leave): guest's WebSocket send to the host's roster update.
