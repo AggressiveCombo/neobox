@@ -418,6 +418,54 @@ async function reconnect(s) {
   return `guest resumed seat ${before.id} in the same match`;
 }
 
+/**
+ * The reload's resumed snapshot lands while the engine is still downloading (a slow link, a loaded host): the match
+ * is entered once the engine has loaded, not left on the room screen.
+ */
+async function reconnectSlowEngine(s) {
+  const m = await matchWithGuest(s, { clipboard: false });
+  const { host, guest, guestName, code } = m;
+  const before = await connectedSeat(s.base, code, guestName);
+  // the engine's download is held until the resumed match is on the room screen
+  let asked = () => {};
+  const requested = new Promise((resolve) => {
+    asked = resolve;
+  });
+  let release = () => {};
+  const gate = new Promise((resolve) => {
+    release = resolve;
+  });
+  // the worker fetches the engine itself, where a route cannot see it (firefox, webkit): drop it so the reload asks the network
+  await guest.page.evaluate(async () => {
+    for (const registration of await navigator.serviceWorker.getRegistrations()) await registration.unregister();
+  });
+  await guest.context.route("**/neobox.wasm*", async (route) => {
+    asked();
+    await gate;
+    await route.continue();
+  });
+  // a slower CPU also stretches the engine's compile (chromium exposes the throttle)
+  const cdp = s.env.browser.browserType().name() === "chromium" ? await guest.context.newCDPSession(guest.page) : null;
+  await cdp?.send("Emulation.setCPUThrottlingRate", { rate: 4 });
+  await guest.page.reload();
+  const didAsk = await Promise.race([requested.then(() => true), sleep(10_000).then(() => false)]);
+  check(didAsk, "the reloaded page did not ask for the engine");
+  await guest.page.getByText("match in progress", { exact: true }).waitFor();
+  // the resumed snapshot follows the room on the same socket: let it land while the engine still waits
+  await sleep(500);
+  check((await guest.page.locator(".hud-leave").count()) === 0, "the match opened before the engine loaded");
+  release();
+  await cdp?.send("Emulation.setCPUThrottlingRate", { rate: 1 });
+  await guest.page.locator(".hud-leave").waitFor({ state: "visible", timeout: 20_000 });
+  await waitForPixels(guest, "guest canvas after reload");
+  await host.page.locator(".hud-leave").waitFor({ state: "visible" });
+  // the reload resumed the held seat rather than joining as a second player
+  await sleep(1500);
+  const after = await connectedSeat(s.base, code, guestName);
+  check(after.id === before.id, `the guest came back as player ${after.id}, was ${before.id}`);
+  return `guest resumed seat ${before.id} while the engine loaded, then entered the match`;
+}
+
 async function quickPlay(s) {
   const host = await s.open("qhost", { name: uniqueName("qh") });
   const roomName = uniqueName("qroom");
@@ -1281,6 +1329,7 @@ export const scenarios = [
   { name: "room match", run: roomMatch },
   { name: "match menu", run: matchMenu },
   { name: "reconnect", run: reconnect },
+  { name: "reconnect slow engine", run: reconnectSlowEngine },
   { name: "quick play", run: quickPlay },
   { name: "quick play name", run: quickPlayName },
   { name: "levels", run: levels },

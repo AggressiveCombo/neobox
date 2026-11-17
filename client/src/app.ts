@@ -165,6 +165,10 @@ export function start(): Store<AppState> {
   let current: ScreenHandle | null = null;
   let hud: HudHandle | null = null;
   let loop: MatchLoop | null = null;
+  /** A match whose start arrived while the engine still loads (a reload resumes its match during the download). */
+  let pendingMatch: { match: MatchStart; you: number | null; snap: SnapshotBytes | null; frames: Uint8Array[] } | null = null;
+  /** Binary frames kept for a pending match; past this cap the gap they leave makes the engine ask for a resync. */
+  const PENDING_FRAMES_MAX = 600;
   let namesRoom: RoomState | null = null;
   let namesMap = new Map<number, string>();
 
@@ -177,7 +181,13 @@ export function start(): Store<AppState> {
 
   // The menu mounts immediately; the engine loads in the background and screens that need it show its progress.
   engineLoader.subscribe((state) => {
-    if (state.status === "ready") engine = state.engine;
+    if (state.status !== "ready") return;
+    engine = state.engine;
+    const pending = pendingMatch;
+    if (pending === null) return;
+    pendingMatch = null;
+    startMatch(pending.match, pending.you, pending.snap);
+    for (const frame of pending.frames) loop?.onServer(frame);
   });
   // Screens that need the engine show its failure inline with Retry, so the background load reports nothing itself.
   engineLoader.get().catch(() => {});
@@ -224,7 +234,10 @@ export function start(): Store<AppState> {
 
   const net = new Net({
     onMessage: (msg) => handleServer(msg),
-    onBinary: (bytes) => loop?.onServer(bytes),
+    onBinary: (bytes) => {
+      if (pendingMatch === null) loop?.onServer(bytes);
+      else if (pendingMatch.frames.length < PENDING_FRAMES_MAX) pendingMatch.frames.push(bytes);
+    },
     onStatus: (status, notice, unexpected) => onStatus(status, notice, unexpected ?? false),
   });
 
@@ -504,6 +517,7 @@ export function start(): Store<AppState> {
   /** Back to the main menu, forgetting the room and any reconnect in progress. */
   function resetToMenu(): void {
     stopReconnect();
+    pendingMatch = null;
     roomCode = null;
     resumeToken = null;
     server = null;
@@ -534,6 +548,7 @@ export function start(): Store<AppState> {
    */
   function leaveRoom(next: Screen = "browse"): void {
     loop?.stop();
+    pendingMatch = null;
     roomCode = null;
     resumeToken = null;
     saveSeat();
@@ -564,7 +579,12 @@ export function start(): Store<AppState> {
     const eng = engine;
     if (!eng) {
       const state = engineLoader.state;
-      toast(state.status === "failed" ? `The game engine failed to load: ${state.error}` : "The game engine is still loading.", "error");
+      if (state.status === "failed") {
+        toast(`The game engine failed to load: ${state.error}`, "error");
+        return;
+      }
+      // A reload resumes its match while the engine still downloads: the match is entered once the engine loads.
+      pendingMatch = { match, you, snap, frames: [] };
       return;
     }
     ensureRenderer();
@@ -765,6 +785,7 @@ export function start(): Store<AppState> {
         return;
       case "match_end":
         loop?.stop();
+        pendingMatch = null;
         store.set({ inMatch: false, tickHz: 0, showScores: false, replayReady: true, screen: "room" });
         return;
       case "tick_rate":
@@ -839,6 +860,7 @@ export function start(): Store<AppState> {
     if (status !== "closed") return;
     linkSeq++;
     loop?.stop();
+    pendingMatch = null;
     if (unexpected && notice?.reconnect) {
       if (roomCode !== null && resumeToken !== null) {
         beginReconnect();
