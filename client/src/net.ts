@@ -2,6 +2,7 @@
 // gameplay, sent over an optional unreliable WebRTC data channel when available.
 
 import type { ClientMsg, ServerMsg } from "./protocol";
+import { checkServerMsg } from "./frame-check";
 
 export type NetStatus = "connecting" | "open" | "closed";
 /** Active gameplay transport: "udp" = WebRTC data channel, "ws" = WebSocket. */
@@ -31,7 +32,7 @@ export function closeNotice(reason: string, wasClean: boolean): CloseNotice {
     case "too_many":
       return { label: "Too many connections", text: "Too many connections from your network.", reconnect: false };
     case "shutdown":
-      return { label: "Server restarting", text: "The server is restarting. Reconnecting…", reconnect: true };
+      return { label: "Server restarting", text: "The server is restarting.", reconnect: true };
     default:
       return wasClean
         ? { label: "", text: "", reconnect: true }
@@ -202,7 +203,7 @@ function whenGathered(pc: RTCPeerConnection): Promise<void> {
   return promise;
 }
 
-/** Parse one text frame. The server schema is trusted; only the `t` tag is checked here. */
+/** Parse one text frame: JSON whose fields the handlers read are checked (see frame-check.ts). */
 function parseServerMsg(text: string): ServerMsg | null {
   let value: unknown;
   try {
@@ -211,5 +212,5 @@ function parseServerMsg(text: string): ServerMsg | null {
     return null;
   }
   if (typeof value !== "object" || value === null || !("t" in value) || typeof value.t !== "string") return null;
-  return value as ServerMsg;
+  return checkServerMsg(value);
 }
