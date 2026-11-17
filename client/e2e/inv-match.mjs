@@ -112,8 +112,67 @@ async function matchLeave(s) {
   return "Leave went straight to Browse rooms";
 }
 
+/** Chat rows: Enter opens and focuses the box, Enter sends to both players, ArrowUp recalls, Escape closes, the length cap, and another player's typing line. */
+async function matchChat(s) {
+  const { host, guest, guestName } = await matchWithGuest(s, { clipboard: true });
+  const hp = host.page;
+  const gp = guest.page;
+  const input = (p) => p.getByLabel("Chat message", { exact: true });
+  const form = (p) => p.locator(".hud-chat-form");
+  const log = (p) => p.locator(".hud-chat-log");
+
+  // chat-open-enter: Enter with nothing focused opens the box and focuses it.
+  await hp.locator(".hud-root").waitFor({ state: "visible" });
+  await hp.keyboard.press("Enter");
+  await input(hp).waitFor({ state: "visible" });
+  check((await input(hp).getAttribute("placeholder")) === "Press Enter to send a message", "chat placeholder is not the keyboard hint");
+  check(await input(hp).evaluate((el) => el === document.activeElement), "chat box is not focused after Enter");
+
+  // chat-send: Enter sends the line to both players and closes the box.
+  await hp.keyboard.type("hello there");
+  await hp.keyboard.press("Enter");
+  await form(hp).waitFor({ state: "hidden" });
+  await log(hp).getByText("hello there").waitFor({ state: "visible" });
+  await log(gp).getByText("hello there").waitFor({ state: "visible" });
+
+  // chat-history: Enter then ArrowUp recalls the last own line.
+  await hp.keyboard.press("Enter");
+  await input(hp).waitFor({ state: "visible" });
+  await input(hp).press("ArrowUp");
+  check((await input(hp).inputValue()) === "hello there", "ArrowUp did not recall the last line");
+
+  // chat-close: Escape closes the box without sending and clears it.
+  await input(hp).press("Escape");
+  await form(hp).waitFor({ state: "hidden" });
+  check((await log(hp).getByText("hello there").count()) === 1, "Escape sent or duplicated the recalled line");
+
+  // chat-escape-menu: with chat closed, Escape opens the match menu (not chat); a second Escape closes it.
+  await hp.keyboard.press("Escape");
+  await hp.locator("#hud-menu").waitFor({ state: "visible" });
+  await hp.keyboard.press("Escape");
+  await hp.locator("#hud-menu").waitFor({ state: "hidden" });
+
+  // chat-length: the box stops at the protocol's cap.
+  await hp.keyboard.press("Enter");
+  const max = Number(await input(hp).getAttribute("maxlength"));
+  check(max > 0, "chat box has no maxlength");
+  await input(hp).fill("x".repeat(max + 50));
+  check((await input(hp).inputValue()).length <= max, `chat box accepted more than ${max} characters`);
+  await input(hp).press("Escape");
+  await form(hp).waitFor({ state: "hidden" });
+
+  // hud-typing: another player's open box shows "<name> is typing…" to the room.
+  await gp.keyboard.press("Enter");
+  await input(gp).waitFor({ state: "visible" });
+  await gp.keyboard.type("typing now");
+  await hp.locator(".hud-typing").filter({ hasText: guestName }).waitFor({ state: "visible" });
+  check(((await hp.locator(".hud-typing").textContent()) ?? "").includes("typing"), "typing line lacks the word typing");
+  await input(gp).press("Escape");
+  return "chat open, send, recall, close, length cap and typing line checked";
+}
 export const matchInvScenarios = [
   { name: "inv match hud and menu", inv: ["hud-main", "hud-menu", "hud-menu (Volume)", "hud-menu (Mute music)", "hud-menu (Fullscreen)", "hud-menu (Change controls)", "hud-stats", "hud-scores", "hud-end (host End match)"], run: matchHudMenu },
   { name: "inv match menu lobby", inv: ["hud-menu (Show lobby)"], run: matchMenuLobby },
   { name: "inv match leave", inv: ["hud-leave"], run: matchLeave },
+  { name: "inv match chat", inv: ["chat-open-enter", "chat-send", "chat-history", "chat-close", "chat-escape-menu", "chat-length", "hud-typing"], run: matchChat },
 ];
