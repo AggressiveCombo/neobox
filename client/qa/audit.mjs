@@ -9,7 +9,7 @@
 //                                distinct computed values per role at rest, max over light and dark
 //   tokens.distinct.fontSize.body  distinct font sizes of text elements across the sampled screens
 //   deadControl.count            visible controls that change nothing (no DOM, request or route) in 1 s
-//   persist.roundTrip            fraction of the 21 DEFAULT_PREFS keys that survive a reload after
+//   persist.roundTrip            fraction of the DEFAULT_PREFS keys (read from src/prefs.ts) that survive a reload after
 //                                being set through the settings UI
 //   persist.accountSync          signed-in prefs (theme, textScale) pulled by a second context (info)
 //
@@ -29,6 +29,7 @@
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { PASSWORD, Results, button, launchEngine, menuName, navTo, outDir, rel, runCleanups, selectedEngines, selfTestMode, sleep, startServer, writeIndex } from "./lib-qa.mjs";
 import { signedIn } from "../e2e/lib.mjs";
 import { scenarios } from "../e2e/scenarios.mjs";
@@ -38,21 +39,21 @@ const INVENTORY =
   process.env.QA_INVENTORY ??
   path.join(os.homedir(), ".omp/agent/sessions/-omp-workspace/2026-11-09T13-23-20-591Z_01a1c07a-438f-71e1-bf7d-0a843edfdf28/local/INVENTORY.md");
 const PLACEHOLDER = /\b(undefined|null|NaN)\b|\[object |\{\{|\}\}|lorem|TODO|\b[a-z]+(\.[a-z]+){2,}\b|ECONN|TypeError|ReferenceError|\bat [\w.]+ \(/g;
-// Every key of DEFAULT_PREFS (client/src/prefs.ts). The denominator of persist.roundTrip.
-const PREF_KEYS = [
-  "keys", "volume", "muted", "renderScale", "antialias", "palette", "touchScale", "touchLeftHanded", "showStats", "color",
-  "musicMuted", "matchMusicMuted", "musicVolume", "sfxVolume", "uiSounds", "filterProfanity", "jukeboxVolume", "theme", "motion", "textScale", "readableFont",
-];
+// Every key of DEFAULT_PREFS, read from client/src/prefs.ts so a new pref cannot be left out. The denominator of persist.roundTrip.
+const PREFS_SOURCE = readFileSync(fileURLToPath(new URL("../src/prefs.ts", import.meta.url)), "utf8");
+const PREF_KEYS = [...(PREFS_SOURCE.match(/export const DEFAULT_PREFS: Prefs = \{([\s\S]*?)\n\};/)?.[1] ?? "").matchAll(/^  (\w+):/gm)].map((m) => m[1]);
+if (PREF_KEYS.length === 0) throw new Error("audit: no DEFAULT_PREFS keys found in src/prefs.ts");
 // Settings values set through the UI, and the stored value each one must read back as.
 const EXPECT = {
   keys: ["KeyQ", "KeyA"], // left, slot 0 (compared as keys.left)
   volume: 0.3, muted: true, renderScale: 0.7, antialias: false, palette: "tritanopia", touchScale: 1.2, touchLeftHanded: true,
+  touchLayout: { rocket: "grab", push: "push", jump: "up", bat: "bat", grab: "rocket" },
   showStats: true, color: 0x3366cc, musicMuted: true, matchMusicMuted: true, musicVolume: 0.3, sfxVolume: 0.4, uiSounds: false,
   filterProfanity: false, jukeboxVolume: 0.2, theme: "dark", motion: "reduce", textScale: 1.3, readableFont: true,
 };
 // Destructive or irreversible controls are not clicked by the dead-control scan.
 const DEAD_SKIP = /\b(leave|delete|reset|sign out|log out|remove|kick|ban|forfeit|quit|report|block|unfriend|disband|decline|reject|abandon|revoke)\b/i;
-const DEAD_SCREENS = ["menu-anon", "room-host", "settings-controls", "settings-touch", "settings-sound", "settings-display", "settings-chat", "library-grid"];
+const DEAD_SCREENS = process.env.QA_DEAD_SCREENS ? process.env.QA_DEAD_SCREENS.split(",").map((s) => s.trim()) : STATES.map((st) => st.id);
 const TOKEN_SCREENS = ["menu-anon", "settings-controls", "library-grid", "room-host"];
 const TOKEN_THEMES = ["light", "dark"];
 const ROLES = ["primary", "secondary", "danger", "ghost", "link"];
@@ -77,6 +78,7 @@ const knownIds = new Set([...STATES.map((st) => st.id), ...scenarios.map((sc) =>
 const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 const mentionsName = (name) => new RegExp(`(?<![a-z0-9])${escapeRe(name.toLowerCase())}(?![a-z0-9])`).test(inventoryLower);
 const firstLine = (err) => String(err?.message ?? err).split("\n")[0];
+const sameControls = (a, b) => a.length === b.length && a.every((c, i) => c.name === b[i].name);
 
 // In-page probes. Each returns plain data; nothing here changes the page except the data-qa-i tags.
 const HARVEST = () => {
@@ -86,9 +88,21 @@ const HARVEST = () => {
     return r.width > 0 && r.height > 0 && cs.visibility !== "hidden" && cs.display !== "none";
   };
   const els = [...document.querySelectorAll("button, a[href], [role=button], [role=tab], [role=switch], [role=radio], [role=menuitem]")].filter(vis);
+  // Accessible-name approximation: aria-label, then aria-labelledby, then <label> text (switches are inputs with no text),
+  // then the element text with block children separated by a space (card heading + description), then title.
+  const textOf = (node) =>
+    [...node.childNodes]
+      .map((n) => {
+        if (n.nodeType === 3) return n.textContent;
+        if (n.nodeType !== 1 || n.getAttribute("aria-hidden") === "true") return "";
+        return getComputedStyle(n).display.startsWith("inline") ? textOf(n) : ` ${textOf(n)} `;
+      })
+      .join("");
+  const labelled = (el) => (el.getAttribute("aria-labelledby") || "").split(/\s+/).filter(Boolean).map((id) => document.getElementById(id)?.textContent ?? "").join(" ");
+  const labelOf = (el) => (el.labels ? [...el.labels].map((l) => textOf(l)).join(" ") : "");
   return els.map((el, i) => {
     el.setAttribute("data-qa-i", String(i));
-    const name = (el.getAttribute("aria-label") || el.textContent || el.getAttribute("title") || "").replace(/\s+/g, " ").trim();
+    const name = (el.getAttribute("aria-label") || labelled(el) || labelOf(el) || textOf(el) || el.getAttribute("title") || "").replace(/\s+/g, " ").trim();
     return {
       i,
       name: name || "(unnamed)",
@@ -137,6 +151,23 @@ const INSTALL_MUTATION = () => {
     window.__qaMut += records.length;
   }).observe(document.body, { subtree: true, childList: true, attributes: true, characterData: true });
 };
+// Visible state beyond the DOM: scroll offsets (a nav link that scrolls a section is a working control) and a 64x64 pixel
+// digest of each canvas (the map editor draws its view on canvas; zoom changes no DOM).
+const EFFECT_STATE = () => {
+  const scrolls = [...document.querySelectorAll("*")].filter((e) => e.scrollTop || e.scrollLeft).map((e) => `${e.scrollTop},${e.scrollLeft}`);
+  const digest = (c) => {
+    if (c.width === 0 || c.height === 0) return "";
+    const t = document.createElement("canvas");
+    t.width = 64;
+    t.height = 64;
+    const ctx = t.getContext("2d", { willReadFrequently: true });
+    ctx.drawImage(c, 0, 0, 64, 64);
+    let s = 0;
+    for (const v of ctx.getImageData(0, 0, 64, 64).data) s = (s * 31 + v) | 0;
+    return String(s);
+  };
+  return JSON.stringify([window.scrollX, window.scrollY, scrolls, [...document.querySelectorAll("canvas")].map(digest)]);
+};
 
 let engine = "";
 let memo = null;
@@ -179,7 +210,7 @@ const placeholderHits = (text) =>
 async function harvestAll(s) {
   if (memo) return memo;
   memo = { desktop: [], phone: [], errors: [] };
-  const phoneScope = { base: s.base, open: (label, o = {}) => s.open(label, { ...o, phone: true }) };
+  const phoneScope = Object.assign(Object.create(s), { open: (label, o = {}) => s.open(label, { ...o, phone: true }) });
   for (const st of STATES) {
     for (const [vp, scope] of [
       ["desktop", s],
@@ -218,17 +249,21 @@ async function copyCase(s) {
 
 async function coverageCase(s) {
   const m = await harvestAll(s);
+  // Names the harness generates as fixture data (room, player, password, map, roster rows): user content, not product controls.
+  const FIXTURE_NAME = /^(room|pw|host|guest|user)[a-z0-9]{6,8}(?![a-z])|^Actions for guest[a-z0-9]+|^map[a-z0-9]{5,9} by [a-z0-9]+ \d+ votes ?\d+ plays$/;
   const screensOf = new Map();
   for (const sc of [...m.desktop, ...m.phone]) {
     for (const c of sc.controls) {
+      if (FIXTURE_NAME.test(c.name)) continue;
       const list = screensOf.get(c.name) ?? [];
       if (!list.includes(sc.id)) list.push(sc.id);
       screensOf.set(c.name, list);
     }
   }
+  // RUBRIC metric: harvested controls missing from INVENTORY. INVENTORY ids without a state or scenario are reported only.
   const missingControls = [...screensOf].filter(([name]) => !mentionsName(name)).map(([name, screens]) => ({ name, screens }));
   const uncoveredIds = inventoryIds.filter((id) => !knownIds.has(id));
-  const value = missingControls.length + uncoveredIds.length;
+  const value = missingControls.length;
   const file = writeEvidence("coverage", { missingControls, uncoveredIds, errors: m.errors });
   return {
     pass: value === 0,
@@ -338,6 +373,7 @@ async function deadCase(s) {
       const h = cur.h;
       const page = h.page;
       const url = page.url();
+      const before = await page.evaluate(EFFECT_STATE);
       h.reqs = 0;
       clicked += 1;
       try {
@@ -348,8 +384,10 @@ async function deadCase(s) {
         await sleep(1000);
         const mut = await page.evaluate(() => window.__qaMut);
         const moved = page.url() !== url;
-        if (mut === 0 && h.reqs === 0 && !moved) dead.push(label);
-        else cur.dirty = true;
+        const changed = (await page.evaluate(EFFECT_STATE)) !== before;
+        if (mut === 0 && h.reqs === 0 && !moved && !changed) dead.push(label);
+        // Reopen only when the click navigated or changed the control list; a toggle keeps the page (reopening after each one made the scan too slow).
+        else cur.dirty = moved || !sameControls(cur.controls, await page.evaluate(HARVEST));
       } catch (err) {
         unclickable.push(`${label}: ${firstLine(err)}`);
         cur.dirty = true;
@@ -390,6 +428,7 @@ async function persistCase(s) {
   await sec(page, "Touch");
   await range(page, "Control size", 120);
   await sw(page, "Left-handed layout");
+  await page.locator('select.touch-select[data-slot="rocket"]').selectOption("grab");
   await sec(page, "Sound");
   await range(page, "Volume", 30);
   await range(page, "Music volume", 30);
@@ -477,7 +516,7 @@ const mode = selfTestMode();
 const wanted = (key) => ONLY.includes(key) && (!mode || MODE_CASE[mode] === key);
 
 /** Whole-case budget like robust.mjs: a hung case fails as 'timeout' instead of idling the run. Audit walks every screen, so the budget is generous. */
-const CASE_TIMEOUT_MS = 900000;
+const CASE_TIMEOUT_MS = 3600000;
 function caseBudgeted(results, id, fn, opts) {
   return results.case(
     id,

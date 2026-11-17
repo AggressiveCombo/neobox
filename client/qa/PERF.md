@@ -41,7 +41,7 @@ A case that depends on a missing capability records `N/A` with the probe value: 
 - **Transfer**: navigation + resource `transferSize`, KB.
 - **Frames**: `requestAnimationFrame` deltas over `QA_FPS_MS`. `perf.displayHz` is the idle rAF median (2 s) before input or throttling. `fps.median = 1000 / median(delta)`; `fps.pctDisplay = fps.median / displayHz`; `droppedFrames.pct` is the share of deltas above 1.5 frame intervals.
 - **Long tasks**: `longtask` observer, counted over the match sample (chromium only; `null` where unsupported).
-- **Heap soak**: `Performance.getMetrics` after a forced GC every 5 s, while the player walks left and right. `perf.heapMB.slope` is the least-squares regression of JS heap MB against minutes over the whole soak window (no warm-up exclusion); `endMinusStartPct` is the change from the first sample to the last.
+- **Heap soak**: `Performance.getMetrics` after a forced GC every 5 s, while the player walks left and right; no e2e pixel probe runs in the soak. `perf.heapMB.slope` is the least-squares regression of JS heap MB against minutes over the whole soak window. `endMinusStartPct` compares the median of the first 3 samples at or after the warm-up (60 s, or a fifth of the soak if shorter; `perf.heapMB.warmupS`) with the median of the last 3 samples, so JIT warm-up does not count as retention. `perf.heapMB.start`/`end` are those two medians. A soak with fewer samples than the warm-up plus both windows fails.
 - **Renderer**: `document.documentElement.dataset.renderer` for each case; the case fails if it is not the renderer the case asked for.
 
 ## Gates (9-level, chromium)
@@ -58,7 +58,7 @@ A case that depends on a missing capability records `N/A` with the probe value: 
 | `fps.*.cpu4x` `perf.fps.median` | >= 30 |
 | `perf.longTasks` (match, 30 s) | 0 |
 | `perf.heapMB.slope` (soak) | <= 0.5 MB/min |
-| `perf.heapMB.endMinusStartPct` (soak) | <= 15 % |
+| `perf.heapMB.endMinusStartPct` (soak) | <= 15 % (warm-up median to end median) |
 
 Firefox and WebKit are measured and reported as info; the rubric bands only `fps.pctDisplay` and `droppedFrames.pct` there. Worst run counts.
 

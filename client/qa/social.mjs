@@ -1,9 +1,11 @@
-// Social QA instrument (round 0 extra): two clients, a room of N clients, the HUD ping badge,
-// the Browse room count and presence latency. Every case starts a fresh server (startServer) and
-// drives the real UI. Chromium runs all cases; firefox and webkit run the room flows and presence.
-// The ping badge and Browse list are DOM-only checks, so they are chromium-only (N/A elsewhere).
+// Social QA instrument: two clients, a room of N clients, the HUD ping badge, the Browse room
+// count and presence latency (RUBRIC D17). Every case starts a fresh server (startServer) and
+// drives the real UI. Each case runs twice per engine: desktop (1280x800 mouse) and phone (every
+// client a touch phone, landscape 844x390: the match HUD asks for landscape in portrait).
+// Chromium also copies the invite through the clipboard; firefox and webkit open the invite URL.
 //
-// Keys (RUBRIC D17):
+// Keys (RUBRIC D17). Case ids carry a ".phone" suffix for the phone variant; the metric keys are
+// the same and `social.phone` is 1 for phone cases.
 //   social.twoClient.pass      1 when two clients (distinct IPs) create, invite, join, start, play,
 //                              leave, and show the same players and scoreboard (names, kills, wins,
 //                              lives) at each step.
@@ -11,8 +13,11 @@
 //                              capacity = the room's max_players (create-form default 8, clamped to
 //                              the server's NEOBOX_MAX_PLAYERS, default 32; crates/server/src/hub.rs).
 //   social.ping.error.ms       max |HUD ping badge - stats-overlay RTT| over a 3 s sample. Pass <= 10.
-//                              The badge pingMs and the RTT row (engine rttMs) render in the same tick.
 //                              social.ping.updateMs: ms from HUD shown until the badge shows a number.
+//                              NOTE: the badge is the server's smoothed WebSocket ping (conn.rs Pong,
+//                              ConnStats.rtt_ms, sent in the room roster); the RTT row is the client's
+//                              clock-sync Pong (wasm lib.rs ServerFrame::Pong). Two paths, so the gap
+//                              is a measurement difference as well as a display error (see README).
 //   social.roomList.counts.ok  1 when the Browse list shows the server's public room count (rows and
 //                              "N open") and excludes the private room.
 //   social.presence.latencyMs  max(join, leave): guest's WebSocket send to the host's roster update.
@@ -20,7 +25,7 @@
 //
 // Usage:  cd client && QA_OUT=C:/Users/aggressivecombo/neobox-scratch/qa/round0-extra node qa/social.mjs
 //         (QA_ENGINES=chromium narrows the engines)
-// Self-test (QA_SELF_TEST=<mode>; only that key's case runs, with a fault that must FAIL it):
+// Self-test (QA_SELF_TEST=<mode>; only that key's desktop case runs, with a fault that must FAIL it):
 //   twoclient  the guest never joins the host's room                     -> twoClient.pass 0
 //   multi      the last of the N clients never joins                     -> multi.pass 0
 //   ping       the HUD ping badge pinned to "250 ms" by a DOM observer   -> ping.error.ms > 10
@@ -31,7 +36,7 @@ import {
   Results,
   button,
   createRoom,
-  joinByInvite,
+  dismissPhoneSplash,
   launchEngine,
   menuName,
   roomTitle,
@@ -49,6 +54,12 @@ import { ADMIN_PASSWORD, playFromMenu } from "../e2e/lib.mjs";
 const mode = selfTestMode();
 const gate = (key) => !mode || mode === key;
 const CLIENT_CAP = 4;
+// Landscape phone: the match HUD shows a "turn your phone" screen in portrait (hud.ts).
+const PHONE_VIEWPORT = { width: 844, height: 390 };
+const VARIANTS = [
+  { suffix: "", phone: false },
+  { suffix: ".phone", phone: true },
+];
 
 // Admin API state (rooms with public flag, server max_players). lib's adminRoom only fetches one room.
 const adminCookies = new Map();
@@ -67,9 +78,31 @@ async function adminState(base) {
   return res.json();
 }
 
+/** Opens a client: a phone (touch, landscape) or the desktop default. */
+const openClient = (s, label, phone, extra = {}) =>
+  s.open(label, phone ? { ...extra, phone: true, viewport: PHONE_VIEWPORT } : extra);
+
+/**
+ * Navigates a client to `url`. On a phone the first visit of a device shows the welcome sheet
+ * (phone-splash.ts); it covers the screen, so it is dismissed here before anything else.
+ */
+async function enter(h, url, phone) {
+  await h.page.goto(url);
+  if (phone) await dismissPhoneSplash(h.page);
+}
+
+/**
+ * Clicks a control on one client. The page is brought to front first: a background page can stall
+ * Playwright's stability check (it waits on animation frames), which is what timed out before.
+ */
+async function clickIn(h, locator) {
+  await h.page.bringToFront();
+  await locator.click();
+}
+
 /** Copies the host's invite link and reads it back from the clipboard (matchWithGuest's path). */
 async function copyInvite(host, expected) {
-  await button(host.page, "Invite").click();
+  await clickIn(host, button(host.page, "Invite"));
   let url = "";
   for (let i = 0; i < 50 && url !== expected; i++) {
     url = await host.page.evaluate(() => navigator.clipboard.readText());
@@ -81,6 +114,7 @@ async function copyInvite(host, expected) {
 
 /** Scoreboard rows of one page as "name|kills|wins|lives", sorted. Columns: Player, Team, Kills, Wins, Lives, Status. */
 const board = async (page) => {
+  await page.bringToFront();
   // The scoreboard renders only while Tab is held (app.ts: showScores follows Tab in a match).
   await page.keyboard.down("Tab");
   try {
@@ -108,8 +142,14 @@ async function settleBoards(handles, expectNames) {
 /** Leaves the room from the room screen (its Leave button) and waits for the browser to replace it. */
 async function leaveRoom(h) {
   const leave = h.page.getByRole("button", { name: "Leave", exact: true });
-  await leave.click();
+  await clickIn(h, leave);
   await leave.waitFor({ state: "detached" });
+}
+
+/** Host opens the menu, then creates a room (the welcome sheet is dismissed on the way on a phone). */
+async function makeRoom(h, s, roomName, isPublic, phone) {
+  await enter(h, s.base, phone);
+  return createRoom(h, s.base, roomName, { isPublic });
 }
 
 /**
@@ -117,13 +157,13 @@ async function leaveRoom(h) {
  * client presses a few keys, the scoreboards are compared, and everyone leaves. `dropLast` makes
  * the last guest never join (self-test). Never throws: `ok` false with `detail` on any failure.
  */
-async function roomFlow(s, { clipboard, clients, dropLast }) {
+async function roomFlow(s, { phone, clipboard, clients, dropLast }) {
   const out = { ok: false, detail: "", clients: 0, roomMax: null, serverMax: null };
   try {
     const hostName = uniqueName("host");
     const roomName = uniqueName("room");
-    const host = await s.open("host", { name: hostName, clipboard });
-    const code = await createRoom(host, s.base, roomName, { isPublic: true });
+    const host = await openClient(s, "host", phone, { name: hostName, clipboard });
+    const code = await makeRoom(host, s, roomName, true, phone);
     const state = await adminState(s.base);
     const room = state.rooms.find((r) => r.code === code);
     out.roomMax = room.max_players;
@@ -133,17 +173,19 @@ async function roomFlow(s, { clipboard, clients, dropLast }) {
     for (let i = 0; i < clients(room.max_players) - 1; i++) {
       const name = uniqueName(`guest${i}`);
       guestNames.push(name);
-      const g = await s.open(`guest${i}`, { name });
+      const g = await openClient(s, `guest${i}`, phone, { name });
       if (dropLast && i === clients(room.max_players) - 2) continue;
       const url = clipboard ? await copyInvite(host, `${s.base}/${code}`) : `${s.base}/${code}`;
-      await g.page.goto(url);
+      await enter(g, url, phone);
       await roomTitle(g.page, roomName).waitFor();
       await host.page.locator("li.room-player").filter({ hasText: name }).waitFor();
       guests.push(g);
     }
+    await host.page.bringToFront();
     await startMatch(host, guests);
     const all = [host, ...guests];
     for (const h of all) {
+      await h.page.bringToFront();
       for (const key of ["ArrowLeft", "ArrowRight", "ArrowUp"]) {
         await h.page.keyboard.press(key);
         await sleep(100);
@@ -153,13 +195,13 @@ async function roomFlow(s, { clipboard, clients, dropLast }) {
     const playing = await settleBoards(all, expectNames);
     // The guests' leave ends the match for the host (last player standing): Game over, then Back to room.
     for (const g of guests) {
-      await g.page.locator(".hud-leave").click();
+      await clickIn(g, g.page.locator(".hud-leave"));
       await g.page.locator(".hud-leave").waitFor({ state: "detached" });
     }
     const afterLeave = await settleBoards([host], [hostName]);
     const back = host.page.getByRole("button", { name: "Back to room" });
     await back.waitFor({ timeout: 10000 });
-    await back.click();
+    await clickIn(host, back);
     out.clients = all.length + (dropLast ? 1 : 0);
     out.ok = playing.ok && afterLeave.ok;
     out.detail = out.ok
@@ -199,9 +241,9 @@ const FORCE_BADGE = () => {
   pin();
 };
 
-async function pingCase(s) {
-  const host = await s.open("host", { name: uniqueName("ping") });
-  await createRoom(host, s.base, uniqueName("room"), { isPublic: false });
+async function pingCase(s, { phone }) {
+  const host = await openClient(s, "host", phone, { name: uniqueName("ping") });
+  await makeRoom(host, s, uniqueName("room"), false, phone);
   await startMatch(host, []);
   const { page } = host;
   const hudAt = Date.now();
@@ -271,24 +313,27 @@ const DELAY_HOOK = () => {
   });
 };
 
-async function presenceCase(s) {
+async function presenceCase(s, { phone }) {
   const guestName = uniqueName("guest");
   const roomName = uniqueName("room");
-  const host = await s.open("host", { name: uniqueName("host") });
+  const host = await openClient(s, "host", phone, { name: uniqueName("host") });
   if (mode === "presence") await host.context.addInitScript(DELAY_HOOK);
-  const code = await createRoom(host, s.base, roomName, { isPublic: true });
+  const code = await makeRoom(host, s, roomName, true, phone);
   await host.page.evaluate(ROSTER_HOOK);
-  const guest = await s.open("guest", { name: guestName });
+  const guest = await openClient(s, "guest", phone, { name: guestName });
   await guest.context.addInitScript(SEND_HOOK);
-  await joinByInvite(guest, s.base, code, roomName);
-  await host.page.waitForFunction((n) => window.__roster.some((r) => r.names.includes(n)), guestName);
+  await enter(guest, `${s.base}/${code}`, phone);
+  await roomTitle(guest.page, roomName).waitFor();
+  // polling: a background page does not run animation frames, so the default rAF polling can stall.
+  await host.page.waitForFunction((n) => window.__roster.some((r) => r.names.includes(n)), guestName, { polling: 100 });
   const joinSent = await guest.page.evaluate(() => window.__sent.join);
   const joinSeen = await host.page.evaluate((n) => window.__roster.find((r) => r.names.includes(n)).t, guestName);
-  await button(guest.page, "Leave").click();
+  await clickIn(guest, button(guest.page, "Leave"));
   const leaveSent = await guest.page.evaluate(() => window.__sent.leave);
   await host.page.waitForFunction(
     ([n, t]) => window.__roster.some((r) => r.t >= t && !r.names.includes(n)),
     [guestName, leaveSent],
+    { polling: 100 },
   );
   const leaveSeen = await host.page.evaluate(
     ([n, t]) => window.__roster.find((r) => r.t >= t && !r.names.includes(n)).t,
@@ -304,14 +349,15 @@ async function presenceCase(s) {
   };
 }
 
-async function roomListCase(s) {
+async function roomListCase(s, { phone }) {
   for (let i = 0; i < 3; i++) {
-    const owner = await s.open(`owner${i}`, { name: uniqueName("own") });
-    await createRoom(owner, s.base, uniqueName("room"), { isPublic: i < 2 });
+    const owner = await openClient(s, `owner${i}`, phone, { name: uniqueName("own") });
+    await makeRoom(owner, s, uniqueName("room"), i < 2, phone);
   }
-  const browser = await s.open("browser", { name: uniqueName("browse") });
-  await browser.page.goto(s.base);
+  const browser = await openClient(s, "browser", phone, { name: uniqueName("browse") });
+  await enter(browser, s.base, phone);
   await menuName(browser.page).waitFor();
+  await browser.page.bringToFront();
   await playFromMenu(browser.page, null);
   const list = browser.page.locator('ul[aria-label="rooms"]');
   await list.waitFor();
@@ -334,37 +380,54 @@ async function roomListCase(s) {
   };
 }
 
-/** A fresh server per case; the server's cleanup is registered by startServer. */
-async function runCase(results, browser, id, fn, extra = {}) {
+/** A fresh server per case; the server's cleanup is registered by startServer. `phone` is recorded as social.phone. */
+async function runCase(results, browser, id, fn, { phone }) {
   const srv = await startServer();
-  return results.case(id, fn, { browser, base: srv.base, ...extra });
+  return results.case(
+    id,
+    async (s) => {
+      const out = await fn(s, { phone });
+      return { ...out, metrics: { ...out.metrics, "social.phone": phone ? 1 : 0 } };
+    },
+    { browser, base: srv.base },
+  );
 }
 
 for (const engine of selectedEngines()) {
   const browser = await launchEngine(engine);
   const results = new Results("social", engine);
   const chromium = engine === "chromium";
+  // A self-test runs its desktop case only; the phone variant is the same flow on touch phones.
+  const variants = mode ? [VARIANTS[0]] : VARIANTS;
 
-  if (gate("twoclient")) {
-    await runCase(results, browser, "twoClient", (s) =>
-      flowCase(s, "social.twoClient.pass", { clipboard: chromium, clients: () => 2, dropLast: mode === "twoclient" }),
-    );
-  }
-  if (gate("multi")) {
-    await runCase(results, browser, "multi", (s) =>
-      flowCase(s, "social.multi.pass", {
-        clipboard: chromium,
-        clients: (roomMax) => Math.min(CLIENT_CAP, roomMax),
-        dropLast: mode === "multi",
-      }),
-    );
-  }
-  if (gate("presence")) await runCase(results, browser, "presence", presenceCase);
-  if (chromium && gate("ping")) await runCase(results, browser, "ping", pingCase);
-  if (chromium && gate("roomcount")) await runCase(results, browser, "roomList", roomListCase);
-  if (!chromium && !mode) {
-    await results.case("ping", () => ({ detail: "N/A: HUD ping badge is DOM-only; chromium baseline" }), { info: true });
-    await results.case("roomList", () => ({ detail: "N/A: Browse list count is DOM-only; chromium baseline" }), { info: true });
+  for (const v of variants) {
+    const phone = v.phone;
+    const id = (name) => `${name}${v.suffix}`;
+    if (gate("twoclient")) {
+      await runCase(results, browser, id("twoClient"), (s, o) =>
+        flowCase(s, "social.twoClient.pass", {
+          ...o,
+          clipboard: chromium && !phone,
+          clients: () => 2,
+          dropLast: mode === "twoclient",
+        }),
+        { phone },
+      );
+    }
+    if (gate("multi")) {
+      await runCase(results, browser, id("multi"), (s, o) =>
+        flowCase(s, "social.multi.pass", {
+          ...o,
+          clipboard: chromium && !phone,
+          clients: (roomMax) => Math.min(CLIENT_CAP, roomMax),
+          dropLast: mode === "multi",
+        }),
+        { phone },
+      );
+    }
+    if (gate("presence")) await runCase(results, browser, id("presence"), presenceCase, { phone });
+    if (gate("ping")) await runCase(results, browser, id("ping"), pingCase, { phone });
+    if (gate("roomcount")) await runCase(results, browser, id("roomList"), roomListCase, { phone });
   }
 
   results.save();

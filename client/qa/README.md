@@ -33,6 +33,7 @@ Rubric D12. Load time, LCP, CLS, frame pacing and a heap soak.
 - Command: `cd client && QA_OUT=<dir> bun qa/perf.mjs`
 - Engines: all three. Banded (9-level gates) on chromium only; firefox and webkit are measured and reported as info. CDP-only cases are N/A off chromium.
 - Cases: `probe`, `load.none.{webgpu,webgl2}` (3 cold loads each, worst run), `load.fast3g`, `load.slow3g`, `fps.{practice,match}.{webgpu,webgl2}` and the `.cpu4x` variants (chromium), `soak.t1m.run{1..3}` and `soak.t3t4x.run{1..3}` (chromium, default 10 min each).
+- Soak metric: `perf.heapMB.endMinusStartPct` compares the median of 3 heap samples after a 60 s warm-up with the median of the last 3, so JIT warm-up is not counted as retention; the slope and the 15 % band are unchanged. The soak runs with no e2e pixel probe (`startPractice` `pixels: false`). Details in `PERF.md`.
 - Renderer: `webgl2` hides `navigator.gpu` before the app boots; the case fails if the app reports another renderer. `webgpu` is N/A when the probe finds no `navigator.gpu`.
 - Self-test: `QA_SELF_TEST=jank` (busy main thread during the fps cases; must fail the fps gates) or `QA_SELF_TEST=leak` (retained heap during soak; must fail the soak gates). The file has no case filter, so a self-test runs all cases; to keep it short: `QA_SOAK_MS=60000 QA_SOAK_RUNS=1 QA_FPS_MS=6000 QA_ENGINES=chromium`.
 - Known limits: LCP and CLS support is read from the probe (`probe.lcpSupported`, `probe.clsSupported`); where an engine does not report the entry the case records the miss rather than inventing a value. Soak uses the practice mode only.
@@ -53,9 +54,9 @@ Installed-app manifest, the home menu in display-mode standalone, and audio befo
 XSS payload injection, server name limit, WebSocket origin check, chat rate limit and server-side profanity masking (RUBRIC D24, section 9.1).
 
 - Command: `cd client && QA_OUT=<dir> node qa/security.mjs`
-- Engines: XSS, chat rate-limit and profanity cases on every selected engine; raw origin and name cases on chromium only (others get an info row).
-- Keys: `sec.xss.hits` (0 passes), `sec.server.nameLimit`, `sec.ws.originRejected`, `sec.chat.rateLimited`, `sec.profanity.viewerMasked`.
-- Self-test (`QA_SELF_TEST`): `xss` (unsafe `innerHTML` into `h1.room-title`), `namelimit` (valid 15-char name sent where a 16-char refusal is expected), `origin` (allowed origin sent where a refusal is expected), `ratelimit` (3 chats where 20 are expected), `profanity` (the raw host sends a clean line where a masked profane word is expected). Only that key's case runs and it must FAIL.
+- Engines: XSS, chat rate-limit and profanity cases on every selected engine; raw origin, name and moderation cases on chromium only (others get an info row).
+- Keys: `sec.xss.hits` (0 passes), `sec.server.nameLimit`, `sec.ws.originRejected`, `sec.chat.rateLimited`, `sec.profanity.viewerMasked`, `sec.mod.muteBlocked`, `sec.mod.kickVisible`, `sec.chat.dupDelivered` (0 passes), `sec.typing.relayed` (0 passes). The moderation case (`mod`) is raw WebSocket: a host, a guest and a watcher share a room; a control typing signal must reach the host; one chat line must reach the watcher once; the host mutes the guest (its chat must be refused with `muted` and not reach the host, its typing must not reach the host); the host kicks the guest (the guest must get a `kicked` reason).
+- Self-test (`QA_SELF_TEST`): `xss` (unsafe `innerHTML` into `h1.room-title`), `namelimit` (valid 15-char name sent where a 16-char refusal is expected), `origin` (allowed origin sent where a refusal is expected), `ratelimit` (3 chats where 20 are expected), `profanity` (the raw host sends a clean line where a masked profane word is expected), `mute` (the host skips the mute frame where the guest is expected to be refused). Only that key's case runs and it must FAIL.
 - Known limit: each case opens its own page and server. `xss` hits are read from `window.__xssHits` and `window.__xss`, which an init script defines before page code (`openPage`). `profanity` is the masking check: a raw-WebSocket host (client bypassed) creates a room, a browser viewer joins it and sees `fuck` as `****` (default prefs); the viewer then leaves, turns "Filter profanity" off under Settings > Chat, rejoins, and must see `shit` as typed. It runs on every engine. Firefox and WebKit ignore `Navigated away from page` errors in the xss and profanity cases: the viewer navigates on purpose, and those engines report the app's in-flight calls as that error. The raw origin and name cases run on chromium only.
 
 ## social.mjs
@@ -63,22 +64,39 @@ XSS payload injection, server name limit, WebSocket origin check, chat rate limi
 Two-client and multi-client room flows, HUD ping badge, Browse room count, presence latency (RUBRIC D17).
 
 - Command: `cd client && QA_OUT=<dir> node qa/social.mjs`
-- Engines: every engine runs the room flows and presence. The ping badge and Browse list are DOM-only checks and run on chromium only (N/A elsewhere).
-- Keys: `social.twoClient.pass`, `social.multi.pass` (N = min(4, room capacity)), `social.ping.error.ms` (<= 10), `social.ping.updateMs`, `social.roomList.counts.ok`, `social.presence.latencyMs` (<= 1000).
+- Engines: every case runs on every engine (chromium, firefox, webkit), twice: desktop (1280x800 mouse) and phone (touch, landscape 844x390, `social.phone` = 1). Chromium also copies the invite through the clipboard; firefox and webkit open the invite URL.
+- Keys: `social.twoClient.pass`, `social.multi.pass` (N = min(4, room capacity)), `social.ping.error.ms` (<= 10), `social.ping.updateMs`, `social.roomList.counts.ok`, `social.presence.latencyMs` (<= 1000). Case ids carry a `.phone` suffix for the phone variant.
 - Each case starts a fresh server and drives the real UI. After the match ends the host sees the postgame modal; the flow clicks "Back to room" on every client before the leave buttons.
-- Self-test (`QA_SELF_TEST`): `twoclient` (guest never joins; `twoClient.pass` must be 0), `multi` (last client never joins; `multi.pass` must be 0), `ping` (forced badge value), `presence` (delayed presence hook), `roomcount` (private room counted).
+- Ping: `social.ping.error.ms` compares the HUD badge (server WebSocket ping, ConnStats rtt) with the stats-overlay RTT row (client clock-sync Pong). The two paths may measure different things; the cause of the gap is not yet established, so it is reported, not assumed to be a display bug.
+- Self-test (`QA_SELF_TEST`): `twoclient` (guest never joins; `twoClient.pass` must be 0), `multi` (last client never joins; `multi.pass` must be 0), `ping` (badge pinned to "250 ms"; `ping.error.ms` > 10), `presence` (host inbound messages delayed 1500 ms; latency > 1000), `roomcount` (phantom room card; `roomList.counts.ok` 0). Only that key's desktop case runs.
 - Known limit: multi needs N clients on distinct IPs; capacity is the room `max_players` clamped to `NEOBOX_MAX_PLAYERS` (default 32).
+
+## motion.mjs
+
+Transition settle time (RUBRIC D20 `motion.transition.ms`): menu modal open and close, and scene transitions (menu to browse, browse to room, room to match).
+
+- Command: `cd client && QA_OUT=<dir> node qa/motion.mjs`
+- Engines: all three, desktop only (1280x800).
+- Method: two idle screenshots 250 ms apart find the pixels that animate with no trigger (canvas arenas, match playfield); they are masked from every frame of that case, and `motion.masked.px` is their count. Then the trigger, then viewport screenshots until two consecutive sample pairs each change < 0.5% of unmasked pixels (per-pixel sum of channel deltas > 24, the image.mjs test). The settle time is the sample from which the region stayed stable, measured from just before the trigger. A case fails when more than half the screenshot animates while idle (nothing left to measure).
+- Cases and limits: `ui.modal.open.news`, `ui.modal.close.news`, `ui.modal.open.createRoom` (300 ms); `scene.menu.browse`, `scene.browse.room`, `scene.room.match` (400 ms). A case also fails when no change follows the trigger, when the region is not stable within 3000 ms, or when the destination screen is not reached.
+- Resolution: a Playwright screenshot takes tens of ms, so the RUBRIC's 16 ms sample period is not reachable. Read `motion.sample.ms` (median interval between samples) next to every value; the settle time is only as fine as that period. Timing on a busy host is provisional.
+- Keys: `motion.transition.ms`, `motion.transition.limit`, `motion.samples`, `motion.sample.ms`, `motion.cssEnd.ms` (in-page cross-check: longest remaining finite CSS animation or transition at the trigger, from `document.getAnimations`), `motion.masked.px`.
+- Self-test (`QA_SELF_TEST=janky`): every CSS animation and transition is stretched to 1500 ms with `!important`, so every case must FAIL. Use a separate `QA_OUT`.
+- Not covered here: `motion.cls` (layout shift; CDP-only, chromium) and `reducedMotion.pixelDiff` (D08).
 
 ## robust.mjs
 
-Console and network health, slow network, disconnect and reconnect, reload, back navigation, resize, phone rotation, tab switch and a bad room code.
+Console and network health, slow network, disconnect and reconnect, offline window, reload, back navigation, resize, phone rotation, tab switch, two tabs of one account, and a bad room code.
 
 - Command: `cd client && bun qa/robust.mjs`
 - Engines: all three; CDP-only parts (network profiles) on chromium.
 - Fails on uncaught page errors, unexpected console errors, and unexpected failed or >= 400 requests. Deliberate faults (offline windows, the bad room) are recorded as `netExpected`, not failed.
 - Outputs: `robust-<engine>.{json,md}`.
 - Self-test (`QA_SELF_TEST`): `console` (console error at load), `request` (failed cross-origin request at load), `badroom` (a real room code where the unknown one is expected). Each runs only its own case (`boot.clean.webgl2` or `badroom`) and must FAIL.
-- Known limit: headless does not hide a background tab; the tab-switch case records `detail: headless did not hide the background tab`.
+- Offline (`net.offline20s.match`): `setOffline` cuts HTTP, and the page's WebSockets go through `routeWebSocket` (`gateSocket`), which refuses every socket while the 20 s window is open, so a reconnect cannot succeed. Pass: the reconnect banner appears within 10 s, stays up for the whole window, clears after recovery, and the HUD is back.
+- Tab switch (`tab.switch.match`): a second page is brought to front and the match page stays hidden for 60 s. When headless reports the page as visible, the case hides it by overriding `document.visibilityState`/`hidden` and dispatching `visibilitychange` (`tab.hiddenMethod: synthetic`). If the page still is not hidden, the case is `info` with `not exercised: the page could not be hidden`, never a pass. Pass: hidden for the whole window, visible again and HUD back on return.
+- Two tabs (`two.tabs.sameAccount.match`): a guest joins the room, then the host account opens a second tab in the same context. The room must list two entries, one of them for the host account.
+- Phone pages (`rotate.phone.practice`) open through `openPhoneAt`: an exact viewport, and a browserType shim so firefox and webkit resolve their device profile.
 
 ## input.mjs (QaInput-owned; CLI only)
 
@@ -86,11 +104,12 @@ Keyboard bindings, reserved keys, on-screen touch controls and gamepads.
 
 - Command: `cd client && bun qa/input.mjs` (`QA_ENGINES` to narrow; `input.latency` alone via the case argument; `QA_LATENCY_SAMPLES` sets the latency sample count, default 30)
 - Outputs: `input-<engine>.{json,md}`, evidence under `evidence/input-<engine>/` (`latency-samples.json` holds per-sample latency, state and control-flip values, plus rAF intervals).
-- Cases: `keys.default`, `keys.reserved`, `touch.buttons`, `touch.stick` (CDP touch on chromium, mouse events elsewhere), `gamepad.buttons`, `gamepad.stick` (injected standard-mapping pad), `input.latency`.
+- Cases: `keys.default`, `keys.reserved`, `keys.chatLeak`, `touch.buttons`, `touch.stick` (CDP touch on chromium, mouse events elsewhere), `gamepad.buttons`, `gamepad.stick` (injected standard-mapping pad), `input.latency` (all three engines).
 - Signal: frame change of the practice canvas (hash per frame), idle window against held-input window. `input.latency` reads full-resolution canvas pixels in-page (`PIXEL_PROBE`, rAF readback) and the engine state (`window.__qa`), timed against a trusted ArrowRight keydown (`HOOK`, first init script).
-- `input.latency`: each sample walks the player to the left wall, waits until the canvas has been still 500 ms, then presses ArrowRight. `input.latency.ms` is the p95 of keydown to the first presented frame whose pixels differ from rest; `input.latency.stateMs` is the same to the first engine frame with a changed local state. Pass: p95 <= 250 ms, no sample without a presented change, no change in a frame before the keydown. `input.rafMs.off|on` are rAF intervals without and with the readback running, so the probe's own cost is visible.
+- `keys.chatLeak`: with chat focused, each default game key is held in turn. The engine's input mask (`window1` over `window.__qa`) must stay 0 for every key and focus must stay in the chat field; after closing chat, ArrowRight must set the right bit. Pass: zero leaked keys (exact, threshold 0; the control is not canvas pixels), and the control sets the bit.
+- `input.latency`: each sample walks the player to the left wall, waits until the canvas has been still 500 ms, then presses ArrowRight. `input.latency.ms` is the p95 of keydown to the first presented frame whose pixels differ from rest; `input.latency.stateMs` is the same to the first engine frame with a changed local state. Pass: p95 <= 250 ms, no sample without a presented change, no change in a frame before the keydown. `input.rafMs.off|on` are rAF intervals without and with the readback running, so the probe's own cost is visible. Runs on chromium, firefox and webkit.
 - Known limits: inputs with no visible effect in the current state (rocket with no ammo, grab with no target) read as silent; the detail names them. Latency numbers measured on a loaded host are not comparable to quiet-host numbers.
-- Self-test: `QA_SELF_TEST=delay-input` (ArrowRight delivered 300 ms late) must FAIL `input.latency`. Other faults are listed in `input.mjs`.
+- Self-test: `QA_SELF_TEST=delay-input` (ArrowRight delivered 300 ms late) must FAIL `input.latency`; `QA_SELF_TEST=chat-leak` (game keys reach the engine from the chat field) must FAIL `keys.chatLeak`. Other faults are listed in `input.mjs`.
 
 ## audit.mjs
 

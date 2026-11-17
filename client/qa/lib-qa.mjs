@@ -48,15 +48,32 @@ export const {
 
 export const ENGINES = ["chromium", "firefox", "webkit"];
 
-/** Opens the practice mode from the menu, starts a run and checks the renderer path. Returns the renderer. */
-export async function startPractice(h, base, renderer, { timeout = 15000 } = {}) {
+/**
+ * Console errors a browser reports for a benign page navigation. Firefox logs the app's WebSocket as
+ * "interrupted while the page was loading" when a case leaves the page; it is not a page error. Narrow on
+ * purpose: the message must match exactly, and service worker errors are not listed here.
+ */
+const ENGINE_NOISE = { firefox: [/The connection to ws:\/\/\S+ was interrupted while the page was loading\./] };
+
+/** True when a console error is known benign noise for this engine. */
+export function engineNoise(engine, text) {
+  return (ENGINE_NOISE[engine] ?? []).some((re) => re.test(text));
+}
+
+/**
+ * Opens the practice mode from the menu, starts a run and checks the renderer path. Returns the renderer.
+ * `pixels: false` skips the canvas colour wait, which installs the e2e pixel probe (its change log grows per frame).
+ */
+export async function startPractice(h, base, renderer, { timeout = 15000, pixels = true } = {}) {
   await h.page.goto(base);
   await menuName(h.page).waitFor({ timeout });
   await navTo(h.page, "Practice");
   await h.page.locator(".offline-list .offline-choice").first().click({ timeout });
   await button(h.page, "Start").click({ timeout });
   await h.page.locator(".offline.playing").waitFor({ timeout });
-  await waitForPixels(h, "practice", 3, timeout * 2);
+  if (pixels) await waitForPixels(h, "practice", 3, timeout * 2);
+  // The renderer is created asynchronously (app.ts ensureRenderer); the attribute is set once it is ready.
+  if (renderer !== null) await h.page.waitForFunction(() => !!document.documentElement.dataset.renderer, null, { timeout: timeout * 2 });
   const got = await h.page.evaluate(() => document.documentElement.dataset.renderer ?? null);
   if (renderer !== null && got !== renderer) throw new Error(`renderer is ${got}, expected ${renderer}`);
   return got;
@@ -219,7 +236,7 @@ export class Results {
   /**
    * Runs `fn(scenario)` as one case. `fn` returns { pass?, detail?, metrics?, evidence? }; pass
    * defaults to true. Any thrown error, or any unexpected console error / page error, fails it.
-   * Failed cases get screenshots of every open page. `info: true` records numbers without a verdict.
+   * Failed cases get screenshots of every open page. `info: true` (or `out.info === true`) records numbers without a verdict.
    */
   async case(id, fn, { browser, base, info = false, ignore = [], label = id } = {}) {
     const t0 = Date.now();
@@ -231,13 +248,14 @@ export class Results {
     } catch (err) {
       error = err instanceof Error ? err.message : String(err);
     }
-    const problems = s.problems().filter((p) => !ignore.some((re) => re.test(p)));
+    const problems = s.problems().filter((p) => !ignore.some((re) => re.test(p)) && !engineNoise(this.engine, p));
     const warnings = s.handles.flatMap((h) => h.warnings ?? []);
     const netFailed = s.handles.flatMap((h) => h.netFailed ?? []);
     const netAborted = s.handles.flatMap((h) => h.netAborted ?? []);
     const netAbortedOther = s.handles.flatMap((h) => h.netAbortedOther ?? []);
     const netExpected = s.handles.flatMap((h) => h.netExpected ?? []);
     const pass = !error && problems.length === 0 && netFailed.length === 0 && (out.pass ?? true);
+    const isInfo = info || out.info === true;
     const evidence = [...(out.evidence ?? [])];
     if (!pass) {
       for (const h of s.handles) {
@@ -248,7 +266,7 @@ export class Results {
     }
     const rec = {
       id,
-      verdict: info ? "info" : pass ? "pass" : "fail",
+      verdict: isInfo ? "info" : pass ? "pass" : "fail",
       detail: [error, out.detail].filter(Boolean).join("; ") || undefined,
       metrics: { ...out.metrics, "net.abortedMedia": netAborted.length, "net.abortedOther": netAbortedOther.length },
       problems: problems.length ? problems : undefined,

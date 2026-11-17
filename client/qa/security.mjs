@@ -9,11 +9,15 @@
 //   sec.chat.rateLimited      1 when 20 chats sent in one tick are cut off by the server and the sender sees a toast.
 //   sec.profanity.viewerMasked  1 when a profane line sent over raw WebSocket shows masked in a browser viewer's room
 //                             chat (filter on), and shows unmasked after the viewer turns the profanity filter off.
+//   sec.mod.muteBlocked        1 when a muted guest's chat is refused with a `muted` error and never reaches the host.
+//   sec.mod.kickVisible        1 when a kicked guest receives the `kicked` notice with a reason.
+//   sec.chat.dupDelivered      extra deliveries of one chat line to a watcher (0 passes; raw WebSocket).
+//   sec.typing.relayed         typing signals from a muted guest that reach the host (0 passes; raw WebSocket).
 //
 // Run: cd client && QA_OUT=<dir> node qa/security.mjs     (QA_ENGINES=chromium to narrow)
 // Output: <QA_OUT>/security-<engine>.{json,md}; evidence under <QA_OUT>/evidence/security-<engine>/.
-// The XSS, chat rate and profanity cases run on every selected engine. Raw WebSocket origin and name cases run on
-// chromium only; other engines get an info row.
+// The XSS, chat rate and profanity cases run on every selected engine. Raw WebSocket origin, name and moderation
+// cases run on chromium only; other engines get an info row.
 //
 // Self-test: QA_SELF_TEST=<mode> runs only that key's case with a known fault; that case must FAIL.
 //   xss        innerHTML of a marked payload into h1.room-title (a real unsafe DOM insertion)
@@ -21,6 +25,7 @@
 //   origin     opens with the server's own origin (allowed) where the case expects a refusal
 //   ratelimit  sends 3 chats (within the server burst) where the case expects 20 to be limited
 //   profanity  sends a clean line where the case expects the viewer to see a masked profane word
+//   mute       skips the host's mute frame where the case expects the guest to be refused
 // Use a separate QA_OUT for self-tests (each run overwrites <instrument>-<engine>.json).
 
 import http from "node:http";
@@ -104,16 +109,14 @@ const hitOf = (page) => page.evaluate(() => (window.__xss === 1 || (window.__xss
 
 // ---------------------------------------------------------------- browser cases
 
+// Markup is never a valid name: the field refuses it (the reason is shown, Browse stays disabled), so it cannot
+// reach a room. A name the field accepts is a failure of that contract.
 async function nameSurface(page, base, payload) {
   await page.goto(base);
   await menuName(page).waitFor();
   await menuName(page).fill(payload);
-  await playFromMenu(page, null);
-  await button(page, "New room").click();
-  await page.getByLabel("room name", { exact: true }).fill(uniqueName("xn"));
-  await button(page, "Create room").click();
-  await page.locator("h1.room-title").waitFor();
-  await page.locator(".room-player-name").first().waitFor();
+  await page.locator(".field-error:not([hidden])").first().waitFor();
+  if (!(await page.locator(".home-browse").isDisabled())) throw new Error(`name accepted: ${payload}`);
 }
 
 async function roomSurface(host, browse, base, payload) {
@@ -343,6 +346,85 @@ async function originCase(base) {
   return { pass: v === 1, metrics: { "sec.ws.originRejected": v }, detail: `Origin ${origin}: ${detail}` };
 }
 
+/**
+ * Host moderation over raw WebSocket. A host, a guest and a watcher share one room. Before any mute, a typing
+ * signal from the guest reaches the host (control), and one chat line from the host is counted at the watcher
+ * (extra frames are duplicates). The host mutes the guest: the guest's chat is refused with a `muted` error and
+ * never reaches the host, and its typing signals stop reaching the host. The host kicks the guest: the guest gets
+ * a `kicked` notice with a reason before the close.
+ */
+async function modCase(base) {
+  const nonce = randomBytes(3).toString("hex");
+  const socks = await Promise.all([connect(base), connect(base), connect(base)]);
+  const [host, guest, watch] = socks;
+  const closeAll = () => socks.forEach((s) => s.raw?.close());
+  if (!host.raw || !guest.raw || !watch.raw) {
+    closeAll();
+    return {
+      pass: false,
+      metrics: { "sec.mod.muteBlocked": 0, "sec.mod.kickVisible": 0 },
+      detail: `upgrade status ${socks.map((s) => s.status).join("/")}`,
+    };
+  }
+  try {
+    const [h, g, w] = [host.raw, guest.raw, watch.raw];
+    for (const [x, name] of [
+      [h, `QAHost${nonce}`],
+      [g, `QAGuest${nonce}`],
+      [w, `QAWatch${nonce}`],
+    ]) {
+      x.send({ t: "hello", version: 1, name });
+      await x.until((f) => f.t === "welcome" || f.t === "error", 4000);
+    }
+    h.send({ t: "create_room", name: `QA mod ${nonce}`, password: null, max_players: 8, public: false });
+    const created = await h.until((f) => f.t === "room", 4000);
+    if (!created) return { pass: false, metrics: {}, detail: "no room frame after create_room" };
+    for (const x of [g, w]) x.send({ t: "join_room", room: created.room.code, password: null });
+    const joined = await g.until((f) => f.t === "joined", 4000);
+    await w.until((f) => f.t === "joined", 4000);
+    if (!joined) return { pass: false, metrics: {}, detail: "guest did not join the room" };
+    const guestId = joined.you;
+
+    const line = `QA dup ${nonce}`;
+    h.send({ t: "chat", text: line });
+    await sleep(1500);
+    const delivered = w.frames.filter((f) => f.t === "chat" && typeof f.text === "string" && f.text.includes(line)).length;
+
+    g.send({ t: "typing" });
+    const control = (await h.until((f) => f.t === "typing" && f.player === guestId, 2000)) !== undefined;
+
+    if (MODE !== "mute") h.send({ t: "mute", player: guestId, muted: true });
+    await sleep(900); // clears the typing gap, so only the mute can stop the next signal
+    const mark = h.frames.length;
+    const muted = `QA muted ${nonce}`;
+    g.send({ t: "chat", text: muted });
+    g.send({ t: "typing" });
+    const refused = await g.until((f) => f.t === "error" && f.code === "muted", 3000);
+    await sleep(1000);
+    const after = h.frames.slice(mark);
+    const leaked = after.some((f) => f.t === "chat" && typeof f.text === "string" && f.text.includes(muted));
+    const relayed = after.filter((f) => f.t === "typing" && f.player === guestId).length;
+    const muteBlocked = refused && !leaked ? 1 : 0;
+
+    h.send({ t: "kick", player: guestId, ban: false });
+    const kicked = await g.until((f) => f.t === "kicked" && typeof f.reason === "string" && f.reason.length > 0, 3000);
+    const kickVisible = kicked ? 1 : 0;
+
+    return {
+      pass: control && delivered === 1 && muteBlocked === 1 && relayed === 0 && kickVisible === 1,
+      metrics: {
+        "sec.mod.muteBlocked": muteBlocked,
+        "sec.mod.kickVisible": kickVisible,
+        "sec.chat.dupDelivered": Math.max(0, delivered - 1),
+        "sec.typing.relayed": relayed,
+      },
+      detail: `control typing ${control ? "relayed" : "not relayed"}; line delivered ${delivered}x; muted chat ${refused ? "refused" : "not refused"}, reached host ${leaked}; muted typing relayed ${relayed}; kick notice ${kicked ? JSON.stringify(kicked.reason) : "none"}`,
+    };
+  } finally {
+    closeAll();
+  }
+}
+
 const sec = (page, name) => page.locator(".settings-nav-item").filter({ hasText: name }).click();
 const sw = (page, text) => page.locator("label.check").filter({ hasText: text }).click();
 const chatLinesWith = (page, needle) => page.locator(".room-chat-line").filter({ hasText: needle }).allTextContents();
@@ -427,6 +509,7 @@ for (const engine of engines) {
     if (want("ratelimit")) await results.case("chat.rateLimited", (s) => chatRateCase(s, base), opts);
     if (want("namelimit")) await results.case("server.nameLimit", () => nameCase(base), opts);
     if (want("origin")) await results.case("ws.originRejected", () => originCase(base), opts);
+    if (want("mute")) await results.case("mod", () => modCase(base), opts);
   } else {
     // Firefox reports requests the instrument's own page.goto aborts as "Navigated away from page" (one per
     // aborted request: problems == net.abortedOther in the run record). Only those are ignored, on non-chromium.
@@ -434,7 +517,7 @@ for (const engine of engines) {
     if (want("ratelimit")) await results.case("chat.rateLimited", (s) => chatRateCase(s, base), opts);
     await results.case(
       "raw.skipped",
-      () => ({ detail: "raw WebSocket cases (nameLimit, originRejected) run on chromium only" }),
+      () => ({ detail: "raw WebSocket cases (nameLimit, originRejected, mod) run on chromium only" }),
       { ...opts, info: true },
     );
   }

@@ -54,6 +54,9 @@ const RENDERERS = ["webgpu", "webgl2"];
 const FPS_MS = Number(process.env.QA_FPS_MS ?? 30000);
 const SOAK_MS = Number(process.env.QA_SOAK_MS ?? 600000);
 const SOAK_RUNS = Number(process.env.QA_SOAK_RUNS ?? 3);
+// Soak baseline and end: medians of SOAK_EDGE samples each, the baseline taken after SOAK_WARM_MS of JIT warm-up.
+const SOAK_WARM_MS = 60000;
+const SOAK_EDGE = 3;
 const LOAD_RUNS = 3;
 const CPU_RATE = 4;
 // LCP is final at the first input or 10 s (Chrome definition, rubric D12); CLS counts 5 s after interactive.
@@ -293,10 +296,11 @@ async function frameCase(s, base, ctx, { kind, renderer, cpu }) {
   };
 }
 
-/** Heap soak in a practice run (chromium CDP): regression slope over the whole window and end-minus-start. */
+/** Heap soak in a practice run (chromium CDP): regression slope over the whole window; end-minus-start between medians after warm-up. */
 async function soakCase(s, base, { cpu }) {
   const h = await s.open("soak");
-  await startPractice(h, base, "webgpu");
+  // The soak needs no e2e pixel probe (its changes log grows with every frame); the game is checked by .offline.playing and the renderer.
+  await startPractice(h, base, "webgpu", { pixels: false });
   const cdp = await cdpOf(h.page);
   if (cpu) await setCpu(cdp, CPU_RATE);
   if (selfTestMode() === "leak") {
@@ -325,14 +329,20 @@ async function soakCase(s, base, { cpu }) {
   }
   // Least-squares slope over the whole soak window (rubric D12: linear slope of JS heap over the soak).
   const perMin = slope(points.map((p) => ({ x: p.t / 60, y: p.heapMB })));
-  const first = points[0];
+  // Retention, not JIT warm-up: baseline = median of SOAK_EDGE samples from the warm-up window on, end = median of the last SOAK_EDGE.
+  const warmMs = Math.min(SOAK_WARM_MS, SOAK_MS / 5);
+  const warmIdx = points.findIndex((p) => p.t * 1000 >= warmMs);
+  const shortSoak = warmIdx < 0 || warmIdx + 2 * SOAK_EDGE > points.length;
+  const baseMB = median(points.slice(warmIdx, warmIdx + SOAK_EDGE).map((p) => p.heapMB));
+  const endMB = median(points.slice(-SOAK_EDGE).map((p) => p.heapMB));
+  const endPct = ((endMB - baseMB) / baseMB) * 100;
   const last = points[points.length - 1];
-  const endPct = ((last.heapMB - first.heapMB) / first.heapMB) * 100;
   const metrics = {
-    "perf.heapMB.start": round(first.heapMB, 2),
-    "perf.heapMB.end": round(last.heapMB, 2),
+    "perf.heapMB.start": round(baseMB, 2),
+    "perf.heapMB.end": round(endMB, 2),
     "perf.heapMB.slope": round(perMin, 3),
     "perf.heapMB.endMinusStartPct": round(endPct, 1),
+    "perf.heapMB.warmupS": round(warmMs / 1000, 0),
     "perf.nodes.end": last.nodes,
     "perf.listeners.end": last.listeners,
     cpu4x: cpu,
@@ -340,6 +350,7 @@ async function soakCase(s, base, { cpu }) {
     seconds: round(SOAK_MS / 1000, 0),
   };
   const problems = [];
+  if (shortSoak) problems.push(`soak too short for a warm-up baseline and end samples (${points.length} samples)`);
   if (!Number.isFinite(perMin)) problems.push("slope not computable");
   else if (perMin > GATE.heapSlope) problems.push(`heap slope ${round(perMin, 3)} MB/min > ${GATE.heapSlope}`);
   if (!(endPct <= GATE.heapEndPct)) problems.push(`heap end-minus-start ${round(endPct, 1)}% > ${GATE.heapEndPct}%`);
