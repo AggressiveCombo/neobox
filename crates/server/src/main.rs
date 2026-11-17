@@ -63,10 +63,17 @@ async fn no_store_entry(req: Request, next: middleware::Next) -> Response {
     res
 }
 
-/// Serves the app shell for an unknown page path. A path whose last segment has an extension names an
-/// asset, so a missing one is a 404 rather than HTML handed to a script or stylesheet request.
+/// Extensions of the files the client ships: a path ending in one names an asset, not a page.
+const ASSET_EXTS: &[&str] = &[
+    "js", "mjs", "css", "wasm", "map", "json", "webmanifest", "svg", "png", "jpg", "jpeg", "gif", "webp", "avif", "ico", "woff", "woff2", "ttf", "otf",
+    "mp3", "ogg", "wav", "mp4", "webm", "txt", "xml",
+];
+
+/// Serves the app shell for an unknown page path. A path whose last segment ends in a known asset extension
+/// names an asset, so a missing one is a 404 rather than HTML handed to a script or stylesheet request.
 async fn spa_fallback(uri: Uri, index: PathBuf) -> Response {
-    if uri.path().rsplit('/').next().is_some_and(|last| last.contains('.')) {
+    let last = uri.path().rsplit('/').next().unwrap_or_default();
+    if last.rsplit_once('.').is_some_and(|(_, ext)| ASSET_EXTS.iter().any(|known| known.eq_ignore_ascii_case(ext))) {
         return StatusCode::NOT_FOUND.into_response();
     }
     match tokio::fs::read(&index).await {
