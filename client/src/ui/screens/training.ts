@@ -148,13 +148,13 @@ export const trainingScreen: ScreenFactory = (ctx) => {
     running = true;
   }
 
-  /** The training map as a map code, from the bundled training.json (`{name, map}` like maps/*.json). */
-  async function loadMapCode(): Promise<string> {
+  /** The training map as JSON, from the bundled training.json (`{name, map}` like maps/*.json). */
+  async function loadMapJson(): Promise<string> {
     const res = await fetch("/training.json");
     if (!res.ok) throw new Error(`training.json: HTTP ${res.status}`);
     const doc: unknown = await res.json();
     const map = typeof doc === "object" && doc !== null && "map" in doc ? doc.map : doc;
-    return ctx.wasm.mapEncode(JSON.stringify(map));
+    return JSON.stringify(map);
   }
 
   /** A plain page (loading, errors) with the hall's head and Back. */
@@ -238,9 +238,9 @@ export const trainingScreen: ScreenFactory = (ctx) => {
 
   async function start(): Promise<void> {
     showPage(h("p", { class: "offline-status" }, "Loading the training hall…"));
-    // The map code loads while the engine does; the engine's own status shows its failure with Retry.
-    const codeReady = loadMapCode();
-    codeReady.catch(() => {});
+    // The map JSON fetches while the engine loads; encoding needs the engine, so it waits for it.
+    const mapJson = loadMapJson();
+    mapJson.catch(() => {});
     let engine: Engine;
     try {
       engine = await ctx.engine();
@@ -249,7 +249,7 @@ export const trainingScreen: ScreenFactory = (ctx) => {
       return;
     }
     try {
-      mapCode = await codeReady;
+      mapCode = ctx.wasm.mapEncode(await mapJson);
     } catch (err) {
       if (!destroyed) showMessage(`The training hall could not load: ${errText(err)}`);
       return;
