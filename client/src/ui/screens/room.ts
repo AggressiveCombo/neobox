@@ -1175,7 +1175,6 @@ export const roomScreen: ScreenFactory = (ctx: AppCtx) => {
   // The header, notice, tabs and sections scroll together; the dock sits outside the scroller so it never covers content.
   const content = h("main", { class: "room-content" }, header, notice, startNotice, tabBar, main);
   const root = h("div", { class: "room-screen", "data-tab": "players" }, content, dock);
-  root.classList.toggle("is-reconnecting", st.reconnecting);
 
   // The sticky tabs cover the scroller's top edge. Their height feeds scroll-margin in room.css, so focus scrolling keeps the focused control clear of them.
   const overlays = new ResizeObserver(() => {
@@ -1183,7 +1182,7 @@ export const roomScreen: ScreenFactory = (ctx: AppCtx) => {
   });
   overlays.observe(tabBar);
 
-  // The reconnect banner floats over the top edge of the app. While it shows, the room's top padding starts below it (room.css), so no content scrolls under it. The room sits over the stale game canvas, so it takes the ground colour too.
+  // The reconnect banner floats over the top edge of the app. While it shows, the room's top padding starts below it (room.css), so no content scrolls under it.
   const banner = document.querySelector<HTMLElement>(".reconnect-banner");
   const bannerSpace = (): void => {
     const bottom = banner && !banner.hidden ? banner.getBoundingClientRect().bottom : 0;
@@ -1420,7 +1419,6 @@ export const roomScreen: ScreenFactory = (ctx: AppCtx) => {
     el: root,
     update(next, prev) {
       st = next;
-      root.classList.toggle("is-reconnecting", next.reconnecting);
       bannerSpace();
       if (next.account !== prev.account) void loadFriends();
       if (
