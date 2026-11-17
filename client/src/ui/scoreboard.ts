@@ -12,7 +12,7 @@ const EVENTS_MAX = 512;
 export interface Scoreboard {
   /** The score table (`.hud-scores`). */
   readonly el: HTMLElement;
-  /** Kill and hit log (`.hud-events`, role "log"); screen-reader only. */
+  /** Kill and hit log (`.hud-events` list in a role "log" region); screen-reader only. */
   readonly events: HTMLElement;
   /** Redraw the table from the scene's score rows. `myId` is highlighted (-1 for none). */
   render(scene: Scene, names: ReadonlyMap<number, string>, myId: number, tickHz: number): void;
@@ -89,7 +89,8 @@ export function createScoreboard(): Scoreboard {
       tbody,
     ),
   );
-  const events = h("ol", { class: "hud-events", role: "log", "aria-label": "Kills and hits" });
+  const list = h("ol", { class: "hud-events" });
+  const events = h("div", { role: "log", "aria-label": "Kills and hits" }, list);
   let lastKey = "";
 
   function render(scene: Scene, names: ReadonlyMap<number, string>, myId: number, tickHz: number): void {
@@ -114,16 +115,16 @@ export function createScoreboard(): Scoreboard {
       }),
     ];
     if (lines.length === 0) return;
-    events.append(
+    list.append(
       ...lines.map((l) =>
         h("li", { class: `hud-event hud-event-${l.kind}`, "data-tick": l.tick, "data-kind": l.kind }, l.text),
       ),
     );
-    while (events.childElementCount > EVENTS_MAX) events.firstElementChild?.remove();
+    while (list.childElementCount > EVENTS_MAX) list.firstElementChild?.remove();
   }
 
   function clear(): void {
-    events.replaceChildren();
+    list.replaceChildren();
   }
 
   return { el, events, render, record, clear };
