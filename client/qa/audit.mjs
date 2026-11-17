@@ -58,7 +58,7 @@ const FIXTURE_NAME = /^(room|pw|host|guest|user)[a-z0-9]{6,8}(?![a-z])|^Actions 
 const DEAD_SCREENS = process.env.QA_DEAD_SCREENS ? process.env.QA_DEAD_SCREENS.split(",").map((s) => s.trim()) : STATES.map((st) => st.id);
 const TOKEN_SCREENS = ["menu-anon", "settings-controls", "library-grid", "room-host"];
 const TOKEN_THEMES = ["light", "dark"];
-const ROLES = ["primary", "secondary", "danger", "ghost", "link"];
+const ROLES = ["primary", "hero", "big", "secondary", "danger", "ghost", "link", "name", "icon", "ink", "block", "chrome", "tile", "seg", "tab"];
 const PROPS = ["fontSize", "radius", "padding", "color"];
 const MODE_CASE = { placeholder: "copy", inventory: "coverage", dead: "dead", tokens: "tokens", persist: "persist" };
 const ONLY = (process.env.QA_ONLY ?? "copy,coverage,dead,tokens,persist,accountSync").split(",").map((s) => s.trim());
@@ -133,17 +133,36 @@ const TOKENS = () => {
     const cs = getComputedStyle(el);
     return r.width > 0 && r.height > 0 && cs.visibility !== "hidden" && cs.display !== "none";
   };
+  // The look a control is drawn as. One role is one intended look, so a role with two values on a screen is drift.
+  const roleOf = (el) => {
+    const c = el.classList;
+    if (el.tagName === "A" || c.contains("home-privacy")) return "link"; // text link; home-privacy is an underlined text button, no padding
+    if (c.contains("room-profile-link")) return "name"; // a player's name as a button: body text, no padding
+    if (c.contains("big")) return c.contains("primary") ? "hero" : "big"; // 64px action at --step-lead; hero is the filled one
+    if (c.contains("icon")) return "icon"; // square glyph button with an aria-label, no text
+    if (c.contains("seg-option")) return "seg"; // option of a segmented control, --control high
+    if (c.contains("tab")) return "tab"; // tab of a tablist, --control high, underlined when selected
+    if (c.contains("home-row-btn")) return "tile"; // menu tile: 14px label under square art, padding sized to the art
+    if (c.contains("ink")) return "ink"; // solid ink fill
+    if (c.contains("primary")) return "primary";
+    if (c.contains("danger")) return "danger";
+    if (c.contains("home-account")) return "chrome"; // account chip: 4px leading inset for the avatar, 14px text
+    if (c.contains("quiet")) return "ghost";
+    if (c.contains("block")) return "block"; // full-width plain button
+    return "secondary";
+  };
   const roles = [];
-  for (const el of document.querySelectorAll("button:not([role]), a[href]")) {
+  for (const el of document.querySelectorAll("button:not([role]), button.seg-option, button.tab, a[href]")) {
     if (!vis(el)) continue;
     const cs = getComputedStyle(el);
-    const role = el.tagName === "A" ? "link" : el.classList.contains("primary") ? "primary" : el.classList.contains("danger") ? "danger" : el.classList.contains("quiet") ? "ghost" : "secondary";
+    // Selected options differ by state (aria-checked / aria-selected), not by role: their colour stays out of the role set.
+    const selected = el.matches('[aria-checked="true"], [aria-selected="true"]');
     roles.push({
-      role,
+      role: roleOf(el),
       fontSize: cs.fontSize,
       radius: cs.borderTopLeftRadius,
       padding: [cs.paddingTop, cs.paddingRight, cs.paddingBottom, cs.paddingLeft].join(" "),
-      color: cs.color,
+      color: selected ? null : cs.color,
     });
   }
   const body = [];
@@ -322,17 +341,23 @@ async function tokensCase(s) {
     const h = await stateById(id).prepare(s);
     try {
       for (const theme of TOKEN_THEMES) {
+        // Account prefs pulled on load overwrite a forced theme (account.ts pullPrefs), so the theme is driven by the
+        // system scheme ("system" resolves to it) and checked after the reload.
+        await h.page.emulateMedia({ colorScheme: theme });
         await h.page.evaluate((t) => {
           const p = JSON.parse(localStorage.getItem("neobox.prefs") ?? "null") ?? {};
           localStorage.setItem("neobox.prefs", JSON.stringify({ ...p, theme: t }));
-        }, theme);
+        }, "system");
         await h.page.reload();
         await sleep(800);
+        const applied = await h.page.evaluate(() => document.documentElement.dataset.theme);
+        if (applied !== theme) throw new Error(`tokens: ${id} rendered ${applied}, wanted ${theme}`);
         await inject(h.page);
         const { roles, body } = await h.page.evaluate(TOKENS);
         for (const r of roles) {
           counts[r.role] = (counts[r.role] ?? 0) + 1;
           for (const prop of PROPS) {
+            if (r[prop] === null) continue; // a state's colour (selected tab/option), not a role's
             const key = `${prop}.${r.role}`;
             sets[theme][key] ??= new Set();
             sets[theme][key].add(r[prop]);
