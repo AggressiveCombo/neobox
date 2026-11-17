@@ -2,8 +2,10 @@
    (play, seek, time), step and speed controls under the picture. The dock and
    top bar backgrounds come from offline.css (.offline-overlay). */
 
-.replay-page .page-inner {
+.replay-page .page-inner > * {
+  width: 100%;
   max-width: 720px;
+  margin-inline: auto;
 }
 
 /* The drop zone is a whole label around the file input: any click or drop
@@ -203,4 +205,20 @@
   .replay-controls .seg-option {
     min-width: 48px;
   }
+}
+
+/* Replay scoreboard: the live table, centred under the bar. Pointer events stay off. */
+#ui > .offline.playing.replay-view > .replay-board {
+  position: absolute;
+  top: calc(env(safe-area-inset-top, 0px) + 64px);
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(560px, calc(100% - 32px));
+  pointer-events: none;
+}
+
+.replay-board .hud-scores {
+  position: static;
+  transform: none;
+  width: auto;
 }

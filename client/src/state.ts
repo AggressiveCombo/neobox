@@ -32,13 +32,15 @@ export interface ChatLine {
 /** Live numbers for the F3 stats overlay (refreshed about 4 times a second). */
 export interface Stats {
   transport: Transport;
-  /** Last measured ping to the server, ms (-1 unknown). */
-  pingMs: number;
-  /** Round-trip estimate from the engine, ms. */
+  /** Round-trip time to the server, ms (-1 unknown): the engine's app-level measure, shown by the HUD badge and RTT row. */
   rttMs: number;
   /** Confirmed ticks behind the head (prediction depth). */
   predDepth: number;
   rollbacksPerSec: number;
+  /** Why the match session asked for a snapshot: "none", "gap 12-19" (ticks skipped) or "hash 240" (checksum mismatch). */
+  netDesync: string;
+  /** p95 rollback depth in ticks over the recent rollbacks. */
+  rollbackDepthP95: number;
   fps: number;
 }
 
@@ -124,7 +126,7 @@ export function initialState(): AppState {
     chat: [],
     inMatch: false,
     tickHz: 0,
-    stats: { transport: "ws", pingMs: -1, rttMs: -1, predDepth: 0, rollbacksPerSec: 0, fps: 0 },
+    stats: { transport: "ws", rttMs: -1, predDepth: 0, rollbacksPerSec: 0, netDesync: "none", rollbackDepthP95: 0, fps: 0 },
     showStats: false,
     showScores: false,
     replayReady: false,

@@ -10,6 +10,7 @@ import { h } from "../dom";
 import { engineStatus } from "../engine-status";
 import { icon, type IconName } from "../icons";
 import { page, pageHead, seg } from "../kit";
+import { createScoreboard, type Scoreboard } from "../scoreboard";
 import "./replay.css";
 
 const SPEEDS = [0.25, 0.5, 1, 2, 4];
@@ -66,6 +67,7 @@ export const replayScreen: ScreenFactory = (ctx) => {
   let playBtn: HTMLButtonElement | null = null;
   let seekEl: HTMLInputElement | null = null;
   let timeEl: HTMLElement | null = null;
+  let board: Scoreboard | null = null;
   let speedSeg: { set(v: string): void } | null = null;
   // Picker-view status line (rebuilt by showPicker).
   let pickerMsg: HTMLElement | null = null;
@@ -97,6 +99,7 @@ export const replayScreen: ScreenFactory = (ctx) => {
     loop.stop();
     if (info) engine?.replayClose();
     info = null;
+    board = null;
     playing = false;
     releaseTop?.();
     releaseTop = null;
@@ -111,6 +114,7 @@ export const replayScreen: ScreenFactory = (ctx) => {
   function seek(t: number): void {
     if (!info) return;
     tick = Math.min(info.end, Math.max(info.first, t));
+    board?.clear();
   }
 
   function step(dir: 1 | -1): void {
@@ -154,7 +158,11 @@ export const replayScreen: ScreenFactory = (ctx) => {
       }
     }
     engine.replayFrame(tick, follow);
-    ctx.present(names, info.hz);
+    const scene = ctx.present(names, info.hz);
+    if (scene && board) {
+      board.render(scene, names, -1, info.hz);
+      board.record(scene, names);
+    }
     if (seekEl && !dragging) seekEl.value = String(Math.round(tick));
     if (timeEl) timeEl.textContent = timeText();
   }
@@ -344,8 +352,10 @@ export const replayScreen: ScreenFactory = (ctx) => {
       h("h1", { class: "offline-title" }, fileName),
       followSel,
     );
+    board = createScoreboard();
     root.replaceChildren(
       bar,
+      h("div", { class: "replay-board" }, board.el, board.events),
       h(
         "main",
         { class: "offline-dock offline-overlay replay-dock" },

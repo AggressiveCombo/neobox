@@ -1,6 +1,7 @@
 // Decodes the frame buffer header and records (docs/CLIENT-API.md "Frame buffer").
-// Layout: little-endian words; header words 0..33; world verts (3 words), players
-// (14 words), sounds (5 words), score rows (15 words), kill pairs (2 words), damage bars (4 words).
+// Layout: little-endian words; header words 0..37; world verts (3 words), players
+// (14 words), sounds (5 words), score rows (15 words), kill pairs (2 words), damage bars (4 words),
+// bat hits (3 words, predicted: hit visuals), bat hits (3 words, confirmed: event log).
 
 import type { FrameView } from "./engine";
 
@@ -12,6 +13,9 @@ export const FLAG_PUSHING = 32;
 export const FLAG_DASH = 64;
 export const FLAG_TELEPORT = 128;
 export const FLAG_AIR_JUMP = 256;
+
+/** Victim kind of a player in a bat hit (HitRec.kind; the sim's kind). */
+export const HIT_KIND_PLAYER = 1;
 
 export interface PlayerRec {
   id: number;
@@ -55,10 +59,25 @@ export interface ScoreRow {
   spawnY: number;
 }
 
-/** A kill that happened since the previous frame. */
+/** A kill that happened since the previous frame, with the confirmed tick it happened on. */
 export interface KillRec {
   killer: number;
   victim: number;
+  tick: number;
+}
+
+/** A bat hit that landed since the previous frame: who swung, what it hit and its index. */
+export interface HitRec {
+  swinger: number;
+  /** Victim kind: 0 body, 1 player, 2 projectile (sim kind). */
+  kind: number;
+  /** Body or projectile index, or the victim's player id for kind 1. */
+  index: number;
+}
+
+/** A confirmed bat hit (the event log): a HitRec with the tick it landed on. */
+export interface LogHitRec extends HitRec {
+  tick: number;
 }
 
 /** A body's damage bar: centre (world units), fill fraction (0..1) and colour (0xRRGGBB). */
@@ -109,6 +128,9 @@ export interface Scene {
   scores: ScoreRow[];
   kills: KillRec[];
   bars: BarRec[];
+  hits: HitRec[];
+  /** Bat hits of confirmed ticks: the event log. `hits` are the predicted hit visuals. */
+  logHits: LogHitRec[];
   /** Word offset of the world vertex block (for zero-copy geometry). */
   view: FrameView;
 }
@@ -181,8 +203,8 @@ export function readScene(fb: FrameView): Scene {
 
   const kills: KillRec[] = [];
   for (let i = 0; i < killCount; i++) {
-    const o = killOff + i * 2;
-    kills.push({ killer: u32[o] ?? 0, victim: u32[o + 1] ?? 0 });
+    const o = killOff + i * 3;
+    kills.push({ killer: u32[o] ?? 0, victim: u32[o + 1] ?? 0, tick: u32[o + 2] ?? 0 });
   }
 
   const barCount = u32[32] ?? 0;
@@ -191,6 +213,22 @@ export function readScene(fb: FrameView): Scene {
   for (let i = 0; i < barCount; i++) {
     const o = barOff + i * 4;
     bars.push({ x: f32[o] ?? 0, y: f32[o + 1] ?? 0, fraction: f32[o + 2] ?? 0, colour: u32[o + 3] ?? 0 });
+  }
+
+  const hitCount = u32[34] ?? 0;
+  const hitOff = u32[35] ?? 0;
+  const hits: HitRec[] = [];
+  for (let i = 0; i < hitCount; i++) {
+    const o = hitOff + i * 3;
+    hits.push({ swinger: u32[o] ?? 0, kind: u32[o + 1] ?? 0, index: u32[o + 2] ?? 0 });
+  }
+
+  const logHitCount = u32[36] ?? 0;
+  const logHitOff = u32[37] ?? 0;
+  const logHits: LogHitRec[] = [];
+  for (let i = 0; i < logHitCount; i++) {
+    const o = logHitOff + i * 4;
+    logHits.push({ swinger: u32[o] ?? 0, kind: u32[o + 1] ?? 0, index: u32[o + 2] ?? 0, tick: u32[o + 3] ?? 0 });
   }
 
   return {
@@ -224,6 +262,8 @@ export function readScene(fb: FrameView): Scene {
     scores,
     kills,
     bars,
+    hits,
+    logHits,
     view: fb,
   };
 }

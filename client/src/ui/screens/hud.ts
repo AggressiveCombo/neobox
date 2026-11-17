@@ -6,17 +6,18 @@ import { applyAccount, errorText, logout } from "../../account";
 import type { AppCtx, HudFactory } from "../../ctx";
 import { cycleSpectate, spectatedId } from "../../camera";
 import { recordClip } from "../../clips";
-import type { Scene, ScoreRow } from "../../frame";
+import type { Scene } from "../../frame";
 import { BIT } from "../../input";
 import { filterProfanity } from "../../profanity";
 import { TOUCH_SLOTS, prefs, type TouchAction, type TouchSlot } from "../../prefs";
-import { MAX_CHAT_LEN, TEAM_BLUE, TEAM_FFA, TEAM_RED, TEAM_SPECTATOR, type PlayerInfo, type XpAward } from "../../protocol";
+import { MAX_CHAT_LEN, type PlayerInfo, type XpAward } from "../../protocol";
 import { cssHex, mixRgb, playerRgb, setPlayerColors } from "../../render/geometry";
 import { CHAT_LIMIT, type AppState, type ChatLine, type Stats } from "../../state";
 import { chatPlaceholder } from "../chat-hint";
 import { h } from "../dom";
 import { icon, type IconName } from "../icons";
 import { confirmDialog, contrastRatio } from "../kit";
+import { createScoreboard } from "../scoreboard";
 
 const SCORE_INTERVAL_MS = 100;
 const CHAT_SHOWN = 8;
@@ -56,34 +57,6 @@ export const TOUCH_BUTTONS: Record<TouchAction, { bit: number; label: string; ic
   bat: { bit: BIT.BAT, label: "Bat", icon: "swords" },
   grab: { bit: BIT.GRAB, label: "Grab", icon: "hand" },
 };
-
-/** Display order of scoreboard teams; unknown teams sort last. */
-const TEAM_ORDER: readonly number[] = [TEAM_RED, TEAM_BLUE, TEAM_FFA, TEAM_SPECTATOR];
-
-function teamRank(team: number): number {
-  const i = TEAM_ORDER.indexOf(team);
-  return i === -1 ? TEAM_ORDER.length : i;
-}
-
-function teamInfo(team: number): { label: string; cls: string } {
-  switch (team) {
-    case TEAM_RED:
-      return { label: "Red", cls: "hud-team-red" };
-    case TEAM_BLUE:
-      return { label: "Blue", cls: "hud-team-blue" };
-    case TEAM_FFA:
-      return { label: "FFA", cls: "hud-team-ffa" };
-    default:
-      return { label: "spectator", cls: "hud-team-spec" };
-  }
-}
-
-function statusText(row: ScoreRow, tickHz: number): string {
-  if (row.alive) return "alive";
-  if (row.eliminated !== 0) return "eliminated";
-  if (row.respawn <= 0) return "dead";
-  return tickHz > 0 ? `respawn ${(row.respawn / tickHz).toFixed(1)}s` : `respawn ${Math.ceil(row.respawn)} ticks`;
-}
 
 /** A touch button in `slot` performing `action`: its name, icon and engine bit follow the action. */
 function touchButton(ctx: AppCtx, slot: TouchSlot, action: TouchAction): HTMLButtonElement {
@@ -283,26 +256,13 @@ function statRow(label: string): StatRow {
   return { el, value };
 }
 
-function scoreRow(row: ScoreRow, name: string, self: boolean, tickHz: number): HTMLTableRowElement {
-  const team = teamInfo(row.team);
-  return h(
-    "tr",
-    { class: self ? "hud-row hud-row-self" : "hud-row" },
-    h("td", { class: "hud-name" }, name),
-    h("td", { class: team.cls }, team.label),
-    h("td", { class: "hud-num" }, String(Math.round(row.kills))),
-    h("td", { class: "hud-num" }, String(Math.round(row.wins))),
-    h("td", { class: "hud-num" }, String(Math.round(row.lives))),
-    h("td", null, statusText(row, tickHz)),
-  );
-}
-
 export const hudScreen: HudFactory = (ctx) => {
   let latestScene: Scene | null = null;
   let lastScoresAt = -Infinity;
   let chatOpen = false;
   let recall = -1;
   let roomPlayers = new Map<number, PlayerInfo>();
+  let roomNames: ReadonlyMap<number, string> = new Map();
   let lastTypingSent = -Infinity;
   let spectating = false;
   let spectateLabel = "";
@@ -334,10 +294,11 @@ export const hudScreen: HudFactory = (ctx) => {
   const statsRows = {
     transport: statRow("Transport"),
     fps: statRow("FPS"),
-    ping: statRow("Ping"),
     rtt: statRow("RTT"),
     predDepth: statRow("Prediction"),
     rollbacks: statRow("Rollbacks"),
+    rollbackP95: statRow("Rollback p95"),
+    desync: statRow("Snapshot"),
   };
   const statsEl = h("div", { class: "hud-stats" }, ...Object.values(statsRows).map((r) => r.el));
   // Connection chip: transport and ping; only its colour changes when the ping is bad.
@@ -345,31 +306,9 @@ export const hudScreen: HudFactory = (ctx) => {
   const linkPing = h("span");
   const linkEl = h("span", { class: "hud-link", title: "Connection" }, icon("wifi", 18), linkKind, linkPing);
 
-  // Scoreboard.
-  const tbody = h("tbody");
-  const scoresEl = h(
-    "div",
-    { class: "hud-scores" },
-    h(
-      "table",
-      { class: "hud-table" },
-      h(
-        "thead",
-        null,
-        h(
-          "tr",
-          null,
-          h("th", null, "Player"),
-          h("th", null, "Team"),
-          h("th", { class: "hud-num" }, "Kills"),
-          h("th", { class: "hud-num" }, "Wins"),
-          h("th", { class: "hud-num" }, "Lives"),
-          h("th", null, "Status"),
-        ),
-      ),
-      tbody,
-    ),
-  );
+  // Scoreboard and kill/hit log (shared with the replay viewer).
+  const board = createScoreboard();
+  const scoresEl = board.el;
 
   // Chat.
   const chatLog = h("div", { class: "hud-chat-log", "aria-live": "polite" });
@@ -383,7 +322,7 @@ export const hudScreen: HudFactory = (ctx) => {
     "aria-label": "Chat message",
   });
   const chatForm = h("div", { class: "hud-chat-form", hidden: true }, chatInput);
-  const topLeftEl = h("div", { class: "hud-topleft" }, statsEl, chatLog, typingEl, chatForm);
+  const topLeftEl = h("div", { class: "hud-topleft" }, statsEl, board.events, chatLog, typingEl, chatForm);
 
   // Quick-play XP popup, centre screen.
   const xpGain = h("div", { class: "hud-xp-gain" });
@@ -441,7 +380,7 @@ export const hudScreen: HudFactory = (ctx) => {
   );
   const menuBtn = h(
     "button",
-    { type: "button", class: "hud-menu-btn", "aria-expanded": "false", "aria-controls": "hud-menu", onclick: () => setMenu(menuPanel.hidden) },
+    { type: "button", class: "hud-menu-btn", "aria-expanded": "false", "aria-controls": "hud-menu", onclick: () => setMenu(menuPanel.hidden === true) },
     icon("menu", 18),
     h("span", { class: "hud-chip-label" }, "Menu"),
   );
@@ -515,28 +454,24 @@ export const hudScreen: HudFactory = (ctx) => {
   function renderStats(s: Stats): void {
     statsRows.transport.value.textContent = s.transport === "udp" ? "WebRTC" : "WebSocket";
     statsRows.fps.value.textContent = String(Math.round(s.fps));
-    statsRows.ping.value.textContent = s.pingMs < 0 ? "-" : `${Math.round(s.pingMs)} ms`;
     statsRows.rtt.value.textContent = s.rttMs < 0 ? "-" : `${Math.round(s.rttMs)} ms`;
     statsRows.predDepth.value.textContent = `${s.predDepth} ticks`;
     statsRows.rollbacks.value.textContent = `${s.rollbacksPerSec.toFixed(1)}/s`;
+    statsRows.rollbackP95.value.textContent = `${s.rollbackDepthP95} ticks`;
+    statsRows.desync.value.textContent = s.netDesync;
   }
 
   function renderLink(s: Stats): void {
     linkKind.textContent = s.transport === "udp" ? "UDP" : "WS";
-    linkPing.textContent = s.pingMs < 0 ? "- ms" : `${Math.round(s.pingMs)} ms`;
-    linkEl.classList.toggle("hud-link-bad", s.pingMs > BAD_PING_MS);
+    linkPing.textContent = s.rttMs < 0 ? "- ms" : `${Math.round(s.rttMs)} ms`;
+    linkEl.classList.toggle("hud-link-bad", s.rttMs > BAD_PING_MS);
   }
 
   function renderScores(state: AppState): void {
     const scene = latestScene;
     if (scene === null) return;
     lastScoresAt = performance.now();
-    const rows = [...scene.scores].sort((a, b) => teamRank(a.team) - teamRank(b.team) || a.id - b.id);
-    tbody.replaceChildren(
-      ...rows.map((row) =>
-        scoreRow(row, roomPlayers.get(row.id)?.name ?? `#${row.id}`, row.id === state.myId, state.tickHz),
-      ),
-    );
+    board.render(scene, roomNames, state.myId ?? -1, state.tickHz);
   }
 
   /** One chat line. Others' text is masked when the profanity filter pref is on; our own is not. */
@@ -702,7 +637,7 @@ export const hudScreen: HudFactory = (ctx) => {
         openChat();
       } else if (e.key === "Escape" && !e.repeat) {
         e.preventDefault();
-        setMenu(menuPanel.hidden);
+        setMenu(menuPanel.hidden === true);
       } else if (spectating && (e.key === "ArrowLeft" || e.key === "ArrowRight")) {
         e.preventDefault();
         spectateStep(e.key === "ArrowRight" ? 1 : -1);
@@ -736,6 +671,7 @@ export const hudScreen: HudFactory = (ctx) => {
     const same = <K extends keyof AppState>(k: K): boolean => prev !== null && prev[k] === state[k];
     if (!same("room")) {
       roomPlayers = new Map((state.room?.players ?? []).map((p): [number, PlayerInfo] => [p.id, p]));
+      roomNames = new Map([...roomPlayers].map(([id, p]): [number, string] => [id, p.name]));
       setPlayerColors(new Map([...roomPlayers].map(([id, p]): [number, number] => [id, p.color])));
     }
     if (!same("showStats")) statsEl.hidden = !state.showStats;
@@ -773,6 +709,7 @@ export const hudScreen: HudFactory = (ctx) => {
     },
     onFrame(scene) {
       latestScene = scene;
+      board.record(scene, roomNames);
       updateSpectate(scene);
       const alone = ctx.store.state.room?.quick != null && scene.scores.length === 1;
       if (matchingEl.hidden === alone) matchingEl.hidden = !alone;

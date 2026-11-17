@@ -19,6 +19,13 @@ const FPS_WINDOW_MS = 1000;
 /** Longest gap between animation frames before the page counts as hidden, ms. */
 const STALL_MS = 250;
 
+/** Stats text for the desync reason: "gap <expected>-<received>" or "hash <tick>". */
+function describeDesync(n: { kind: number; a: number; b: number }): string {
+  if (n.kind === 1) return `gap ${n.a}-${n.b}`;
+  if (n.kind === 2) return `hash ${n.a}`;
+  return "none";
+}
+
 export interface LoopDeps {
   engine: Engine;
   input: Input;
@@ -134,15 +141,15 @@ export class MatchLoop {
 
   private publishStats(): void {
     const { store, net, engine } = this.d;
-    const { state } = store;
-    const me = state.room?.players.find((p) => p.id === state.myId);
+    const netInfo = engine.netStats();
     store.set({
       stats: {
         transport: net.transport,
-        pingMs: me?.ping_ms ?? -1,
         rttMs: engine.rtt(),
         predDepth: this.lastScene?.predictionDepth ?? 0,
         rollbacksPerSec: this.lastScene?.rollbacksPerSec ?? 0,
+        netDesync: describeDesync(netInfo),
+        rollbackDepthP95: netInfo.rollbackP95,
         fps: this.fps,
       },
     });

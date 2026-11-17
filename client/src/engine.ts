@@ -32,6 +32,7 @@ export interface NeoboxExports {
   nb_map_preview(code: number, codeLen: number): number;
   nb_map_encode(json: number, jsonLen: number): number;
   nb_rtt(): number;
+  nb_net_stats(): number;
   nb_map_decode(code: number, codeLen: number): number;
   nb_replay_export(names: number, namesLen: number): number;
   nb_replay_clip(names: number, namesLen: number, maxSecs: number, minSecs: number): number;
@@ -154,6 +155,14 @@ export class Engine {
 
   rtt(): number {
     return this.x.nb_rtt();
+  }
+
+  /** Desync reason and p95 rollback depth of the current session (see `nb_net_stats`). */
+  netStats(): { kind: number; a: number; b: number; rollbackP95: number } {
+    const n = this.x.nb_net_stats();
+    if (n < 16) return { kind: 0, a: 0, b: 0, rollbackP95: 0 };
+    const w = new Uint32Array(this.x.memory.buffer.slice(this.x.nb_out_ptr(), this.x.nb_out_ptr() + 16));
+    return { kind: w[0], a: w[1], b: w[2], rollbackP95: w[3] };
   }
 
   private outView(n: number): Uint8Array {

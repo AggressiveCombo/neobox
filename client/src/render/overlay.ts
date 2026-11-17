@@ -6,9 +6,9 @@
 import type { Camera, ViewRect } from "../camera";
 import { worldXf } from "../camera";
 import type { Scene } from "../frame";
-import { FLAG_LOCAL } from "../frame";
+import { FLAG_LOCAL, HIT_KIND_PLAYER } from "../frame";
 import { TEAM_BLUE, TEAM_RED, TEAM_SPECTATOR, isTeamMode } from "../protocol";
-import { cssHex, playerRgb } from "./geometry";
+import { AWAY_RING_BELOW_LUM, cssHex, playerRgb, relLuminance } from "./geometry";
 
 const NAME_FONT = "500 12px system-ui, sans-serif";
 const LOCAL_NAME_FONT = "700 13px system-ui, sans-serif";
@@ -44,6 +44,8 @@ const FEED_GAP = 2;
 /** Kill feed: lifetime in ms and the number of rows kept. */
 const FEED_MS = 4000;
 const FEED_MAX = 4;
+/** Bat hit flash (ring around the hit player): lifetime in ms. */
+const HIT_FLASH_MS = 160;
 /** Objective bar: height, and its width limits (CSS px). */
 const OBJECTIVE_H = 30;
 const OBJECTIVE_MIN_W = 160;
@@ -61,6 +63,10 @@ const AWAY_ARROW = 9;
 const AWAY_CHIP_H = 18;
 const AWAY_CHIP_PAD = 5;
 const AWAY_CHIP_GAP = 4;
+/** Name chip: the player colour is a 6 px swatch on the panel (a non-text mark); the name is white. */
+const AWAY_SWATCH = 6;
+/** One drawn edge chip, in window CSS px (QA hook). */
+interface AwayChip { id: number; x: number; y: number; w: number; h: number }
 
 interface KillEntry {
   killer: number;
@@ -73,7 +79,7 @@ export class Overlay {
   private readonly ctx: CanvasRenderingContext2D;
   private readonly cssCache = new Map<number, string>();
   private readonly feed: KillEntry[] = [];
-  private feedTick = -1;
+  private readonly hitFlashes: { id: number; at: number }[] = [];
   /** CSS px at the top taken by a screen's own controls (AppCtx.reserveTop); the top bars go below. */
   topInset = 0;
   /** The game view's rect in window CSS px (the canvas covers it). */
@@ -133,11 +139,12 @@ export class Overlay {
     this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     const cssW = this.canvas.width / dpr;
     const cssH = this.canvas.height / dpr;
-    this.recordKills(scene);
+    if (chrome) this.recordEvents(scene);
     this.drawDamageBars(scene, cam, cssW, cssH);
     this.drawNames(scene, cam, names, cssW, cssH);
+    if (chrome) this.drawHitFlashes(scene, cam, cssW, cssH);
     if (!chrome) return;
-    this.drawAway(scene, cam, names, cssW, cssH);
+    this.publishAway(scene.tick, this.drawAway(scene, cam, names, cssW, cssH));
     this.drawIntro(scene, tickHz, cssW, cssH);
     this.drawBanner(scene, names, cssW, cssH);
     this.drawPersonal(scene, names, cssW);
@@ -145,15 +152,41 @@ export class Overlay {
     this.drawObjectiveBar(scene, cssW);
   }
 
-  /** Scene kills belong to one tick: keep each tick's once, for FEED_MS, the newest FEED_MAX. */
-  private recordKills(scene: Scene): void {
+  /**
+   * Each present consumes the frame feed's new events once (the feed holds only the ticks new since
+   * the previous frame). Kills are confirmed, so the KO feed never shows a rolled-back kill; hit
+   * flashes come from the predicted hits, so they show at once.
+   */
+  private recordEvents(scene: Scene): void {
     const now = performance.now();
-    if (scene.tick !== this.feedTick) {
-      this.feedTick = scene.tick;
-      for (const k of scene.kills) this.feed.push({ killer: k.killer, victim: k.victim, at: now });
-    }
+    for (const k of scene.kills) this.feed.push({ killer: k.killer, victim: k.victim, at: now });
+    for (const h of scene.hits) if (h.kind === HIT_KIND_PLAYER) this.hitFlashes.push({ id: h.index, at: now });
     while (this.feed.length > FEED_MAX) this.feed.shift();
     while (this.feed.length > 0 && now - (this.feed[0]?.at ?? 0) > FEED_MS) this.feed.shift();
+  }
+
+  /** A ring around each player hit by a bat recently (predicted hits; bodies and projectiles have no flash). */
+  private drawHitFlashes(scene: Scene, cam: Camera, cssW: number, cssH: number): void {
+    const now = performance.now();
+    while (this.hitFlashes.length > 0 && now - (this.hitFlashes[0]?.at ?? 0) > HIT_FLASH_MS) this.hitFlashes.shift();
+    if (this.hitFlashes.length === 0) return;
+    const ctx = this.ctx;
+    const [sx, sy, ox, oy] = worldXf(cam);
+    const pxPerUnit = cssW / cam.w;
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = TEXT;
+    for (const f of this.hitFlashes) {
+      const p = scene.players.find((q) => q.id === f.id);
+      if (!p) continue;
+      const t = (now - f.at) / HIT_FLASH_MS;
+      const x = ((p.x * sx + ox) + 1) * cssW / 2;
+      const y = (1 - (p.y * sy + oy)) * cssH / 2;
+      ctx.globalAlpha = 1 - t;
+      ctx.beginPath();
+      ctx.arc(x, y, (p.size / 2) * pxPerUnit + 4 + 10 * t, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
   }
 
   private drawNames(scene: Scene, cam: Camera, names: ReadonlyMap<number, string>, cssW: number, cssH: number): void {
@@ -191,13 +224,15 @@ export class Overlay {
    * Edge indicators for the live opponents outside the view (`cam.away`): an arrow on the view's edge
    * in the direction of the opponent, with its name chip just inside it. Drawn with the chrome only.
    */
-  private drawAway(scene: Scene, cam: Camera, names: ReadonlyMap<number, string>, cssW: number, cssH: number): void {
-    if (cam.away.length === 0) return;
+  private drawAway(scene: Scene, cam: Camera, names: ReadonlyMap<number, string>, cssW: number, cssH: number): AwayChip[] {
+    if (cam.away.length === 0) return [];
     const ctx = this.ctx;
     const [sx, sy, ox, oy] = worldXf(cam);
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
     ctx.font = NAME_FONT;
+    const chips: AwayChip[] = [];
+    const rect = this.canvas.getBoundingClientRect();
     for (const id of cam.away) {
       const p = scene.players.find((q) => q.id === id);
       if (!p) continue;
@@ -212,7 +247,8 @@ export class Overlay {
       const t = Math.min(ux !== 0 ? hx / Math.abs(ux) : Infinity, uy !== 0 ? hy / Math.abs(uy) : Infinity);
       const ex = cssW / 2 + ux * t;
       const ey = cssH / 2 + uy * t;
-      const colour = this.colourCss(playerRgb(p.team, p.id));
+      const rgb = playerRgb(p.team, p.id);
+      const colour = this.colourCss(rgb);
       // Arrow: tip outward from the edge point, base just inside it.
       const px = -uy;
       const py = ux;
@@ -225,16 +261,32 @@ export class Overlay {
       ctx.fill();
       const name = names.get(id);
       if (name === undefined) continue;
-      const width = ctx.measureText(name).width + AWAY_CHIP_PAD * 2;
+      const textW = ctx.measureText(name).width;
+      const width = AWAY_CHIP_PAD + AWAY_SWATCH + AWAY_CHIP_GAP + textW + AWAY_CHIP_PAD;
       const height = AWAY_CHIP_H;
       const inward = AWAY_ARROW + AWAY_CHIP_GAP + height / 2;
       const chipX = Math.min(Math.max(ex - ux * inward, width / 2 + 2), cssW - width / 2 - 2);
       const chipY = Math.min(Math.max(ey - uy * inward, height / 2 + 2), cssH - height / 2 - 2);
+      const left = chipX - width / 2;
       ctx.fillStyle = PANEL;
-      ctx.fillRect(chipX - width / 2, chipY - height / 2, width, height);
+      ctx.fillRect(left, chipY - height / 2, width, height);
+      // The colour is a swatch (a non-text mark); darker colours get a white ring so the swatch meets 3:1 on the panel. The name stays white.
+      if (relLuminance(rgb) < AWAY_RING_BELOW_LUM) {
+        ctx.fillStyle = TEXT;
+        ctx.fillRect(left + AWAY_CHIP_PAD - 1, chipY - AWAY_SWATCH / 2 - 1, AWAY_SWATCH + 2, AWAY_SWATCH + 2);
+      }
       ctx.fillStyle = colour;
-      ctx.fillText(name, chipX, chipY + 0.5);
+      ctx.fillRect(left + AWAY_CHIP_PAD, chipY - AWAY_SWATCH / 2, AWAY_SWATCH, AWAY_SWATCH);
+      ctx.fillStyle = TEXT;
+      ctx.fillText(name, left + AWAY_CHIP_PAD + AWAY_SWATCH + AWAY_CHIP_GAP + textW / 2, chipY + 0.5);
+      chips.push({ id, x: rect.left + left, y: rect.top + chipY - height / 2, w: width, h: height });
     }
+    return chips;
+  }
+
+  /** QA hook (like __qaCam): this frame's edge chips in window CSS px, keyed by the scene tick. */
+  private publishAway(tick: number, chips: AwayChip[]): void {
+    Object.assign(globalThis, { __qaAway: { tick, chips } });
   }
 
   /** Small crown centred on (x, y), for the FFA leader. */

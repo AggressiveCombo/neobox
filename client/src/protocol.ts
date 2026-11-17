@@ -41,6 +41,7 @@ export type ClientMsg =
   | { t: "abort_start" }
   | { t: "end_match" }
   | { t: "kick"; player: number; ban: boolean }
+  | { t: "mute"; player: number; muted: boolean }
   | { t: "unban"; name: string }
   | { t: "give_host"; player: number }
   | { t: "move_player"; player: number; team: number }
