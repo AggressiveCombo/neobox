@@ -59,6 +59,11 @@ for (const scenario of selected) {
     console.log(`skip ${scenario.name}: ${process.env.NEOBOX_ENGINE || "chromium"} has no RTCPeerConnection`);
     continue;
   }
+  if (scenario.cdp && (process.env.NEOBOX_ENGINE || "chromium") !== "chromium") {
+    skipped++;
+    console.log(`skip ${scenario.name}: CDP network emulation is chromium-only`);
+    continue;
+  }
   const s = new Scenario(scenario.name, { ...env });
   const t0 = Date.now();
   let detail = "";
