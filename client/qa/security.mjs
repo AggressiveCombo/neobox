@@ -19,6 +19,8 @@
 //                             the chat budget), with rate_limited errors for the rest.
 //   sec.typing.relayed        1 when a guest's typing reaches the host before any mute (raw WebSocket).
 //   sec.typing.mutedRelayed   typing signals from a muted guest that reach the host (0 passes).
+//   sec.presence.flood       updates a watcher gets: typing bursts bounded (<=2 of 10 relayed), join/leave bursts
+//                             bounded (room updates <= joins+leaves+2). 1 passes. Chromium only.
 //   *.phone                   chat rate and profanity cases re-run in a phone viewport (sec.chat.rateLimited.phone,
 //                             sec.profanity.viewerMasked.phone).
 //
@@ -549,6 +551,71 @@ async function commandCase(base) {
   }
 }
 
+/**
+ * Presence fan-out. A host, a watcher and a guest share one room. The guest sends a 10-line typing burst in one tick:
+ * the watcher gets at most 2 typing frames (typing is relayed at most once per gap). Then two extra guests each join
+ * and leave the room: the watcher gets at most one room update per join or leave, plus 2 slack.
+ */
+async function presenceFloodCase(base) {
+  const nonce = randomBytes(3).toString("hex");
+  const socks = await Promise.all([connect(base), connect(base), connect(base), connect(base), connect(base)]);
+  const [host, guest, watch, flick1, flick2] = socks;
+  const closeAll = () => socks.forEach((s) => s.raw?.close());
+  const fail = (detail) => ({ pass: false, metrics: { "sec.presence.flood": 0 }, detail });
+  if (!socks.every((s) => s.raw)) {
+    closeAll();
+    return fail(`upgrade status ${socks.map((s) => s.status).join("/")}`);
+  }
+  try {
+    const [h, g, w, f1, f2] = [host.raw, guest.raw, watch.raw, flick1.raw, flick2.raw];
+    for (const [x, tag] of [
+      [h, "Host"],
+      [g, "Guest"],
+      [w, "Watch"],
+      [f1, "Flick1"],
+      [f2, "Flick2"],
+    ]) {
+      x.send({ t: "hello", version: 1, name: `QA${tag}${nonce}` });
+      await x.until((f) => f.t === "welcome" || f.t === "error", 4000);
+    }
+    h.send({ t: "create_room", name: `QA flood ${nonce}`, password: null, max_players: 8, public: false });
+    const created = await h.until((f) => f.t === "room", 4000);
+    if (!created) return fail("no room frame after create_room");
+    for (const x of [g, w]) x.send({ t: "join_room", room: created.room.code, password: null });
+    const joined = await g.until((f) => f.t === "joined", 4000);
+    await w.until((f) => f.t === "joined", 4000);
+    if (!joined) return fail("guest did not join the room");
+
+    const typing0 = w.frames.filter((f) => f.t === "typing").length;
+    for (let i = 0; i < 10; i++) g.send({ t: "typing" });
+    await sleep(1500);
+    const typingSeen = w.frames.filter((f) => f.t === "typing").length - typing0;
+
+    const room0 = w.frames.filter((f) => f.t === "room").length;
+    let actions = 0;
+    for (const x of [f1, f2]) {
+      x.send({ t: "join_room", room: created.room.code, password: null });
+      if (!(await x.until((f) => f.t === "joined", 4000))) break;
+      actions++;
+      x.send({ t: "leave_room" });
+      if (!(await x.until((f) => f.t === "left", 4000))) break;
+      actions++;
+    }
+    await sleep(500);
+    const roomSeen = w.frames.filter((f) => f.t === "room").length - room0;
+
+    if (actions < 4) return fail(`join/leave did not complete (${actions} of 4 actions)`);
+    const v = typingSeen <= 2 && roomSeen <= actions + 2 ? 1 : 0;
+    return {
+      pass: v === 1,
+      metrics: { "sec.presence.flood": v },
+      detail: `typing burst of 10: watcher got ${typingSeen} typing frames (bound 2); ${actions} join/leave actions: watcher got ${roomSeen} room frames (bound ${actions + 2})`,
+    };
+  } finally {
+    closeAll();
+  }
+}
+
 const sec = (page, name) => page.locator(".settings-nav-item").filter({ hasText: name }).click();
 const sw = (page, text) => page.locator("label.check").filter({ hasText: text }).click();
 const chatLinesWith = (page, needle) => page.locator(".room-chat-line").filter({ hasText: needle }).allTextContents();
@@ -561,6 +628,19 @@ const seenInChat = (page, needle) =>
       () => true,
       () => false,
     );
+
+// The app navigates on Leave, so a goto issued right after it can be aborted (ERR_ABORTED) by that navigation. Retry
+// the same navigation once the app's own has settled.
+async function gotoSettled(page, url) {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await page.goto(url);
+    } catch (e) {
+      if (attempt >= 3 || !String(e).includes("ERR_ABORTED")) throw e;
+      await sleep(500);
+    }
+  }
+}
 
 /**
  * A raw-WebSocket host (client bypassed) posts profane lines into its room. The browser viewer's own client must
@@ -590,11 +670,11 @@ async function profanityCase(s, base, { phone = false } = {}) {
   raw.send({ t: "chat", text: first });
   const sawFirst = await seenInChat(page, "QAProfanity");
   const shownFirst = sawFirst ? ((await chatLinesWith(page, "QAProfanity")).at(-1) ?? "") : "none";
-  const masked = sawFirst && shownFirst.includes("****") ? 1 : 0;
+  const masked = sawFirst && !/fuck/i.test(shownFirst) && shownFirst.includes("****") ? 1 : 0;
 
   // Prefs live in page memory, so the viewer leaves the room, changes the setting, and joins again.
   await page.getByRole("button", { name: "Leave", exact: true }).click();
-  await page.goto(base);
+  await gotoSettled(page, base);
   await menuName(page).waitFor();
   await navTo(page, "Settings");
   await sec(page, "Chat");
@@ -637,6 +717,7 @@ for (const engine of engines) {
     if (want("mute")) await results.case("mod", () => modCase(base), opts);
     if (want("multisocket")) await results.case("chat.multiSocket", () => multiSocketCase(base), opts);
     if (MODE === null) await results.case("chat.commandFlood", () => commandCase(base), opts);
+    if (MODE === null) await results.case("presence.flood", () => presenceFloodCase(base), opts);
   } else {
     // Firefox reports requests the instrument's own page.goto aborts as "Navigated away from page" (one per
     // aborted request: problems == net.abortedOther in the run record). Only those are ignored, on non-chromium.
