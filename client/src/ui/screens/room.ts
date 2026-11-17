@@ -1172,8 +1172,8 @@ export const roomScreen: ScreenFactory = (ctx: AppCtx) => {
     h("div", { class: "room-col room-col-match" }, modePanel, mapPanel, managePanel, settingsPanel),
     h("div", { class: "room-col room-col-chat" }, chatPanel),
   );
-  // The header, notice, tabs and sections scroll together; the dock sits outside the scroller so it never covers content.
-  const content = h("main", { class: "room-content" }, header, notice, startNotice, tabBar, main);
+  // The tabs, header, notice and sections scroll together; the tabs come first so the phone's sticky switch is always in view (320x256 zoomed: the header above it hid them under the dock) and DOM order matches the layout. The dock sits outside the scroller so it never covers content.
+  const content = h("main", { class: "room-content" }, tabBar, header, notice, startNotice, main);
   const root = h("div", { class: "room-screen", "data-tab": "players" }, content, dock);
 
   // The sticky tabs cover the scroller's top edge. Their height feeds scroll-margin in room.css, so focus scrolling keeps the focused control clear of them.
