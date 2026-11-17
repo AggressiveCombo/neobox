@@ -246,7 +246,15 @@ export const accountScreen: ScreenFactory = (ctx) => {
       ),
     );
 
-    return h("div", { class: "account-member" }, profileSummary(account.name), security, status);
+    return h(
+      "div",
+      { class: "account-member" },
+      h("h2", { class: "sr-only" }, "Profile"),
+      profileSummary(account.name),
+      h("h2", { class: "sr-only" }, "Security"),
+      security,
+      status,
+    );
   }
 
   function render(state: AppState): void {

@@ -1,5 +1,18 @@
 /* Account screen: sign in or create (guest) and the profile, session and security (member). */
 
+/* Headings the layout does not show: the member view's sections, so the heading levels run in order. */
+.account-page .sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
 /* The header's Sign out is hidden for guests. */
 .account-page [hidden] {
   display: none !important;
