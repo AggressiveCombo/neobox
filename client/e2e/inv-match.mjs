@@ -170,9 +170,30 @@ async function matchChat(s) {
   await input(gp).press("Escape");
   return "chat open, send, recall, close, length cap and typing line checked";
 }
+
+/** Controls rows: the Change button arms a key capture ("Press a key"), a reserved key is refused with its notice, and Escape cancels the capture. */
+async function matchKeys(s) {
+  const { host } = await matchWithGuest(s, { clipboard: true });
+  const { page } = host;
+  await page.locator(".hud-root").waitFor({ state: "visible" });
+  await page.locator(".hud-menu-btn").click();
+  await menuItem(page, "Change controls").click();
+  const bind = page.getByRole("button", { name: /key 1: .*\. Change$/ }).first();
+  await bind.waitFor({ state: "visible" });
+  await bind.click();
+  await page.getByText("Press a key", { exact: true }).first().waitFor({ state: "visible" });
+  // kb-reserved: F3 is the game's own stats key, so the capture refuses it and says why.
+  await page.keyboard.press("F3");
+  await page.getByText(/F3 is used by the game or browser\. Pick another key\./).waitFor({ state: "visible" });
+  // Escape cancels the capture: no "Press a key" left.
+  await page.keyboard.press("Escape");
+  await page.getByText("Press a key", { exact: true }).first().waitFor({ state: "hidden" });
+  return "Change arms a key capture; F3 refused with its notice; Escape cancels";
+}
 export const matchInvScenarios = [
   { name: "inv match hud and menu", inv: ["hud-main", "hud-menu", "hud-menu (Volume)", "hud-menu (Mute music)", "hud-menu (Fullscreen)", "hud-menu (Change controls)", "hud-stats", "hud-scores", "hud-end (host End match)"], run: matchHudMenu },
   { name: "inv match menu lobby", inv: ["hud-menu (Show lobby)"], run: matchMenuLobby },
   { name: "inv match leave", inv: ["hud-leave"], run: matchLeave },
   { name: "inv match chat", inv: ["chat-open-enter", "chat-send", "chat-history", "chat-close", "chat-escape-menu", "chat-length", "hud-typing"], run: matchChat },
+  { name: "inv match keys", inv: ["kb-reserved (F3/Tab/Enter in capture)"], run: matchKeys },
 ];
