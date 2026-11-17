@@ -3,6 +3,7 @@
 
 import { spawn } from "node:child_process";
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import dgram from "node:dgram";
 import net from "node:net";
 import os from "node:os";
 import path from "node:path";
@@ -28,8 +29,24 @@ export function phoneOptions(browser) {
 const STEP_TIMEOUT = 15_000;
 /** Firefox logs a web font still downloading when the page navigates away as a console error (NS_BINDING_ABORTED, status 2152398850). */
 const FONT_ABORT_RE = /downloadable font: download failed .*status=2152398850\b/;
+/** YouTube's jukebox embed logs rejected third-party cookies; only that message from a YouTube-origin file is noise. */
+const YOUTUBE_COOKIE_RE = /Cookie .* has been rejected/;
+const YOUTUBE_ORIGIN_RE = /^https:\/\/(www\.)?youtube\.com\//;
 
 export const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/** Waits until the locator's box is the same on two reads in a row (a transition has ended); returns that box. */
+export async function waitStable(locator, timeoutMs = STEP_TIMEOUT) {
+  const deadline = Date.now() + timeoutMs;
+  let last = null;
+  for (;;) {
+    const box = await locator.boundingBox();
+    if (box && last && box.x === last.x && box.y === last.y && box.width === last.width && box.height === last.height) return box;
+    if (Date.now() > deadline) throw new Error("element box still moving");
+    last = box;
+    await sleep(50);
+  }
+}
 
 /** Cleanup callbacks (server, browser, temp dirs); run on exit, in reverse order. */
 const cleanups = [];
@@ -362,17 +379,20 @@ export class Scenario {
     }
     const page = await context.newPage();
     page.setDefaultTimeout(STEP_TIMEOUT);
-    const handle = { label, context, page, ip, problems: [] };
+    const handle = { label, context, page, ip, problems: [], allowedDialogs: new Set() };
     page.on("pageerror", (err) => handle.problems.push(`${label}: page error: ${err.message}`));
     page.on("console", (msg) => {
       if (msg.type() !== "error") return;
       // The font abort is the browser's own, not the page's: only that exact status is ignored.
       if (FONT_ABORT_RE.test(msg.text())) return;
       const url = msg.location().url ?? "";
+      if (YOUTUBE_COOKIE_RE.test(msg.text()) && YOUTUBE_ORIGIN_RE.test(url)) return;
       handle.problems.push(`${label}: console error: ${msg.text()}${url ? ` (${url})` : ""}`);
     });
     page.on("dialog", (dialog) => {
-      handle.problems.push(`${label}: unexpected dialog: ${dialog.message()}`);
+      if (!handle.allowedDialogs.has(dialog.type())) {
+        handle.problems.push(`${label}: unexpected ${dialog.type()} dialog: ${dialog.message()}`);
+      }
       void dialog.dismiss();
     });
     this.handles.push(handle);
@@ -505,10 +525,34 @@ function lanAddress() {
   return "127.0.0.1";
 }
 
+/**
+ * A UDP port on `host` that the OS lets the server bind. Windows reserves port ranges (`netsh int udp show excludedportrange`)
+ * that a free-port probe over TCP never sees; the server then logs "WebRTC disabled" (os error 10013) and every match
+ * stays on the WebSocket. So each candidate is bound here, the way the server will bind it, before it is handed out.
+ */
+async function freeUdpPort(host) {
+  for (let attempt = 0; attempt < 200; attempt++) {
+    const port = 20000 + Math.floor(Math.random() * 40000);
+    if (await udpBindable(host, port)) return port;
+  }
+  throw new Error(`no bindable UDP port on ${host}`);
+}
+
+function udpBindable(host, port) {
+  return new Promise((resolve) => {
+    const sock = dgram.createSocket("udp4");
+    sock.once("error", () => {
+      sock.close();
+      resolve(false);
+    });
+    sock.bind(port, host, () => sock.close(() => resolve(true)));
+  });
+}
+
 /** A server with WebRTC on the LAN address (every other scenario runs on the WebSocket alone). */
 export async function rtcServer() {
-  const rtcPort = await freePort();
-  const rtc = `${lanAddress()}:${rtcPort}`;
+  const host = lanAddress();
+  const rtc = `${host}:${await freeUdpPort(host)}`;
   const main = await startServer({ extraEnv: { NEOBOX_RTC_BIND: rtc, NEOBOX_RTC_PUBLIC: rtc } });
   return { base: main.base, nodeBase: null, output: main.output, stop: main.stop };
 }

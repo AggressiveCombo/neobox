@@ -1,6 +1,6 @@
 // The e2e scenarios. Each one drives the real UI of a real server (see lib.mjs)
-// and returns an optional detail string for its `ok` line. Scenarios share a
-// server but no state, so `run.mjs` can run any subset in any order.
+// and returns an optional detail string for its `ok` line. Each scenario gets its own server (a fresh database) unless
+// it brings a topology, so `run.mjs` can run any subset in any order, in parallel.
 
 import {
   ADMIN_PASSWORD,
@@ -13,6 +13,7 @@ import {
   menuName,
   measureFirstChange,
   navTo,
+  waitStable,
   PASSWORD,
   playFromMenu,
   probeChanges,
@@ -83,7 +84,6 @@ async function menu(s) {
   const links = ["Training", "Library", "Friends", "Practice", "Replay", "Map editor", "Settings", "About"];
   for (const link of links) {
     await navTo(page, link);
-    await sleep(150);
     if (link === "Map editor") {
       await button(page, "Back").click();
     } else if (link === "Training") {
@@ -678,11 +678,12 @@ async function replay(s) {
   const { host } = m;
   await waitForPixels(host, "match canvas");
     await host.page.locator(".hud-end").click();
-    const endDialog = host.page.getByRole("alertdialog", { name: "End the match?", exact: true });
+    // a closed dialog stays in the DOM while it animates out, so only an open one counts
+    const endDialog = host.page.getByRole("alertdialog", { name: "End the match?", exact: true }).and(host.page.locator("dialog[open]"));
     await endDialog.waitFor();
     // Escape cancels: the match goes on, and the HUD stays live behind the dialog.
     await host.page.keyboard.press("Escape");
-    await endDialog.waitFor({ state: "detached" });
+    await endDialog.waitFor({ state: "hidden" });
     await host.page.locator(".hud-end").waitFor();
     await host.page.locator(".hud-end").click();
     await endDialog.waitFor();
@@ -827,7 +828,7 @@ async function phoneLandscapeTouch(s) {
   const jump = await centre('.hud-touch[data-action="up"]');
   const beforeJump = await probeChanges(page);
   await send("touchStart", [{ x: jump.x, y: jump.y }]);
-  await sleep(400);
+  await sleep(1000);
   await send("touchEnd", []);
   const jumped = (await probeChanges(page)) - beforeJump;
   check(jumped > 5, `guest frames barely changed while holding Jump (${jumped} changes)`);
@@ -1006,14 +1007,13 @@ async function editorLeave(s) {
   await navTo(page, "Map editor");
   const canvas = page.locator("canvas.editor-canvas");
   await canvas.waitFor({ state: "visible" });
-  await sleep(300);
+  await waitStable(canvas);
   // No edits: Back leaves at once.
   await back(page).click();
   await menuName(page).waitFor();
   await navTo(page, "Map editor");
   await canvas.waitFor({ state: "visible" });
-  await sleep(300);
-  const box = await canvas.boundingBox();
+  const box = await waitStable(canvas);
   const cx = box.x + box.width / 2;
   const cy = box.y + box.height / 2;
   await button(page, "Box").click();
@@ -1023,11 +1023,11 @@ async function editorLeave(s) {
   await page.mouse.up();
   check(await button(page, "Undo").isEnabled(), "box drawn does not enable Undo");
   // Page unload with unsaved edits asks the browser to confirm; the harness dismisses it, which keeps the page.
+  h.allowedDialogs.add("beforeunload");
   const unload = page.waitForEvent("dialog", { timeout: 10000 }).then((d) => d.type());
   void page.reload().catch(() => {});
   check((await unload) === "beforeunload", "reload with unsaved edits did not ask before unloading");
-  // The harness reports every dialog as a problem; this one is the expected unload prompt.
-  h.problems.splice(0, h.problems.length, ...h.problems.filter((p) => !p.endsWith("unexpected dialog: ")));
+  h.allowedDialogs.delete("beforeunload");
   await canvas.waitFor({ state: "visible" });
   // In-app Back asks too: Cancel keeps the editor open, Leave goes back.
   const dialog = page.getByRole("alertdialog", { name: "Leave without saving?", exact: true });
@@ -1040,7 +1040,10 @@ async function editorLeave(s) {
   await dialog.waitFor();
   await dialog.getByRole("button", { name: "Leave", exact: true }).click();
   await menuName(page).waitFor();
-  return "Back and unload ask only with unsaved edits; Cancel keeps the editor";
+  // The confirmed Leave removed the editor's unload guard: a reload from the menu does not ask.
+  await page.reload();
+  await menuName(page).waitFor();
+  return "Back and unload ask only with unsaved edits; Cancel keeps the editor; Leave drops the guard";
 }
 
 /** A guest name typed on the menu is kept for the next visit before any play action. */
@@ -1342,7 +1345,7 @@ export const scenarios = [
   { name: "practice", run: practice },
   { name: "phone", run: phone },
   { name: "phone landscape touch", run: phoneLandscapeTouch },
-  { name: "input latency", run: latency },
+  { name: "input latency", run: latency, serial: true },
   { name: "map editor", run: editor },
   { name: "map editor phone", run: editorPhone },
   { name: "map editor leave", run: editorLeave },

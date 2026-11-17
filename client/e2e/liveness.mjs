@@ -22,12 +22,12 @@ const LIVE_TICK_MS = 250;
 const RENDER_MS = 500;
 const BANNER_MS = SILENT_MS + 2 * LIVE_TICK_MS + RENDER_MS;
 /** The browser's own refused reconnect while the emulated network is offline. */
-const OFFLINE_CONSOLE_RE = /console error: WebSocket connection to .* failed: .*net::ERR_INTERNET_DISCONNECTED/;
+const OFFLINE_CONSOLE_RE = /console error: .*net::ERR_INTERNET_DISCONNECTED/;
 /** How long the blackhole holds: past the server's own 10 s silence limit, so the server drops its side too. */
 const HOLD_MS = 12_000;
 /** How long the match takes to resume once the link is back: the reconnect plus the resume handshake. */
 const RECOVER_MS = 15_000;
-function pipe(deliver, link) {
+function pipe(deliver, link, open) {
   const items = [];
   let timer = null;
   const pump = () => {
@@ -35,7 +35,7 @@ function pipe(deliver, link) {
     timer = null;
     while (items.length && items[0].at <= Date.now()) {
       const { fn } = items.shift();
-      if (!link.hole) {
+      if (!link.hole && open()) {
         try {
           fn();
         } catch {}
@@ -61,15 +61,19 @@ function relay(link) {
       return;
     }
     const server = ws.connectToServer();
-    const up = pipe((m) => server.send(m), link);
-    const down = pipe((m) => ws.send(m), link);
+    const pageOpen = { v: true };
+    const serverOpen = { v: true };
+    const up = pipe((m) => server.send(m), link, () => serverOpen.v);
+    const down = pipe((m) => ws.send(m), link, () => pageOpen.v);
     ws.onMessage((m) => up(m));
     server.onMessage((m) => down(m));
     // a close does not cross a dead link either: the far side only learns of it when the link returns
     ws.onClose(() => {
+      pageOpen.v = false;
       if (!link.hole) server.close();
     });
     server.onClose(() => {
+      serverOpen.v = false;
       if (!link.hole) ws.close();
     });
   };
@@ -184,7 +188,7 @@ async function offlineCdp(s) {
   await banner.waitFor({ state: "hidden", timeout: RECOVER_MS });
   const recoverMs = Date.now() - back;
   await host.page.locator(".hud-leave").waitFor({ state: "visible", timeout: RECOVER_MS });
-  // Chromium logs each reconnect attempt on the cut link as a console error while offline: expected, not a page fault.
+  // Chromium logs each refused request and reconnect attempt on the cut link (sockets and fetches) as a console error while offline: expected, not a page fault.
   for (let i = host.problems.length - 1; i >= 0; i--) {
     if (OFFLINE_CONSOLE_RE.test(host.problems[i])) host.problems.splice(i, 1);
   }
