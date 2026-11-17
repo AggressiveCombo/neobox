@@ -210,6 +210,10 @@ const track = (h) => {
   return h;
 };
 const closeHandle = (h) => h.context.close().catch(() => {});
+/** Closes the contexts a state's prepare opened besides the one it returned (seeding accounts, the admin page). Left open, they pile up for the rest of the run and load the browser for every later state. */
+async function closeSeeds(s, from, keep) {
+  for (const h of s.handles.slice(from)) if (h !== keep) await h.context.close().catch(() => {});
+}
 const placeholderHits = (text) =>
   [...text.matchAll(PLACEHOLDER)].map((m) => text.slice(Math.max(0, m.index - 30), m.index + m[0].length + 30).replace(/\s+/g, " "));
 
@@ -242,6 +246,7 @@ async function harvestAll(s) {
       ["desktop", s],
       ["phone", phoneScope],
     ]) {
+      const from = s.handles.length;
       let h = null;
       try {
         h = await st.prepare(scope);
@@ -253,6 +258,7 @@ async function harvestAll(s) {
         memo.errors.push(`${vp}:${st.id}: ${firstLine(err)}`);
       } finally {
         if (h) await closeHandle(h);
+        await closeSeeds(s, from, h);
       }
     }
   }
