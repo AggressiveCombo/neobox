@@ -4,7 +4,7 @@
 
 import type { HudHandle, Present } from "./ctx";
 import type { Engine } from "./engine";
-import type { Scene } from "./frame";
+import { readScene, type Scene } from "./frame";
 import type { Input } from "./input";
 import type { Net } from "./net";
 import type { MatchStart } from "./protocol";
@@ -83,7 +83,12 @@ export class MatchLoop {
       if (this.d.engine.serverFrame(bytes, now)) this.d.net.send({ t: "resync" });
       // With no animation frames (hidden page) nothing else acknowledges the
       // server's ticks, and the server would resend a snapshot every few seconds.
-      if (now - this.lastStep > STALL_MS) this.d.net.sendBinary(this.d.engine.frame(now, this.d.input.mask()));
+      if (now - this.lastStep > STALL_MS) {
+        this.d.net.sendBinary(this.d.engine.frame(now, this.d.input.mask()));
+        // the frame drained the feed: the HUD still records the kills and bat hits it carried
+        const fb = this.d.engine.framebuffer();
+        if (fb) this.d.hud()?.onFrame(readScene(fb));
+      }
     } catch (err) {
       this.fail(err);
     }

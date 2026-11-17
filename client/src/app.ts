@@ -214,7 +214,7 @@ export function start(): Store<AppState> {
   const present: Present = (names, tickHz, chrome = true) => {
     const fb = engine?.framebuffer();
     if (!fb) return null;
-    ensureRenderer();
+    ensureRenderer(chrome);
     const scene = readScene(fb);
     scene.localKeys = input.mask();
     const local = computeCamera(scene, findLocal(scene));
@@ -407,11 +407,11 @@ export function start(): Store<AppState> {
   }
 
   /** Renderer creation is async (WebGPU or WebGL2 init); the loop skips drawing until it is ready. */
-  function ensureRenderer(): void {
+  function ensureRenderer(chrome: boolean): void {
     if (renderer || rendererP) return;
     if (rendererFailed) {
       // Drawn frames would be empty: say so on the first call on each screen (the dialog covered the first failure).
-      if (!failureSaid) {
+      if (chrome && !failureSaid) {
         failureSaid = true;
         toast("This browser cannot draw the game: WebGPU and WebGL 2 are unavailable.", "error");
       }
@@ -474,7 +474,7 @@ export function start(): Store<AppState> {
     renderer = null;
     rendererP = null;
     toast("graphics context lost", "error");
-    if (store.state.inMatch) ensureRenderer();
+    if (store.state.inMatch) ensureRenderer(true);
   }
 
   /** Size the game canvases to the view rect (the original's aspect, centred in the window) and publish it. */
@@ -587,7 +587,7 @@ export function start(): Store<AppState> {
       pendingMatch = { match, you, snap, frames: [] };
       return;
     }
-    ensureRenderer();
+    ensureRenderer(true);
     loop ??= new MatchLoop({
       engine: eng,
       input,
