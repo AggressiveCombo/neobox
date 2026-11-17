@@ -334,14 +334,14 @@ export const STATES = [
     return g;
   }),
   state("error-toast", {}, async (s) => {
-    // A full room's code typed into Join: the server refuses with room_full, shown as an error toast (room.rs).
+    // A full room's code typed into Join: the server refuses with room_full, and the browser keeps the cause on screen as an alert (app.ts).
     const host = await signedIn(s, "host");
     const code = await createRoomMax(host, s.base, uniqueName("room"), 1);
     const h = await guestHome(s);
     await playFromMenu(h.page, null);
     await h.page.getByLabel("Room code").fill(code);
     await button(h.page, "Join").click();
-    await h.page.locator("#toasts").getByText("The room is full").waitFor();
+    await h.page.getByRole("alert").filter({ hasText: "The room is full" }).waitFor();
     return h;
   }),
   state("error-404-room", { dialog: true }, async (s) => {
