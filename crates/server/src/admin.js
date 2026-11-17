@@ -31,27 +31,74 @@ $("#sayallbtn").onclick = async () => { const t = $("#sayall").value.trim(); if 
 
 function cmd(code, body) { return api("/admin/api/rooms/" + encodeURIComponent(code), body); }
 
+// A table body follows its rows. A row is kept while its key is listed, its cells are rewritten only where their html
+// changed, and `setup` runs once for a new row, so the controls in a row keep focus and an open select stays open
+// across the one-second refresh. Rows are moved only when the order changed.
+const rowCaches = new WeakMap();
+const c = (html, cls = "") => ({ html: String(html), cls });
+function syncRows(tb, rows) {
+  const cache = rowCaches.get(tb) ?? new Map();
+  rowCaches.set(tb, cache);
+  const keep = new Set();
+  const trs = rows.map(({ key, cls = "", cells, setup, sync }) => {
+    keep.add(key);
+    let row = cache.get(key);
+    if (row === undefined) {
+      row = { tr: document.createElement("tr"), shown: [] };
+      for (let i = 0; i < cells.length; i++) row.tr.appendChild(document.createElement("td"));
+      if (setup) setup(row.tr);
+      cache.set(key, row);
+    }
+    row.tr.className = cls;
+    cells.forEach((cell, i) => {
+      const td = row.tr.cells[i];
+      if (td.className !== cell.cls) td.className = cell.cls;
+      if (row.shown[i] !== cell.html) {
+        row.shown[i] = cell.html;
+        td.innerHTML = cell.html;
+      }
+    });
+    if (sync) sync(row.tr);
+    return row.tr;
+  });
+  for (const key of cache.keys()) if (!keep.has(key)) cache.delete(key);
+  const listed = new Set(trs);
+  for (const el of Array.from(tb.children)) if (!listed.has(el)) el.remove();
+  trs.forEach((tr, i) => {
+    if (tb.children[i] !== tr) tb.insertBefore(tr, tb.children[i] ?? null);
+  });
+}
+
 function renderState(st) {
   lastState = st;
   const s = st.server;
   $("#srv").innerHTML = `<span>up <b>${fmtTime(s.uptime_s)}</b></span><span>connections <b>${s.connections}</b></span><span>rooms <b>${s.rooms}</b>/${s.max_rooms}</span><span>players <b>${s.players}</b></span><span>in <b>${fmtBytes(s.bytes_in_per_s)}</b></span><span>out <b>${fmtBytes(s.bytes_out_per_s)}</b></span><span class="muted">v${esc(s.version)}</span>`;
   const tb = $("#rooms tbody");
-  tb.innerHTML = "";
   $("#norooms").hidden = st.rooms.length > 0;
-  for (const r of st.rooms) {
-    const tr = document.createElement("tr");
-    if (r.code === selected) tr.className = "sel";
-    tr.innerHTML = `<td><b>${esc(r.code)}</b></td><td>${esc(r.region || "")}</td><td>${esc(r.name)}${r.password ? " 🔒" : ""}${r.public ? "" : " <span class=muted>(private)</span>"}</td><td class="num">${r.players.length}/${r.max_players}</td><td>${r.in_match ? "<span class=pill>match " + fmtTime(r.match_seconds) + "</span>" : "lobby"}</td><td class="num">${r.tick}</td><td class="num">${r.tick_hz}</td><td class="num">${r.step_avg_us.toFixed(0)} / ${r.step_max_us.toFixed(0)}</td><td class="num">${fmtBytes(r.bytes_in_per_s)} / ${fmtBytes(r.bytes_out_per_s)}</td><td>${esc(r.map_name)}</td>`;
-    tr.onclick = () => { selected = r.code; renderState(lastState); };
-    tb.appendChild(tr);
-  }
+  syncRows(tb, st.rooms.map((r) => ({
+    key: r.code,
+    cls: r.code === selected ? "sel" : "",
+    cells: [
+      c(`<b>${esc(r.code)}</b>`),
+      c(esc(r.region || "")),
+      c(`${esc(r.name)}${r.password ? " 🔒" : ""}${r.public ? "" : " <span class=muted>(private)</span>"}`),
+      c(`${r.players.length}/${r.max_players}`, "num"),
+      c(r.in_match ? "<span class=pill>match " + fmtTime(r.match_seconds) + "</span>" : "lobby"),
+      c(r.tick, "num"),
+      c(r.tick_hz, "num"),
+      c(`${r.step_avg_us.toFixed(0)} / ${r.step_max_us.toFixed(0)}`, "num"),
+      c(`${fmtBytes(r.bytes_in_per_s)} / ${fmtBytes(r.bytes_out_per_s)}`, "num"),
+      c(esc(r.map_name)),
+    ],
+    setup: (tr) => { tr.onclick = () => { selected = r.code; renderState(lastState); }; },
+  })));
   const room = st.rooms.find((r) => r.code === selected);
   renderRoom(room);
 }
 
 function renderRoom(r) {
   const ptb = $("#players tbody");
-  if (!r) { $("#roomtitle").textContent = "Room"; $("#roomdetail").innerHTML = "<span class=muted>Select a room.</span>"; ptb.innerHTML = ""; return; }
+  if (!r) { $("#roomtitle").textContent = "Room"; $("#roomdetail").innerHTML = "<span class=muted>Select a room.</span>"; syncRows(ptb, []); return; }
   $("#roomtitle").textContent = "Room " + r.code;
   const round = r.round;
   const set = r.settings || {};
@@ -83,21 +130,36 @@ function renderRoom(r) {
   }
   $("#roominfo").innerHTML = `<div class="row muted">${esc(r.name)} · mode ${set.game_mode} · ${r.in_match ? "in match" : "lobby"} · ${r.players.length}/${r.max_players} players · map ${esc(r.map_name)}</div>`;
   $("#scores").innerHTML = scores;
-  ptb.innerHTML = "";
-  for (const p of r.players) {
-    const tr = document.createElement("tr");
-    tr.innerHTML = `<td class="num">${p.id}</td><td>${esc(p.name)}${p.host ? " <span class=pill>host</span>" : ""}</td><td class="t${p.team}">${teamName[p.team] || p.team}</td><td class="num">${p.ping_ms} ms <span class=muted>${esc(p.transport)}</span></td><td class="num">${p.margin_ticks.toFixed(2)}</td><td class="num">${fmtBytes(p.bytes_in_per_s)} / ${fmtBytes(p.bytes_out_per_s)}</td><td>${maskText(p.input_mask)}</td><td>${fmtTime(p.connected_s)}</td><td class="muted">${esc(p.ip)}</td><td></td>`;
-    const actions = tr.lastChild;
-    const mk = (label, body, cls) => { const b = document.createElement("button"); b.textContent = label; if (cls) b.className = cls; b.onclick = () => cmd(r.code, body); actions.appendChild(b); };
-    mk("Host", { action: "set_host", player: p.id });
-    const sel = document.createElement("select");
-    sel.innerHTML = teamName.map((t, i) => `<option value="${i}" ${i === p.team ? "selected" : ""}>${t}</option>`).join("");
-    sel.onchange = () => cmd(r.code, { action: "set_team", player: p.id, team: Number(sel.value) });
-    actions.appendChild(sel);
-    mk("Kick", { action: "kick", player: p.id, ban: false }, "bad");
-    mk("Ban", { action: "kick", player: p.id, ban: true }, "bad");
-    ptb.appendChild(tr);
-  }
+  syncRows(ptb, r.players.map((p) => ({
+    key: `${r.code}:${p.id}`,
+    cells: [
+      c(p.id, "num"),
+      c(`${esc(p.name)}${p.host ? " <span class=pill>host</span>" : ""}`),
+      c(teamName[p.team] || p.team, "t" + p.team),
+      c(`${p.ping_ms} ms <span class=muted>${esc(p.transport)}</span>`, "num"),
+      c(p.margin_ticks.toFixed(2), "num"),
+      c(`${fmtBytes(p.bytes_in_per_s)} / ${fmtBytes(p.bytes_out_per_s)}`, "num"),
+      c(maskText(p.input_mask)),
+      c(fmtTime(p.connected_s)),
+      c(esc(p.ip), "muted"),
+    ],
+    setup: (tr) => {
+      const actions = document.createElement("td");
+      tr.appendChild(actions);
+      const mk = (label, body, cls) => { const b = document.createElement("button"); b.textContent = label; if (cls) b.className = cls; b.onclick = () => cmd(r.code, body); actions.appendChild(b); };
+      mk("Host", { action: "set_host", player: p.id });
+      const sel = document.createElement("select");
+      sel.innerHTML = teamName.map((t, i) => `<option value="${i}">${t}</option>`).join("");
+      sel.onchange = () => cmd(r.code, { action: "set_team", player: p.id, team: Number(sel.value) });
+      actions.appendChild(sel);
+      mk("Kick", { action: "kick", player: p.id, ban: false }, "bad");
+      mk("Ban", { action: "kick", player: p.id, ban: true }, "bad");
+    },
+    sync: (tr) => {
+      const sel = tr.querySelector("select");
+      if (sel.value !== String(p.team)) sel.value = String(p.team);
+    },
+  })));
 }
 
 async function refreshMaps() {
@@ -108,18 +170,19 @@ async function refreshMaps() {
 }
 function renderMaps(maps) {
   const tb = $("#maps tbody");
-  tb.innerHTML = "";
   $("#nomaps").hidden = maps.length > 0;
-  for (const m of maps) {
-    const tr = document.createElement("tr");
-    tr.innerHTML = `<td><b>${esc(m.name)}</b></td><td>${esc(m.author)}</td><td>${esc(m.created)}</td><td class="num">${m.size} B</td><td></td>`;
-    const actions = tr.lastChild;
-    const mk = (label, fn, cls) => { const b = document.createElement("button"); b.textContent = label; if (cls) b.className = cls; b.onclick = fn; actions.appendChild(b); };
-    mk("Copy code", () => copyMapCode(m));
-    mk("Approve", () => decideMap(m, "approve"));
-    mk("Reject", () => { if (confirm("Reject \"" + m.name + "\"? It stays hidden from everyone but its owner.")) decideMap(m, "reject"); }, "bad");
-    tb.appendChild(tr);
-  }
+  syncRows(tb, maps.map((m) => ({
+    key: JSON.stringify(m),
+    cells: [c(`<b>${esc(m.name)}</b>`), c(esc(m.author)), c(esc(m.created)), c(`${m.size} B`, "num")],
+    setup: (tr) => {
+      const actions = document.createElement("td");
+      tr.appendChild(actions);
+      const mk = (label, fn, cls) => { const b = document.createElement("button"); b.textContent = label; if (cls) b.className = cls; b.onclick = fn; actions.appendChild(b); };
+      mk("Copy code", () => copyMapCode(m));
+      mk("Approve", () => decideMap(m, "approve"));
+      mk("Reject", () => { if (confirm("Reject \"" + m.name + "\"? It stays hidden from everyone but its owner.")) decideMap(m, "reject"); }, "bad");
+    },
+  })));
 }
 async function decideMap(m, verb) {
   const r = await api("/admin/api/maps/" + m.id + "/" + verb, {});
@@ -152,18 +215,18 @@ async function refreshLibrary() {
 }
 function renderLibrary({ total, maps }) {
   if (!maps.length && libPage > 0) { libPage--; refreshLibrary(); return; }
-  const tb = $("#library tbody");
-  tb.innerHTML = "";
-  for (const m of maps) {
-    const tr = document.createElement("tr");
-    tr.innerHTML = `<td><b>${esc(m.name)}</b></td><td>${esc(m.author)}</td><td>${esc(m.status)}</td><td>${esc(m.visibility)}</td><td>${m.pick ? "yes" : ""}</td><td>${esc(m.created)}</td><td></td>`;
-    const actions = tr.lastChild;
-    const mk = (label, fn, cls) => { const b = document.createElement("button"); b.textContent = label; if (cls) b.className = cls; b.onclick = fn; actions.appendChild(b); };
-    mk("Show code", () => showMapCode(m));
-    mk(m.pick ? "Unpick" : "Pick", () => pickMap(m, !m.pick));
-    mk("Delete", () => { if (confirm("Delete \"" + m.name + "\" for good? Its owner loses it and players can no longer open it.")) deleteMap(m); }, "bad");
-    tb.appendChild(tr);
-  }
+  syncRows($("#library tbody"), maps.map((m) => ({
+    key: JSON.stringify(m),
+    cells: [c(`<b>${esc(m.name)}</b>`), c(esc(m.author)), c(esc(m.status)), c(esc(m.visibility)), c(m.pick ? "yes" : ""), c(esc(m.created))],
+    setup: (tr) => {
+      const actions = document.createElement("td");
+      tr.appendChild(actions);
+      const mk = (label, fn, cls) => { const b = document.createElement("button"); b.textContent = label; if (cls) b.className = cls; b.onclick = fn; actions.appendChild(b); };
+      mk("Show code", () => showMapCode(m));
+      mk(m.pick ? "Unpick" : "Pick", () => pickMap(m, !m.pick));
+      mk("Delete", () => { if (confirm("Delete \"" + m.name + "\" for good? Its owner loses it and players can no longer open it.")) deleteMap(m); }, "bad");
+    },
+  })));
   const pages = Math.max(1, Math.ceil(total / LIB_PAGE));
   $("#libinfo").textContent = total + " maps · page " + (libPage + 1) + " of " + pages;
   $("#libprev").disabled = libPage === 0;
