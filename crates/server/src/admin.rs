@@ -5,13 +5,13 @@ use crate::api::{db, Fail, MapDetailJson, MapJson};
 use crate::cluster;
 use crate::hub::Hub;
 use crate::room::{AdminCmd, RoomCmd};
-use axum::body::Body;
+use axum::body::{Body, Bytes};
 use axum::extract::{ConnectInfo, Path, Query, State};
 use axum::http::{header, HeaderMap, StatusCode};
 use axum::response::{Html, IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
-use neobox_store::{ReportStatus, Verdict};
+use neobox_store::{Error, ReportStatus, Verdict};
 use serde::{Deserialize, Serialize};
 use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
@@ -80,6 +80,11 @@ fn authorized(hub: &Hub, headers: &HeaderMap) -> bool {
     let mut sessions = hub.admin_sessions.lock().unwrap();
     sessions.retain(|_, t| t.elapsed() < SESSION_TTL);
     sessions.keys().any(|k| constant_time_eq(k.as_bytes(), token.as_bytes()))
+}
+
+/// A JSON body, parsed only once the request is authorized.
+fn parse_body<T: serde::de::DeserializeOwned>(body: &[u8]) -> Result<T, Fail> {
+    serde_json::from_slice(body).map_err(|_| Error::Invalid("Malformed body").into())
 }
 
 /// Whether this connection came through a proxy whose forwarded headers are
@@ -217,10 +222,14 @@ struct SayBody {
     text: String,
 }
 
-async fn broadcast(State(hub): State<Arc<Hub>>, headers: HeaderMap, Json(b): Json<SayBody>) -> Response {
+async fn broadcast(State(hub): State<Arc<Hub>>, headers: HeaderMap, body: Bytes) -> Response {
     if !authorized(&hub, &headers) {
         return StatusCode::UNAUTHORIZED.into_response();
     }
+    let b: SayBody = match parse_body(&body) {
+        Ok(b) => b,
+        Err(e) => return e.into_response(),
+    };
     let rooms: Vec<_> = hub.rooms.lock().unwrap().values().cloned().collect();
     for r in rooms {
         let _ = r.tx.send(RoomCmd::Admin(AdminCmd::Say { text: b.text.clone() }));
@@ -228,10 +237,14 @@ async fn broadcast(State(hub): State<Arc<Hub>>, headers: HeaderMap, Json(b): Jso
     "ok".into_response()
 }
 
-async fn room_cmd(State(hub): State<Arc<Hub>>, headers: HeaderMap, Path(code): Path<String>, Json(cmd): Json<AdminCmd>) -> Response {
+async fn room_cmd(State(hub): State<Arc<Hub>>, headers: HeaderMap, Path(code): Path<String>, body: Bytes) -> Response {
     if !authorized(&hub, &headers) {
         return StatusCode::UNAUTHORIZED.into_response();
     }
+    let cmd: AdminCmd = match parse_body(&body) {
+        Ok(cmd) => cmd,
+        Err(e) => return e.into_response(),
+    };
     if let AdminCmd::SetTickRate { hz } = &cmd {
         if !neobox_net::valid_tick_hz(*hz) {
             let (min, max) = (neobox_net::TICK_HZ_MIN, neobox_net::TICK_HZ_MAX);
@@ -354,10 +367,11 @@ struct PickBody {
 }
 
 /// Staff picks lead the library's "picks" listing; unpicking clears the pick.
-async fn pick_map(State(hub): State<Arc<Hub>>, headers: HeaderMap, Path(id): Path<i64>, Json(b): Json<PickBody>) -> Result<Response, Fail> {
+async fn pick_map(State(hub): State<Arc<Hub>>, headers: HeaderMap, Path(id): Path<i64>, body: Bytes) -> Result<Response, Fail> {
     if !authorized(&hub, &headers) {
         return Ok(StatusCode::UNAUTHORIZED.into_response());
     }
+    let b: PickBody = parse_body(&body)?;
     db(&hub, move |s| s.set_pick(id, b.pick)).await?;
     Ok(StatusCode::NO_CONTENT.into_response())
 }
@@ -420,10 +434,11 @@ struct ReportStatusBody {
     status: ReportStatus,
 }
 
-async fn report_status(State(hub): State<Arc<Hub>>, headers: HeaderMap, Path(id): Path<i64>, Json(b): Json<ReportStatusBody>) -> Result<Response, Fail> {
+async fn report_status(State(hub): State<Arc<Hub>>, headers: HeaderMap, Path(id): Path<i64>, body: Bytes) -> Result<Response, Fail> {
     if !authorized(&hub, &headers) {
         return Ok(StatusCode::UNAUTHORIZED.into_response());
     }
+    let b: ReportStatusBody = parse_body(&body)?;
     db(&hub, move |s| s.set_report_status(id, b.status)).await?;
     Ok(StatusCode::NO_CONTENT.into_response())
 }
@@ -457,10 +472,11 @@ struct PasswordSetBody {
 }
 
 /// Set an account's password without the old one; its sessions are signed out.
-async fn account_password(State(hub): State<Arc<Hub>>, headers: HeaderMap, Path(id): Path<i64>, Json(b): Json<PasswordSetBody>) -> Result<Response, Fail> {
+async fn account_password(State(hub): State<Arc<Hub>>, headers: HeaderMap, Path(id): Path<i64>, body: Bytes) -> Result<Response, Fail> {
     if !authorized(&hub, &headers) {
         return Ok(StatusCode::UNAUTHORIZED.into_response());
     }
+    let b: PasswordSetBody = parse_body(&body)?;
     db(&hub, move |s| s.admin_set_password(id, &b.password)).await?;
     Ok(StatusCode::NO_CONTENT.into_response())
 }
