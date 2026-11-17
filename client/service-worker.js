@@ -1,18 +1,15 @@
-// Service worker template. build.ts writes it to dist/sw.js with this build's id in the
-// cache names and the list of files to precache. It caches the app shell only: the server's
-// api, websocket, admin and internal routes are never intercepted.
+// Service worker template. build.ts writes it to dist/sw.js with this build's id in the cache name and the list of
+// files to precache. It answers two things itself: page navigations (network first, the precached page offline) and the
+// content-hashed bundle files a page needs to start offline. Every other request goes to the browser unchanged.
 
 const BUILD = "__BUILD__";
 const SHELL = `neobox-shell-${BUILD}`;
-const MEDIA = `neobox-media-${BUILD}`;
 const PRECACHE = __PRECACHE__;
 
 // Live server traffic: always the network.
 const SERVER_PATH = /^\/(api|ws|admin|internal|healthz)(\/|$)/;
-// Sound effects are precached with the shell (build.ts): a hit never touches the network.
-const SFX_PATH = /^\/sfx\//;
-// Music and flags load on demand; kept for later offline play.
-const MEDIA_PATH = /^\/(music|flags)\//;
+// Bundle files: the content hash is in the name, so a cached copy is this build's copy.
+const BUNDLE_PATH = /^\/chunk-[^/]+\.(js|css)$/;
 
 self.addEventListener("install", (event) => {
   event.waitUntil(
@@ -29,24 +26,24 @@ self.addEventListener("activate", (event) => {
   event.waitUntil(
     (async () => {
       for (const name of await caches.keys()) {
-        if (name.startsWith("neobox-") && name !== SHELL && name !== MEDIA) await caches.delete(name);
+        if (name.startsWith("neobox-") && name !== SHELL) await caches.delete(name);
       }
       await self.clients.claim();
     })(),
   );
 });
 
+// Firefox logs "A ServiceWorker intercepted the request and encountered an unexpected error" for every intercepted
+// request the page cancels (a reload or navigation while it loads), whatever the worker answers. So the worker answers
+// only the requests it must: pages and bundles. Other files (wasm, fonts, logo, icons, sounds, music, clips) are not
+// intercepted; the browser's HTTP cache serves them offline.
 self.addEventListener("fetch", (event) => {
   const req = event.request;
   const url = new URL(req.url);
   if (req.method !== "GET" || url.origin !== self.location.origin || SERVER_PATH.test(url.pathname)) return;
   if (req.mode === "navigate") {
     event.respondWith(networkFirst(req));
-  } else if (SFX_PATH.test(url.pathname)) {
-    if (!req.headers.has("range")) event.respondWith(sfx(req));
-  } else if (MEDIA_PATH.test(url.pathname)) {
-    if (!req.headers.has("range")) event.respondWith(networkThenMedia(MEDIA, req));
-  } else {
+  } else if (BUNDLE_PATH.test(url.pathname)) {
     event.respondWith(networkThenShell(req));
   }
 });
@@ -63,51 +60,19 @@ async function networkFirst(req) {
   }
 }
 
-// Shell files that keep their name across builds (fonts/, logo.svg, training.json, ...) and content-hashed bundle files
-// come from the network: an old worker must not hand this build's page the previous build's copy. This build's precache
-// answers only when the network is unreachable. neobox.wasm is requested with a build-id query (engine-loader.ts): the
-// precache ignores the query offline. Network-first for hashed files: a cache-hit response for a favicon/image load
-// failed in Firefox ("A ServiceWorker intercepted the request and encountered an unexpected error").
+// Bundles come from the network; the precache answers only when the network is unreachable.
 async function networkThenShell(req) {
   try {
     return await fetch(req);
   } catch {
-    return (await matchCached(SHELL, req, { ignoreSearch: true })) ?? Response.error();
+    return (await matchCached(SHELL, req)) ?? Response.error();
   }
 }
 
-// Sound effects: the shell cache holds them (build.ts precaches sfx/), so a hit answers without the network. The network
-// is asked only on a miss, and a fetch the page abandons (reload, navigation) rejects: answer with a network error rather
-// than a worker exception (an exception escaping respondWith is a page error in Firefox).
-async function sfx(req) {
-  const hit = await matchCached(SHELL, req);
-  if (hit) return hit;
-  return networkThenMedia(MEDIA, req);
-}
-
-// Music and flags: the network first, every good response kept; the cache answers only when the network fails.
-async function networkThenMedia(name, req) {
+async function matchCached(name, req) {
   try {
-    const res = await fetch(req);
-    if (res.ok) void remember(name, req, res.clone());
-    return res;
-  } catch {
-    return (await matchCached(name, req)) ?? Response.error();
-  }
-}
-
-async function matchCached(name, req, options) {
-  try {
-    return await (await caches.open(name)).match(req, options);
+    return await (await caches.open(name)).match(req);
   } catch {
     return undefined;
-  }
-}
-
-async function remember(name, req, res) {
-  try {
-    await (await caches.open(name)).put(req, res);
-  } catch {
-    // not stored; the next request goes to the network again
   }
 }
