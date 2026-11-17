@@ -26,10 +26,10 @@ mod ticket;
 mod youtube;
 
 use axum::extract::{ConnectInfo, Request, State, WebSocketUpgrade};
-use axum::http::{header, HeaderMap, HeaderValue};
+use axum::http::{header, HeaderMap, HeaderValue, StatusCode};
 use axum::middleware;
 use axum::response::{IntoResponse, Response};
-use axum::routing::get;
+use axum::routing::{any, get};
 use axum::{Json, Router};
 use hub::{Config, Hub};
 use neobox_store::Store;
@@ -61,6 +61,11 @@ async fn no_store_entry(req: Request, next: middleware::Next) -> Response {
         res.headers_mut().insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
     }
     res
+}
+
+/// Unknown `/api` paths answer 404 JSON, never the web shell.
+async fn api_not_found() -> Response {
+    (StatusCode::NOT_FOUND, Json(serde_json::json!({ "error": "not found" }))).into_response()
 }
 
 async fn ws(State(hub): State<Arc<Hub>>, ConnectInfo(peer): ConnectInfo<SocketAddr>, headers: HeaderMap, upgrade: WebSocketUpgrade) -> impl IntoResponse {
@@ -129,6 +134,7 @@ async fn main() {
             .merge(api::router())
             .merge(clips::router())
             .merge(cluster::router())
+            .route("/api/{*rest}", any(api_not_found))
             .fallback_service(files)
             .layer(middleware::from_fn_with_state(hub.clone(), share::preview))
     };
