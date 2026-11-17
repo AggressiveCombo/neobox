@@ -4,20 +4,23 @@
   width: 100%;
   max-width: 1280px;
   margin: 0 auto;
-  padding: var(--margin);
-  padding-bottom: 0;
   display: flex;
   flex-direction: column;
-  gap: var(--gap);
   box-sizing: border-box;
-  min-height: 100%;
-  align-self: flex-start;
+  padding-top: env(safe-area-inset-top);
+  /* fills #ui (the viewport): the content scrolls and the dock stays put below it */
+  height: 100%;
+  min-height: 0;
 }
 
 .room-content {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
   display: flex;
   flex-direction: column;
   gap: var(--gap);
+  padding: var(--margin) var(--margin) var(--gap);
   min-width: 0;
 }
 
@@ -28,6 +31,11 @@
 .room-screen :focus-visible {
   outline: 2px solid var(--ink);
   outline-offset: 2px;
+}
+
+/* The sticky tabs cover the scroller's top edge. room.ts measures them into --room-tabs-h, so focus scrolling stops short of them. */
+.room-screen :is(button, input, select, textarea, summary, a[href], [tabindex]) {
+  scroll-margin-top: var(--room-tabs-h, 0px);
 }
 
 /* ---- header ---- */
@@ -118,6 +126,12 @@
   display: inline-flex;
   align-items: center;
   gap: 8px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .room-screen .room-btn {
+    transition: none;
+  }
 }
 
 .room-screen .room-tabs .tab {
@@ -216,7 +230,7 @@
 
 .room-player-line {
   display: flex;
-  flex-wrap: nowrap;
+  flex-wrap: wrap;
   align-items: center;
   gap: 6px;
   min-width: 0;
@@ -633,6 +647,11 @@ button.room-menu-item[aria-checked="true"] {
   font-weight: 500;
 }
 
+/* A closed "More settings" keeps no layout: its controls would otherwise overflow the column and sit under the chat. */
+.room-all-settings:not([open]) > :not(summary) {
+  display: none;
+}
+
 .room-all-settings[open] > :not(summary) {
   animation: room-reveal 200ms var(--ease) both;
 }
@@ -691,6 +710,28 @@ button.room-menu-item[aria-checked="true"] {
   overflow-wrap: anywhere;
 }
 
+/* Touch: settings rows and their checkboxes take 48px targets. */
+@media (pointer: coarse), (max-width: 599px) {
+  .room-all-settings summary {
+    min-height: 48px;
+  }
+
+  .room-setting {
+    min-height: 48px;
+    align-items: center;
+  }
+
+  .room-setting input[type="checkbox"] {
+    width: 48px;
+    height: 48px;
+    margin: 0;
+  }
+
+  .room-setting input[type="number"] {
+    min-height: 48px;
+  }
+}
+
 /* ---- chat ---- */
 
 .room-chat {
@@ -744,20 +785,17 @@ button.room-menu-item[aria-checked="true"] {
   min-width: 0;
 }
 
-/* ---- dock: the host's start controls, pinned at the bottom ---- */
+/* ---- dock: the host's start controls, fixed under the scrolling content ---- */
 
 .room-dock {
-  position: sticky;
-  bottom: 0;
-  z-index: 10;
+  flex: none;
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  /* short content: the dock still sits at the bottom of the screen */
-  margin: auto calc(-1 * var(--margin)) 0;
-  padding: 12px var(--margin);
+  margin: 0;
+  padding: 12px var(--margin) calc(12px + env(safe-area-inset-bottom));
   background: var(--surface);
   box-sizing: border-box;
 }
@@ -785,13 +823,18 @@ button.room-menu-item[aria-checked="true"] {
   .room-main {
     grid-template-areas:
       "roster match"
-      "chat match";
+      "roster chat";
     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   }
 
   .room-col-chat {
     position: static;
     max-height: none;
+  }
+
+  /* stacked, the chat takes its content's height; 100% would size it to the grid row and the log would cover the form */
+  .room-chat {
+    height: auto;
   }
 }
 
@@ -806,12 +849,21 @@ button.room-menu-item[aria-checked="true"] {
 
   .room-screen .room-tabs {
     display: flex;
+    flex-wrap: wrap;
+    flex: none;
     position: sticky;
     top: 0;
     z-index: 5;
     margin: 0 calc(-1 * var(--margin));
     padding: 8px var(--margin);
     background: var(--surface);
+  }
+
+  .room-screen .room-tabs .tab {
+    flex: 1 0 auto;
+    justify-content: center;
+    padding: 0 6px;
+    scroll-margin: 0;
   }
 
   .room-col-chat {
@@ -834,13 +886,5 @@ button.room-menu-item[aria-checked="true"] {
   .room-more {
     min-width: 44px;
     min-height: 44px;
-  }
-}
-
-/* Short screens: the sticky tabs and dock together fill the viewport and cover the content, so they scroll with it. */
-@media (max-width: 599px) and (max-height: 479px) {
-  .room-screen .room-tabs,
-  .room-dock {
-    position: static;
   }
 }

@@ -596,7 +596,7 @@ export async function matchWithGuest(s, { clipboard: wantClipboard = true } = {}
   await dismissPhoneSplash(host.page);
   const guest = await s.open("guest", { name: guestName });
   if (clipboard) {
-    await button(host.page, "Copy invite link").click();
+    await button(host.page, "Invite").click();
     // The toast fades quickly, so poll the clipboard, which holds the link.
     let url = "";
     for (let i = 0; i < 50 && url !== `${s.base}/${code}`; i++) {

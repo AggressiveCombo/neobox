@@ -1162,8 +1162,15 @@ export const roomScreen: ScreenFactory = (ctx: AppCtx) => {
     h("div", { class: "room-col room-col-match" }, modePanel, mapPanel, managePanel, settingsPanel),
     h("div", { class: "room-col room-col-chat" }, chatPanel),
   );
-  const content = h("main", { class: "room-content" }, notice, startNotice, tabBar, main);
-  const root = h("div", { class: "room-screen", "data-tab": "players" }, header, content, dock);
+  // The header, notice, tabs and sections scroll together; the dock sits outside the scroller so it never covers content.
+  const content = h("main", { class: "room-content" }, header, notice, startNotice, tabBar, main);
+  const root = h("div", { class: "room-screen", "data-tab": "players" }, content, dock);
+
+  // The sticky tabs cover the scroller's top edge. Their height feeds scroll-margin in room.css, so focus scrolling keeps the focused control clear of them.
+  const overlays = new ResizeObserver(() => {
+    root.style.setProperty("--room-tabs-h", `${tabBar.offsetHeight}px`);
+  });
+  overlays.observe(tabBar);
 
   // Section builders. Each reads `st`, which is set before any render runs.
 
@@ -1182,7 +1189,7 @@ export const roomScreen: ScreenFactory = (ctx: AppCtx) => {
         st.inMatch
           ? h("button", { type: "button", class: "room-btn", onclick: () => ctx.store.set({ screen: "match" }) }, icon("arrow-left", 16), "Back to game")
           : null,
-        h("button", { type: "button", class: "room-btn room-invite", "aria-label": "Copy invite link", title: "Copy invite link", onclick: () => void shareInvite() }, icon("link", 16), "Invite"),
+        h("button", { type: "button", class: "room-btn room-invite", title: "Copy invite link", onclick: () => void shareInvite() }, icon("link", 16), "Invite"),
         st.replayReady
           ? h(
               "button",
@@ -1410,6 +1417,7 @@ export const roomScreen: ScreenFactory = (ctx: AppCtx) => {
     destroy() {
       alive = false;
       clearInterval(typingTimer);
+      overlays.disconnect();
       unsubPrefs();
       closeVoteMenu();
       window.removeEventListener("pointerdown", onMenuOutside, true);
