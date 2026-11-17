@@ -149,8 +149,8 @@ export function openNews(): () => void {
   show(0);
   const { close } = openModal({
     title: "Update news",
-    body: [list, h("div", { class: "news-pager" }, prev, counter, next)],
-    actions: [done],
+    body: [list],
+    actions: [prev, counter, next, done],
   });
   return () => close();
 }
