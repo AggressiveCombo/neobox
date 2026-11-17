@@ -17,6 +17,9 @@
 
 import { writeFile } from "node:fs/promises";
 import path from "node:path";
+import { readFileSync, readdirSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { PALETTES as GEOMETRY_PALETTES, AWAY_RING_BELOW_LUM, relLuminance } from "../src/render/geometry.ts";
 import {
   Results,
   createRoom,
@@ -48,6 +51,8 @@ const CONTRAST_TIERS = ["T1-M", "T5-T"];
 const PALETTES = (process.env.PALETTES ?? "default,deuteranopia").split(",").map((s) => s.trim());
 // Reference maps (rubric section 1, "Reference maps"): the four built-in maps by display name.
 const REFERENCE_MAPS = ["Proving Grounds", "Sky Islands", "Playground", "Twin Forts (teams)"];
+// QA-only wide arena (client/qa/fixtures/qa-wide.json, pasted as map JSON like e2e's voidMap, never shipped): players start at both ends of a 200-wide floor.
+const QA_WIDE = { id: "QA Wide Arena", json: readFileSync(path.resolve(path.dirname(fileURLToPath(import.meta.url)), "fixtures/qa-wide.json"), "utf8") };
 const HUD_MS = 5000;
 const HUD_EVERY_MS = 250;
 const SAMPLE_MS = 250;
@@ -63,6 +68,10 @@ const HIT_SOUNDS = [3, 6, 12, 14];
 // Ticks at the end of a log whose feedback window has not closed yet; those events are not judged.
 const OPEN_TAIL_TICKS = 60;
 const DRIVE_KEYS = ["ArrowLeft", "ArrowRight", "ArrowUp", "KeyC", "KeyX"];
+const MAPS_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../maps");
+// Edge chips (overlay.ts drawAway): the name is white on the panel; the player colour is a swatch (non-text, 1.4.11). Dark colours get a white ring.
+const CHIP_TEXT_MIN = 4.5;
+const CHIP_SWATCH_MIN = 3;
 
 const rowOf = (id) => {
   const row = ROWS.find((r) => r.id === id);
@@ -371,6 +380,59 @@ function measureHud(selfTest) {
   return { ready: true, boxes, targets: targets.length, overlapping, names };
 }
 
+/**
+ * Runs in the page: the edge chips of this frame (globalThis.__qaAway, published by overlay.ts) against the
+ * local sprite and the HUD leaves (the leaf filter of measureHud). `chips` is null when the chips were published
+ * for another tick than the camera's. Every off-screen opponent (cam.away) needs a chip.
+ */
+function measureAway() {
+  const lat = window.__qaPF?.latest;
+  const cam = globalThis.__qaCam;
+  const aw = globalThis.__qaAway;
+  const gl = document.querySelector("#gl-host canvas");
+  if (!lat || !cam || cam.tick < 0 || !(gl instanceof HTMLCanvasElement)) return { ready: false };
+  const away = cam.away.length;
+  if (away === 0) return { ready: true, away, chips: 0, missing: 0, overLocal: 0, overHud: 0, names: [] };
+  if (!aw || aw.tick !== cam.tick) return { ready: true, away, chips: null, missing: 0, overLocal: 0, overHud: 0, names: [] };
+  const chips = aw.chips.map((c) => ({ id: c.id, left: c.x, top: c.y, right: c.x + c.w, bottom: c.y + c.h }));
+  const missing = cam.away.filter((id) => !chips.some((c) => c.id === id)).length;
+  const hit = (b, q) => b.left < q.right && b.right > q.left && b.top < q.bottom && b.bottom > q.top;
+  const r = gl.getBoundingClientRect();
+  const sx = r.width / cam.w;
+  const sy = r.height / cam.h;
+  const toPx = (x, y) => [r.left + r.width / 2 + (x - cam.cx) * sx, r.top + r.height / 2 + (y - cam.cy) * sy];
+  let overLocal = 0;
+  const me = lat.live.find((p) => p.id === lat.localId);
+  if (me) {
+    const e = (me.size / 2) * (Math.abs(Math.cos(me.angle)) + Math.abs(Math.sin(me.angle)));
+    const [cx, cy] = toPx(me.x, me.y);
+    const box = { left: cx - e * sx, right: cx + e * sx, top: cy - e * sy, bottom: cy + e * sy };
+    overLocal = chips.filter((c) => hit(c, box)).length;
+  }
+  const names = [];
+  let overHud = 0;
+  const root = document.querySelector(".hud-root, .offline.playing");
+  if (root) {
+    for (const el of root.querySelectorAll("*")) {
+      if (el.childElementCount > 0 || el.getClientRects().length === 0) continue;
+      const cs = getComputedStyle(el);
+      if (cs.visibility === "hidden" || Number(cs.opacity) === 0) continue;
+      const b = el.getBoundingClientRect();
+      if (b.width < 1 || b.height < 1) continue;
+      const box = { left: b.left, right: b.right, top: b.top, bottom: b.bottom };
+      for (const c of chips) {
+        if (!hit(c, box)) continue;
+        overHud++;
+        if (names.length < 8) {
+          const cls = typeof el.className === "string" ? el.className : (el.className?.baseVal ?? "");
+          names.push(`${el.tagName.toLowerCase()}.${cls.trim().split(/\s+/).join(".")} under chip ${c.id}`);
+        }
+      }
+    }
+  }
+  return { ready: true, away, chips: chips.length, missing, overLocal, overHud, names };
+}
+
 /** Whether the run of hit ticks from log[i] landed on something that reacts: a body or projectile, or a player alive before the hit. A hit on a dead player has no feedback to give. */
 function reactsToHit(log, i) {
   for (let j = i; j < log.length && log[j].hits > 0; j++) {
@@ -381,7 +443,13 @@ function reactsToHit(log, i) {
   return false;
 }
 
-/** Pure: feedback events of an engine log (one per run of ticks with hit records). Frames = ticks. */
+/**
+ * Pure: feedback events of an engine log (one per run of ticks with hit records). Frames = ticks.
+ * visual: the hit flash, drawn from the predicted hit record of the frame (overlay hitFlashes), so 0 when the
+ * frame that carries the record is the hit's frame. sound: the first hit sound of the predicted stream.
+ * consequence (reported, not judged): the first frame where a victim's health drops or dies or a damage bar grows;
+ * for a player victim that is the KO after the fall, so it can be many ticks after the hit.
+ */
 export function feedbackEvents(log) {
   const events = [];
   for (let i = 0; i < log.length; i++) {
@@ -390,17 +458,19 @@ export function feedbackEvents(log) {
     const hit = log[i].tick;
     let visual = null;
     let sound = null;
-    for (let j = i; j < log.length && (visual === null || sound === null); j++) {
+    let consequence = null;
+    for (let j = i; j < log.length && (visual === null || sound === null || consequence === null); j++) {
       const f = log[j];
       const prev = j > 0 ? log[j - 1] : null;
-      if (visual === null && prev) {
+      if (visual === null && f.hits > 0) visual = f.tick - hit;
+      if (consequence === null && prev) {
         const dropped = Object.keys(f.hp).some((id) => id in prev.hp && f.hp[id] < prev.hp[id]);
         const killed = log[i].victims.some((id) => id in prev.hp && !(id in f.hp));
-        if (dropped || killed || f.bars > prev.bars) visual = f.tick - hit;
+        if (dropped || killed || f.bars > prev.bars) consequence = f.tick - hit;
       }
       if (sound === null && f.sounds.some((k) => HIT_SOUNDS.includes(k))) sound = f.tick - hit;
     }
-    events.push({ tick: hit, visual, sound, frames: visual === null || sound === null ? null : Math.max(visual, sound) });
+    events.push({ tick: hit, visual, sound, consequence, frames: visual === null || sound === null ? null : Math.max(visual, sound) });
   }
   return events;
 }
@@ -583,7 +653,7 @@ async function tierCell(results, browser, engine, base, tier, palette, renderer,
 const rendererFor = (engine) => (engine === "chromium" ? "webgpu" : "webgl2");
 
 /** Two clients in one room on `mapName` (or the room default), running random inputs for `ms`. */
-async function pairMatch(s, browser, engine, base, { mapName, selfTest, renderer = rendererFor(engine), palette = "default" }, opened) {
+async function pairMatch(s, browser, engine, base, { mapName = null, mapJson = null, selfTest, renderer = rendererFor(engine), palette = "default" }, opened) {
   const row = rowOf("T1-M");
   const roomName = uniqueName("room");
   const hostName = uniqueName("host");
@@ -594,10 +664,19 @@ async function pairMatch(s, browser, engine, base, { mapName, selfTest, renderer
   const guest = await openPage(s, browser, engine, row, { label: "guest", renderer, palette, name: guestName, selfTest }, opened);
   await joinByInvite(guest, base, code, roomName);
   await dismissPhoneSplash(guest.page);
-  if (mapName) {
+  if (mapName || mapJson) {
     await host.page.getByRole("button", { name: "Change map", exact: true }).click();
-    await host.page.locator(".room-map-list button").filter({ hasText: mapName }).first().click();
-    await host.page.locator(".room-map-name").filter({ hasText: mapName }).waitFor();
+    if (mapJson) {
+      await host.page.getByLabel("Map code or JSON", { exact: true }).fill(mapJson);
+      await host.page.getByRole("button", { name: "Use code", exact: true }).click();
+      await host.page.locator(".room-map-name").filter({ hasText: "Custom map" }).waitFor({ timeout: 60000 });
+    } else {
+      // The built-in list loads async (room.ts "loading maps"); on a loaded shared host it can take longer than the 20s default.
+      const mapBtn = host.page.locator(".room-map-list button").filter({ hasText: mapName }).first();
+      await mapBtn.waitFor({ timeout: 60000 });
+      await mapBtn.click();
+      await host.page.locator(".room-map-name").filter({ hasText: mapName }).waitFor();
+    }
   }
   await startMatch(host, [guest]);
   await waitMatch(host.page, renderer);
@@ -605,16 +684,87 @@ async function pairMatch(s, browser, engine, base, { mapName, selfTest, renderer
   return { host, guest };
 }
 
-/** Camera (rubric camera.inView): both clients play one reference map; every live player's centre must be in view on every published frame. */
-async function cameraCase(results, browser, engine, base, mapName, selfTest) {
-  const id = `camera.${mapName.replaceAll(/[^\w]+/g, "-").toLowerCase()}`;
+/** Samples one page's edge chips while it plays (see measureAway): frames with an off-screen opponent, and what is wrong in them. */
+async function sampleAway(page, ms) {
+  const acc = { awayFrames: 0, staleFrames: 0, missing: 0, overLocalFrames: 0, overHud: 0, names: [] };
+  const end = Date.now() + ms;
+  while (Date.now() < end) {
+    const m = await page.evaluate(measureAway);
+    if (m.ready && m.away > 0) {
+      if (m.chips === null) acc.staleFrames++;
+      else {
+        acc.awayFrames++;
+        acc.missing += m.missing;
+        if (m.overLocal > 0) acc.overLocalFrames++;
+        acc.overHud += m.overHud;
+        for (const n of m.names) if (acc.names.length < 8) acc.names.push(n);
+      }
+    }
+    await sleep(SAMPLE_MS);
+  }
+  return acc;
+}
+
+/**
+ * Static (rubric chips): the edge chip's name is white on its panel (rgba(0,0,0,0.5) over the ground) for every
+ * shipped ground (map sets "12" and "17", and the void). The player colour is a swatch: a colour darker than
+ * AWAY_RING_BELOW_LUM gets a white ring (overlay.ts), so the colour meets the ring and the ring meets the panel;
+ * a lighter colour meets the panel directly. Colours are the ones overlay.ts draws (PALETTES; team and FFA
+ * colours). Room colours are swatches only, so they need no per-colour text check.
+ */
+async function chipContrastCase(results) {
+  return results.case("chip.contrast", async () => {
+    const grounds = new Set([0x0a0a0a]);
+    for (const f of readdirSync(MAPS_DIR).filter((f) => f.endsWith(".json"))) {
+      const set = JSON.parse(readFileSync(path.join(MAPS_DIR, f), "utf8")).map?.set ?? {};
+      for (const k of ["12", "17"]) if (typeof set[k] === "number") grounds.add(set[k]);
+    }
+    const lum = relLuminance;
+    const ratio = (a, b) => (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
+    const panelOver = (bg) => {
+      const ch = (s) => Math.round(((bg >> s) & 255) * 0.5);
+      return (ch(16) << 16) | (ch(8) << 8) | ch(0);
+    };
+    const colours = new Set();
+    for (const p of Object.values(GEOMETRY_PALETTES)) {
+      colours.add(p.red);
+      colours.add(p.blue);
+      for (const c of p.ffa) colours.add(c);
+    }
+    let textMin = Infinity;
+    let ringMin = Infinity;
+    let swatchMin = Infinity;
+    const white = lum(0xffffff);
+    for (const g of grounds) {
+      const panelLum = lum(panelOver(g));
+      textMin = Math.min(textMin, ratio(white, panelLum));
+      // Dark colours get a ring: the ring meets the panel, the colour meets the ring. Lighter colours meet the panel.
+      ringMin = Math.min(ringMin, ratio(white, panelLum));
+      for (const c of colours) {
+        const cl = lum(c);
+        swatchMin = Math.min(swatchMin, cl < AWAY_RING_BELOW_LUM ? ratio(cl, white) : ratio(cl, panelLum));
+      }
+    }
+    const pass = textMin >= CHIP_TEXT_MIN && ringMin >= CHIP_SWATCH_MIN && swatchMin >= CHIP_SWATCH_MIN;
+    return {
+      pass,
+      detail: `chip name white on panel min ${textMin.toFixed(2)}:1 over ${grounds.size} grounds (need ${CHIP_TEXT_MIN}); swatch edge (white ring if dark, else panel) min ${swatchMin.toFixed(2)}:1 over ${colours.size} palette colours (need ${CHIP_SWATCH_MIN}); ring white on panel min ${ringMin.toFixed(2)}:1`,
+      metrics: { "chip.textMinRatio": Math.round(textMin * 100) / 100, "chip.ringMinRatio": Math.round(ringMin * 100) / 100, "chip.swatchMinRatio": Math.round(swatchMin * 100) / 100, "chip.grounds": grounds.size, "chip.paletteColours": colours.size },
+    };
+  });
+}
+
+/** Camera (rubric camera.inView): both clients play one map; every live player's centre must be in view on every published frame. `forced`: nobody moves, so on a wide map the spawns leave an opponent off-screen and its edge chip must show. */
+async function cameraCase(results, browser, engine, base, map, selfTest, forced = false) {
+  const mapOpt = typeof map === "string" ? { mapName: map } : { mapJson: map.json };
+  const id = `camera.${(typeof map === "string" ? map : map.id).replaceAll(/[^\w]+/g, "-").toLowerCase()}${forced ? "-forced-away" : ""}`;
   const opened = [];
   const out = await results.case(
     id,
     async (s) => {
-      const { host, guest } = await pairMatch(s, browser, engine, base, { mapName, selfTest }, opened);
+      const { host, guest } = await pairMatch(s, browser, engine, base, { ...mapOpt, selfTest }, opened);
       for (const h of [host, guest]) await h.page.evaluate(() => Object.assign(window.__qaPF, { camFrames: 0, camOut: 0, camLocalOut: 0, camUnind: 0, camDetail: [], camLocalDetail: [] }));
-      await drive([host.page, guest.page], CAM_MS);
+      const [, ...chipPer] = await Promise.all([forced ? sleep(CAM_MS) : drive([host.page, guest.page], CAM_MS), ...[host, guest].map((h) => sampleAway(h.page, CAM_MS))]);
       const per = [];
       for (const h of [host, guest]) per.push(await h.page.evaluate(() => ({ frames: window.__qaPF.camFrames, out: window.__qaPF.camOut, localOut: window.__qaPF.camLocalOut, unind: window.__qaPF.camUnind, detail: window.__qaPF.camDetail, localDetail: window.__qaPF.camLocalDetail })));
       const frames = per.reduce((n, p) => n + p.frames, 0);
@@ -624,12 +774,19 @@ async function cameraCase(results, browser, engine, base, mapName, selfTest) {
       // Pass (R1-60): the local player is in view on every frame and every off-screen opponent has an edge indicator.
       const inView = frames > 0 && localOut === 0 && unind === 0 ? 1 : 0;
       const allInView = frames > 0 ? (frames - outFrames) / frames : 0;
+      // Edge chips (overlay.ts drawAway) while someone is off-screen: each has a chip; none covers the local sprite or a HUD box.
+      const chipAway = chipPer.reduce((n, c) => n + c.awayFrames, 0);
+      const chipMissing = chipPer.reduce((n, c) => n + c.missing, 0);
+      const chipLocal = chipPer.reduce((n, c) => n + c.overLocalFrames, 0);
+      const chipHud = chipPer.reduce((n, c) => n + c.overHud, 0);
+      const chipNames = chipPer.flatMap((c) => c.names).slice(0, 8);
+      const chipOk = chipMissing === 0 && chipLocal === 0 && chipHud === 0;
       const file = path.join(results.evidenceDir, `${id}.png`);
       const saved = await shot(host.page, file);
       return {
-        pass: inView === 1,
-        detail: `camera.inView=${inView}: local out on ${localOut} frames, opponents out without indicator on ${unind}; all live in view on ${(allInView * 100).toFixed(1)}% of ${frames} frames (host ${per[0].out}/${per[0].frames} out, guest ${per[1].out}/${per[1].frames} out)`,
-        metrics: { "camera.inView": inView, "camera.localOutFrames": localOut, "camera.indicatorMissFrames": unind, "camera.allInView": Math.round(allInView * 1000) / 1000, "camera.outFrames": outFrames, "camera.frames": frames, "camera.detail": per.flatMap((p) => p.detail).slice(0, 10), "camera.localDetail": per.flatMap((p) => p.localDetail).slice(0, 12) },
+        pass: inView === 1 && chipOk && (!forced || chipAway > 0),
+        detail: `camera.inView=${inView}: local out on ${localOut} frames, opponents out without indicator on ${unind}; all live in view on ${(allInView * 100).toFixed(1)}% of ${frames} frames (host ${per[0].out}/${per[0].frames} out, guest ${per[1].out}/${per[1].frames} out); chips over ${chipAway} away frames: missing ${chipMissing}, over local sprite ${chipLocal}, over HUD ${chipHud}${chipNames.length ? ` (${chipNames.join("; ")})` : ""}`,
+        metrics: { "camera.inView": inView, "camera.localOutFrames": localOut, "camera.indicatorMissFrames": unind, "camera.allInView": Math.round(allInView * 1000) / 1000, "camera.outFrames": outFrames, "camera.frames": frames, "camera.detail": per.flatMap((p) => p.detail).slice(0, 10), "camera.localDetail": per.flatMap((p) => p.localDetail).slice(0, 12), "chip.awayFrames": chipAway, "chip.missing": chipMissing, "chip.overLocalFrames": chipLocal, "chip.overHud": chipHud, "chip.names": chipNames },
         evidence: saved ? [rel(saved)] : [],
       };
     },
@@ -699,7 +856,11 @@ if (mode === "feedback") {
           for (const renderer of renderers) await tierCell(results, browser, engine, base, tier, palette, renderer, null);
         }
       }
-      for (const map of wantCase("camera") ? REFERENCE_MAPS : []) await cameraCase(results, browser, engine, base, map, null);
+      for (const map of wantCase("camera") ? REFERENCE_MAPS : []) {
+        await cameraCase(results, browser, engine, base, map, null);
+      }
+      if (wantCase("camera")) await cameraCase(results, browser, engine, base, QA_WIDE, null, true);
+      if (wantCase("camera")) await chipContrastCase(results);
       if (engine === "chromium" && wantCase("feedback")) await feedbackCase(results, browser, engine, base);
     } else if (mode === "hud" || mode === "contrast") {
       await tierCell(results, browser, engine, base, "T1-M", "default", renderers[0], mode);
