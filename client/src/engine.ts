@@ -3,6 +3,7 @@
 // linear memory and are valid until the next engine call.
 
 import type { MatchStart } from "./protocol";
+import { fetchPrecached } from "./precached";
 
 export interface NeoboxExports {
   memory: WebAssembly.Memory;
@@ -312,7 +313,7 @@ export async function loadWasmEngine(url = "./neobox.wasm", onProgress?: (loaded
  * consumes such a Response.
  */
 async function readWasm(url: string, onProgress?: (loaded: number, total: number) => void): Promise<Uint8Array> {
-  const res = await fetch(url);
+  const res = await fetchPrecached(url);
   if (!res.ok) throw new EngineError(`neobox.wasm: HTTP ${res.status}`);
   if (!res.body) return new Uint8Array(await res.arrayBuffer());
   const total = res.headers.get("content-encoding") ? 0 : Number(res.headers.get("content-length")) || 0;

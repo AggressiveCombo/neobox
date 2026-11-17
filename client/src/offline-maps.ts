@@ -3,9 +3,10 @@
 
 import type { BuiltinMap } from "./api";
 import type { AppCtx } from "./ctx";
+import { fetchPrecached } from "./precached";
 
 export async function bundledMaps(ctx: AppCtx): Promise<BuiltinMap[]> {
-  const res = await fetch("/offline-maps.json");
+  const res = await fetchPrecached("/offline-maps.json");
   if (!res.ok) throw new Error(`offline-maps.json: HTTP ${res.status}`);
   const entries: unknown = await res.json();
   if (!Array.isArray(entries)) throw new Error("offline-maps.json: unexpected content");

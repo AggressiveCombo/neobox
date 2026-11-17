@@ -51,7 +51,7 @@ async function writeOfflineMaps(dir: string): Promise<void> {
   await Bun.write(`${dir}/offline-maps.json`, JSON.stringify(entries));
 }
 
-/** sw.js: the service worker with this build's id and the files it precaches: the page and the bundles it answers. */
+/** sw.js: the service worker with this build's id and the files it precaches: every shipped file but source maps, sw.js itself, the share image, music and flags. */
 async function writeServiceWorker(dir: string): Promise<void> {
   const files: string[] = [];
   for await (const raw of new Bun.Glob("**/*").scan({ cwd: dir })) {
@@ -67,8 +67,7 @@ async function writeServiceWorker(dir: string): Promise<void> {
   }
   const build = hash.digest("hex").slice(0, 16);
   const template = await Bun.file(`${root}/service-worker.js`).text();
-  const precache = files.filter((f) => f === "index.html" || /^chunk-[^/]+\.(js|css)$/.test(f));
-  const sw = template.replaceAll("__BUILD__", build).replace("__PRECACHE__", () => JSON.stringify(precache.map((f) => `/${f}`)));
+  const sw = template.replaceAll("__BUILD__", build).replace("__PRECACHE__", () => JSON.stringify(files.map((f) => `/${f}`)));
   await Bun.write(`${dir}/sw.js`, sw);
 }
 

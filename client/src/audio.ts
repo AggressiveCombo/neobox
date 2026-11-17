@@ -4,6 +4,7 @@
 // through WebAudio, with a little random pitch and a random variant per play.
 
 import { prefs } from "./prefs";
+import { fetchPrecached } from "./precached";
 
 /** Interface sound names; the screens never play sounds themselves, the global hooks do (installUiSounds). */
 export type UiSound = "hover" | "click" | "tab" | "toggle" | "open" | "close" | "error" | "win" | "lose" | "chat";
@@ -101,7 +102,7 @@ export class Sfx {
   private async load(ctx: AudioContext): Promise<void> {
     await Promise.all(
       FILES.map(async (name) => {
-        const res = await fetch(`sfx/${name}.mp3`);
+        const res = await fetchPrecached(`sfx/${name}.mp3`);
         if (!res.ok) throw new Error(`sound ${name}: HTTP ${res.status}`);
         this.buffers.set(name, await ctx.decodeAudioData(await res.arrayBuffer()));
       }),

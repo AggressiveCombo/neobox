@@ -1,6 +1,7 @@
 // Service worker template. build.ts writes it to dist/sw.js with this build's id in the cache name and the list of
-// files to precache. It answers two things itself: page navigations (network first, the precached page offline) and the
-// content-hashed bundle files a page needs to start offline. Every other request goes to the browser unchanged.
+// files to precache: every shipped file but music and flags. It answers two things itself: page navigations (network
+// first, the precached page offline) and the content-hashed bundle files. Every other request goes to the browser
+// unchanged; the page reads its other precached files itself (client/src/precached.ts).
 
 const BUILD = "__BUILD__";
 const SHELL = `neobox-shell-${BUILD}`;
@@ -35,8 +36,8 @@ self.addEventListener("activate", (event) => {
 
 // Firefox logs "A ServiceWorker intercepted the request and encountered an unexpected error" for every intercepted
 // request the page cancels (a reload or navigation while it loads), whatever the worker answers. So the worker answers
-// only the requests it must: pages and bundles. Other files (wasm, fonts, logo, icons, sounds, music, clips) are not
-// intercepted; the browser's HTTP cache serves them offline.
+// only pages and bundles. Other files (wasm, sfx, fonts, logo, clips, music) are not intercepted: the page reads the
+// precached copies when the network is down, and fonts and the logo rely on the browser's HTTP cache.
 self.addEventListener("fetch", (event) => {
   const req = event.request;
   const url = new URL(req.url);

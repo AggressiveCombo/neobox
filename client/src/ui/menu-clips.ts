@@ -7,6 +7,7 @@
 import type { AppCtx } from "../ctx";
 import type { Engine, ReplayInfo } from "../engine";
 import { fetchClipReplay, listClips, type ClipSummary } from "../clips";
+import { fetchPrecached } from "../precached";
 import { h } from "./dom";
 
 /** Clips per page; matches the server's page size, so a short page means the end. */
@@ -20,7 +21,7 @@ const RETRY_MS = 15_000;
 const DEMO_CLIP: ClipSummary = { id: 0, recorder: "neobox", map_name: "Simple Arena 1", created: 0, size: 0 };
 
 async function fetchDemo(signal: AbortSignal): Promise<string> {
-  const res = await fetch("/clips/demo.json", { signal });
+  const res = await fetchPrecached("/clips/demo.json", { signal });
   if (!res.ok) throw new Error(`/clips/demo.json: HTTP ${res.status}`);
   return res.text();
 }
