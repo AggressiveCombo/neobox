@@ -115,6 +115,7 @@ export const menuScreen: ScreenFactory = (ctx) => {
   // The overlay canvas (names, kill feed, objective bar) is masked with the game view.
   const overlay = document.getElementById("overlay");
   let attempted = false;
+  let nameTouched = false;
   let liveClip = false;
   let shownAccount: Account | null | undefined;
 
@@ -140,8 +141,13 @@ export const menuScreen: ScreenFactory = (ctx) => {
     value: initialName,
     readonly: account !== null,
     oninput: () => {
+      nameTouched = true;
       sync();
       saveTypedName(nameInput.value);
+    },
+    onblur: () => {
+      nameTouched = true;
+      sync();
     },
   });
 
@@ -183,18 +189,20 @@ export const menuScreen: ScreenFactory = (ctx) => {
   const fullscreenBtn = toolButton("maximize", "Fullscreen", () => toggleFullscreen());
   fullscreenBtn.hidden = !document.fullscreenEnabled;
 
-  /** Enable Browse rooms only when the name is valid; say why when it is not. */
+  /** Enable Browse rooms only when the name is valid; say why once the player has typed or left the field. */
   function sync(): void {
     const problem = nameProblem(nameInput.value);
+    const shown = nameTouched ? problem : null;
     browseBtn.disabled = problem !== null;
-    nameError.textContent = problem ?? "";
-    nameError.hidden = problem === null;
-    nameInput.setAttribute("aria-invalid", String(problem !== null));
+    nameError.textContent = shown ?? "";
+    nameError.hidden = shown === null;
+    nameInput.setAttribute("aria-invalid", String(shown !== null));
   }
 
   /** Connect with the name and show the room browser once the server welcomes us. */
   function go(): void {
     if (nameProblem(nameInput.value) !== null) {
+      nameTouched = true;
       sync();
       nameInput.focus();
       return;
