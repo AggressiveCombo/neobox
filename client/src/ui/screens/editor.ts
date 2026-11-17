@@ -57,6 +57,8 @@ export const editorScreen: ScreenFactory = (ctx) => {
   let mapName: string | null = null;
   /** The player's own library map on screen (Save overwrites it), or null. */
   let libraryMap: LibraryMap | null = null;
+  /** The map and its name as last loaded, saved or downloaded; edits since then are unsaved. */
+  let savedState = "";
 
   // Viewport: the canvas, the scope bar and the lag verdict over it.
   const canvas = h("canvas", { class: "editor-canvas", "aria-label": "Map canvas" });
@@ -159,7 +161,7 @@ export const editorScreen: ScreenFactory = (ctx) => {
   const topbar = h(
     "header",
     { class: "editor-top" },
-    h("button", { type: "button", class: "quiet", "aria-label": "Back", onclick: () => exit() }, icon("arrow-left"), h("span", { class: "editor-label" }, "Back")),
+    h("button", { type: "button", class: "quiet", "aria-label": "Back", onclick: () => void exit() }, icon("arrow-left"), h("span", { class: "editor-label" }, "Back")),
     h("h1", { class: "editor-sr" }, "Map editor"),
     nameInput,
     h("div", { class: "editor-top-tools" }, undoBtn, redoBtn, saveBtn, useRoomBtn, testBtn, menuBtn),
@@ -210,7 +212,7 @@ export const editorScreen: ScreenFactory = (ctx) => {
           { class: "editor-buttons" },
           h("button", { type: "button", onclick: () => { toggleMenu(false); openSaveDialog(); } }, icon("save"), "Save to library"),
           h("button", { type: "button", onclick: () => fileInput.click() }, icon("folder-open"), "Load file"),
-          h("button", { type: "button", onclick: () => downloadMap(ctrl.doc) }, icon("download"), "Download"),
+          h("button", { type: "button", onclick: () => { downloadMap(ctrl.doc); markSaved(); } }, icon("download"), "Download"),
           h("button", { type: "button", onclick: () => void copyCode() }, icon("copy"), "Copy map code"),
           h("button", { type: "button", onclick: () => void newMap() }, icon("file-plus"), "New map"),
         ),
@@ -301,8 +303,28 @@ export const editorScreen: ScreenFactory = (ctx) => {
     refreshInspector();
   }
 
-  /** Back leaves to the room when the editor was opened from it; otherwise to the screen it came from. */
-  function exit(): void {
+  /** Record the map on screen as saved: Leave and page unload compare against it. */
+  function markSaved(): void {
+    savedState = JSON.stringify([ctrl.doc, mapName]);
+  }
+
+  /** Warns before the page closes or reloads while edits are unsaved. */
+  function onBeforeUnload(e: BeforeUnloadEvent): void {
+    if (JSON.stringify([ctrl.doc, mapName]) === savedState) return;
+    e.preventDefault();
+    e.returnValue = "";
+  }
+
+  /** Back leaves to the room when the editor was opened from it; otherwise to the screen it came from. Asks first when edits are unsaved. */
+  async function exit(): Promise<void> {
+    if (JSON.stringify([ctrl.doc, mapName]) !== savedState) {
+      const ok = await confirmDialog({
+        title: "Leave without saving?",
+        message: "Edits not saved to the library or a file are lost.",
+        action: "Leave",
+      });
+      if (!ok || destroyed) return;
+    }
     if (inRoom) ctx.store.set({ screen: "room", editorForRoom: false });
     else ctx.store.set({ screen: origin });
   }
@@ -333,6 +355,7 @@ export const editorScreen: ScreenFactory = (ctx) => {
     }
     ctrl.load(doc);
     mapName = label;
+    markSaved();
     toggleMenu(false);
     ctx.toast(`Opened ${label}`);
     return true;
@@ -350,6 +373,7 @@ export const editorScreen: ScreenFactory = (ctx) => {
     ctrl.load(emptyDoc());
     mapName = null;
     libraryMap = null;
+    markSaved();
     toggleMenu(false);
   }
 
@@ -507,6 +531,7 @@ export const editorScreen: ScreenFactory = (ctx) => {
         libraryMap = await findUploaded(title);
       }
       mapName = title;
+      markSaved();
       done();
       ctx.toast("Saved to your library");
       void showMine();
@@ -540,6 +565,7 @@ export const editorScreen: ScreenFactory = (ctx) => {
     } catch (err) {
       ctx.toast(`Could not load the room map: ${errorText(err)}`, "error");
     }
+    markSaved();
   }
 
   /** Room mode: send the map back to the room and leave the editor. */
@@ -594,6 +620,8 @@ export const editorScreen: ScreenFactory = (ctx) => {
 
   setSide(false);
   refresh();
+  markSaved();
+  window.addEventListener("beforeunload", onBeforeUnload);
   if (inRoom) void loadRoomMap();
 
   return {
@@ -606,6 +634,7 @@ export const editorScreen: ScreenFactory = (ctx) => {
     },
     destroy() {
       destroyed = true;
+      window.removeEventListener("beforeunload", onBeforeUnload);
       observer.disconnect();
       if (testing) {
         testing.destroy();
