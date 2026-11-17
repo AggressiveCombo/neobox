@@ -665,8 +665,11 @@ export async function dismissRotateGate(page) {
   await gate.waitFor({ state: "hidden" });
 }
 
-/** A room with a host and a guest (via the host's invite link, read from the clipboard), in a running match. */
-export async function matchWithGuest(s, { clipboard: wantClipboard = true, keepRotateGate = false } = {}) {
+/**
+ * A room with a host and a guest (via the host's invite link, read from the clipboard), in a running match.
+ * `objectiveLimit` (optional) sets the host's `/set objectiveLimit` before Start, so a long match can outlast the default.
+ */
+export async function matchWithGuest(s, { clipboard: wantClipboard = true, keepRotateGate = false, objectiveLimit = null } = {}) {
   // Engines without clipboard permissions (Firefox, WebKit) take the invite link by navigating to it instead.
   const clipboard = wantClipboard && s.env.browser.clipboard;
   const hostName = uniqueName("host");
@@ -693,6 +696,12 @@ export async function matchWithGuest(s, { clipboard: wantClipboard = true, keepR
   await roomTitle(guest.page, roomName).waitFor();
   await dismissPhoneSplash(guest.page);
   await host.page.locator("li.room-player").filter({ hasText: guestName }).waitFor();
+  if (objectiveLimit !== null) {
+    const chat = host.page.getByLabel("Chat message", { exact: true });
+    await chat.fill(`/set objectiveLimit ${objectiveLimit}`);
+    await chat.press("Enter");
+    await host.page.locator("div.room-chat-log").getByText(`objectiveLimit: ${objectiveLimit}`).waitFor();
+  }
   await startMatch(host, [guest], { keepRotateGate });
   return { host, guest, code, roomName, hostName, guestName };
 }

@@ -20,8 +20,9 @@
 //   net.rollback.depth.p95  last HUD "Rollback p95" sample (ticks), worst of the two clients.
 //                           Threshold <= 8 at 100 ms RTT. Starved runs are flagged (res.starved).
 //   net.impair.pass         1 on the impair condition (150 ms RTT, 50 ms jitter, 2% loss) when
-//                           the match completes with no resync, no desync, both canvases
-//                           still changing and the scoreboards agree. Threshold 1.
+//                           the match runs the full play window with no resync, no desync, both
+//                           canvases still changing and the scoreboards agree. The match is set
+//                           to NET_OBJECTIVE_LIMIT so it cannot end early. Threshold 1.
 import { appendFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import {
@@ -50,6 +51,7 @@ const LOG = path.join(OUT, `netgame-${engine}.jsonl`);
 const DUR = Number(process.env.JN_DUR ?? 30000);
 const STARVED_FPS = 20;
 const STARVED_RTT_MS = 100;
+const NET_OBJECTIVE_LIMIT = 99; // long enough that the match outlasts the play window
 writeFileSync(LOG, "");
 const rec = (r) => {
   appendFileSync(LOG, `${JSON.stringify(r)}\n`);
@@ -214,7 +216,7 @@ async function netRun(browser, renderer, cond) {
   const s = setupScenario(browser, server, `net-${tag}`, renderer, cond);
   const res = { mode: "net", engine, renderer, cond: cond.id, rtt: cond.rtt, jitter: cond.jitter, loss: cond.loss };
   try {
-    const { host, guest, code } = await matchWithGuest(s, { clipboard: false });
+    const { host, guest, code } = await matchWithGuest(s, { clipboard: false, objectiveLimit: NET_OBJECTIVE_LIMIT });
     res.code = code;
     await ensureProbe(host.page);
     await ensureProbe(guest.page);
@@ -270,13 +272,14 @@ async function netRun(browser, renderer, cond) {
     res.desyncReasons = desyncReasons;
     res.rollbackP95 = rollbackP95;
     res.fps = fps;
-    // Starved: the host is too busy to measure (FPS under 20 or no FPS row), or the measured RTT
-    // is far above the injected one (the relay and page timers slip under load). Such a run
-    // says nothing about the netcode at that RTT.
+    // Starved: the host is too busy to measure (FPS under 20 or no FPS row), or, when the relay
+    // adds no jitter or loss, the measured RTT is far above the injected one (page timers slip
+    // under load). Under jitter or loss the measured RTT follows the relay's own model, so only
+    // FPS counts there. Such a run says nothing about the netcode at that RTT.
     const rttMed = Math.max(res.rttMs.hostMedian ?? 0, res.rttMs.guestMedian ?? 0);
+    const rttSlip = cond.jitter === 0 && cond.loss === 0 && rttMed > cond.rtt + STARVED_RTT_MS;
     res.starved =
-      fps.host === null || fps.guest === null || fps.host < STARVED_FPS || fps.guest < STARVED_FPS ||
-      rttMed > cond.rtt + STARVED_RTT_MS;
+      fps.host === null || fps.guest === null || fps.host < STARVED_FPS || fps.guest < STARVED_FPS || rttSlip;
     res.lastStats = { host: samples.host.at(-1), guest: samples.guest.at(-1) };
     writeFileSync(path.join(EVID, `netgame-${tag}-samples.json`), JSON.stringify(samples));
 
@@ -285,6 +288,13 @@ async function netRun(browser, renderer, cond) {
     await shot(guest, "guest");
 
     const desyncCount = Number(desyncReasons.host.length > 0) + Number(desyncReasons.guest.length > 0);
+    // The match ran the whole play window: each client's last sample is at or past DUR and still
+    // carries HUD rows (the rows are gone once the match ends).
+    const fullWindow = ["host", "guest"].every((k) => {
+      const last = samples[k].at(-1);
+      return last !== undefined && last.t >= DUR && statNum(last, "Rollback p95") !== null;
+    });
+    res.fullWindow = fullWindow;
     res.pass =
       res.resyncs.host === 0 &&
       res.resyncs.guest === 0 &&
@@ -292,7 +302,8 @@ async function netRun(browser, renderer, cond) {
       desyncCount === 0 &&
       res.boardAgree &&
       res.canvasChanges.host > 20 &&
-      res.canvasChanges.guest > 20;
+      res.canvasChanges.guest > 20 &&
+      fullWindow;
     res.metrics = {
       "net.desync.count": desyncCount,
       "net.rollback.depth.p95": Math.max(rollbackP95.host ?? 0, rollbackP95.guest ?? 0),
