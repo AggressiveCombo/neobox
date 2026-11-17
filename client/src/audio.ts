@@ -5,6 +5,7 @@
 
 import { prefs } from "./prefs";
 import { fetchPrecached } from "./precached";
+import { HttpError } from "./http-error";
 
 /** Interface sound names; the screens never play sounds themselves, the global hooks do (installUiSounds). */
 export type UiSound = "hover" | "click" | "tab" | "toggle" | "open" | "close" | "error" | "win" | "lose" | "chat";
@@ -56,6 +57,10 @@ const HOVER_LEVEL = 0.4;
 const MIN_GAP_MS = 35;
 /** Random playback-rate spread around 1, so repeats never sound identical. */
 const RATE_SPREAD = 0.03;
+/** Sound files fetched at once: one request per file would exhaust the browser's connections under host load. */
+const LOAD_CONCURRENCY = 6;
+/** A file that fails to fetch or decode is tried this many times before it is given up. */
+const LOAD_ATTEMPTS = 2;
 
 export class Sfx {
   private ctx: AudioContext | null = null;
@@ -99,14 +104,30 @@ export class Sfx {
     this.ui("chat");
   }
 
+  /** Fetches and decodes every sound file, a few at a time; a file that fails is retried once, and the rest still load. */
   private async load(ctx: AudioContext): Promise<void> {
-    await Promise.all(
-      FILES.map(async (name) => {
-        const res = await fetchPrecached(`sfx/${name}.mp3`);
-        if (!res.ok) throw new Error(`sound ${name}: HTTP ${res.status}`);
-        this.buffers.set(name, await ctx.decodeAudioData(await res.arrayBuffer()));
-      }),
-    ).catch((err: unknown) => this.report("Sound effects failed to load:", err));
+    const pending = [...FILES];
+    const failed: unknown[] = [];
+    const loadOne = async (name: string): Promise<void> => {
+      for (let attempt = 1; ; attempt++) {
+        try {
+          const res = await fetchPrecached(`sfx/${name}.mp3`);
+          if (!res.ok) throw new HttpError(res.status);
+          this.buffers.set(name, await ctx.decodeAudioData(await res.arrayBuffer()));
+          return;
+        } catch (err) {
+          if (attempt === LOAD_ATTEMPTS) {
+            failed.push(err);
+            return;
+          }
+        }
+      }
+    };
+    const worker = async (): Promise<void> => {
+      for (let name = pending.shift(); name !== undefined; name = pending.shift()) await loadOne(name);
+    };
+    await Promise.all(Array.from({ length: LOAD_CONCURRENCY }, worker));
+    if (failed.length) this.report(`Sound effects failed to load (${failed.length} of ${FILES.length}):`, failed[0]);
   }
 
   /** Logs an audio failure, except one the page causes by leaving: Firefox then rejects pending audio work with "Navigated away from page". */
