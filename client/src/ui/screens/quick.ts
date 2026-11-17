@@ -157,7 +157,6 @@ export const quickScreen: ScreenFactory = (ctx) => {
     const valid = account !== null || NAME_RE.test(sanitizeName(nameInput.value));
     for (const card of cards.values()) {
       card.choose.disabled = !valid || waiting;
-      card.el.classList.toggle("disabled", card.choose.disabled);
     }
     renderStatus();
   }

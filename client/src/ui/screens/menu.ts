@@ -146,7 +146,8 @@ export const menuScreen: ScreenFactory = (ctx) => {
   /** Guests see "Sign in"; signed-in players see their avatar and level under one label. */
   function setAccount(acc: Account | null): void {
     if (acc) {
-      const swatch = avatar(acc.name, null, false);
+      // No letter: the button's visible text must match its label (axe label-content-name-mismatch).
+      const swatch = avatar(acc.name, null, true);
       swatch.setAttribute("aria-hidden", "true");
       accountBtn.setAttribute("aria-label", `Account, Level ${levelOf(acc.xp)}`);
       accountBtn.replaceChildren(swatch, h("span", { class: "home-level" }, `Level ${levelOf(acc.xp)}`));

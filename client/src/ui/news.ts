@@ -127,7 +127,7 @@ export function hasUnreadNews(): boolean {
 export function openNews(): () => void {
   writeSeen(NEWS.length);
   let index = 0;
-  const list = h("div", { class: "news-body" });
+  const list = h("div", { class: "news-body", role: "region", tabindex: "0", "aria-label": "Update news" });
   const counter = h("span", { class: "news-count", "aria-live": "polite" });
   const prev = h("button", { type: "button", onclick: () => show(index - 1) }, icon("arrow-left", 18), "Previous");
   const next = h("button", { type: "button", class: "primary", onclick: () => show(index + 1) }, "Next", icon("arrow-right", 18));

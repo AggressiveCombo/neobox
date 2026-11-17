@@ -155,7 +155,7 @@ export const libraryScreen: ScreenFactory = (ctx) => {
   );
 
   const makersList = h("ol", { class: "library-makers-list" });
-  const makersStatus = h("p", { class: "status" });
+  const makersStatus = h("p", { class: "status", role: "status", "aria-live": "polite" });
   const makers = h(
     "section",
     { class: "library-makers panel", "aria-label": "top makers this week", hidden: true },
