@@ -157,6 +157,11 @@
   padding: 0 20px 20px;
 }
 
+/* A closed disclosure keeps its content laid out in Chromium (content-visibility), so its controls stayed clickable-looking off-screen. */
+.account-security:not([open]) > .account-security-body {
+  display: none;
+}
+
 .account-subform {
   display: flex;
   flex-direction: column;
