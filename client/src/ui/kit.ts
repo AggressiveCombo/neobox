@@ -31,9 +31,25 @@ export function pageHead(opts: PageHeadOptions): HTMLElement {
   );
 }
 
+/** Phones: the page actions head the content column instead of the head, so the head is one height on every page. */
+const phoneQuery = window.matchMedia("(max-width: 600px)");
+
+function placeActions(pg: HTMLElement): void {
+  const head = pg.querySelector<HTMLElement>(":scope > .page-head");
+  const inner = pg.querySelector<HTMLElement>(":scope > .page-inner");
+  const acts = pg.querySelector<HTMLElement>(":scope > .page-head > .page-actions, :scope > .page-inner > .page-actions");
+  if (!head || !inner || !acts) return;
+  if (phoneQuery.matches) inner.prepend(acts);
+  else head.append(acts);
+}
+
+phoneQuery.addEventListener("change", () => document.querySelectorAll<HTMLElement>("main.page").forEach(placeActions));
+
 /** A full-viewport page on the ground colour: `head`, then the content in a centred column. */
 export function page(className: string, head: HTMLElement, ...content: Child[]): HTMLElement {
-  return h("main", { class: `page ${className}` }, head, h("div", { class: "page-inner enter" }, ...content));
+  const pg = h("main", { class: `page ${className}` }, head, h("div", { class: "page-inner enter" }, ...content));
+  placeActions(pg);
+  return pg;
 }
 
 /** A labelled control with an optional hint under it. The label is tied to the control. */

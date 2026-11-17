@@ -328,7 +328,7 @@ button,
   overflow-wrap: break-word;
 }
 
-.page-head .page-actions {
+.page-actions {
   display: flex;
   flex-wrap: wrap;
   justify-content: flex-end;
@@ -336,20 +336,19 @@ button,
 }
 
 @media (max-width: 600px) {
+  /* Back and title share row 1 at the same place on every page; actions head the column (kit.ts placeActions), so the head never changes height. */
   .page-head {
     position: static;
-    /* Back and title always share row 1 at the same place; actions take row 2 so a page
-       with buttons never pushes the title down or moves the column under it. */
     display: grid;
     grid-template-columns: auto minmax(0, 1fr);
     align-items: center;
     column-gap: 12px;
-    row-gap: 4px;
-    padding-bottom: 8px;
   }
+}
 
-  .page-head .page-actions {
-    grid-column: 1 / -1;
+/* Phones: page actions open the content column, right-aligned, in the same order. */
+@media (max-width: 600px) {
+  .page-inner > .page-actions {
     justify-content: flex-end;
   }
 }
@@ -1077,7 +1076,7 @@ table.data .r {
   color: var(--ground);
   box-shadow: var(--float-shadow);
   overflow-wrap: anywhere;
-  animation: rise-in 200ms var(--ease);
+  animation: appear 200ms var(--ease);
 }
 
 .toast-error {
@@ -1110,7 +1109,7 @@ dialog.modal::backdrop {
 dialog.modal[open] {
   display: flex;
   flex-direction: column;
-  animation: rise-in 220ms var(--ease);
+  animation: appear 220ms var(--ease);
 }
 
 /* Already closed (the page is live again): drawn in place, with its scrim as a spread shadow, while it fades. */
@@ -1253,19 +1252,19 @@ dialog.modal:focus {
 }
 
 .enter > :nth-child(2) {
-  animation-delay: 40ms;
+  animation-delay: 20ms;
 }
 
 .enter > :nth-child(3) {
-  animation-delay: 80ms;
+  animation-delay: 40ms;
 }
 
 .enter > :nth-child(4) {
-  animation-delay: 120ms;
+  animation-delay: 60ms;
 }
 
 .enter > :nth-child(n + 5) {
-  animation-delay: 160ms;
+  animation-delay: 80ms;
 }
 
 /* Screen changes (ui/transition.ts): a crossfade. The new screen fades in while a frozen copy
