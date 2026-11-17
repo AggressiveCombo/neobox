@@ -414,9 +414,10 @@ async fn run(hub: &Arc<Hub>, socket: WebSocket, ip: IpAddr, conn_id: u64, accoun
     let mut window = Instant::now();
     let mut count = 0u32;
     let mut stop = hub.shutdown.subscribe();
-    // why the server closes this socket, if it does: sent as the close frame
-    let mut closing: Option<Close> = None;
-    loop {
+    // why the server closes this socket, if it does: sent as the close frame. subscribe() marks the current value as
+    // seen, so a shutdown that began before this socket subscribed is read here, not awaited by changed().
+    let mut closing: Option<Close> = if *stop.borrow_and_update() { Some(close::SHUTDOWN) } else { None };
+    while closing.is_none() {
         let msg = tokio::select! {
             m = stream.next() => match m {
                 Some(Ok(m)) => m,
@@ -486,7 +487,72 @@ async fn run(hub: &Arc<Hub>, socket: WebSocket, ip: IpAddr, conn_id: u64, accoun
     s.drop_room();
     drop(s);
     if closing.is_some() {
-        let _ = tokio::time::timeout(Duration::from_secs(2), &mut writer).await;
+        // keep reading until the writer has sent the close frame and the client has answered it: dropping the socket
+        // with a pong still unread resets the connection, and the client can lose the close frame with it
+        let drain = async { while stream.next().await.is_some() {} };
+        let _ = tokio::time::timeout(Duration::from_secs(2), async { tokio::join!(&mut writer, drain) }).await;
     }
     writer.abort();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::hub::Config;
+    use futures_util::StreamExt;
+    use std::net::SocketAddr;
+    use tokio_tungstenite::tungstenite::Message as ClientMsg;
+
+    /// A hub with an empty store and the real `/ws` route on a free local port.
+    async fn start() -> (Arc<Hub>, String) {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let dir = std::env::temp_dir().join(format!("neobox-conn-test-{}-{port}", std::process::id()));
+        let mut cfg = Config::from_env();
+        cfg.data = dir.join("neobox.db");
+        cfg.max_conns_per_ip = 32;
+        let store = crate::open_store(&cfg.data);
+        let hub = Hub::new(cfg, Vec::new(), crate::rotation::Rotation::default(), None, Some(store));
+        let app = axum::Router::new().route("/ws", axum::routing::get(crate::ws)).with_state(hub.clone());
+        tokio::spawn(async move {
+            axum::serve(listener, app.into_make_service_with_connect_info::<SocketAddr>()).await.unwrap();
+        });
+        (hub, format!("ws://127.0.0.1:{port}/ws"))
+    }
+
+    /// Reads until the server closes the socket; returns the close code and reason it sent.
+    async fn read_close<S>(ws: &mut S) -> Option<(u16, String)>
+    where
+        S: futures_util::Stream<Item = Result<ClientMsg, tokio_tungstenite::tungstenite::Error>> + Unpin,
+    {
+        // an overall deadline: the server pings every 2 s, so a per-frame timeout would never fire
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                match ws.next().await {
+                    Some(Ok(ClientMsg::Close(Some(f)))) => return Some((u16::from(f.code), f.reason.to_string())),
+                    Some(Ok(ClientMsg::Close(None))) | Some(Err(_)) | None => return None,
+                    Some(Ok(_)) => continue,
+                }
+            }
+        })
+        .await
+        .expect("no close frame within 5 s")
+    }
+
+    #[tokio::test]
+    async fn socket_accepted_during_shutdown_gets_the_shutdown_frame() {
+        let (hub, url) = start().await;
+        hub.shutdown.send_replace(true);
+        let (mut ws, _) = tokio_tungstenite::connect_async(&url).await.unwrap();
+        assert_eq!(read_close(&mut ws).await, Some((close::SHUTDOWN.code, close::SHUTDOWN.reason.to_string())));
+    }
+
+    #[tokio::test]
+    async fn open_socket_gets_the_shutdown_frame_when_shutdown_begins() {
+        let (hub, url) = start().await;
+        let (mut ws, _) = tokio_tungstenite::connect_async(&url).await.unwrap();
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        hub.shutdown.send_replace(true);
+        assert_eq!(read_close(&mut ws).await, Some((close::SHUTDOWN.code, close::SHUTDOWN.reason.to_string())));
+    }
 }
