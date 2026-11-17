@@ -8,6 +8,7 @@ import { prefs, sanitizePrefs } from "./prefs";
 import { NAME_STORAGE_KEY, REMEMBER_KEY } from "./storage-keys";
 import { local } from "./storage";
 import { type Account, type AppState, type Screen } from "./state";
+import { HttpError } from "./http-error";
 
 export class ApiError extends Error {
   constructor(
@@ -34,7 +35,7 @@ function errorMessage(text: string, status: number): string {
     // not JSON: fall through to the text body
   }
   const plain = text.trim();
-  return plain !== "" && plain.length <= 200 ? plain : `request failed (HTTP ${status})`;
+  return plain !== "" && plain.length <= 200 ? plain : new HttpError(status).message;
 }
 
 /** One JSON request. Empty success bodies resolve to undefined; non-JSON bodies to their text. */

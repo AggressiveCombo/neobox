@@ -14,6 +14,7 @@ import { icon } from "../icons";
 import { page, pageHead } from "../kit";
 import { TOUCH_BUTTONS, rotateGate, touchControls } from "./hud";
 import { fetchPrecached } from "../../precached";
+import { HttpError } from "../../http-error";
 
 const TICK_HZ = 30;
 /** Endless game mode id, the same one practice uses (lives would strand a player). */
@@ -191,7 +192,7 @@ export const trainingScreen: ScreenFactory = (ctx) => {
   /** The training map as JSON, from the bundled training.json (`{name, map}` like maps/*.json). */
   async function loadMapJson(): Promise<string> {
     const res = await fetchPrecached("/training.json");
-    if (!res.ok) throw new Error(`training.json: HTTP ${res.status}`);
+    if (!res.ok) throw new HttpError(res.status);
     const doc: unknown = await res.json();
     const map = typeof doc === "object" && doc !== null && "map" in doc ? doc.map : doc;
     return JSON.stringify(map);

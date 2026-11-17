@@ -112,6 +112,8 @@ const HARVEST = () => {
       name: name || "(unnamed)",
       href: el.tagName === "A" ? el.href : null,
       disabled: el.disabled === true || el.getAttribute("aria-disabled") === "true",
+      // The active tab or current page: clicking it changes nothing by design.
+      selected: el.getAttribute("aria-selected") === "true" || (el.getAttribute("aria-current") ?? "false") !== "false",
       // Something else sits on the control's centre (an open modal): it cannot be clicked from here.
       covered: !!top && !el.contains(top) && !top.contains(el),
     };
@@ -409,6 +411,10 @@ async function deadCase(s) {
       }
       if (FIXTURE_NAME.test(c.name)) {
         skipped.push(`${label} (fixture data)`);
+        continue;
+      }
+      if (c.selected) {
+        skipped.push(`${label} (already selected)`);
         continue;
       }
       if (DEAD_SKIP.test(c.name)) {
