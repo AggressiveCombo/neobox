@@ -44,6 +44,8 @@ export const quickScreen: ScreenFactory = (ctx) => {
   const { store } = ctx;
   let waiting = false;
   let attempted = false;
+  /** Whether the matching loader and Cancel are in the wait box. */
+  let waitShown = false;
   let nameTouched = false;
   /** Set once the transport starts connecting, so an earlier "closed" state is not read as a failure. */
   let sawConnecting = false;
@@ -181,14 +183,21 @@ export const quickScreen: ScreenFactory = (ctx) => {
   /** While matching: the loader and Cancel. Otherwise the connection state after an attempt. */
   function renderStatus(state?: AppState): void {
     if (waiting) {
-      waitBox.replaceChildren(
-        loading("Finding a room…"),
-        h("button", { type: "button", class: "quiet", onclick: () => cancel() }, "Cancel"),
-      );
+      // Built once per wait: every store update passes through here, and a rebuilt Cancel loses clicks and focus.
+      if (!waitShown) {
+        waitBox.replaceChildren(
+          loading("Finding a room…"),
+          h("button", { type: "button", class: "quiet", onclick: () => cancel() }, "Cancel"),
+        );
+        waitShown = true;
+      }
       status.textContent = "";
       return;
     }
-    waitBox.replaceChildren();
+    if (waitShown) {
+      waitBox.replaceChildren();
+      waitShown = false;
+    }
     status.textContent = attempted ? statusText(state ?? store.state) : "";
   }
 

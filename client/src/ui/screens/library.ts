@@ -658,6 +658,14 @@ export const libraryScreen: ScreenFactory = (ctx) => {
     });
   }
 
+  /** What the detail's play action depends on: the room and whether the viewer hosts it. Room broadcasts that leave it unchanged do not repaint the detail. */
+  function roomKey(state: AppState): string {
+    const { room, myId } = state;
+    if (room === null) return "";
+    const host = room.quick === null && room.players.some((p) => p.id === myId && p.host);
+    return `${room.code}|${host}`;
+  }
+
   const el = page(
     "library-page",
     pageHead({ title: "Library", back: () => store.set({ screen: returnScreen(store.state) }) }),
@@ -680,7 +688,7 @@ export const libraryScreen: ScreenFactory = (ctx) => {
         paintChrome();
         reload();
       }
-      if (detail !== null && state.room !== prev.room) paintInfo();
+      if (detail !== null && roomKey(state) !== roomKey(prev)) paintInfo();
     },
     destroy() {
       clearTimeout(searchTimer);
