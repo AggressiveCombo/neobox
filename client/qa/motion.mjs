@@ -234,10 +234,11 @@ async function openCreateForm(page) {
   await page.getByLabel("room name", { exact: true }).fill(uniqueName("room"));
 }
 
-/** Installs a per-frame reader of the top page's shared chrome (head box, Back, title, primary column) into window.__chrome. */
+/** Installs a per-frame reader of the current page's shared chrome (head box, Back, title, primary column) into window.__chrome; window.__chromeSel says which elements (set per page). */
 function installChromeSampler() {
   const geom = () => {
-    const pg = [...document.querySelectorAll("#ui .page")].find((p) => !p.parentElement.closest(".page") && !p.closest(".screen-out"));
+    const sel = window.__chromeSel;
+    const pg = [...document.querySelectorAll(sel.scope)].find((p) => !p.parentElement.closest(sel.scope) && !p.closest(".screen-out"));
     if (!pg) return null;
     const box = (el) => {
       if (!el) return null;
@@ -245,15 +246,16 @@ function installChromeSampler() {
       return { x: b.x, y: b.y, r: b.right };
     };
     return {
-      head: box(pg.querySelector(":scope > .page-head")),
-      back: box(pg.querySelector(".page-back")),
-      title: box(pg.querySelector(".page-head h1")),
-      column: box(pg.querySelector(":scope > .page-inner")),
+      head: box(pg.querySelector(sel.head)),
+      back: box(pg.querySelector(sel.back)),
+      title: box(pg.querySelector(sel.title)),
+      column: box(pg.querySelector(sel.column)),
     };
   };
+  window.__chromeSel = null;
   window.__chrome = [];
   const tick = () => {
-    window.__chrome.push({ g: geom() });
+    window.__chrome.push({ g: window.__chromeSel ? geom() : null });
     requestAnimationFrame(tick);
   };
   requestAnimationFrame(tick);
@@ -277,22 +279,45 @@ function chromeComplete(g) {
   return !!g && ["head", "back", "title", "column"].every((k) => g[k]);
 }
 
+const PAGE_SEL = { scope: "#ui .page", head: ":scope > .page-head", back: ".page-back", title: ".page-head h1", column: ":scope > .page-inner" };
+
+// `own` screens are full-screen tools or games with their own bar: their chrome is not compared with Browse rooms
+// at rest (a different layout by design); only travel is checked, against their own settled geometry.
 const CHROME_PAGES = [
-  { id: "browse", title: "Browse rooms", open: (p) => button(p, "Browse rooms").click() },
-  { id: "quick", title: "Quick play", open: (p) => button(p, "Quick play").click() },
-  { id: "settings", title: "Settings", open: (p) => navTo(p, "Settings") },
-  { id: "account", title: "Account", open: (p) => p.locator(".home-account").click() },
-  { id: "library", title: "Library", open: (p) => navTo(p, "Library") },
-  { id: "practice", title: "Practice", open: (p) => navTo(p, "Practice") },
-  { id: "about", title: "About neobox", open: (p) => navTo(p, "About") },
-  { id: "friends", title: "Friends", open: (p) => navTo(p, "Friends") },
+  { id: "browse", title: "Browse rooms", sel: PAGE_SEL, open: (p) => button(p, "Browse rooms").click() },
+  { id: "quick", title: "Quick play", sel: PAGE_SEL, open: (p) => button(p, "Quick play").click() },
+  { id: "settings", title: "Settings", sel: PAGE_SEL, open: (p) => navTo(p, "Settings") },
+  { id: "account", title: "Account", sel: PAGE_SEL, open: (p) => p.locator(".home-account").click() },
+  { id: "library", title: "Library", sel: PAGE_SEL, open: (p) => navTo(p, "Library") },
+  { id: "practice", title: "Practice", sel: PAGE_SEL, open: (p) => navTo(p, "Practice") },
+  { id: "about", title: "About neobox", sel: PAGE_SEL, open: (p) => navTo(p, "About") },
+  { id: "friends", title: "Friends", sel: PAGE_SEL, open: (p) => navTo(p, "Friends") },
+  {
+    id: "editor",
+    own: true,
+    sel: { scope: "#ui .screen.editor", head: ".editor-top", back: ".editor-top > button", title: ".editor-top input", column: ".editor-stage" },
+    ready: (p) => p.locator("#ui .editor-top input"),
+    open: (p) => navTo(p, "Map editor"),
+    leave: (p) => p.locator("#ui .editor-top > button").first().click(),
+  },
+  {
+    id: "training",
+    own: true,
+    sel: { scope: "#ui .offline.playing", head: ".offline-top", back: ".offline-top > button", title: ".offline-title", column: ".training-lesson" },
+    ready: (p) => p.locator("#ui .offline-top .offline-title"),
+    open: (p) => navTo(p, "Training"),
+    leave: (p) => p.locator("#ui .offline-top > button").first().click(),
+  },
 ];
 
-/** Back to the menu from a page: its Back control, then the menu's name field. */
-async function backToMenu(page) {
-  const back = page.locator("#ui .page-back");
-  if (await back.count()) await back.first().click();
-  else await button(page, "Back").first().click();
+/** Back to the menu from a page: its Back control (or `leave`), then the menu's name field. */
+async function backToMenu(page, leave) {
+  if (leave) await leave(page);
+  else {
+    const back = page.locator("#ui .page-back");
+    if (await back.count()) await back.first().click();
+    else await button(page, "Back").first().click();
+  }
   await page.locator(".home-name-input").waitFor({ state: "visible", timeout: MAX_MS });
   await sleep(CHROME_SETTLE_MS);
 }
@@ -311,23 +336,30 @@ async function chromePages(s) {
   let travel = 0;
   const lines = [];
   for (const p of CHROME_PAGES) {
-    await page.evaluate(() => {
+    await page.evaluate((sel) => {
+      window.__chromeSel = sel;
       window.__chrome.length = 0;
-    });
+    }, p.sel);
     await p.open(page);
-    await page.locator("#ui .page-head h1", { hasText: p.title }).waitFor({ state: "visible", timeout: MAX_MS });
+    if (p.ready) await p.ready(page).waitFor({ state: "visible", timeout: MAX_MS });
+    else await page.locator("#ui .page-head h1", { hasText: p.title }).waitFor({ state: "visible", timeout: MAX_MS });
     await sleep(CHROME_SETTLE_MS);
     const frames = await page.evaluate(() => window.__chrome.splice(0));
     const ready = frames.filter((f) => chromeComplete(f.g));
     const settled = ready.at(-1)?.g ?? null;
     if (!settled) return { pass: false, detail: `${p.id}: no page chrome found` };
-    ref ??= settled;
-    const dShift = chromeDelta(settled, ref);
+    // Travel: every frame of the change against this screen's own settled chrome.
     const dTravel = ready.reduce((m, f) => Math.max(m, chromeDelta(f.g, settled)), 0);
-    shift = Math.max(shift, dShift);
     travel = Math.max(travel, dTravel);
-    lines.push(`${p.id} ${round(dShift)} px at rest, ${round(dTravel)} px in flight (${frames.length - ready.length} frames without page chrome)`);
-    await backToMenu(page);
+    let rest = "own layout, not compared with Browse rooms";
+    if (!p.own) {
+      ref ??= settled;
+      const dShift = chromeDelta(settled, ref);
+      shift = Math.max(shift, dShift);
+      rest = `${round(dShift)} px at rest`;
+    }
+    lines.push(`${p.id} ${rest}, ${round(dTravel)} px in flight (${frames.length - ready.length} frames without page chrome)`);
+    await backToMenu(page, p.leave);
   }
   const metrics = {
     "motion.chromeShift.px": round(shift),
@@ -350,7 +382,7 @@ const CASES = [
         id: "ui.modal.open.news",
         limit: 300,
         liveSquare: true,
-        trigger: () => button(page, "News").click(),
+        trigger: () => button(page, "News").evaluate((el) => el.click()),
         arrived: () => dialog.waitFor({ state: "visible", timeout: MAX_MS }),
       });
     },
@@ -385,7 +417,7 @@ const CASES = [
       return measure(page, {
         id: "ui.modal.open.createRoom",
         limit: 300,
-        trigger: () => button(page, "New room").click(),
+        trigger: () => button(page, "New room").evaluate((el) => el.click()),
         arrived: () => form.waitFor({ state: "visible", timeout: MAX_MS }),
       });
     },
@@ -398,7 +430,7 @@ const CASES = [
       return measure(page, {
         id: "scene.menu.browse",
         limit: 400,
-        trigger: () => button(page, "Browse rooms").click(),
+        trigger: () => button(page, "Browse rooms").evaluate((el) => el.click()),
         arrived: () => button(page, "New room").waitFor({ state: "visible", timeout: MAX_MS }),
       });
     },
@@ -414,7 +446,7 @@ const CASES = [
       return measure(page, {
         id: "scene.browse.room",
         limit: 400,
-        trigger: () => button(page, "Create room").click(),
+        trigger: () => button(page, "Create room").evaluate((el) => el.click()),
         arrived: () => lobby.waitFor({ state: "visible", timeout: MAX_MS }),
       });
     },
@@ -433,7 +465,7 @@ const CASES = [
       return measure(page, {
         id: "scene.room.match",
         limit: 400,
-        trigger: () => button(page, "Start").click(),
+        trigger: () => button(page, "Start").evaluate((el) => el.click()),
         arrived: () => hud.waitFor({ state: "visible", timeout: MAX_MS }),
       });
     },
