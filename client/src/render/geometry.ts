@@ -38,6 +38,17 @@ export const PALETTES: Record<Palette, { red: number; blue: number; ffa: readonl
   protanopia: { red: 0xd55e00, blue: 0x0072b2, ffa: OKABE_ITO },
   tritanopia: { red: 0xd55e00, blue: 0xcc79a7, ffa: [0xe69f00, 0xd55e00, 0xcc79a7, 0xbbbbbb, 0xffffff, 0xff7f9f, 0xf0e442, 0xb0b0ff] },
 };
+/** WCAG relative luminance of an 0xRRGGBB colour. */
+export function relLuminance(rgb: number): number {
+  const lin = (c: number): number => {
+    const s = c / 255;
+    return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4;
+  };
+  return 0.2126 * lin((rgb >> 16) & 255) + 0.7152 * lin((rgb >> 8) & 255) + 0.0722 * lin(rgb & 255);
+}
+/** Edge-chip swatches darker than this relative luminance get a white ring; lighter colours already meet 3:1 on the panel. */
+export const AWAY_RING_BELOW_LUM = 0.25;
+
 const ICE_RGB = 0xbfe9ff;
 const WHITE_RGB = 0xffffff;
 /** Local marker: frozen, air jump ready, air jump spent (the original's colours). */
