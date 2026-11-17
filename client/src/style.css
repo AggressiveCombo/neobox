@@ -134,9 +134,9 @@
 }
 
 :root[data-font="readable"] body {
-  letter-spacing: 0.03em;
+  letter-spacing: 0.12em;
   word-spacing: 0.16em;
-  line-height: 1.5;
+  line-height: 1.6;
 }
 
 /* ------------------------------------------------------------------ base */
