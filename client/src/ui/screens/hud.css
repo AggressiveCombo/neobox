@@ -532,14 +532,15 @@
 /* Touch controls. Sized so the stick and the action cluster (3 columns, Jump
    as a tall block on the right) fit side by side on a 320 px wide portrait phone
    and on a 390 px tall landscape phone. The button size is capped by the screen
-   height as well, so the controls cover less of the arena in landscape. */
+   height as well, so the controls cover less of the arena in landscape. The Control size pref scales them, but never below 48px. */
 .hud-touch-layer {
   position: absolute;
   inset: 0;
   touch-action: none;
   -webkit-touch-callout: none;
-  --hud-btn: calc(
-    clamp(48px, min(calc((100vw - 48px) / 5.8), calc(100vh * 0.17)), 76px) * var(--hud-touch-scale, 1)
+  --hud-btn: max(
+    48px,
+    calc(clamp(48px, min(calc((100vw - 48px) / 5.8), calc(100vh * 0.17)), 76px) * var(--hud-touch-scale, 1))
   );
 }
 
@@ -768,7 +769,7 @@
 }
 
 /* Very short landscape phones (320 px tall at 200% zoom is 160 CSS px). The chip row ends at 52px and the touch
-   rows start below it, so nothing overlaps; every target keeps 44px. Sized here, after the coarse block, so it wins. */
+   rows start below it, so nothing overlaps; every target keeps 48px. Sized here, after the coarse block, so it wins. */
 @media (max-height: 200px) {
   .hud-touch-layer,
   .hud-root {
@@ -776,7 +777,7 @@
   }
 
   .hud-touch-layer {
-    --hud-btn: 44px;
+    --hud-btn: 48px;
   }
 
   .hud-root button,
