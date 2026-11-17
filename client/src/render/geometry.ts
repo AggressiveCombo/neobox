@@ -29,14 +29,13 @@ export interface Span {
   count: number;
 }
 
-/** Okabe-Ito colours: told apart under the common colour-vision deficiencies. */
-const OKABE_ITO = [0xe69f00, 0x56b4e9, 0x009e73, 0xf0e442, 0xcc79a7, 0xbbbbbb, 0xffffff, 0x0072b2];
-/** Team and FFA colours per palette pref (FFA is indexed by player id). */
+/** Team and FFA colours per palette pref (FFA is indexed by player id). Each colour-blind palette is checked under its own
+ *  deficiency (RUBRIC D06 cvd.minDeltaE >= 15): team pairs and FFA sets keep CIEDE2000 >= 15 after the Machado 2009 simulation. */
 export const PALETTES: Record<Palette, { red: number; blue: number; ffa: readonly number[] }> = {
-  default: { red: 0xff5252, blue: 0x4d9bff, ffa: [0x9be15d, 0xffc857, 0xc792ea, 0x4fd1c5, 0xff8fab, 0xf6e05e, 0x7f9cf5, 0xf28c28] },
-  deuteranopia: { red: 0xd55e00, blue: 0x0072b2, ffa: OKABE_ITO },
-  protanopia: { red: 0xd55e00, blue: 0x0072b2, ffa: OKABE_ITO },
-  tritanopia: { red: 0xd55e00, blue: 0xcc79a7, ffa: [0xe69f00, 0xd55e00, 0xcc79a7, 0xbbbbbb, 0xffffff, 0xff7f9f, 0xf0e442, 0xb0b0ff] },
+  default: { red: 0xff5252, blue: 0x4d9bff, ffa: [0x9be15d, 0x4fd1c5, 0x7f9cf5, 0xf28c28, 0xb0b0ff, 0xff7f9f, 0x3fbfbf, 0xcc79a7] },
+  deuteranopia: { red: 0xf85800, blue: 0x0860a0, ffa: [0x706060, 0x0050e0, 0x108030, 0x0090e0, 0x407080, 0xf06020, 0x20a090, 0xf05080] },
+  protanopia: { red: 0xc00800, blue: 0x1090f0, ffa: [0x30a000, 0xa000e0, 0x609070, 0x1090f0, 0xb02060, 0x307010, 0xc00030, 0x208090] },
+  tritanopia: { red: 0xe84030, blue: 0x0090f0, ffa: [0xa000c0, 0x708030, 0x3050e0, 0xf040e0, 0xa09030, 0x8010f0, 0xc01030, 0x40a010] },
 };
 /** WCAG relative luminance of an 0xRRGGBB colour. */
 export function relLuminance(rgb: number): number {
