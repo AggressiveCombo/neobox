@@ -151,9 +151,11 @@ export class Net {
       pc.onconnectionstatechange = () => {
         if (pc.connectionState === "failed" || pc.connectionState === "closed") this.dropRtc();
       };
-      // The server is ICE-lite with a host candidate; send the offer without waiting for gathering.
+      // The offer goes out only once gathering is complete: candidates are not trickled, and Firefox puts none
+      // in the local description until then (Chromium has them at once), so the server could never reach the browser.
       pc.createOffer()
         .then((offer) => pc.setLocalDescription(offer))
+        .then(() => whenGathered(pc))
         .then(() => {
           if (this.rtc === cur && pc.localDescription) this.send({ t: "rtc_offer", sdp: pc.localDescription.sdp });
         })
@@ -188,6 +190,16 @@ export class Net {
     this.status = status;
     this.handlers.onStatus(status, notice, unexpected);
   }
+}
+
+/** Resolves once the connection has gathered all its candidates (with no ICE servers, that is immediate). */
+function whenGathered(pc: RTCPeerConnection): Promise<void> {
+  if (pc.iceGatheringState === "complete") return Promise.resolve();
+  const { promise, resolve } = Promise.withResolvers<void>();
+  pc.addEventListener("icegatheringstatechange", () => {
+    if (pc.iceGatheringState === "complete") resolve();
+  });
+  return promise;
 }
 
 /** Parse one text frame. The server schema is trusted; only the `t` tag is checked here. */
