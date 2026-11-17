@@ -36,6 +36,7 @@ import {
   rtcServer,
 } from "./lib.mjs";
 import { livenessScenarios } from "./liveness.mjs";
+import { matchInvScenarios } from "./inv-match.mjs";
 import { writeFileSync, mkdtempSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -1356,5 +1357,6 @@ export const scenarios = [
   { name: "webrtc match", run: rtcMatch, topology: rtcServer },
   { name: "resync keeps map", run: resyncKeepsMap, topology: rtcServer, webrtc: true },
   { name: "sounds", run: sounds },
+  ...matchInvScenarios,
   ...livenessScenarios,
 ];
