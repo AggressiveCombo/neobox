@@ -197,8 +197,17 @@ export interface ModalOptions {
   onclose?: () => void;
 }
 
+/** An open modal. `pushed`: its history entry exists (a modal opened while a pop is in flight waits for it). */
+interface ModalEntry {
+  dialog: HTMLDialogElement;
+  id: string;
+  silent: boolean;
+  pushed: boolean;
+}
 /** Open modals, top last. Each one owns a history entry; Back closes the top one (popstate in app.ts closes the modals above it). */
-const openStack: { dialog: HTMLDialogElement; id: string; silent: boolean }[] = [];
+const openStack: ModalEntry[] = [];
+/** Modals opened while a pop is in flight: their history entries are pushed once it lands (pushDeferredModals). */
+const unpushed: ModalEntry[] = [];
 /** Entries of modals closed from the page whose pop has not been asked for yet. */
 let deadEntries = 0;
 /** The history.go() that page-side closes asked for, not yet landed: the nav subscriber holds screen changes until it does. */
@@ -215,6 +224,19 @@ export function takeModalPop(): boolean {
   popInFlight = false;
   flushModalPops();
   return true;
+}
+
+/**
+ * Pushes the history entries of modals opened while the pops were in flight. Call after takeModalPop returned true, once the
+ * landed screen is recorded: a push made earlier would be the entry the pop lands on.
+ */
+export function pushDeferredModals(): void {
+  if (modalPopPending()) return;
+  for (const m of unpushed.splice(0)) pushModalEntry(m);
+}
+function pushModalEntry(m: ModalEntry): void {
+  m.pushed = true;
+  history.pushState({ ...history.state, modal: m.id }, "");
 }
 function flushModalPops(): void {
   if (popInFlight || deadEntries === 0) return;
@@ -240,7 +262,7 @@ export function openModal(opts: ModalOptions): { dialog: HTMLDialogElement; clos
     h("div", { class: "modal-body", tabindex: "0" }, ...opts.body),
     h("div", { class: "modal-actions" }, ...actions),
   );
-  const entry = { dialog, id, silent: false };
+  const entry: ModalEntry = { dialog, id, silent: false, pushed: false };
   // Close at once, so the page is interactive and focus is back where it was before the exit
   // animation runs; the closed dialog then fades out (style.css dialog.modal.is-closing).
   const close = (): void => {
@@ -257,10 +279,12 @@ export function openModal(opts: ModalOptions): { dialog: HTMLDialogElement; clos
   dialog.addEventListener("close", () => {
     const i = openStack.indexOf(entry);
     if (i >= 0) openStack.splice(i, 1);
+    const u = unpushed.indexOf(entry);
+    if (u >= 0) unpushed.splice(u, 1);
     // Closed from the page rather than by Back: this modal's entry is still in history, so it is popped. Left in place it
     // would be a dead entry: Back would land on the screen the modal opened over. Page-side closes queue their pops
     // one at a time (flushModalPops); screen changes made until they land wait (app.ts).
-    if (!entry.silent) {
+    if (entry.pushed && !entry.silent) {
       deadEntries++;
       flushModalPops();
     }
@@ -275,7 +299,8 @@ export function openModal(opts: ModalOptions): { dialog: HTMLDialogElement; clos
   });
   document.body.appendChild(dialog);
   openStack.push(entry);
-  history.pushState({ ...history.state, modal: id }, "");
+  if (modalPopPending()) unpushed.push(entry);
+  else pushModalEntry(entry);
   dialog.showModal();
   // Without an explicit [autofocus], start on the dialog itself rather than ringing its first button.
   if (!dialog.querySelector("[autofocus]")) {
@@ -332,10 +357,12 @@ export function confirmDialog(opts: ConfirmOptions): Promise<boolean> {
  * Silent: history is not touched, since Back (or a screen change that takes over the modal's entry) has already moved on.
  */
 export function closeModalsAbove(id: string | null, inclusive = false): void {
-  const at = id === null ? -1 : openStack.findIndex((m) => m.id === id);
+  // A modal not yet pushed has no entry in the history that landed: it stays open.
+  const pushed = openStack.filter((m) => m.pushed);
+  const at = id === null ? -1 : pushed.findIndex((m) => m.id === id);
   if (id !== null && at < 0) return;
   const from = id === null ? 0 : at + (inclusive ? 0 : 1);
-  for (const m of openStack.slice(from).reverse()) {
+  for (const m of pushed.slice(from).reverse()) {
     m.silent = true;
     m.dialog.close();
   }

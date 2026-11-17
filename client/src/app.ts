@@ -39,7 +39,7 @@ import { prefs } from "./prefs";
 import { music } from "./music";
 import type { XpAward } from "./protocol";
 import { h } from "./ui/dom";
-import { closeModalsAbove, modalPopPending, openModal, takeModalPop } from "./ui/kit";
+import { closeModalsAbove, modalPopPending, openModal, pushDeferredModals, takeModalPop } from "./ui/kit";
 import { needsServer, offlinePage } from "./ui/offline-page";
 import { showToast } from "./ui/toast";
 import { playScreenTransition } from "./ui/transition";
@@ -1019,6 +1019,8 @@ export function start(): Store<AppState> {
           deferredFrom = null;
           recordScreen(store.state, from);
         }
+        // Modals opened while the pop was in flight take their entries now that it has landed.
+        pushDeferredModals();
         return;
       }
       if (nav === null) return;
