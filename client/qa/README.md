@@ -84,6 +84,16 @@ Transition settle time (RUBRIC D20 `motion.transition.ms`): menu modal open and 
 - Self-test (`QA_SELF_TEST=janky`): every CSS animation and transition is stretched to 1500 ms with `!important`, so every case must FAIL. Use a separate `QA_OUT`.
 - Not covered here: `motion.cls` (layout shift; CDP-only, chromium) and `reducedMotion.pixelDiff` (D08).
 
+## playfield.mjs (RUBRIC D16; play-field HUD, sprite contrast, camera, hit feedback)
+
+- Command: `cd client && QA_OUT=<dir> bun qa/playfield.mjs` (`QA_ENGINES=chromium` to limit; `PALETTES=default` to limit palettes). Env: `QA_CAM_MS` (15000), `QA_PLAY_MS` (30000).
+- Engines: chromium (webgpu and webgl2), firefox and webkit (webgl2), both palettes (default and deuteranopia) at every tier viewport (T1-M to T11-T).
+- Ground truth is engine state, not screenshots: a read-only init-script hook on the wasm frame exports (`window.__qaPF`) and the camera's published view (`globalThis.__qaCam`, src/camera.ts). The sprite contrast sample (T1-M, T5-T) reads the match canvas.
+- Cases: `tier.<palette>.<renderer>` (HUD overlap, spawn points, contrast); `camera.<map>` (every live player in view on the four reference maps); `feedback.hit.frames` (hit feedback latency in engine ticks).
+- Phone tiers: a touch-only phone welcome is dismissed after load (`dismissPhoneSplash`), since it covers the Start button.
+- Outputs: `playfield-<engine>.{json,md}`; screenshots under `evidence/playfield-<engine>/`.
+- Self-tests (`QA_SELF_TEST`, use a separate `QA_OUT`; each must FAIL): `hud` (a fixed box over the local sprite before each HUD sample), `contrast` (sprite fill replaced by its background before the ratio), `camera` (a fake live player in the far corner of the in-view check), `feedback` (synthetic 5-tick delay, no browser).
+
 ## robust.mjs
 
 Console and network health, slow network, disconnect and reconnect, offline window, reload, back navigation, resize, phone rotation, tab switch, two tabs of one account, and a bad room code.
@@ -117,7 +127,8 @@ Two clients play one match while a relay on the WebSocket path delays, jitters a
 
 - Command: `cd client && node qa/netgame.mjs <chromium|firefox|webkit>` (one engine per process). `JN_CONDS` picks conditions from `rtt0,rtt100,impair,jit,loss,lat` (default `rtt0,rtt100,impair`); `JN_DUR` is the play window in ms (default 30000). Chromium runs webgpu and webgl2; firefox and webkit run webgl2.
 - Outputs: `netgame-<engine>.jsonl` (one record per renderer and condition) and `evidence/netgame-<engine>-<renderer>-<cond>-{host,guest}.png`, under `QA_OUT`.
-- Metrics: `net.desync.count` (clients whose Snapshot row showed `gap a-b` or `hash t`; threshold 0), `net.rollback.depth.p95` (max final `Rollback p95` row at rtt100; threshold <= 8), `net.impair.pass` (impair condition: 1 when no resync, no desync, both canvases still change and the scoreboards agree).
+- Metrics: `net.desync.count` (clients whose Snapshot row showed `gap a-b` or `hash t`; threshold 0), `net.rollback.depth.p95` (max over clients and samples of the HUD `Rollback p95` row at rtt100; threshold <= 8), `net.impair.pass` (impair condition: 1 when no resync, no desync, both canvases still change and the scoreboards agree).
+- Host load: the HUD rows are read from the page, so a starved engine (FPS 1-5, measured RTT 400+ ms at 0 ms injected) inflates rollback depth and can blank the scoreboard read. Such runs are provisional; rerun the condition alone before reading a failure.
 - Relay is FIFO only. A WebSocket is an ordered TCP stream: each direction has one queue released strictly in order, and a lost message stalls every later one (head-of-line), as TCP does. A relay that let a later message overtake an earlier one would model a transport the game never runs on, so there is no reorder mode.
 
 ## audit.mjs
