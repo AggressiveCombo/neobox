@@ -4,6 +4,7 @@
 
 import type { MatchStart } from "./protocol";
 import { fetchPrecached } from "./precached";
+import { HttpError } from "./http-error";
 
 export interface NeoboxExports {
   memory: WebAssembly.Memory;
@@ -314,7 +315,7 @@ export async function loadWasmEngine(url = "./neobox.wasm", onProgress?: (loaded
  */
 async function readWasm(url: string, onProgress?: (loaded: number, total: number) => void): Promise<Uint8Array> {
   const res = await fetchPrecached(url);
-  if (!res.ok) throw new EngineError(`neobox.wasm: HTTP ${res.status}`);
+  if (!res.ok) throw new EngineError(new HttpError(res.status).message);
   if (!res.body) return new Uint8Array(await res.arrayBuffer());
   const total = res.headers.get("content-encoding") ? 0 : Number(res.headers.get("content-length")) || 0;
   const reader = res.body.getReader();

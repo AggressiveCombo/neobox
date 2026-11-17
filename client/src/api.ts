@@ -1,6 +1,7 @@
 // Plain HTTP helpers for the server's JSON endpoints.
 
 import { request } from "./account";
+import { HttpError } from "./http-error";
 
 export interface BuiltinMap {
   name: string;
@@ -9,9 +10,9 @@ export interface BuiltinMap {
 
 export async function fetchBuiltinMaps(signal?: AbortSignal): Promise<BuiltinMap[]> {
   const res = await fetch("/api/maps", { signal, headers: { accept: "application/json" } });
-  if (!res.ok) throw new Error(`/api/maps: HTTP ${res.status}`);
+  if (!res.ok) throw new HttpError(res.status);
   const data: unknown = await res.json();
-  if (!Array.isArray(data)) throw new Error("/api/maps: unexpected response");
+  if (!Array.isArray(data)) throw new Error("The server sent an unexpected reply. Try again in a moment.");
   return data.filter(
     (m): m is BuiltinMap => typeof m?.name === "string" && typeof m?.code === "string",
   );
@@ -41,7 +42,7 @@ export interface ServerStats {
 
 export async function fetchStats(signal?: AbortSignal): Promise<ServerStats> {
   const res = await fetch("/api/stats", { signal, headers: { accept: "application/json" } });
-  if (!res.ok) throw new Error(`/api/stats: HTTP ${res.status}`);
+  if (!res.ok) throw new HttpError(res.status);
   return (await res.json()) as ServerStats;
 }
 
@@ -62,7 +63,7 @@ interface RotationJson {
 /** GET /api/rotation (the original's maps2.json format): modes `qp_1`..`qp_10` in order. */
 export async function fetchQuickModes(signal?: AbortSignal): Promise<QuickMode[]> {
   const res = await fetch("/api/rotation", { signal, headers: { accept: "application/json" } });
-  if (!res.ok) throw new Error(`/api/rotation: HTTP ${res.status}`);
+  if (!res.ok) throw new HttpError(res.status);
   const data = (await res.json()) as RotationJson;
   const modes: QuickMode[] = [];
   for (let i = 1; i <= 10; i++) {
