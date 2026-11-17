@@ -6,16 +6,22 @@
 
 pub mod frame;
 
-use frame::{FrameBuilder, Meta, SoundOut};
-use neobox_net::{ClientFrame, ClientSession, InputFrame, MatchStart, Replay, ReplayPlayer, ReplayRecorder, ServerFrame, ServerMatch, TickClock};
+use frame::{Feed, FrameBuilder, Meta};
+use neobox_net::{ClientFrame, ClientSession, Desync, InputFrame, MatchStart, Replay, ReplayPlayer, ReplayRecorder, RttTracker, ServerFrame, ServerMatch, TickClock};
 use neobox_sim::start::Outcome;
 use neobox_sim::{GameSettings, MapData, State};
 use neobox_sim::input::LEFT;
 use std::cell::RefCell;
 
+/// Match time (ms) whose rollback depths are left out: the tick clock is still settling.
+const DEPTH_WARMUP_MS: f64 = 3000.0;
+
 /// Most unacknowledged input changes sent per packet (the rest follow in
 /// later packets, oldest first, so none is ever skipped).
 const MAX_RESEND: usize = 32;
+
+/// Most ticks a replay frame steps through to collect their events; a longer jump is a seek.
+const REPLAY_FEED_TICKS: u32 = 60;
 
 #[derive(Default)]
 struct App {
@@ -35,18 +41,19 @@ struct App {
     sent_seq: u32,
     /// first input sequence number of the next session
     next_seq: u32,
-    sound_tick: u32,
-    sounds: Vec<SoundOut>,
-    /// app-level round-trip time; None until the first pong
-    rtt_ms: Option<f64>,
-    rtt_jitter: f64,
+    /// events of the ticks reached since the last frame
+    feed: Feed,
+    /// round-trip estimate of the link, kept across matches
+    rtt: RttTracker,
+    /// match time whose rollback depths are not counted yet
+    warm_ms: Option<f64>,
     rollback_window: (f64, u64),
     rollback_rate: f32,
     /// recording of the current (or last) online match
     recorder: Option<ReplayRecorder>,
     /// replay being watched
     replay: Option<ReplayPlayer>,
-    replay_sound_tick: u32,
+    replay_feed_tick: u32,
     /// offline local game
     local: Option<LocalGame>,
 }
@@ -192,21 +199,18 @@ fn begin(a: &mut App, mut session: ClientSession, now_ms: f64) {
     let hz = session.start.tick_hz;
     let tick = session.head() as f64;
     // start ahead of the server by half a round trip plus a small margin
-    let lead = (a.rtt_ms.unwrap_or(0.0) / 2000.0) * hz + 2.0;
+    let lead = (a.rtt.rtt().unwrap_or(0.0) / 2000.0) * hz + 2.0;
     let mut clock = TickClock::new(hz, tick, lead);
-    clock.target_margin = target_margin(a.rtt_jitter, hz);
+    clock.target_margin = a.rtt.target_margin(hz);
     a.clock = Some(clock);
-    a.sound_tick = session.head();
+    a.warm_ms = Some(0.0);
+    session.attach_feed();
     a.last_sent = 0;
     a.sent_seq = 0;
     a.last_now = now_ms;
     a.latch = 0;
     a.input_tick = session.head();
     a.session = Some(session);
-}
-
-fn target_margin(jitter_ms: f64, hz: f64) -> f64 {
-    (1.0 + 2.0 * jitter_ms / 1000.0 * hz).clamp(1.0, 6.0)
 }
 
 /// # Safety
@@ -286,6 +290,7 @@ pub unsafe extern "C" fn nb_server_frame(ptr: u32, len: u32, now_ms: f64) -> i32
         match f {
             ServerFrame::Batch { ticks, input_ack, margin16 } => {
                 if let Some(s) = a.session.as_mut() {
+                    let was = s.desync.is_some();
                     s.on_ticks(&ticks);
                     if let Some(r) = a.recorder.as_mut() {
                         r.push(&ticks);
@@ -294,28 +299,23 @@ pub unsafe extern "C" fn nb_server_frame(ptr: u32, len: u32, now_ms: f64) -> i32
                     if let Some(c) = a.clock.as_mut() {
                         c.on_margin(margin16 as f64 / 16.0);
                     }
-                    return s.desynced as i32;
+                    return (!was && s.desync.is_some()) as i32;
                 }
                 0
             }
             ServerFrame::Checksum { tick, hash } => {
                 if let Some(s) = a.session.as_mut() {
+                    let was = s.desync.is_some();
                     s.on_checksum(tick, hash);
-                    return s.desynced as i32;
+                    return (!was && s.desync.is_some()) as i32;
                 }
                 0
             }
             ServerFrame::Pong { client_time, .. } => {
                 let rtt = (now_ms - client_time).max(0.0);
-                match a.rtt_ms {
-                    None => a.rtt_ms = Some(rtt),
-                    Some(prev) => {
-                        a.rtt_jitter += ((rtt - prev).abs() - a.rtt_jitter) * 0.2;
-                        a.rtt_ms = Some(prev + (rtt - prev) * 0.2);
-                    }
-                }
+                a.rtt.sample(rtt);
                 if let (Some(c), Some(s)) = (a.clock.as_mut(), a.session.as_ref()) {
-                    c.target_margin = target_margin(a.rtt_jitter, s.start.tick_hz);
+                    c.target_margin = a.rtt.target_margin(s.start.tick_hz);
                 }
                 0
             }
@@ -331,10 +331,31 @@ pub extern "C" fn nb_ping(now_ms: f64) -> u32 {
     })
 }
 
+/// Netcode stats of the current session, written to the out buffer as four
+/// little-endian u32: desync kind (0 none, 1 gap, 2 hash), the expected tick
+/// (gap) or mismatch tick (hash), the tick received (gap), and the p95
+/// rollback depth in ticks. Returns the byte count, 0 without a session.
+#[unsafe(no_mangle)]
+pub extern "C" fn nb_net_stats() -> i32 {
+    with(|a| {
+        let Some(s) = a.session.as_ref() else { return 0 };
+        let (kind, x, y) = match s.desync {
+            None => (0, 0, 0),
+            Some(Desync::Gap { expected, got }) => (1, expected, got),
+            Some(Desync::Hash { tick }) => (2, tick, 0),
+        };
+        a.out.clear();
+        for w in [kind, x, y, s.rollback_depth_pct(95)] {
+            a.out.extend_from_slice(&w.to_le_bytes());
+        }
+        a.out.len() as i32
+    })
+}
+
 /// Round-trip time estimate in milliseconds; -1 until the first pong.
 #[unsafe(no_mangle)]
 pub extern "C" fn nb_rtt() -> f64 {
-    with(|a| a.rtt_ms.unwrap_or(-1.0))
+    with(|a| a.rtt.rtt().unwrap_or(-1.0))
 }
 
 #[unsafe(no_mangle)]
@@ -349,6 +370,13 @@ pub extern "C" fn nb_frame(now_ms: f64, mask: u32) -> u32 {
             a.frame.words.clear();
             return 0;
         };
+        if let Some(w) = a.warm_ms.as_mut() {
+            *w += dt * 1000.0;
+            if *w >= DEPTH_WARMUP_MS {
+                a.warm_ms = None;
+                s.reset_depth_stats();
+            }
+        }
         let tick_f = clock.update(dt);
         let target = tick_f.floor().max(0.0) as u32;
         // The input applies to the tick in progress (`target`), whose result
@@ -375,14 +403,14 @@ pub extern "C" fn nb_frame(now_ms: f64, mask: u32) -> u32 {
             a.rollback_rate = (a.rollback_window.1 as f64 / a.rollback_window.0) as f32;
             a.rollback_window = (0.0, 0);
         }
-        // sounds of newly reached ticks
-        a.sounds.clear();
+        // events of the ticks newly reached since the last frame. Confirmed ticks give the event
+        // log (kills, bat hits: the same on every client, each fed once); predicted ticks give
+        // what the player sees and hears at once (sounds, bat hit visuals), which a rollback may undo
+        a.feed.clear();
         let new_head = s.head();
-        if new_head > a.sound_tick {
-            let (prev, cur) = s.latest_pair();
-            frame::new_sounds(prev, cur, &mut a.sounds);
-            a.sound_tick = new_head;
-        }
+        s.drain_confirmed(|tick, prev, cur| a.feed.add_confirmed(tick, prev, cur));
+        s.drain_predicted(|tick, prev, cur| a.feed.add_predicted(tick, prev, cur));
+        a.feed.forget_before(s.base);
         let (prev, cur) = s.latest_pair();
         // between the last finished tick and the one in progress
         let alpha = (tick_f - (new_head as f64 - 1.0)).clamp(0.0, 1.0);
@@ -392,7 +420,7 @@ pub extern "C" fn nb_frame(now_ms: f64, mask: u32) -> u32 {
             prediction: (new_head.saturating_sub(s.known)) as f32,
             rollbacks_per_s: a.rollback_rate,
         };
-        a.frame.build(prev, cur, alpha, &s.start.settings, meta, &a.sounds);
+        a.frame.build(prev, cur, alpha, &s.start.settings, meta, &a.feed);
         // send once per tick (heartbeat + unacknowledged changes) and
         // immediately when the input changed; the heartbeat names the tick in
         // progress, the one new inputs are stamped with
@@ -420,7 +448,7 @@ pub unsafe extern "C" fn nb_map_preview(code: u32, len: u32) -> i32 {
         };
         let state = State::from_map(&map);
         let gs = GameSettings::default();
-        a.frame.build(&state, &state, 1.0, &gs, Meta { local: -1, ..Meta::default() }, &[]);
+        a.frame.build(&state, &state, 1.0, &gs, Meta { local: -1, ..Meta::default() }, &Feed::default());
         0
     })
 }
@@ -547,7 +575,7 @@ pub unsafe extern "C" fn nb_replay_load(json: u32, len: u32) -> i32 {
             "players": player.replay.start.players,
         });
         a.out = info.to_string().into_bytes();
-        a.replay_sound_tick = player.tick();
+        a.replay_feed_tick = player.tick();
         a.replay = Some(player);
         a.out.len() as i32
     })
@@ -555,7 +583,8 @@ pub unsafe extern "C" fn nb_replay_load(json: u32, len: u32) -> i32 {
 
 /// Build the frame of the loaded replay at fractional tick `tick_f`,
 /// following player `follow` (-1: none). Seeking anywhere is allowed;
-/// sounds play only when playback moves forward one tick at a time.
+/// events (sounds, kills, hits) are collected while playback moves forward by at most
+/// REPLAY_FEED_TICKS ticks; seeks collect none.
 #[unsafe(no_mangle)]
 pub extern "C" fn nb_replay_frame(tick_f: f64, follow: i32) -> i32 {
     with(|a| {
@@ -565,17 +594,21 @@ pub extern "C" fn nb_replay_frame(tick_f: f64, follow: i32) -> i32 {
         let t = tick_f.clamp(first, last);
         let base = t.floor() as u32;
         // show the step from `base` to `base + 1` (the last state at the end)
-        p.seek((base + 1).min(p.end_tick()));
-        let alpha = if p.tick() == base + 1 { t - base as f64 } else { 1.0 };
-        a.sounds.clear();
-        if p.tick() == a.replay_sound_tick + 1 {
-            let (prev, cur) = p.states();
-            frame::new_sounds(prev, cur, &mut a.sounds);
+        let target = (base + 1).min(p.end_tick());
+        a.feed.clear();
+        if target > a.replay_feed_tick && target - a.replay_feed_tick <= REPLAY_FEED_TICKS {
+            while p.tick() < target && p.step() {
+                let (prev, cur) = p.states();
+                a.feed.add(p.tick(), prev, cur);
+            }
+        } else {
+            p.seek(target);
         }
-        a.replay_sound_tick = p.tick();
+        let alpha = if p.tick() == base + 1 { t - base as f64 } else { 1.0 };
+        a.replay_feed_tick = p.tick();
         let (prev, cur) = p.states();
         let meta = Meta { tick: p.tick(), local: follow, ..Meta::default() };
-        a.frame.build(prev, cur, alpha, p.settings(), meta, &a.sounds);
+        a.frame.build(prev, cur, alpha, p.settings(), meta, &a.feed);
         0
     })
 }
@@ -626,7 +659,7 @@ pub extern "C" fn nb_local_frame(dt_ms: f64, mask: u32) -> i32 {
         g.last_mask = mask;
         let hz = g.m.start.tick_hz;
         g.acc = (g.acc + dt_ms.max(0.0) / 1000.0 * hz).min(5.0);
-        a.sounds.clear();
+        a.feed.clear();
         while g.acc >= 1.0 {
             g.acc -= 1.0;
             // a key tapped between two ticks still counts for one tick
@@ -649,10 +682,10 @@ pub extern "C" fn nb_local_frame(dt_ms: f64, mask: u32) -> i32 {
             }
             g.prev = g.m.state.clone();
             g.m.step();
-            frame::new_sounds(&g.prev, &g.m.state, &mut a.sounds);
+            a.feed.add(g.m.tick, &g.prev, &g.m.state);
         }
         let meta = Meta { tick: g.m.tick, local: g.player as i32, ..Meta::default() };
-        a.frame.build(&g.prev, &g.m.state, g.acc, &g.m.start.settings, meta, &a.sounds);
+        a.frame.build(&g.prev, &g.m.state, g.acc, &g.m.start.settings, meta, &a.feed);
         (g.m.last_outcome == Outcome::MatchOver) as i32
     })
 }

@@ -9,7 +9,7 @@
 use crate::protocol::{InputFrame, MatchStart, TickData, TickEvent};
 use neobox_sim::start::Outcome;
 use neobox_sim::{advance, match_start, Events, GameSettings, MapData, Sim, State};
-use std::collections::VecDeque;
+use std::collections::{BTreeMap, VecDeque};
 
 /// Longest client prediction ahead of the last confirmed tick (ticks).
 pub const MAX_PREDICTION: u32 = 45;
@@ -304,6 +304,18 @@ impl ServerMatch {
 
 // ------------------------------------------------------------------ client
 
+/// Why a client session needs a snapshot from the server.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Desync {
+    /// a batch starts at `got` while the next tick needed is `expected`
+    Gap { expected: u32, got: u32 },
+    /// the server's checksum of `tick` differs from the local state
+    Hash { tick: u32 },
+}
+
+/// Rollback depths are counted exactly up to this many ticks; deeper ones share the last bin.
+const DEPTH_BINS: usize = 64;
+
 /// Client-side prediction with rollback.
 ///
 /// `known`: inputs and events of every tick below it are confirmed.
@@ -331,13 +343,56 @@ pub struct ClientSession {
     dirty: Option<u32>,
     /// server checksums awaiting comparison
     server_hashes: VecDeque<(u32, u64)>,
-    pub desynced: bool,
+    /// the first reason this session lost sync (it needs a snapshot after this)
+    pub desync: Option<Desync>,
+    /// rollbacks by depth in ticks; the last bin holds `DEPTH_BINS` and deeper
+    depth_hist: [u64; DEPTH_BINS + 1],
     pub outcome: Outcome,
     scratch: Vec<u8>,
     /// recycled `used` input vectors (no allocation per simulated tick)
     spare: Vec<Vec<u8>>,
     pub rollbacks: u64,
     pub resimulated: u64,
+    /// drain positions of the live frame's feed; `None` until attached (nothing is pruned before it drains)
+    feed: Option<FeedCursor>,
+}
+
+/// The live frame's drain positions: the confirmed and the predicted ticks already fed.
+#[derive(Clone, Copy, Debug)]
+struct FeedCursor {
+    confirmed: u32,
+    predicted: u32,
+}
+
+/// Keys of the presentation records already fed, per tick. A rollback rewinds the predicted feed
+/// to the first recomputed tick, so records of those ticks come round again; the consumer passes
+/// each record through [`FedKeys::first`] and only new ones go out.
+#[derive(Clone, Debug)]
+pub struct FedKeys<K> {
+    ticks: BTreeMap<u32, Vec<K>>,
+}
+
+impl<K> Default for FedKeys<K> {
+    fn default() -> Self {
+        FedKeys { ticks: BTreeMap::new() }
+    }
+}
+
+impl<K: PartialEq> FedKeys<K> {
+    /// True the first time `key` is seen for `tick` (and records it).
+    pub fn first(&mut self, tick: u32, key: K) -> bool {
+        let keys = self.ticks.entry(tick).or_default();
+        if keys.contains(&key) {
+            return false;
+        }
+        keys.push(key);
+        true
+    }
+
+    /// Forget the ticks before `tick` (rollbacks never reach below the session's base).
+    pub fn forget_before(&mut self, tick: u32) {
+        self.ticks = self.ticks.split_off(&tick);
+    }
 }
 
 impl ClientSession {
@@ -382,12 +437,14 @@ impl ClientSession {
             used: VecDeque::with_capacity(64),
             dirty: None,
             server_hashes: VecDeque::new(),
-            desynced: false,
+            desync: None,
+            depth_hist: [0; DEPTH_BINS + 1],
             outcome: Outcome::Running,
             scratch: Vec::new(),
             spare: Vec::new(),
             rollbacks: 0,
             resimulated: 0,
+            feed: None,
         }
     }
 
@@ -411,6 +468,51 @@ impl ClientSession {
         let cur = &self.states[n - 1];
         let prev = if n >= 2 { &self.states[n - 2] } else { cur };
         (prev, cur)
+    }
+
+    /// The (tick, previous, current) of the ticks in `(from, to]` still held, oldest first.
+    pub fn pairs_between(&self, from: u32, to: u32) -> impl Iterator<Item = (u32, &State, &State)> {
+        let first = from.saturating_add(1).max(self.base + 1);
+        let last = to.min(self.head());
+        let (lo, hi) = if last >= first { ((first - self.base) as usize, (last - self.base) as usize + 1) } else { (0, 0) };
+        let (base, states) = (self.base, &self.states);
+        (lo..hi).map(move |i| (base + i as u32, &states[i - 1], &states[i]))
+    }
+
+    /// Start the live feed: states are kept until drained.
+    pub fn attach_feed(&mut self) {
+        self.feed = Some(FeedCursor { confirmed: self.base, predicted: self.base });
+    }
+
+    /// Feed the pairs of the confirmed ticks not drained yet. Confirmed states never change again,
+    /// so their events agree on every client.
+    pub fn drain_confirmed(&mut self, mut f: impl FnMut(u32, &State, &State)) {
+        let Some(c) = self.feed else { return };
+        let to = self.known;
+        for (t, p, q) in self.pairs_between(c.confirmed, to) {
+            f(t, p, q);
+        }
+        if let Some(c) = self.feed.as_mut() {
+            c.confirmed = to;
+        }
+    }
+
+    /// Feed the pairs of the predicted ticks not drained yet. Presentation only: a rollback may undo them,
+    /// and then the recomputed ticks are fed again (the consumer keeps what it has fed, see [`FedKeys`]).
+    pub fn drain_predicted(&mut self, mut f: impl FnMut(u32, &State, &State)) {
+        let Some(c) = self.feed else { return };
+        let to = self.head();
+        for (t, p, q) in self.pairs_between(c.predicted, to) {
+            f(t, p, q);
+        }
+        if let Some(c) = self.feed.as_mut() {
+            c.predicted = to;
+        }
+    }
+
+    /// States at or above this tick are kept for the live feed.
+    fn feed_floor(&self) -> u32 {
+        self.feed.map_or(u32::MAX, |c| c.confirmed.min(c.predicted))
     }
 
     /// Record the local player's input for `tick` (only changes matter).
@@ -516,7 +618,7 @@ impl ClientSession {
             }
             if t.tick > self.known {
                 // a gap means lost data: ask for a snapshot
-                self.desynced = true;
+                self.set_desync(Desync::Gap { expected: self.known, got: t.tick });
                 return;
             }
             for &(p, m) in &t.changes {
@@ -551,7 +653,7 @@ impl ClientSession {
         while self.head() < self.known {
             self.step_one();
         }
-        while self.base < self.known && self.states.len() > 1 {
+        while self.base < self.known && self.base < self.feed_floor() && self.states.len() > 1 {
             self.states.pop_front();
             if let Some((v, _)) = self.used.pop_front() {
                 self.spare.push(v);
@@ -573,6 +675,33 @@ impl ClientSession {
         self.check_hash();
     }
 
+    fn set_desync(&mut self, d: Desync) {
+        self.desync.get_or_insert(d);
+    }
+
+    /// Nearest-rank percentile `pct` of the rollback depths counted since the last
+    /// [`Self::reset_depth_stats`] (0 if none).
+    pub fn rollback_depth_pct(&self, pct: u32) -> u32 {
+        let n: u64 = self.depth_hist.iter().sum();
+        if n == 0 {
+            return 0;
+        }
+        let rank = (n * pct as u64).div_ceil(100).max(1);
+        let mut seen = 0;
+        for (depth, &count) in self.depth_hist.iter().enumerate() {
+            seen += count;
+            if seen >= rank {
+                return depth as u32;
+            }
+        }
+        DEPTH_BINS as u32
+    }
+
+    /// Start counting rollback depths afresh (the stats skip the match's warm-up).
+    pub fn reset_depth_stats(&mut self) {
+        self.depth_hist = [0; DEPTH_BINS + 1];
+    }
+
     fn check_hash(&mut self) {
         while let Some(&(t, h)) = self.server_hashes.front() {
             if t > self.base {
@@ -580,7 +709,7 @@ impl ClientSession {
             }
             self.server_hashes.pop_front();
             if t == self.base && checksum(&self.states[0]) != h {
-                self.desynced = true;
+                self.set_desync(Desync::Hash { tick: t });
             }
         }
     }
@@ -610,6 +739,10 @@ impl ClientSession {
             return;
         }
         self.rollbacks += 1;
+        self.depth_hist[((head - d) as usize).min(DEPTH_BINS)] += 1;
+        if let Some(c) = self.feed.as_mut() {
+            c.predicted = c.predicted.min(d);
+        }
         let keep = (d - self.base) as usize + 1;
         self.states.truncate(keep);
         while self.used.len() > keep - 1 {
@@ -676,5 +809,561 @@ impl TickClock {
         let rate = 1.0 + (err * 0.02).clamp(-0.06, 0.06);
         self.tick += dt.clamp(0.0, 0.25) * self.hz * rate;
         self.tick
+    }
+}
+
+/// Pong samples kept for the jitter estimate.
+const RTT_SAMPLES: usize = 16;
+
+/// Round-trip time and jitter of a link, from ping/pong samples.
+///
+/// Jitter is the median of each sample's excess over the window minimum. A pong
+/// delayed by a busy client thread is an outlier the median ignores, where a
+/// running mean of successive differences would absorb it and push the tick
+/// clock further ahead of the server.
+#[derive(Clone, Debug, Default)]
+pub struct RttTracker {
+    window: [f64; RTT_SAMPLES],
+    /// samples held in `window`
+    count: usize,
+    /// slot the next sample is written to
+    next: usize,
+    smooth: Option<f64>,
+}
+
+impl RttTracker {
+    pub fn sample(&mut self, rtt_ms: f64) {
+        self.window[self.next] = rtt_ms;
+        self.next = (self.next + 1) % RTT_SAMPLES;
+        self.count = (self.count + 1).min(RTT_SAMPLES);
+        self.smooth = Some(match self.smooth {
+            None => rtt_ms,
+            Some(prev) => prev + (rtt_ms - prev) * 0.2,
+        });
+    }
+
+    /// Smoothed round-trip time in ms; None before the first sample.
+    pub fn rtt(&self) -> Option<f64> {
+        self.smooth
+    }
+
+    /// Median excess of the window's samples over its minimum, in ms.
+    pub fn jitter(&self) -> f64 {
+        let w = &self.window[..self.count];
+        let Some(min) = w.iter().copied().reduce(f64::min) else {
+            return 0.0;
+        };
+        let mut excess = [0.0f64; RTT_SAMPLES];
+        for (e, &r) in excess.iter_mut().zip(w) {
+            *e = r - min;
+        }
+        let e = &mut excess[..self.count];
+        e.sort_unstable_by(f64::total_cmp);
+        e[e.len() / 2]
+    }
+
+    /// Target arrival margin in ticks at `hz`: a jitter of `j` ms wants `2 j`
+    /// of extra lead, clamped to one to six ticks.
+    pub fn target_margin(&self, hz: f64) -> f64 {
+        (1.0 + 2.0 * self.jitter() / 1000.0 * hz).clamp(1.0, 6.0)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use neobox_sim::{GameSettings, MapData};
+    use crate::protocol::InputFrame;
+    use std::collections::VecDeque;
+    use neobox_sim::input::BAT;
+    use neobox_sim::step::kind;
+
+    fn start() -> MatchStart {
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../maps/01-proving-grounds.json");
+        let json: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+        let code = MapData::from_json(&json["map"]).unwrap().to_code();
+        MatchStart {
+            seed: 5,
+            start_tick: 0,
+            tick_hz: 30.0,
+            players: vec![(0, 1.0), (1, 1.0)],
+            settings: GameSettings::default(),
+            maps: vec![code],
+            intro: false,
+            rotation: false,
+        }
+    }
+
+    /// Batches that arrive late, twice, or overlapping (the unreliable path
+    /// resends everything unconfirmed from the acknowledged tick) are not gaps:
+    /// the client applies each tick once and ends on the server's state.
+    #[test]
+    fn late_and_resent_batches_do_not_desync() {
+        let mut server = ServerMatch::new(start()).unwrap();
+        let ticks: Vec<TickData> = (0..90).map(|_| server.step()).collect();
+        let mut c = ClientSession::new(start(), None).unwrap();
+        c.on_ticks(&ticks[0..30]);
+        c.on_ticks(&ticks[10..50]);
+        c.on_ticks(&ticks[0..20]);
+        c.on_ticks(&ticks[50..90]);
+        assert_eq!(c.desync, None);
+        assert_eq!(c.known, 90);
+        assert_eq!(c.base, 90);
+        assert_eq!(checksum(c.confirmed_state()), server.checksum());
+    }
+
+    /// The live feed's confirmed stream matches an undisturbed session after a rollback: a predicted
+    /// tick the server corrects never reaches it, each confirmed tick is fed once, and the predicted
+    /// stream (which the rollback leaves behind) is fed once too.
+    #[test]
+    fn confirmed_feed_ignores_rolled_back_predictions() {
+        let mut server = ServerMatch::new(start()).unwrap();
+        server.submit(0, &InputFrame { ack: 0, now: 0, changes: vec![(1, 0, 1)] });
+        let ticks: Vec<TickData> = (0..30).map(|_| server.step()).collect();
+
+        let mut reference = ClientSession::new(start(), None).unwrap();
+        reference.attach_feed();
+        reference.on_ticks(&ticks);
+        let mut want = Vec::new();
+        reference.drain_confirmed(|_, _, cur| want.push(checksum(cur)));
+
+        // predicts player 0 idle; the server holds it left from tick 0
+        let mut c = ClientSession::new(start(), Some(0)).unwrap();
+        c.attach_feed();
+        c.advance_to(30);
+        let mut predicted = Vec::new();
+        c.drain_predicted(|_, _, cur| predicted.push(checksum(cur)));
+        c.on_ticks(&ticks);
+        assert!(c.rollbacks > 0);
+        let mut got = Vec::new();
+        c.drain_confirmed(|_, _, cur| got.push(checksum(cur)));
+        // the rollback rewinds the predicted feed to its first tick: all 30 ticks come round again,
+        // while the confirmed feed has nothing left
+        let mut refed = 0;
+        c.drain_predicted(|_, _, _| refed += 1);
+        let mut again = 0;
+        c.drain_confirmed(|_, _, _| again += 1);
+        assert_eq!(predicted.len(), 30);
+        assert_eq!(refed, 30);
+        assert_ne!(predicted, want);
+        assert_eq!(got, want);
+        assert_eq!(again, 0);
+    }
+
+    /// A batch that starts beyond the next tick needed is a real gap on an
+    /// ordered stream; the first reason is kept.
+    #[test]
+    fn batch_past_known_is_a_gap() {
+        let mut server = ServerMatch::new(start()).unwrap();
+        let ticks: Vec<TickData> = (0..30).map(|_| server.step()).collect();
+        let mut c = ClientSession::new(start(), None).unwrap();
+        c.on_ticks(&ticks[0..10]);
+        c.on_ticks(&ticks[15..30]);
+        assert_eq!(c.desync, Some(Desync::Gap { expected: 10, got: 15 }));
+        c.on_ticks(&ticks[10..30]);
+        assert_eq!(c.desync, Some(Desync::Gap { expected: 10, got: 15 }));
+    }
+
+    /// A checksum that disagrees with the confirmed state reports its tick.
+    #[test]
+    fn checksum_mismatch_reports_tick() {
+        let mut server = ServerMatch::new(start()).unwrap();
+        let ticks: Vec<TickData> = (0..30).map(|_| server.step()).collect();
+        let mut c = ClientSession::new(start(), None).unwrap();
+        c.on_ticks(&ticks);
+        assert_eq!(c.base, 30);
+        c.on_checksum(30, checksum(c.confirmed_state()));
+        assert_eq!(c.desync, None);
+        let mut c = ClientSession::new(start(), None).unwrap();
+        c.on_ticks(&ticks);
+        c.on_checksum(30, checksum(c.confirmed_state()) ^ 1);
+        assert_eq!(c.desync, Some(Desync::Hash { tick: 30 }));
+    }
+
+    const MAX_RESEND: usize = 32;
+    const FRAME_MS: f64 = 1000.0 / 60.0;
+    /// match tick rate
+    const HZ: f64 = 30.0;
+    /// ping cadence of the client (`PING_MS` in game.ts)
+    const PING_MS: f64 = 1000.0;
+    /// the stats skip this much of a session, as the wasm does
+    const WARMUP_MS: f64 = 3000.0;
+
+    /// Which round-trip estimate sets the target margin.
+    #[derive(Clone, Copy, PartialEq)]
+    enum Est {
+        /// the EMA of successive RTT differences the wasm used before
+        Ema,
+        /// [`RttTracker`]
+        Window,
+    }
+
+    /// Main-thread stalls of one client: busy for `len` ms every `period` ms from `phase`.
+    #[derive(Clone, Copy)]
+    struct Stall {
+        period: f64,
+        len: f64,
+        phase: f64,
+    }
+
+    /// When a client thread that wants to run at `t` gets to run: the end of a stall covering `t`.
+    fn free_at(stall: Option<Stall>, t: f64) -> f64 {
+        let Some(s) = stall else { return t };
+        if t < s.phase {
+            return t;
+        }
+        let start = s.phase + ((t - s.phase) / s.period).floor() * s.period;
+        if t < start + s.len { start + s.len } else { t }
+    }
+
+    /// One simulated client of [`two_peer_rollbacks`].
+    struct Peer {
+        session: ClientSession,
+        clock: TickClock,
+        rtt: RttTracker,
+        ema_rtt: Option<f64>,
+        ema_jitter: f64,
+        stall: Option<Stall>,
+        last_t: f64,
+        last_sent: u32,
+        sent_seq: u32,
+        last_ping: f64,
+        mask: u8,
+        typing: bool,
+        rng: u64,
+        warm: bool,
+        /// (arrival ms, input frame) on the way to the server
+        to_server: VecDeque<(f64, InputFrame)>,
+        /// (arrival ms, tick, server input ack, margin in ticks) from the server
+        to_client: VecDeque<(f64, TickData, u32, f64)>,
+        /// (arrival ms, send time) of pings awaiting their pong
+        pongs: VecDeque<(f64, f64)>,
+    }
+
+    enum Ev {
+        Step,
+        Frame(usize),
+        Up(usize),
+        Down(usize),
+        Pong(usize),
+    }
+
+    fn next_rand(s: &mut u64) -> u64 {
+        *s ^= *s << 13;
+        *s ^= *s >> 7;
+        *s ^= *s << 17;
+        *s
+    }
+
+    /// Client frame, as `nb_frame` does it: predict to `target + 1` with the
+    /// local input stamped at `target`, then send the heartbeat and changes.
+    fn frame(p: &mut Peer, t: f64, owl: f64) {
+        let dt = (t - p.last_t) / 1000.0;
+        p.last_t = t;
+        if p.typing && next_rand(&mut p.rng) % 30 == 0 {
+            p.mask = (next_rand(&mut p.rng) % 8) as u8;
+        }
+        if t - p.last_ping >= PING_MS {
+            p.last_ping = t;
+            p.pongs.push_back((t + 2.0 * owl, t));
+        }
+        let target = p.clock.update(dt).floor().max(0.0) as u32;
+        p.session.local_input(target, p.mask);
+        p.session.advance_to(target + 1);
+        let newest = p.session.last_input_seq();
+        if target >= p.last_sent || newest != p.sent_seq {
+            p.to_server.push_back((t + owl, p.session.input_frame(target, MAX_RESEND)));
+            p.last_sent = p.last_sent.max(target + 1);
+            p.sent_seq = newest;
+        }
+    }
+
+    /// The target arrival margin in ticks that `est` gives this client.
+    fn target(p: &Peer, est: Est) -> f64 {
+        match est {
+            Est::Window => p.rtt.target_margin(HZ),
+            Est::Ema => (1.0 + 2.0 * p.ema_jitter / 1000.0 * HZ).clamp(1.0, 6.0),
+        }
+    }
+
+    /// Two clients in one match over a link with `owl` ms one-way delay, ticks
+    /// at 30 Hz, frames at 60 Hz, both starting at time 0. With `stall`, each
+    /// client's thread (frames, pings, received batches, pongs) waits out its
+    /// stalls. Returns peer 0's session with its depth stats after warm-up.
+    fn two_peer_rollbacks(owl: f64, typing: [bool; 2], stall: Option<Stall>, est: Est, secs: f64) -> ClientSession {
+        let tick_ms = 1000.0 / HZ;
+        let mut server = ServerMatch::new(start()).unwrap();
+        let mut peers: Vec<Peer> = (0..2usize)
+            .map(|i| {
+                let session = ClientSession::new(start(), Some(i as u32)).unwrap();
+                let mut clock = TickClock::new(HZ, session.head() as f64, owl / 1000.0 * HZ + 2.0);
+                clock.target_margin = 1.0;
+                Peer {
+                    session,
+                    clock,
+                    rtt: RttTracker::default(),
+                    ema_rtt: None,
+                    ema_jitter: 0.0,
+                    stall: stall.map(|s| Stall { phase: s.phase + i as f64 * s.period / 2.0, ..s }),
+                    last_t: 0.0,
+                    last_sent: 0,
+                    sent_seq: 0,
+                    last_ping: -PING_MS,
+                    mask: 0,
+                    typing: typing[i],
+                    rng: 0x9E37_79B9_7F4A_7C15 ^ (i as u64 + 1),
+                    warm: false,
+                    to_server: VecDeque::new(),
+                    to_client: VecDeque::new(),
+                    pongs: VecDeque::new(),
+                }
+            })
+            .collect();
+        let mut margins = [0.0f64; 2];
+        let mut next_step = 0.0f64;
+        let mut next_frame = [0.0f64; 2];
+        let end = secs * 1000.0;
+        loop {
+            let mut best = (next_step, Ev::Step);
+            for (i, p) in peers.iter().enumerate() {
+                let frame_at = free_at(p.stall, next_frame[i]);
+                if frame_at < best.0 {
+                    best = (frame_at, Ev::Frame(i));
+                }
+                if let Some(&(t, _)) = p.to_server.front() {
+                    if t < best.0 {
+                        best = (t, Ev::Up(i));
+                    }
+                }
+                if let Some(&(t, ..)) = p.to_client.front() {
+                    let t = free_at(p.stall, t);
+                    if t < best.0 {
+                        best = (t, Ev::Down(i));
+                    }
+                }
+                if let Some(&(t, _)) = p.pongs.front() {
+                    let t = free_at(p.stall, t);
+                    if t < best.0 {
+                        best = (t, Ev::Pong(i));
+                    }
+                }
+            }
+            let (t, ev) = best;
+            if t >= end {
+                break;
+            }
+            for p in peers.iter_mut() {
+                if !p.warm && t >= WARMUP_MS {
+                    p.warm = true;
+                    p.session.reset_depth_stats();
+                }
+            }
+            match ev {
+                Ev::Step => {
+                    let data = server.step();
+                    for (i, p) in peers.iter_mut().enumerate() {
+                        p.to_client.push_back((t + owl, data.clone(), server.input_ack(i as u32), margins[i]));
+                    }
+                    next_step += tick_ms;
+                }
+                Ev::Frame(i) => {
+                    frame(&mut peers[i], t, owl);
+                    // a frame loop resumes one frame after the stall, not on a backlog
+                    next_frame[i] = t + FRAME_MS;
+                }
+                Ev::Up(i) => {
+                    let (arr, f) = peers[i].to_server.pop_front().unwrap();
+                    let m = server.submit(i as u32, &f).margin;
+                    // the server's margin counts the part of its current tick already elapsed
+                    let to_next = ((next_step - arr) / tick_ms).clamp(0.0, 1.0);
+                    margins[i] = ((m as f64 - (1.0 - to_next)) * 16.0).round() / 16.0;
+                }
+                Ev::Down(i) => {
+                    let (_, data, ack, margin) = peers[i].to_client.pop_front().unwrap();
+                    let p = &mut peers[i];
+                    p.session.on_ticks(&[data]);
+                    p.session.input_ack(ack);
+                    p.clock.on_margin(margin);
+                }
+                Ev::Pong(i) => {
+                    let (_, sent) = peers[i].pongs.pop_front().unwrap();
+                    let rtt = t - sent;
+                    let p = &mut peers[i];
+                    match p.ema_rtt {
+                        None => p.ema_rtt = Some(rtt),
+                        Some(prev) => {
+                            p.ema_jitter += ((rtt - prev).abs() - p.ema_jitter) * 0.2;
+                            p.ema_rtt = Some(prev + (rtt - prev) * 0.2);
+                        }
+                    }
+                    p.rtt.sample(rtt);
+                    p.clock.target_margin = target(p, est);
+                }
+            }
+        }
+        peers.swap_remove(0).session
+    }
+
+    /// Outlier pongs from a busy client thread do not move the median jitter.
+    #[test]
+    fn stalled_pongs_do_not_move_jitter() {
+        let mut t = RttTracker::default();
+        for i in 0..RTT_SAMPLES {
+            t.sample(if i % 4 == 3 { 52.0 } else { 2.0 });
+        }
+        assert!(t.jitter() < 0.5, "jitter {}", t.jitter());
+        assert_eq!(t.target_margin(HZ), 1.0);
+    }
+
+    /// Jitter is the median excess over the minimum: excess spread over 0..40 ms gives about 21.
+    #[test]
+    fn jitter_is_median_excess_over_min() {
+        let mut t = RttTracker::default();
+        for i in 0..RTT_SAMPLES {
+            t.sample(100.0 + i as f64 * 40.0 / (RTT_SAMPLES - 1) as f64);
+        }
+        let j = t.jitter();
+        assert!((j - 21.3).abs() < 1.0, "jitter {j}");
+        let m = t.target_margin(HZ);
+        assert!((2.0..2.5).contains(&m), "margin {m}");
+    }
+
+    /// The depth percentile is nearest-rank over the counted depths and restarts on reset.
+    #[test]
+    fn depth_percentile_counts_recorded_depths() {
+        let mut c = ClientSession::new(start(), None).unwrap();
+        c.depth_hist[1] = 90;
+        c.depth_hist[3] = 4;
+        c.depth_hist[8] = 6;
+        assert_eq!(c.rollback_depth_pct(50), 1);
+        assert_eq!(c.rollback_depth_pct(95), 8);
+        c.reset_depth_stats();
+        assert_eq!(c.rollback_depth_pct(95), 0);
+    }
+
+    /// Diagnostic: the observer's rollback depths on 0 ms and 100 ms links, clean and with
+    /// main-thread stalls (60 ms every 700 ms), under the old and the windowed estimate.
+    #[test]
+    fn two_peer_rollback_depths() {
+        let stall = Some(Stall { period: 700.0, len: 60.0, phase: 0.0 });
+        let cases: [(&str, f64, Option<Stall>, Est); 8] = [
+            ("rtt0 clean ema", 0.0, None, Est::Ema),
+            ("rtt0 clean window", 0.0, None, Est::Window),
+            ("rtt0 stall ema", 0.0, stall, Est::Ema),
+            ("rtt0 stall window", 0.0, stall, Est::Window),
+            ("rtt100 clean ema", 50.0, None, Est::Ema),
+            ("rtt100 clean window", 50.0, None, Est::Window),
+            ("rtt100 stall ema", 50.0, stall, Est::Ema),
+            ("rtt100 stall window", 50.0, stall, Est::Window),
+        ];
+        for (label, owl, stall, est) in cases {
+            let s = two_peer_rollbacks(owl, [true, true], stall, est, 60.0);
+            let n: u64 = s.depth_hist.iter().sum();
+            eprintln!(
+                "{label}: n={n} p50={} p95={} max={}",
+                s.rollback_depth_pct(50),
+                s.rollback_depth_pct(95),
+                s.rollback_depth_pct(100)
+            );
+        }
+    }
+
+    /// Two players on one flat floor, one unit apart, neither on a team: the bat reaches the other.
+    fn flat_start() -> MatchStart {
+        let map = serde_json::json!({
+            "b": [{ "1": 0, "14": 0, "s": [{ "p": [-30.0, 10.0, 30.0, 10.0, 30.0, 12.0, -30.0, 12.0] }] }],
+            "j": [],
+            "s": [{ "1": 10.0, "2": 9.0, "5": true }, { "1": 11.0, "2": 9.0, "5": true }],
+            "set": { "15": 60.0, "16": 30.0, "18": 15.0 }
+        });
+        MatchStart {
+            seed: 3,
+            start_tick: 0,
+            tick_hz: 30.0,
+            players: vec![(0, 1.0), (1, 1.0)],
+            settings: GameSettings::default(),
+            maps: vec![MapData::from_json(&map).unwrap().to_code()],
+            intro: false,
+            rotation: false,
+        }
+    }
+
+    /// Bat hits `cur` records after `prev`: (tick, swinger, victim kind, victim index).
+    fn bat_hits_between(tick: u32, prev: &State, cur: &State) -> Vec<(u32, u32, u32, u32)> {
+        let mut out = Vec::new();
+        for (id, p) in cur.players.iter() {
+            let before = prev.players.get(id).map_or(0, |pp| pp.bat_hits.len());
+            let from = if p.bat_hits.len() >= before { before } else { 0 };
+            for pair in p.bat_hits[from..].chunks_exact(2) {
+                out.push((tick, id as u32, pair[0] as u32, pair[1] as u32));
+            }
+        }
+        out
+    }
+
+    /// Player 0 is local: it predicts holding the bat over `predict`, while the server hears it
+    /// hold `sent`, and the confirmations reach the client `lag` ticks late. Returns the bat hits
+    /// of the predicted stream and of the confirmed stream.
+    fn swing_streams(who: u32, predict: std::ops::Range<u32>, sent: std::ops::Range<u32>, lag: usize) -> (Vec<(u32, u32, u32, u32)>, Vec<(u32, u32, u32, u32)>) {
+        const TICKS: u32 = 70;
+        let mut server = ServerMatch::new(flat_start()).unwrap();
+        let mut c = ClientSession::new(flat_start(), Some(0)).unwrap();
+        c.attach_feed();
+        let (mut predicted, mut confirmed) = (Vec::new(), Vec::new());
+        let mut fed = FedKeys::default();
+        let mut in_flight = VecDeque::new();
+        for t in 0..TICKS {
+            let bat = |r: &std::ops::Range<u32>| if r.contains(&t) { BAT } else { 0 };
+            c.local_input(t, if who == 0 { bat(&predict) } else { 0 });
+            c.advance_to(t + 1);
+            c.drain_predicted(|tick, prev, cur| {
+                for h in bat_hits_between(tick, prev, cur) {
+                    if fed.first(h.0, (h.1, h.2, h.3)) {
+                        predicted.push(h);
+                    }
+                }
+            });
+            server.submit(who, &InputFrame { ack: 0, now: t, changes: vec![(t + 1, t, bat(&sent))] });
+            in_flight.push_back(server.step());
+            if in_flight.len() > lag {
+                c.on_ticks(&[in_flight.pop_front().unwrap()]);
+                c.drain_confirmed(|tick, prev, cur| confirmed.extend(bat_hits_between(tick, prev, cur)));
+            }
+        }
+        for d in in_flight {
+            c.on_ticks(&[d]);
+        }
+        c.drain_confirmed(|tick, prev, cur| confirmed.extend(bat_hits_between(tick, prev, cur)));
+        (predicted, confirmed)
+    }
+
+    /// A predicted bat hit on the remote player reaches the predicted stream once; once the server
+    /// confirms it, the same hit reaches the confirmed stream once, at the same tick.
+    #[test]
+    fn predicted_bat_hit_feeds_once_and_confirms_once() {
+        let (predicted, confirmed) = swing_streams(0, 40..49, 40..49, 3);
+        assert_eq!(predicted.len(), 1, "one predicted hit: {predicted:?}");
+        assert_eq!((predicted[0].1, predicted[0].2, predicted[0].3), (0, kind::PLAYER as u32, 1));
+        assert_eq!(confirmed, predicted);
+    }
+
+    /// A remote player's swing at the local player: the client learns it only from confirmations, so the
+    /// hit lands in ticks the client already predicted; it must still reach the predicted stream once.
+    #[test]
+    fn remote_swing_hit_feeds_predicted_once() {
+        let (predicted, confirmed) = swing_streams(1, 40..49, 40..49, 3);
+        eprintln!("remote predicted {predicted:?}\nremote confirmed {confirmed:?}");
+        assert_eq!(confirmed.len(), 1, "one confirmed hit: {confirmed:?}");
+        assert_eq!(predicted.len(), 1, "one predicted hit: {predicted:?}");
+        assert_eq!(predicted, confirmed);
+    }
+
+    /// A hit predicted from a swing the server never received may show, at most once, in the predicted
+    /// stream, and never reaches the confirmed stream.
+    #[test]
+    fn mispredicted_bat_hit_never_confirms() {
+        let (predicted, confirmed) = swing_streams(0, 40..49, 0..0, 3);
+        assert!(predicted.len() <= 1, "a predicted hit shows at most once: {predicted:?}");
+        assert!(confirmed.is_empty(), "the server saw no swing: {confirmed:?}");
     }
 }

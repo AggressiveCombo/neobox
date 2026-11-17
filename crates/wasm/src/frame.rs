@@ -1,14 +1,15 @@
 //! Builds the per-frame render buffer (see docs/CLIENT-API.md) from two
 //! consecutive simulation states.
 
+use neobox_net::FedKeys;
 use neobox_sim::map::{BodyDef, MapShape, SHAPE_CIRCLE};
 use neobox_sim::state::{Body, Effect, Player, Projectile, State, ATTACH_ON};
 use neobox_sim::step::kind;
 use neobox_sim::GameSettings;
 use std::collections::HashMap;
 
-pub const LAYOUT_VERSION: u32 = 4;
-pub const HEADER_WORDS: usize = 34;
+pub const LAYOUT_VERSION: u32 = 7;
+pub const HEADER_WORDS: usize = 38;
 pub const PLAYER_WORDS: usize = 14;
 pub const SOUND_WORDS: usize = 5;
 pub const SCORE_WORDS: usize = 15;
@@ -73,8 +74,6 @@ pub struct FrameBuilder {
     /// be reused by another definition while it is cached
     cache: HashMap<usize, (std::sync::Arc<BodyDef>, Vec<Mesh>)>,
     tmp: Vec<[f32; 2]>,
-    /// Kill events of the built frame: (killer, victim) pairs.
-    kills: Vec<u32>,
     /// Damage bars of the built frame: x, y, fraction, colour (BAR_WORDS each).
     bars: Vec<u32>,
 }
@@ -347,7 +346,7 @@ impl FrameBuilder {
     }
 
     /// Build the frame for `cur`, interpolating from `prev` by `t` in [0, 1].
-    pub fn build(&mut self, prev: &State, cur: &State, t: f64, gs: &GameSettings, meta: Meta, sounds: &[SoundOut]) {
+    pub fn build(&mut self, prev: &State, cur: &State, t: f64, gs: &GameSettings, meta: Meta, feed: &Feed) {
         self.verts.clear();
         self.bars.clear();
         // bodies, back to front by z-index (stable)
@@ -460,14 +459,6 @@ impl FrameBuilder {
             self.effect(e);
         }
 
-        // kills since prev as (killer, victim) pairs; the client shows each tick's kills once
-        self.kills.clear();
-        for (id, r) in cur.round.players.iter() {
-            let before = prev.round.players.get(id).map_or(0.0, |pr| pr.kills);
-            if r.kills > before && r.last_victim >= 0.0 {
-                self.kills.extend([id, r.last_victim as u32]);
-            }
-        }
         // ---- assemble
         let w = &mut self.words;
         w.clear();
@@ -528,9 +519,9 @@ impl FrameBuilder {
                 f(interp_egg_aim(prev.players.get(id), p, t)),
             ]);
         }
-        w[5] = sounds.len() as u32;
+        w[5] = feed.sounds.len() as u32;
         w[6] = w.len() as u32;
-        for s in sounds {
+        for s in &feed.sounds {
             w.extend([s.kind, s.x.to_bits(), s.y.to_bits(), s.volume.to_bits(), s.player as u32]);
         }
         w[7] = cur.round.players.len() as u32;
@@ -561,12 +552,18 @@ impl FrameBuilder {
                 f(spawn_y),
             ]);
         }
-        w[30] = (self.kills.len() / 2) as u32;
+        w[30] = (feed.kills.len() / 3) as u32;
         w[31] = w.len() as u32;
-        w.extend_from_slice(&self.kills);
+        w.extend_from_slice(&feed.kills);
         w[32] = (self.bars.len() / BAR_WORDS) as u32;
         w[33] = w.len() as u32;
         w.extend_from_slice(&self.bars);
+        w[34] = (feed.hits.len() / 3) as u32;
+        w[35] = w.len() as u32;
+        w.extend_from_slice(&feed.hits);
+        w[36] = (feed.log_hits.len() / 4) as u32;
+        w[37] = w.len() as u32;
+        w.extend_from_slice(&feed.log_hits);
         let st = &cur.settings;
         w[9] = f(st.screen_width);
         w[10] = f(st.width);
@@ -678,6 +675,69 @@ fn rotate(x: f64, y: f64, angle: f64) -> (f64, f64) {
     (x * c - y * s, x * s + y * c)
 }
 
+/// Events of the ticks a frame covers. Two streams: predicted ticks (sounds and bat hits, which
+/// drive the presentation at once; a rollback may undo them) and confirmed ticks (kills and bat
+/// hits, the event log that every client agrees on).
+#[derive(Default)]
+pub struct Feed {
+    /// sounds of predicted ticks
+    pub sounds: Vec<SoundOut>,
+    /// (swinger, victim kind, victim index) triples of bat hits of predicted ticks: the hit visuals
+    pub hits: Vec<u32>,
+    /// (killer, victim, tick) triples of confirmed ticks
+    pub kills: Vec<u32>,
+    /// (swinger, victim kind, victim index, tick) quadruples of bat hits of confirmed ticks: the event log
+    pub log_hits: Vec<u32>,
+    /// predicted sounds already fed, per tick: a rollback feeds the recomputed ticks again
+    fed_sounds: FedKeys<(u32, u32, u32, u32, i32)>,
+    /// predicted bat hits already fed, per tick
+    fed_hits: FedKeys<(u32, u32, u32)>,
+}
+
+impl Feed {
+    pub fn clear(&mut self) {
+        self.sounds.clear();
+        self.hits.clear();
+        self.kills.clear();
+        self.log_hits.clear();
+    }
+    /// Forget the dedupe keys of the ticks before `tick` (rollbacks never reach below it).
+    pub fn forget_before(&mut self, tick: u32) {
+        self.fed_sounds.forget_before(tick);
+        self.fed_hits.forget_before(tick);
+    }
+    /// Add the sounds and bat hits of predicted tick `tick`, `prev` to `cur`; a record fed before
+    /// (the tick was recomputed by a rollback) is not fed again.
+    pub fn add_predicted(&mut self, tick: u32, prev: &State, cur: &State) {
+        let mut sounds = Vec::new();
+        new_sounds(prev, cur, &mut sounds);
+        for s in sounds {
+            let key = (s.kind, s.x.to_bits(), s.y.to_bits(), s.volume.to_bits(), s.player);
+            if self.fed_sounds.first(tick, key) {
+                self.sounds.push(s);
+            }
+        }
+        let mut hits = Vec::new();
+        new_hits(prev, cur, None, &mut hits);
+        for h in hits.chunks_exact(3) {
+            if self.fed_hits.first(tick, (h[0], h[1], h[2])) {
+                self.hits.extend_from_slice(h);
+            }
+        }
+    }
+    /// Add the kills and bat hits of one confirmed tick `tick` (`cur`'s tick), `prev` to `cur`.
+    pub fn add_confirmed(&mut self, tick: u32, prev: &State, cur: &State) {
+        new_kills(tick, prev, cur, &mut self.kills);
+        new_hits(prev, cur, Some(tick), &mut self.log_hits);
+    }
+    /// Add the events of one tick that is final (replays, offline games): both streams, each once.
+    pub fn add(&mut self, tick: u32, prev: &State, cur: &State) {
+        new_sounds(prev, cur, &mut self.sounds);
+        new_hits(prev, cur, None, &mut self.hits);
+        self.add_confirmed(tick, prev, cur);
+    }
+}
+
 /// New sounds of `cur` relative to `prev` (sounds append after survivors), then the client-only
 /// cues the sim does not emit: a push click when a push runs out of stamina, and the fanfare
 /// when the game ends.
@@ -694,6 +754,30 @@ pub fn new_sounds(prev: &State, cur: &State, out: &mut Vec<SoundOut>) {
     }
     if prev.round.game_over < 0.0 && cur.round.game_over >= 0.0 {
         out.push(SoundOut { kind: SOUND_FANFARE, x: 0.0, y: 0.0, volume: 1.0, player: -1 });
+    }
+}
+
+/// (killer, victim, tick) triples of the kills `cur` has over `prev`; `tick` is `cur`'s tick.
+pub fn new_kills(tick: u32, prev: &State, cur: &State, out: &mut Vec<u32>) {
+    for (id, r) in cur.round.players.iter() {
+        let before = prev.round.players.get(id).map_or(0.0, |pr| pr.kills);
+        if r.kills > before && r.last_victim >= 0.0 {
+            out.extend([id as u32, r.last_victim as u32, tick]);
+        }
+    }
+}
+
+/// (swinger, victim kind, victim index) triples of the bat hits that landed on `cur` after `prev`,
+/// each followed by `tick` when given (confirmed hits). `bat_hits` grows during a swing and is
+/// cleared when the swing resets.
+pub fn new_hits(prev: &State, cur: &State, tick: Option<u32>, out: &mut Vec<u32>) {
+    for (id, p) in cur.players.iter() {
+        let before = prev.players.get(id).map_or(0, |pp| pp.bat_hits.len());
+        let from = if p.bat_hits.len() >= before { before } else { 0 };
+        for pair in p.bat_hits[from..].chunks_exact(2) {
+            out.extend([id as u32, pair[0] as u32, pair[1] as u32]);
+            out.extend(tick);
+        }
     }
 }
 
@@ -762,7 +846,7 @@ mod tests {
         };
         let (prev, cur) = (at(0.0), at(10.0));
         let mut f = FrameBuilder::default();
-        f.build(&prev, &cur, 0.5, &GameSettings::default(), Meta::default(), &[]);
+        f.build(&prev, &cur, 0.5, &GameSettings::default(), Meta::default(), &Feed::default());
         let xs: Vec<f32> = f.verts.chunks(3).map(|v| f32::from_bits(v[0])).collect();
         assert!(!xs.is_empty());
         let mid = xs.iter().sum::<f32>() / xs.len() as f32;

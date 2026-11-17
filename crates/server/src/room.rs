@@ -42,8 +42,8 @@ const RECORD_TICKS_PER_SECOND: f64 = 30.0;
 /// Appearance colours for players who have not picked one.
 const DEFAULT_COLORS: [u32; 8] = [0x9be15d, 0xffc857, 0xc792ea, 0x4fd1c5, 0xff8fab, 0xf6e05e, 0x7f9cf5, 0xf28c28];
 const HELP: &str = "Commands: /set <key> <value>, /settings, /reset, /mode <n>, /start, /end, /lock, /unlock, \
-    /kick <name>, /ban <name>, /unban <name>, /host <name>, /team <name> <ffa|red|blue|spec>, \
-    /join <ffa|red|blue|spec>, /upvote, /downvote, /fav, /unfav, /record";
+    /kick <name>, /ban <name>, /unban <name>, /mute <name>, /unmute <name>, /host <name>, \
+    /team <name> <ffa|red|blue|spec>, /join <ffa|red|blue|spec>, /upvote, /downvote, /fav, /unfav, /record";
 
 /// (player id, resume token) on success, or (code, message).
 type JoinReply = Result<(u32, String), (String, String)>;
@@ -196,6 +196,8 @@ struct RPlayer {
     rate: (u64, u64),
     /// The best (map, ticks) already announced for this player; a finish counts only when it beats it.
     record_seen: Option<(i64, i64)>,
+    /// Host-muted: chat lines and typing signals are refused.
+    muted: bool,
 }
 
 impl RPlayer {
@@ -551,7 +553,7 @@ impl Room {
                 let frame = self.game.as_ref().map(|g| {
                     let mut fb = neobox_wasm::frame::FrameBuilder::default();
                     let meta = neobox_wasm::frame::Meta { tick: g.m.tick, local: -1, ..Default::default() };
-                    fb.build(&g.m.state, &g.m.state, 1.0, &g.m.start.settings, meta, &[]);
+                    fb.build(&g.m.state, &g.m.state, 1.0, &g.m.start.settings, meta, &neobox_wasm::frame::Feed::default());
                     fb.words.iter().flat_map(|w| w.to_le_bytes()).collect()
                 });
                 let _ = reply.send(frame);
@@ -727,6 +729,7 @@ impl Room {
             last_bytes: (0, 0),
             rate: (0, 0),
             record_seen: None,
+            muted: false,
         });
         // quick-play rooms have no host
         if self.host.is_none() && self.quick.is_none() {
@@ -967,6 +970,10 @@ impl Room {
                     None => return self.notice(id, "No banned player with that name"),
                 }
             }
+            "mute" | "unmute" => match self.named_player(rest) {
+                Some((player, _)) => ClientMsg::Mute { player, muted: word == "mute" },
+                None => return self.notice(id, "No player with that name"),
+            },
             "upvote" | "downvote" | "fav" | "fave" | "unfav" | "unfave" => return self.map_command(id, &word),
             // clips are cut on the client from its own recording of the match
             "record" => return self.notice(id, "Type /record in a running match to send its last 15 seconds to the main menu"),
@@ -1023,6 +1030,9 @@ impl Room {
                 let text: String = clean_text(&text).chars().take(MAX_CHAT_LEN).collect::<String>().trim().to_string();
                 if text.is_empty() {
                     return;
+                }
+                if self.player(id).is_some_and(|p| p.muted) {
+                    return self.error(id, "muted", "The host has muted you");
                 }
                 // commands are the same actions the UI sends as plain messages,
                 // which are not throttled; only chat lines are
@@ -1091,7 +1101,7 @@ impl Room {
                 match MapData::from_code(code.trim()) {
                     Ok(_) => {
                         self.map_code = code.trim().to_string();
-                        self.map_name = name.map(|n| n.chars().take(60).collect()).unwrap_or_else(|| "Custom map".into());
+                        self.map_name = map_label(name.as_deref());
                         self.map_meta = None;
                         self.system_chat(&format!("Map changed to {}", self.map_name));
                         self.broadcast_room();
@@ -1206,6 +1216,9 @@ impl Room {
             }
             ClientMsg::Typing => {
                 let Some(p) = self.player_mut(id) else { return };
+                if p.muted {
+                    return;
+                }
                 let now = Instant::now();
                 if p.typing_at.is_some_and(|t| now.duration_since(t) < TYPING_GAP) {
                     return;
@@ -1243,6 +1256,24 @@ impl Room {
                     return;
                 }
                 self.kick(player, ban);
+            }
+            ClientMsg::Mute { player, muted } => {
+                if !host {
+                    return self.error(id, "not_host", "Only the host can mute players");
+                }
+                if player == id {
+                    return;
+                }
+                let Some(p) = self.player_mut(player) else { return };
+                p.muted = muted;
+                let name = p.name.clone();
+                if muted {
+                    self.notice(player, "The host muted you: your chat lines are not sent");
+                    self.system_chat(&format!("{name} was muted"));
+                } else {
+                    self.notice(player, "The host unmuted you");
+                    self.system_chat(&format!("{name} was unmuted"));
+                }
             }
             ClientMsg::Unban { name } => {
                 if !host {
@@ -1620,7 +1651,7 @@ impl Room {
             }
         });
         self.map_meta = Some(map_meta_of(&found));
-        self.map_name = found.name.chars().take(60).collect();
+        self.map_name = map_label(Some(found.name.as_str()));
         self.map_code = found.code;
         self.system_chat(&format!("Map changed to {}", self.map_name));
         self.broadcast_room();
@@ -1904,4 +1935,24 @@ impl Room {
 
 pub fn json<T: Serialize>(v: &T) -> String {
     serde_json::to_string(v).unwrap_or_default()
+}
+
+/// The name of a map as others see it: invisible and bidi characters removed, trimmed and at most 60
+/// characters. A name with nothing visible left reads as the default.
+fn map_label(name: Option<&str>) -> String {
+    let label: String = name.map(clean_text).unwrap_or_default().trim().chars().take(60).collect();
+    if label.is_empty() { "Custom map".into() } else { label }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::map_label;
+
+    #[test]
+    fn map_names_are_cleaned_and_capped() {
+        assert_eq!(map_label(Some("a\u{202E}bc")), "abc");
+        assert_eq!(map_label(Some("\u{3164}")), "Custom map");
+        assert_eq!(map_label(None), "Custom map");
+        assert_eq!(map_label(Some(&"x".repeat(80))).chars().count(), 60);
+    }
 }

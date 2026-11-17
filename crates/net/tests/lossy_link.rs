@@ -107,7 +107,7 @@ fn clients_converge_and_lose_no_input() {
                     ServerFrame::Batch { ticks, input_ack, .. } => {
                         clients[to].on_ticks(&ticks);
                         clients[to].input_ack(input_ack);
-                        assert!(!clients[to].desynced, "client {to} desynced");
+                        assert!(clients[to].desync.is_none(), "client {to} desynced");
                     }
                     other => panic!("unexpected {other:?}"),
                 }

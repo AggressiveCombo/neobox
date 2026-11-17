@@ -39,13 +39,14 @@ pub fn valid_name(name: &str) -> bool {
 
 /// Invisible format characters that change how text renders: bidirectional
 /// controls (they reverse the text after them), zero-width spaces and joiners
-/// (they make a line look blank), word joiners and byte-order marks.
+/// (they make a line look blank), word joiners, byte-order marks and blank fillers (Hangul and braille blanks).
 fn is_format(c: char) -> bool {
     matches!(
         c,
         '\u{00AD}' | '\u{0600}'..='\u{0605}' | '\u{061C}' | '\u{06DD}' | '\u{070F}' | '\u{180E}'
             | '\u{200B}'..='\u{200C}' | '\u{200E}'..='\u{200F}' | '\u{202A}'..='\u{202E}'
             | '\u{2060}'..='\u{206F}' | '\u{FEFF}' | '\u{FFF9}'..='\u{FFFB}' | '\u{110BD}' | '\u{1D173}'..='\u{1D17A}' | '\u{E0001}'
+            | '\u{034F}' | '\u{115F}'..='\u{1160}' | '\u{2800}' | '\u{3164}' | '\u{FFA0}'
     )
 }
 
@@ -132,6 +133,8 @@ pub enum ClientMsg {
     EndMatch,
     /// Host: kick or ban a player.
     Kick { player: u32, ban: bool },
+    /// Host: mute or unmute a player's chat lines for this room session.
+    Mute { player: u32, muted: bool },
     /// Host: lift a ban (by the banned player's name as listed in `RoomState::bans`).
     Unban { name: String },
     /// Host: hand the host role to another player.
@@ -689,5 +692,13 @@ mod clean_tests {
         assert_eq!(clean_text("\u{200D}hi"), "hi");
         assert_eq!(clean_text("\u{FE0F}"), "");
         assert_eq!(clean_text("hi \u{200D} there"), "hi  there");
+    }
+
+    #[test]
+    fn blank_fillers_are_dropped() {
+        assert_eq!(clean_text("\u{3164}"), "");
+        assert_eq!(clean_text("\u{115F}\u{1160}\u{FFA0}\u{2800}\u{034F}"), "");
+        assert_eq!(clean_text("a\u{3164}b"), "ab");
+        assert_eq!(clean_text("\u{3164} \u{3164}").trim(), "");
     }
 }

@@ -61,11 +61,11 @@ Little-endian. Word = 4 bytes. View it as both `Uint32Array` and
 `Float32Array` over `memory.buffer` at `nb_frame_ptr()` (re-create the views
 if `memory.buffer` changed).
 
-Header (words 0..33):
+Header (words 0..37):
 
 | Word | Type | Field |
 | --- | --- | --- |
-| 0 | u32 | layout version (4) |
+| 0 | u32 | layout version (7) |
 | 1 | u32 | world vertex count |
 | 2 | u32 | world vertex offset (words) |
 | 3 | u32 | player count |
@@ -99,6 +99,10 @@ Header (words 0..33):
 | 31 | u32 | kill offset (words) |
 | 32 | u32 | damage bar count |
 | 33 | u32 | damage bar offset (words) |
+| 34 | u32 | predicted bat hit count (hit visuals) |
+| 35 | u32 | predicted bat hit offset (words) |
+| 36 | u32 | confirmed bat hit count (event log) |
+| 37 | u32 | confirmed bat hit offset (words) |
 
 World vertices: 3 words each `x f32, y f32, colour u32`; the colour's bytes
 in memory are R, G, B, A (i.e. `r | g << 8 | b << 16 | a << 24`, ready for a
@@ -130,8 +134,16 @@ kill_timer f32, death_timer f32, suicide_timer f32, spawn_x f32, spawn_y f32`.
 `killed_by` and `last_victim` are player ids, -1 for none. `spawn_x`/`spawn_y`
 are the claimed respawn point (NaN when none), flashed by the spawn preview.
 
-Kill pairs: 2 words each, `killer u32, victim u32`, in order, for the kills
-since the previous frame. Count in word 30, offset in word 31.
+Kill triples: 3 words each, `killer u32, victim u32, tick u32`, in order, for the
+kills since the previous frame (confirmed ticks; `tick` is the tick the kill happened
+on). Count in word 30, offset in word 31.
+
+Bat hits: 3 words each, `swinger u32, kind u32, index u32` (kind 0 body, 1 player,
+2 projectile; index is the body or projectile index, or the victim's player id for
+kind 1). Words 34/35 hold the predicted ticks' hits (the hit visuals, which a
+rollback may undo). Words 36/37 hold the confirmed ticks' hits: 4 words each, the
+same three plus `tick u32` (the event log every client agrees on). Both are for the
+ticks since the previous frame.
 
 Damage bars: 4 words each, `x f32, y f32, fraction f32, colour u32`
 (0xRRGGBB), one per body with a dynamic (field 21) or removal (field 22)

@@ -67,7 +67,7 @@ fn replay_reproduces_the_server_match() {
     for chunk in since_join.chunks(40) {
         client.on_ticks(chunk);
     }
-    assert!(!client.desynced);
+    assert!(client.desync.is_none());
     assert_eq!(checksum(client.confirmed_state()), hashes[TICKS as usize], "late-joining client diverged");
 
     // the file round-trips through JSON
