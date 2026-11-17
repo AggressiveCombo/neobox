@@ -19,8 +19,8 @@ const RETRY_MS = 15_000;
 /** The bundled demo match, listed when the server has no clips. */
 const DEMO_CLIP: ClipSummary = { id: 0, recorder: "neobox", map_name: "Simple Arena 1", created: 0, size: 0 };
 
-async function fetchDemo(): Promise<string> {
-  const res = await fetch("/clips/demo.json");
+async function fetchDemo(signal: AbortSignal): Promise<string> {
+  const res = await fetch("/clips/demo.json", { signal });
   if (!res.ok) throw new Error(`/clips/demo.json: HTTP ${res.status}`);
   return res.text();
 }
@@ -49,6 +49,12 @@ export function mountMenuClips(ctx: AppCtx, host: HTMLElement, onPlaying?: (on: 
   let rafId = 0;
   let last = 0;
   let retryTimer = 0;
+  // Aborted when the page leaves (beforeunload, then pagehide) and when the menu closes: a fetch the page abandons
+  // mid-navigation rejects with a page error in WebKit, so it is cancelled first, in the page, and its rejection is handled below.
+  let net = new AbortController();
+  const abortLoads = () => net.abort();
+  window.addEventListener("beforeunload", abortLoads);
+  window.addEventListener("pagehide", abortLoads);
 
   const credit = h("p", { class: "menu-clip-credit" });
   credit.hidden = true;
@@ -58,7 +64,7 @@ export function mountMenuClips(ctx: AppCtx, host: HTMLElement, onPlaying?: (on: 
   ctx.sfx.sceneMuted = true;
 
   async function fetchPage(): Promise<void> {
-    const page = await listClips(clips.at(-1)?.id);
+    const page = await listClips(clips.at(-1)?.id, net.signal);
     if (destroyed) return;
     clips = [...clips, ...page];
     atEnd = page.length < PAGE_SIZE;
@@ -69,7 +75,7 @@ export function mountMenuClips(ctx: AppCtx, host: HTMLElement, onPlaying?: (on: 
   /** Fetch and load one clip into the engine; throws when it does not load. */
   async function loadClip(clip: ClipSummary): Promise<Playing> {
     const engine = await ctx.engine();
-    const text = clip === DEMO_CLIP ? await fetchDemo() : await fetchClipReplay(clip.id);
+    const text = clip === DEMO_CLIP ? await fetchDemo(net.signal) : await fetchClipReplay(clip.id, net.signal);
     if (destroyed) throw new Error("the menu closed");
     engine.replayClose();
     const info = engine.replayLoad(text);
@@ -118,6 +124,7 @@ export function mountMenuClips(ctx: AppCtx, host: HTMLElement, onPlaying?: (on: 
 
   function startNext(): void {
     if (loading || destroyed) return;
+    if (net.signal.aborted) net = new AbortController();
     loading = true;
     loadNext().then(
       (next) => {
@@ -165,6 +172,9 @@ export function mountMenuClips(ctx: AppCtx, host: HTMLElement, onPlaying?: (on: 
 
   return () => {
     destroyed = true;
+    window.removeEventListener("beforeunload", abortLoads);
+    window.removeEventListener("pagehide", abortLoads);
+    net.abort();
     cancelAnimationFrame(rafId);
     window.clearTimeout(retryTimer);
     playing = null;

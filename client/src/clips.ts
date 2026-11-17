@@ -48,15 +48,18 @@ export async function recordClip(ctx: AppCtx): Promise<string> {
   }
 }
 
-/** One page of clips, newest first. `before`: the id of the last clip of the previous page. */
-export async function listClips(before?: number): Promise<ClipSummary[]> {
+/**
+ * One page of clips, newest first. `before`: the id of the last clip of the previous page.
+ * `signal` abandons the request when the page is leaving (see menu-clips.ts).
+ */
+export async function listClips(before?: number, signal?: AbortSignal): Promise<ClipSummary[]> {
   const query = before === undefined ? "" : `?before=${before}`;
-  const res = await clipRequest(`/api/clips${query}`, { headers: { accept: "application/json" } });
+  const res = await clipRequest(`/api/clips${query}`, { headers: { accept: "application/json" }, signal });
   return (await res.json()) as ClipSummary[];
 }
 
 /** The replay JSON text of a clip, ready for `Engine.replayLoad`. */
-export async function fetchClipReplay(id: number): Promise<string> {
-  const res = await clipRequest(`/api/clips/${id}`);
+export async function fetchClipReplay(id: number, signal?: AbortSignal): Promise<string> {
+  const res = await clipRequest(`/api/clips/${id}`, { signal });
   return res.text();
 }
