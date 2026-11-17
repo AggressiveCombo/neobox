@@ -261,11 +261,6 @@
   display: none;
 }
 
-/* Toasts sit above the footer, not over it. */
-body:has(.screen.editor) #toasts {
-  bottom: 108px;
-}
-
 /* --------------------------------------------------------------- inspector */
 
 .editor-side {
@@ -608,10 +603,6 @@ body:has(.screen.editor) #toasts {
 
   .editor-lag {
     bottom: 64px;
-  }
-
-  body:has(.screen.editor) #toasts {
-    bottom: calc(128px + env(safe-area-inset-bottom));
   }
 
   .editor-menu {

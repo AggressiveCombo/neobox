@@ -1,5 +1,10 @@
 /* The Browse rooms screen (ui/screens/browser.ts). Page, field and button base styles come from style.css. */
 
+/* The title scrolls with the room list: a sticky bar covered rows at large text sizes (settings.css does the same). */
+.browser .page-head {
+  position: static;
+}
+
 /* Join by code: the field and the Join button in one row. */
 .code-join {
   display: flex;

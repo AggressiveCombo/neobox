@@ -36,6 +36,11 @@
   outline-offset: 2px;
 }
 
+/* Firefox makes the scrolling column a Tab stop. Its edge is the viewport edge, so the ring sits inside it. */
+.room-screen .room-content:focus-visible {
+  outline-offset: -4px;
+}
+
 /* The sticky tabs cover the scroller's top edge. room.ts measures them into --room-tabs-h, so focus scrolling stops short of them. */
 .room-screen :is(button, input, select, textarea, summary, a[href], [tabindex]) {
   scroll-margin-top: var(--room-tabs-h, 0px);
