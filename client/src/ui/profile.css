@@ -160,3 +160,21 @@ dialog.modal.profile-dialog {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
+
+@media (max-height: 640px) {
+  .profile {
+    gap: 16px;
+  }
+
+  .profile-stats {
+    gap: 14px 12px;
+  }
+
+  .profile-stat .num {
+    font-size: 1.25rem;
+  }
+
+  .profile-stat-icon {
+    display: none;
+  }
+}
