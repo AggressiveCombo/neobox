@@ -81,7 +81,23 @@ export class Net {
   private pings: number[] = [];
   status: NetStatus = "closed";
 
-  constructor(private readonly handlers: NetHandlers) {}
+  constructor(private readonly handlers: NetHandlers) {
+    // The page goes away with its socket open: close it quietly here. The server holds the seat for the resume,
+    // and no status is set, so the session (and its seat) is kept. A bfcache freeze keeps the socket.
+    window.addEventListener("pagehide", (ev) => {
+      if (!ev.persisted) this.leavePage();
+    });
+  }
+
+  /** Drop the socket without a status change: the page is unloading. */
+  private leavePage(): void {
+    const ws = this.ws;
+    if (ws === null) return;
+    this.ws = null;
+    this.stopWatch();
+    this.dropRtc();
+    if (ws.readyState <= WebSocket.OPEN) ws.close(1000, "bye");
+  }
 
   get transport(): Transport {
     return this.rtc?.dc.readyState === "open" ? "udp" : "ws";
