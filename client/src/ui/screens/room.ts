@@ -887,6 +887,16 @@ export const roomScreen: ScreenFactory = (ctx: AppCtx) => {
     });
   }
 
+  /** Runs a preview draw once the engine is loaded: a room that opens before the engine is not an error to show. */
+  function afterEngine(draw: () => void): void {
+    ctx.engine().then(
+      () => {
+        if (alive) draw();
+      },
+      () => {},
+    );
+  }
+
   /**
    * Previews the room's current map (visible to everyone): a built-in by name, otherwise the
    * code the server holds for the room (asked once per map name).
@@ -895,14 +905,14 @@ export const roomScreen: ScreenFactory = (ctx: AppCtx) => {
     const name = lastMapName;
     const map = builtins?.find((m) => m.name === name);
     if (map) {
-      showPreview(map.code);
+      afterEngine(() => showPreview(map.code));
       return;
     }
     if (!name || previewAsked === name) return;
     previewAsked = name;
     ctx.roomMap().then(
       ({ code }) => {
-        if (alive && code !== "" && lastMapName === name) showPreview(code);
+        if (alive && code !== "" && lastMapName === name) afterEngine(() => showPreview(code));
       },
       () => {},
     );
