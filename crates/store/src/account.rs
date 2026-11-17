@@ -321,7 +321,7 @@ mod tests {
         let a = s.register("Fay", PASSWORD).unwrap();
         let b = s.register("Gus", PASSWORD).unwrap();
         let token = s.create_session(a.id).unwrap();
-        let map = s.upload(a.id, "Mine", "code", Visibility::Unlisted, "").unwrap();
+        let map = s.upload(a.id, "Mine", &neobox_sim::MapData::default().to_code(), Visibility::Unlisted, "").unwrap();
         s.vote(b.id, map, 1).unwrap();
         s.favourite(b.id, map, true).unwrap();
         s.set_prefs(a.id, "{}").unwrap();

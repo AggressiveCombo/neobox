@@ -255,6 +255,8 @@ fn check_code(code: &str) -> Result<()> {
         Err(Error::Invalid("The map is empty"))
     } else if code.len() > MAX_CODE_BYTES {
         Err(Error::Invalid("The map is too large"))
+    } else if neobox_sim::MapData::from_code(code.trim()).is_err() {
+        Err(Error::Invalid("That is not a valid map code"))
     } else {
         Ok(())
     }
@@ -672,8 +674,17 @@ mod tests {
     use super::*;
     use crate::test_support::{raw_account, store};
 
+    fn valid_code() -> String {
+        neobox_sim::MapData::default().to_code()
+    }
+
+    /// A different code string for the same map; the trailing space makes an edit count as changed.
+    fn edited_code() -> String {
+        format!("{} ", valid_code())
+    }
+
     fn live_public(s: &Store, owner: i64, name: &str) -> i64 {
-        let id = s.upload(owner, name, "code", Visibility::Public, "").unwrap();
+        let id = s.upload(owner, name, &valid_code(), Visibility::Public, "").unwrap();
         s.moderate(id, Verdict::Approve).unwrap();
         id
     }
@@ -690,18 +701,20 @@ mod tests {
     fn upload_checks_name_code_and_owner() {
         let s = store();
         let o = raw_account(&s, "Owner");
-        assert!(matches!(s.upload(o, "  ", "c", Visibility::Unlisted, ""), Err(Error::Invalid(_))));
+        assert!(matches!(s.upload(o, "  ", &valid_code(), Visibility::Unlisted, ""), Err(Error::Invalid(_))));
         let long = "n".repeat(MAX_MAP_NAME_CHARS + 1);
-        assert!(matches!(s.upload(o, &long, "c", Visibility::Unlisted, ""), Err(Error::Invalid(_))));
-        assert!(matches!(s.upload(o, "bad\u{7}name", "c", Visibility::Unlisted, ""), Err(Error::Invalid(_))));
-        s.upload(o, &"n".repeat(MAX_MAP_NAME_CHARS), "c", Visibility::Unlisted, "").unwrap();
+        assert!(matches!(s.upload(o, &long, &valid_code(), Visibility::Unlisted, ""), Err(Error::Invalid(_))));
+        assert!(matches!(s.upload(o, "bad\u{7}name", &valid_code(), Visibility::Unlisted, ""), Err(Error::Invalid(_))));
+        s.upload(o, &"n".repeat(MAX_MAP_NAME_CHARS), &valid_code(), Visibility::Unlisted, "").unwrap();
         assert!(matches!(s.upload(o, "x", "", Visibility::Unlisted, ""), Err(Error::Invalid(_))));
         assert!(matches!(
             s.upload(o, "x", &"c".repeat(MAX_CODE_BYTES + 1), Visibility::Unlisted, ""),
             Err(Error::Invalid(_))
         ));
-        s.upload(o, "x", &"c".repeat(MAX_CODE_BYTES), Visibility::Unlisted, "").unwrap();
-        assert!(matches!(s.upload(999, "x", "c", Visibility::Unlisted, ""), Err(Error::NotFound)));
+        let code = valid_code();
+        let padded = format!("{code}{}", " ".repeat(MAX_CODE_BYTES - code.len()));
+        s.upload(o, "x", &padded, Visibility::Unlisted, "").unwrap();
+        assert!(matches!(s.upload(999, "x", &valid_code(), Visibility::Unlisted, ""), Err(Error::NotFound)));
     }
 
     #[test]
@@ -709,9 +722,9 @@ mod tests {
         let s = store();
         let o = raw_account(&s, "Owner");
         let long = "d".repeat(MAX_DESCRIPTION_CHARS + 1);
-        assert!(matches!(s.upload(o, "x", "c", Visibility::Unlisted, &long), Err(Error::Invalid(_))));
-        assert!(matches!(s.upload(o, "x", "c", Visibility::Unlisted, "two\nlines"), Err(Error::Invalid(_))));
-        let m = s.upload(o, "x", "c", Visibility::Unlisted, "  a race  ").unwrap();
+        assert!(matches!(s.upload(o, "x", &valid_code(), Visibility::Unlisted, &long), Err(Error::Invalid(_))));
+        assert!(matches!(s.upload(o, "x", &valid_code(), Visibility::Unlisted, "two\nlines"), Err(Error::Invalid(_))));
+        let m = s.upload(o, "x", &valid_code(), Visibility::Unlisted, "  a race  ").unwrap();
         assert_eq!(s.get(m, Some(o), false).unwrap().map.description, "a race", "trimmed and kept");
         s.update(o, m, "x", None, Visibility::Unlisted, "a new description").unwrap();
         assert_eq!(s.get(m, Some(o), false).unwrap().map.description, "a new description");
@@ -739,23 +752,23 @@ mod tests {
         let old = live_public(&s, o, "Old");
         vote(old, 3, 1);
         s.db().execute("UPDATE maps SET created = 10 WHERE id = ?1", [old]).unwrap();
-        let unlisted = s.upload(o, "Unlisted", "code", Visibility::Unlisted, "").unwrap();
+        let unlisted = s.upload(o, "Unlisted", &valid_code(), Visibility::Unlisted, "").unwrap();
         vote(unlisted, 3, 1);
 
         let picks: Vec<i64> = s.rotation_picks(100, 4).unwrap().iter().map(|m| m.id).collect();
         assert_eq!(picks, [best, good], "best first; no old, unlisted, unrated or disliked maps");
         assert_eq!(s.rotation_picks(100, 1).unwrap().len(), 1, "limit");
         let picks = s.rotation_picks(100, 4).unwrap();
-        assert_eq!((picks[0].name.as_str(), picks[0].author.as_str(), picks[0].code.as_str(), picks[0].up), ("Best", "Owner", "code", 3));
+        assert_eq!((picks[0].name.as_str(), picks[0].author.as_str(), picks[0].code.as_str(), picks[0].up), ("Best", "Owner", valid_code().as_str(), 3));
     }
 
     #[test]
     fn public_maps_start_pending_and_others_are_live() {
         let s = store();
         let o = raw_account(&s, "Owner");
-        let p = s.upload(o, "Pub", "code", Visibility::Public, "").unwrap();
-        let u = s.upload(o, "Unl", "code", Visibility::Unlisted, "").unwrap();
-        let v = s.upload(o, "Priv", "code", Visibility::Private, "").unwrap();
+        let p = s.upload(o, "Pub", &valid_code(), Visibility::Public, "").unwrap();
+        let u = s.upload(o, "Unl", &valid_code(), Visibility::Unlisted, "").unwrap();
+        let v = s.upload(o, "Priv", &valid_code(), Visibility::Private, "").unwrap();
         assert_eq!(status_of(&s, p), Status::Pending);
         assert_eq!(status_of(&s, u), Status::Approved);
         assert_eq!(status_of(&s, v), Status::Approved);
@@ -766,11 +779,11 @@ mod tests {
         let s = store();
         let o = raw_account(&s, "Owner");
         let other = raw_account(&s, "Other");
-        let pending = s.upload(o, "Pending", "code", Visibility::Public, "").unwrap();
-        let unlisted = s.upload(o, "Link", "code", Visibility::Unlisted, "").unwrap();
-        let private = s.upload(o, "Mine", "code", Visibility::Private, "").unwrap();
+        let pending = s.upload(o, "Pending", &valid_code(), Visibility::Public, "").unwrap();
+        let unlisted = s.upload(o, "Link", &valid_code(), Visibility::Unlisted, "").unwrap();
+        let private = s.upload(o, "Mine", &valid_code(), Visibility::Private, "").unwrap();
         let public = live_public(&s, o, "Live");
-        let rejected = s.upload(o, "Bad", "code", Visibility::Public, "").unwrap();
+        let rejected = s.upload(o, "Bad", &valid_code(), Visibility::Public, "").unwrap();
         s.moderate(rejected, Verdict::Reject).unwrap();
 
         for hidden in [pending, private, rejected] {
@@ -796,7 +809,7 @@ mod tests {
         s.vote(fan, m, -1).unwrap();
         s.favourite(fan, m, true).unwrap();
         let d = s.get(m, Some(fan), false).unwrap();
-        assert_eq!(d.code, "code");
+        assert_eq!(d.code, valid_code());
         assert_eq!(d.vote, -1);
         assert!(d.favourite);
         assert_eq!(d.map.score, -1);
@@ -811,20 +824,20 @@ mod tests {
         let other = raw_account(&s, "Other");
         let fan = raw_account(&s, "Fan");
         let fan2 = raw_account(&s, "Fan2");
-        let public = s.upload(o, "Live", "code", Visibility::Public, "Nice").unwrap();
+        let public = s.upload(o, "Live", &valid_code(), Visibility::Public, "Nice").unwrap();
         s.moderate(public, Verdict::Approve).unwrap();
         s.vote(fan, public, 1).unwrap();
         s.vote(fan2, public, -1).unwrap();
         let meta = s.map_meta(public, None).unwrap();
         assert_eq!((meta.name.as_str(), meta.author.as_str()), ("Live", "Owner"));
-        assert_eq!((meta.description.as_str(), meta.code.as_str()), ("Nice", "code"));
+        assert_eq!((meta.description.as_str(), meta.code.as_str()), ("Nice", valid_code().as_str()));
         assert_eq!((meta.up, meta.down), (1, 1));
 
-        let private = s.upload(o, "Mine", "secret", Visibility::Private, "").unwrap();
-        assert_eq!(s.map_meta(private, Some(o)).unwrap().code, "secret");
+        let private = s.upload(o, "Mine", &valid_code(), Visibility::Private, "").unwrap();
+        assert_eq!(s.map_meta(private, Some(o)).unwrap().code, valid_code());
         assert!(matches!(s.map_meta(private, Some(other)), Err(Error::NotFound)));
         assert!(matches!(s.map_meta(private, None), Err(Error::NotFound)));
-        let pending = s.upload(o, "Waiting", "c", Visibility::Public, "").unwrap();
+        let pending = s.upload(o, "Waiting", &valid_code(), Visibility::Public, "").unwrap();
         assert!(matches!(s.map_meta(pending, Some(other)), Err(Error::NotFound)));
         assert!(s.map_meta(pending, Some(o)).is_ok());
         // unlike `get`, an admin override does not exist here
@@ -836,9 +849,9 @@ mod tests {
         let s = store();
         let o = raw_account(&s, "Owner");
         let live = live_public(&s, o, "Live");
-        s.upload(o, "Pending", "c", Visibility::Public, "").unwrap();
-        s.upload(o, "Unlisted", "c", Visibility::Unlisted, "").unwrap();
-        s.upload(o, "Private", "c", Visibility::Private, "").unwrap();
+        s.upload(o, "Pending", &valid_code(), Visibility::Public, "").unwrap();
+        s.upload(o, "Unlisted", &valid_code(), Visibility::Unlisted, "").unwrap();
+        s.upload(o, "Private", &valid_code(), Visibility::Private, "").unwrap();
         let listing = s.list(Sort::New, "", 0, 20).unwrap();
         assert_eq!(listing.total, 1);
         assert_eq!(listing.maps[0].id, live);
@@ -848,12 +861,12 @@ mod tests {
     fn admin_listing_shows_every_map_newest_first() {
         let s = store();
         let ann = raw_account(&s, "Ann");
-        let a = s.upload(ann, "Pending", "c", Visibility::Public, "").unwrap();
-        let b = s.upload(ann, "Private", "c", Visibility::Private, "").unwrap();
-        let c = s.upload(ann, "Rejected", "c", Visibility::Public, "").unwrap();
+        let a = s.upload(ann, "Pending", &valid_code(), Visibility::Public, "").unwrap();
+        let b = s.upload(ann, "Private", &valid_code(), Visibility::Private, "").unwrap();
+        let c = s.upload(ann, "Rejected", &valid_code(), Visibility::Public, "").unwrap();
         s.moderate(c, Verdict::Reject).unwrap();
         let bo = raw_account(&s, "Bo");
-        let d = s.upload(bo, "Other", "c", Visibility::Unlisted, "").unwrap();
+        let d = s.upload(bo, "Other", &valid_code(), Visibility::Unlisted, "").unwrap();
         let all = s.admin_list("", 0, 50).unwrap();
         assert_eq!(all.total, 4);
         assert_eq!(all.maps.iter().map(|m| m.id).collect::<Vec<_>>(), vec![d, c, b, a]);
@@ -965,7 +978,7 @@ mod tests {
         let o = raw_account(&s, "Owner");
         let a = live_public(&s, o, "A");
         let b = live_public(&s, o, "B");
-        let pending = s.upload(o, "P", "c", Visibility::Public, "").unwrap();
+        let pending = s.upload(o, "P", &valid_code(), Visibility::Public, "").unwrap();
         s.set_pick(a, true).unwrap();
         s.set_pick(b, true).unwrap();
         s.set_pick(pending, true).unwrap();
@@ -1014,9 +1027,9 @@ mod tests {
         let s = store();
         let o = raw_account(&s, "Owner");
         let other = raw_account(&s, "Other");
-        s.upload(o, "A", "c", Visibility::Public, "").unwrap();
-        s.upload(o, "B", "c", Visibility::Private, "").unwrap();
-        s.upload(other, "C", "c", Visibility::Unlisted, "").unwrap();
+        s.upload(o, "A", &valid_code(), Visibility::Public, "").unwrap();
+        s.upload(o, "B", &valid_code(), Visibility::Private, "").unwrap();
+        s.upload(other, "C", &valid_code(), Visibility::Unlisted, "").unwrap();
         assert_eq!(s.mine(o).unwrap().len(), 2);
     }
 
@@ -1025,9 +1038,9 @@ mod tests {
         let s = store();
         let o = raw_account(&s, "Owner");
         let m = live_public(&s, o, "Map");
-        s.update(o, m, "Map", Some("code"), Visibility::Public, "").unwrap();
+        s.update(o, m, "Map", Some(valid_code().as_str()), Visibility::Public, "").unwrap();
         assert_eq!(status_of(&s, m), Status::Approved, "an unchanged save keeps the approval");
-        s.update(o, m, "Map", Some("changed"), Visibility::Public, "").unwrap();
+        s.update(o, m, "Map", Some(edited_code().as_str()), Visibility::Public, "").unwrap();
         assert_eq!(status_of(&s, m), Status::Pending);
         s.moderate(m, Verdict::Approve).unwrap();
         s.update(o, m, "Renamed", None, Visibility::Public, "").unwrap();
@@ -1045,14 +1058,14 @@ mod tests {
     fn rejected_maps_stay_rejected_until_they_go_public_again() {
         let s = store();
         let o = raw_account(&s, "Owner");
-        let m = s.upload(o, "Map", "c", Visibility::Public, "").unwrap();
+        let m = s.upload(o, "Map", &valid_code(), Visibility::Public, "").unwrap();
         s.moderate(m, Verdict::Reject).unwrap();
         s.update(o, m, "Map", None, Visibility::Public, "").unwrap();
         assert_eq!(status_of(&s, m), Status::Rejected);
-        s.update(o, m, "Map", Some("fixed"), Visibility::Unlisted, "").unwrap();
+        s.update(o, m, "Map", Some(edited_code().as_str()), Visibility::Unlisted, "").unwrap();
         assert_eq!(status_of(&s, m), Status::Rejected, "hiding it and editing does not clear the rejection");
         assert!(matches!(s.get(m, None, false), Err(Error::NotFound)));
-        s.update(o, m, "Map", Some("fixed again"), Visibility::Public, "").unwrap();
+        s.update(o, m, "Map", Some(edited_code().as_str()), Visibility::Public, "").unwrap();
         assert_eq!(status_of(&s, m), Status::Pending);
     }
 
@@ -1062,7 +1075,7 @@ mod tests {
         let o = raw_account(&s, "Owner");
         let other = raw_account(&s, "Other");
         let public = live_public(&s, o, "Map");
-        let private = s.upload(o, "Hidden", "c", Visibility::Private, "").unwrap();
+        let private = s.upload(o, "Hidden", &valid_code(), Visibility::Private, "").unwrap();
         assert!(matches!(s.update(other, public, "Map", None, Visibility::Unlisted, ""), Err(Error::Forbidden(_))));
         assert!(matches!(s.update(other, private, "Hidden", None, Visibility::Unlisted, ""), Err(Error::NotFound)));
         assert!(matches!(s.update(o, 999, "Map", None, Visibility::Unlisted, ""), Err(Error::NotFound)));
@@ -1109,8 +1122,8 @@ mod tests {
             .query_row("SELECT at FROM map_votes WHERE map_id = ?1 AND account_id = ?2", params![m, b], |r| r.get(0))
             .unwrap();
         assert!(at > 0, "votes are timestamped");
-        let pending = s.upload(o, "P", "c", Visibility::Public, "").unwrap();
-        let private = s.upload(o, "H", "c", Visibility::Private, "").unwrap();
+        let pending = s.upload(o, "P", &valid_code(), Visibility::Public, "").unwrap();
+        let private = s.upload(o, "H", &valid_code(), Visibility::Private, "").unwrap();
         assert!(matches!(s.vote(a, pending, 1), Err(Error::NotFound)));
         assert!(matches!(s.vote(a, private, 1), Err(Error::NotFound)));
     }
@@ -1175,9 +1188,9 @@ mod tests {
         let s = store();
         let o = raw_account(&s, "Owner");
         let live = live_public(&s, o, "Live");
-        let pending = s.upload(o, "P", "c", Visibility::Public, "").unwrap();
-        let private = s.upload(o, "H", "c", Visibility::Private, "").unwrap();
-        let unlisted = s.upload(o, "U", "c", Visibility::Unlisted, "").unwrap();
+        let pending = s.upload(o, "P", &valid_code(), Visibility::Public, "").unwrap();
+        let private = s.upload(o, "H", &valid_code(), Visibility::Private, "").unwrap();
+        let unlisted = s.upload(o, "U", &valid_code(), Visibility::Unlisted, "").unwrap();
         for id in [live, pending, private, unlisted, 999] {
             s.record_play(id).unwrap();
         }
@@ -1192,8 +1205,8 @@ mod tests {
     fn moderators_work_the_review_queue() {
         let s = store();
         let o = raw_account(&s, "Owner");
-        let a = s.upload(o, "A", "c", Visibility::Public, "").unwrap();
-        let b = s.upload(o, "B", "c", Visibility::Public, "").unwrap();
+        let a = s.upload(o, "A", &valid_code(), Visibility::Public, "").unwrap();
+        let b = s.upload(o, "B", &valid_code(), Visibility::Public, "").unwrap();
         assert_eq!(s.pending().unwrap().iter().map(|m| m.id).collect::<Vec<_>>(), vec![a, b]);
         s.moderate(a, Verdict::Approve).unwrap();
         s.moderate(b, Verdict::Reject).unwrap();
@@ -1209,10 +1222,10 @@ mod tests {
         let s = store();
         let o = raw_account(&s, "Owner");
         for i in 0..MAX_MAPS_PER_ACCOUNT {
-            s.upload(o, &format!("Map {i}"), "c", Visibility::Unlisted, "").unwrap();
+            s.upload(o, &format!("Map {i}"), &valid_code(), Visibility::Unlisted, "").unwrap();
         }
-        assert!(matches!(s.upload(o, "one more", "c", Visibility::Unlisted, ""), Err(Error::Limit(_))));
+        assert!(matches!(s.upload(o, "one more", &valid_code(), Visibility::Unlisted, ""), Err(Error::Limit(_))));
         let other = raw_account(&s, "Other");
-        s.upload(other, "fine", "c", Visibility::Unlisted, "").unwrap();
+        s.upload(other, "fine", &valid_code(), Visibility::Unlisted, "").unwrap();
     }
 }

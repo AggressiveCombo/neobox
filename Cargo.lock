@@ -1515,6 +1515,7 @@ dependencies = [
  "argon2",
  "base64 0.22.1",
  "neobox-net",
+ "neobox-sim",
  "rand 0.9.5",
  "rusqlite",
  "serde",

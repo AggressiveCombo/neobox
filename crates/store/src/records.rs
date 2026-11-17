@@ -75,7 +75,7 @@ mod tests {
     use crate::test_support::{raw_account, store};
 
     fn live_public(s: &Store, owner: i64, name: &str) -> i64 {
-        let id = s.upload(owner, name, "code", Visibility::Public, "").unwrap();
+        let id = s.upload(owner, name, &neobox_sim::MapData::default().to_code(), Visibility::Public, "").unwrap();
         s.moderate(id, crate::Verdict::Approve).unwrap();
         id
     }
@@ -151,7 +151,7 @@ mod tests {
     fn private_maps_are_hidden_from_strangers() {
         let s = store();
         let owner = raw_account(&s, "Owner");
-        let m = s.upload(owner, "secret", "code", Visibility::Private, "").unwrap();
+        let m = s.upload(owner, "secret", &neobox_sim::MapData::default().to_code(), Visibility::Private, "").unwrap();
         let stranger = raw_account(&s, "stranger");
         assert!(matches!(s.records(m, Some(stranger), false), Err(Error::NotFound)));
         assert!(matches!(s.records(m, None, false), Err(Error::NotFound)));
