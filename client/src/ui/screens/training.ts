@@ -216,6 +216,8 @@ export const trainingScreen: ScreenFactory = (ctx) => {
     if (!lessonEl) return;
     const texts = lessons();
     lessonEl.replaceChildren(h("span", null, ...texts[lesson]));
+    // The lesson box is a scroll region only when the text overflows; a keyboard user can focus it then, and only then.
+    lessonEl.tabIndex = lessonEl.scrollHeight > lessonEl.clientHeight ? 0 : -1;
   }
 
   function syncStart(): void {
@@ -265,7 +267,7 @@ export const trainingScreen: ScreenFactory = (ctx) => {
       renderText();
       syncStart();
     });
-    lessonEl = h("p", { class: "training-text", tabindex: "0", "aria-live": "polite" });
+    lessonEl = h("p", { class: "training-text", "aria-live": "polite" });
     countEl = h("span", { class: "training-count" });
     stepEls = lessons().map(() => h("span", { class: "training-step", "aria-hidden": "true" }));
     startKey = h("span", { class: "key" }, "Start");
