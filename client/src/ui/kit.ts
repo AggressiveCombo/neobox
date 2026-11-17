@@ -229,10 +229,10 @@ export function openModal(opts: ModalOptions): { dialog: HTMLDialogElement; clos
   dialog.addEventListener("close", () => {
     const i = openStack.indexOf(entry);
     if (i >= 0) openStack.splice(i, 1);
-    // Closed from the page rather than by Back: this modal's entry is still the current one, so pop it. Left in place it
-    // would be a dead entry: Back would land on the screen the modal opened over. The pop is async; screen changes made
-    // until it lands wait for it (app.ts), so they are recorded on the entry Back lands on.
-    if (!entry.silent && history.state?.modal === id) {
+    // Closed from the page rather than by Back: this modal's entry is still in history, so pop it. Left in place it
+    // would be a dead entry: Back would land on the screen the modal opened over. The pop is async, so several page-side
+    // closes queue one pop each (top first, as the entries sit); screen changes made until they land wait (app.ts).
+    if (!entry.silent) {
       pagePops++;
       history.back();
     }
