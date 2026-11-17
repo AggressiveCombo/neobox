@@ -136,23 +136,65 @@ export const friendsScreen: ScreenFactory = (ctx) => {
     );
   }
 
-  function section(title: string, name: IconName, items: HTMLElement[], empty: string): HTMLElement {
-    const list =
-      items.length > 0
-        ? h("ul", { class: "friend-list", "aria-label": title }, items)
-        : h("p", { class: "empty" }, empty);
-    return h("section", { class: "section friend-section" }, h("h2", null, icon(name, 18), title), list);
+  /** Section containers, kept across paints so the rows inside keep their focus. */
+  const sections = new Map<string, { el: HTMLElement; head: HTMLElement; list: HTMLElement; empty: HTMLElement }>();
+  /** Rows built on an earlier paint, by key. A row is reused while its signature holds. */
+  const built = new Map<string, { sig: string; el: HTMLElement }>();
+
+  function sectionFor(title: string, name: IconName): { el: HTMLElement; head: HTMLElement; list: HTMLElement; empty: HTMLElement } {
+    let s = sections.get(title);
+    if (s === undefined) {
+      const head = h("h2", null, icon(name, 18), title);
+      const list = h("ul", { class: "friend-list", "aria-label": title });
+      const empty = h("p", { class: "empty" });
+      s = { el: h("section", { class: "section friend-section" }, head, list), head, list, empty };
+      sections.set(title, s);
+    }
+    return s;
   }
 
+  /** The row for `key`: the one built earlier while `sig` still holds, else a new one from `make`. */
+  function rowFor(key: string, sig: string, make: () => HTMLElement): HTMLElement {
+    const hit = built.get(key);
+    if (hit !== undefined && hit.sig === sig) return hit.el;
+    const el = make();
+    built.set(key, { sig, el });
+    return el;
+  }
+
+  /** Puts `items` into `parent` in order. A child already in place does not move, so its focus survives. */
+  function order(parent: HTMLElement, items: HTMLElement[]): void {
+    items.forEach((el, i) => {
+      if (parent.children[i] !== el) parent.insertBefore(el, parent.children[i] ?? null);
+    });
+    while (parent.children.length > items.length) parent.lastElementChild?.remove();
+  }
+
+  /** The three groups. Rows are reconciled in place: a refresh that changes nothing touches no control. */
   function paint(): void {
     const incoming = friends.filter((f) => f.state === "incoming");
     const outgoing = friends.filter((f) => f.state === "outgoing");
     const mine = friends.filter((f) => f.state === "friend");
-    groups.replaceChildren(
-      ...(incoming.length > 0 ? [section("Requests", "bell", incoming.map(requestRow), "")] : []),
-      ...(outgoing.length > 0 ? [section("Sent", "send", outgoing.map(requestRow), "")] : []),
-      section("Friends", "users", mine.map(friendRow), "No friends yet. Add one by name."),
-    );
+    const seen = new Set<string>();
+    const shown: HTMLElement[] = [];
+    const rows = (list: Friend[], build: (f: Friend) => HTMLElement): HTMLElement[] =>
+      list.map((f) => {
+        const key = `${f.state}:${f.name}`;
+        seen.add(key);
+        return rowFor(key, `${f.online}|${f.room?.code ?? ""}|${f.room?.name ?? ""}`, () => build(f));
+      });
+    const group = (title: string, name: IconName, items: HTMLElement[], empty: string): void => {
+      const s = sectionFor(title, name);
+      s.empty.textContent = empty;
+      order(s.list, items);
+      order(s.el, [s.head, items.length > 0 ? s.list : s.empty]);
+      shown.push(s.el);
+    };
+    if (incoming.length > 0) group("Requests", "bell", rows(incoming, requestRow), "");
+    if (outgoing.length > 0) group("Sent", "send", rows(outgoing, requestRow), "");
+    group("Friends", "users", rows(mine, friendRow), "No friends yet. Add one by name.");
+    order(groups, shown);
+    for (const key of built.keys()) if (!seen.has(key)) built.delete(key);
   }
 
   /** Show the list for the current account (or the sign-in prompt) and start or stop polling. */
@@ -163,6 +205,7 @@ export const friendsScreen: ScreenFactory = (ctx) => {
     clearInterval(timer);
     timer = undefined;
     friends = [];
+    built.clear();
     if (state.account === null) {
       body.replaceChildren(signInPrompt(ctx, "Friends need an account. Sign in to add friends and see when they are online."));
       return;
