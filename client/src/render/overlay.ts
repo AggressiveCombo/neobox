@@ -141,11 +141,11 @@ export class Overlay {
     const cssH = this.canvas.height / dpr;
     if (chrome) this.recordEvents(scene);
     this.drawDamageBars(scene, cam, cssW, cssH);
+    if (chrome) this.drawIntro(scene, tickHz, cssW, cssH);
     this.drawNames(scene, cam, names, cssW, cssH);
     if (chrome) this.drawHitFlashes(scene, cam, cssW, cssH);
     if (!chrome) return;
     this.publishAway(scene.tick, this.drawAway(scene, cam, names, cssW, cssH));
-    this.drawIntro(scene, tickHz, cssW, cssH);
     this.drawBanner(scene, names, cssW, cssH);
     this.drawPersonal(scene, names, cssW);
     this.drawFeed(names, cssW);
