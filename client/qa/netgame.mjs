@@ -67,6 +67,9 @@ const CONDS = {
   lat: { id: "lat", rtt: 150, jitter: 0, loss: 0 },
 };
 
+// Relay timers wake this many ms before a due message and spin the rest (see pump).
+const SPIN_MS = 20;
+
 // Latency = rtt/2 each way; jitter = uniform [0, jitter) per message; loss = a per-message
 // retransmit stall (rtt + 200 ms) with probability `loss`. Counts client resync requests and
 // server checksum frames (0x83) on the way through.
@@ -74,15 +77,20 @@ function relay(cond, c) {
   return (ws) => {
     const server = ws.connectToServer();
     const dirs = { up: { items: [], timer: null, last: 0 }, down: { items: [], timer: null, last: 0 } };
+    // Node's setTimeout lands ~12 ms late on this host (coarse Windows timer): each relayed hop
+    // added that to the RTT. Sleep with a timer only while far from the due time, then spin on
+    // setImmediate, which still lets the socket I/O run between checks.
     const pump = (dir) => {
       const q = dirs[dir];
-      while (q.items.length && q.items[0].at <= Date.now()) q.items.shift().fn();
-      if (q.items.length && !q.timer) {
-        q.timer = setTimeout(() => {
-          q.timer = null;
-          pump(dir);
-        }, Math.max(0, q.items[0].at - Date.now()));
+      q.timer = null;
+      while (q.items.length && q.items[0].at <= performance.now()) {
+        const it = q.items.shift();
+        it.fn();
       }
+      if (!q.items.length) return;
+      const wait = q.items[0].at - performance.now();
+      if (wait > SPIN_MS) q.timer = setTimeout(() => pump(dir), wait - SPIN_MS);
+      else q.timer = setImmediate(() => pump(dir));
     };
     const delayFor = () => {
       let d = cond.rtt / 2 + Math.random() * cond.jitter;
@@ -92,10 +100,10 @@ function relay(cond, c) {
     const sched = (dir, fn) => {
       const q = dirs[dir];
       // never earlier than the message ahead of it: the queue stays in send order
-      const at = Math.max(Date.now() + delayFor(), q.last);
+      const at = Math.max(performance.now() + delayFor(), q.last);
       q.last = at;
       q.items.push({ at, fn });
-      pump(dir);
+      if (!q.timer) pump(dir);
     };
     ws.onMessage((msg) => {
       if (typeof msg === "string" && msg.includes('"t":"resync"')) c.resync++;
