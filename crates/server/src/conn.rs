@@ -307,6 +307,9 @@ impl Session {
                         let then = ClientMsg::JoinRoom { room, password, resume };
                         self.send(&ServerMsg::Redirect { url: node.url, then: Box::new(then) });
                     }
+                    None if resume.as_deref().is_some_and(crate::room::is_stale_token) => {
+                        self.error("server_restarted", "The server restarted, so that room is gone")
+                    }
                     None => self.error("room_not_found", "Room not found"),
                 },
             },

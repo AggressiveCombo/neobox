@@ -471,8 +471,19 @@ fn ct_eq(a: &str, b: &str) -> bool {
     a.len() == b.len() && a.bytes().zip(b.bytes()).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
 }
 
+/// This process's part of every resume token. A token from an earlier process names a room that no longer exists.
+fn boot_id() -> &'static str {
+    static BOOT: std::sync::LazyLock<String> = std::sync::LazyLock::new(|| format!("{:08x}", rand::random::<u32>()));
+    &BOOT
+}
+
 fn new_token() -> String {
-    format!("{:016x}{:016x}", rand::random::<u64>(), rand::random::<u64>())
+    format!("{}{:016x}{:016x}", boot_id(), rand::random::<u64>(), rand::random::<u64>())
+}
+
+/// True for a resume token issued by an earlier server process (the server restarted since).
+pub fn is_stale_token(token: &str) -> bool {
+    !token.starts_with(boot_id())
 }
 
 /// Splits a leading player name off `text`: a quoted name, or else the

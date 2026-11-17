@@ -73,6 +73,19 @@ const ROOM_CODE_RE = /^[A-HJ-NP-Z2-9]{6}$/;
 const RECONNECT_DELAYS_MS = [500, 1000, 2000, 4000, 8000];
 /** Stop retrying this long after the first drop. */
 const RECONNECT_GIVE_UP_MS = 60_000;
+/** Shown when a room is gone because the game server restarted (its rooms do not survive a restart). */
+const RESTARTED_TEXT = "The server restarted, so that room is gone.";
+/** The server's kick reasons (room.rs) as full sentences. Any other reason is shown as given, ended with a period. */
+const KICK_TEXT: Record<string, string> = {
+  "You were banned": "You were banned from the room.",
+  "You were kicked": "You were kicked from the room.",
+  "You were removed from the room for being idle too long": "You were removed from the room for being idle too long.",
+  "Room closed by an administrator": "The room was closed by an administrator.",
+};
+
+function kickText(reason: string): string {
+  return KICK_TEXT[reason] ?? `${reason.replace(/\.?$/, "")}.`;
+}
 
 function byId<T extends HTMLElement>(id: string): T {
   const el = document.getElementById(id);
@@ -95,7 +108,7 @@ function decodeSnapshot(state: string): Uint8Array {
 }
 
 /** What the page address asks for: a room code (`/CODE` or `?room=CODE`), an address that names no room, or null for the plain menu. */
-type UrlInvite = { code: string } | { error: "malformed" | "unknown" } | null;
+type UrlInvite = { code: string } | { error: "malformed" } | null;
 
 /** The room code the address names, or why it names none. */
 function inviteFromUrl(): UrlInvite {
@@ -112,7 +125,7 @@ function inviteFromUrl(): UrlInvite {
   }
   if (path === "") return null;
   const code = path.toUpperCase();
-  return ROOM_CODE_RE.test(code) ? { code } : { error: "unknown" };
+  return ROOM_CODE_RE.test(code) ? { code } : { error: "malformed" };
 }
 
 /** A history entry: the screen it shows, the screen it was entered from, and the modal it opened, if any. */
@@ -584,9 +597,9 @@ export function start(): Store<AppState> {
   }
 
   /** The game server we were on is gone: back to the room list on the home server. */
-  function serverGone(): void {
+  function serverGone(text = "The game server went away"): void {
     leaveRoom();
-    toast("The game server went away", "error");
+    toast(text, "error");
   }
 
   function startMatch(match: MatchStart, you: number | null, snap: SnapshotBytes | null): void {
@@ -702,10 +715,11 @@ export function start(): Store<AppState> {
         if (resuming) {
           resuming = false;
           if (server !== null) {
-            serverGone();
+            serverGone(msg.code === "server_restarted" ? RESTARTED_TEXT : undefined);
           } else {
             leaveRoom();
-            if (msg.code === "room_not_found") store.set({ notice: "That room has closed, so you cannot rejoin it." });
+            if (msg.code === "server_restarted") store.set({ notice: RESTARTED_TEXT });
+            else if (msg.code === "room_not_found") store.set({ notice: "That room has closed, so you cannot rejoin it." });
             else toast(`could not rejoin the room: ${msg.message}`, "error");
           }
           return;
@@ -763,7 +777,7 @@ export function start(): Store<AppState> {
         return;
       case "kicked":
         leaveRoom();
-        store.set({ notice: `${msg.reason} from the room.` });
+        store.set({ notice: kickText(msg.reason) });
         return;
       case "chat":
         if (msg.from !== null && msg.from !== store.state.myId) sfx.chatPop();
@@ -1098,7 +1112,7 @@ export function start(): Store<AppState> {
   }
 
   /** An address that names no room: say so, with a way back to the menu. */
-  function badLink(error: "malformed" | "unknown"): void {
+  function badLink(): void {
     let m: { close(): void } | null = null;
     const browse = h(
       "button",
@@ -1112,19 +1126,11 @@ export function start(): Store<AppState> {
       "Browse rooms",
     );
     const menu = h("button", { type: "button", onclick: () => m?.close() }, "Back to menu");
-    m = openModal(
-      error === "malformed"
-        ? {
-            title: "Link not recognised",
-            body: [h("p", null, "This link is not valid, so it does not open a room. Check the address, or browse the open rooms.")],
-            actions: [browse, menu],
-          }
-        : {
-            title: "Page not found",
-            body: [h("p", null, "There is nothing at this address. Check the link, or go back to the menu.")],
-            actions: [menu],
-          },
-    );
+    m = openModal({
+      title: "Link not recognised",
+      body: [h("p", null, "This link is not valid, so it does not open a room. Check the address, or browse the open rooms.")],
+      actions: [browse, menu],
+    });
   }
 
   // The first history entry is the screen this page opened on, at the URL it opened at.
@@ -1138,6 +1144,6 @@ export function start(): Store<AppState> {
       boot.hidden = true;
     }, 180);
   }
-  if (invite !== null && "error" in invite) badLink(invite.error);
+  if (invite !== null && "error" in invite) badLink();
   return store;
 }
