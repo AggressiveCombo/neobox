@@ -67,6 +67,25 @@ const AWAY_CHIP_GAP = 4;
 const AWAY_SWATCH = 6;
 /** One drawn edge chip, in window CSS px (QA hook). */
 interface AwayChip { id: number; x: number; y: number; w: number; h: number }
+/** Name labels: px gap between stacked labels, and the most upward shifts tried before a label stays overlapped. */
+const NAME_GAP = 2;
+const NAME_STACK_MAX = 4;
+/** A name label for this frame: anchor (baseline centre), measured box and draw data (CSS px). */
+interface NameLabel {
+  player: Scene["players"][number];
+  name: string;
+  x: number;
+  y: number;
+  centreY: number;
+  bodyHalf: number;
+  local: boolean;
+  font: string;
+  colour: string;
+  w: number;
+  h: number;
+}
+/** Axis-aligned box of a placed name label, in CSS px. */
+interface Box { left: number; right: number; top: number; bottom: number }
 
 interface KillEntry {
   killer: number;
@@ -197,6 +216,7 @@ export class Overlay {
     ctx.textAlign = "center";
     ctx.textBaseline = "bottom";
     ctx.lineJoin = "round";
+    const labels: NameLabel[] = [];
     for (const p of scene.players) {
       if (p.team === TEAM_SPECTATOR) continue;
       const name = names.get(p.id);
@@ -204,18 +224,46 @@ export class Overlay {
       const x = ((p.x * sx + ox) + 1) * cssW / 2;
       const centreY = (1 - (p.y * sy + oy)) * cssH / 2;
       const bodyHalf = (p.size / 2) * pxPerUnit;
-      const y = centreY - bodyHalf - 4;
       const local = (p.flags & FLAG_LOCAL) !== 0;
       ctx.font = local ? LOCAL_NAME_FONT : NAME_FONT;
+      const m = ctx.measureText(name);
+      labels.push({
+        player: p,
+        name,
+        x,
+        y: centreY - bodyHalf - 4,
+        centreY,
+        bodyHalf,
+        local,
+        font: ctx.font,
+        colour: this.colourCss(playerRgb(p.team, p.id)),
+        w: m.width,
+        h: m.actualBoundingBoxAscent + m.actualBoundingBoxDescent,
+      });
+    }
+    // The local player's label keeps its place and is drawn last, on top. Others stack upward off it and off each other.
+    const placed: Box[] = [];
+    for (const l of [...labels].sort((a, b) => Number(b.local) - Number(a.local))) {
+      if (!l.local) {
+        for (let step = 0; step < NAME_STACK_MAX; step++) {
+          const hit = placed.some((b) => b.left < l.x + l.w / 2 && l.x - l.w / 2 < b.right && b.top < l.y && l.y - l.h < b.bottom);
+          if (!hit) break;
+          l.y -= l.h + NAME_GAP;
+        }
+      }
+      placed.push({ left: l.x - l.w / 2, right: l.x + l.w / 2, top: l.y - l.h, bottom: l.y });
+    }
+    for (const l of labels.sort((a, b) => Number(a.local) - Number(b.local))) {
+      ctx.font = l.font;
       ctx.lineWidth = 3;
       ctx.strokeStyle = OUTLINE;
-      ctx.strokeText(name, x, y);
-      ctx.fillStyle = this.colourCss(playerRgb(p.team, p.id));
-      ctx.fillText(name, x, y);
+      ctx.strokeText(l.name, l.x, l.y);
+      ctx.fillStyle = l.colour;
+      ctx.fillText(l.name, l.x, l.y);
       // The local player reads its own status from the stamina bar and kill line instead.
-      if (p.id === leader && !local) this.drawCrown(x, y - 18);
-      if (local && scene.maxStamina > 0) {
-        this.drawStamina(p.stamina / scene.maxStamina, x, centreY + bodyHalf + 4);
+      if (l.player.id === leader && !l.local) this.drawCrown(l.x, l.y - 18);
+      if (l.local && scene.maxStamina > 0) {
+        this.drawStamina(l.player.stamina / scene.maxStamina, l.x, l.centreY + l.bodyHalf + 4);
       }
     }
   }
