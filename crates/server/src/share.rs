@@ -6,10 +6,12 @@
 
 use crate::hub::{Hub, ROOM_CODE_CHARS};
 use crate::room::RoomSummary;
-use axum::extract::{Request, State};
+use crate::admin;
+use axum::extract::{ConnectInfo, Request, State};
 use axum::http::{header, HeaderMap, HeaderValue, Method, Uri};
 use axum::middleware::Next;
 use axum::response::{Html, IntoResponse, Response};
+use std::net::SocketAddr;
 use std::sync::Arc;
 
 /// Brackets the preview tags of `client/index.html`, which are replaced.
@@ -35,7 +37,8 @@ pub async fn preview(State(hub): State<Arc<Hub>>, req: Request, next: Next) -> R
     };
     let Some(named) = named else { return next.run(req).await };
     let card = named.and_then(|code| find_room(&hub, &code)).and_then(|room| card_for(&room));
-    let origin = origin(&hub.cfg.public_url, req.headers(), hub.cfg.trust_proxy);
+    let proxied = req.extensions().get::<ConnectInfo<SocketAddr>>().is_some_and(|peer| admin::via_trusted_proxy(&hub, peer.0));
+    let origin = origin(&hub.cfg.public_url, req.headers(), proxied);
     let page = format!("{origin}{}", req.uri().path());
     let html = match tokio::fs::read_to_string(hub.cfg.static_dir.join("index.html")).await {
         Ok(template) => render(&template, card.as_ref(), &origin, &page),

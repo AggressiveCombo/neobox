@@ -273,9 +273,27 @@ async fn rooms_reconnect_quick_play_and_host_commands() {
     let refused = banned.join(&h.code, None, None).await.err().expect("a banned player must not join");
     assert!(refused.starts_with("banned:"), "{refused}");
 
+    // commands spend the chat budget (3 at once, then one per 3 seconds)
+    tokio::time::sleep(Duration::from_secs(4)).await;
     host.chat("/unban guest").await;
     host.room_where("/unban", |r| r.bans.is_empty()).await;
     banned.join(&h.code, None, None).await.expect("unbanned player rejoins");
+}
+
+#[tokio::test]
+async fn commands_share_the_chat_budget() {
+    let server = Server::start();
+    let mut host = Client::connect(&server.ws(), "host").await;
+    host.create(None).await.unwrap();
+    for _ in 0..4 {
+        host.chat("/help").await;
+    }
+    host.until("command flood refused", |m| match m {
+        ServerMsg::Error { code, .. } if code == "rate_limited" => Some(Ok(())),
+        _ => None,
+    })
+    .await
+    .unwrap();
 }
 
 #[tokio::test]

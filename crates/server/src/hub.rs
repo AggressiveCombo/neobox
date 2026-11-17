@@ -28,8 +28,12 @@ pub struct Config {
     pub max_rooms: usize,
     pub max_players: u8,
     pub max_conns_per_ip: usize,
-    /// Trust `X-Forwarded-For` / `X-Forwarded-Proto` (when behind a proxy).
+    /// Honour `X-Forwarded-For` / `X-Forwarded-Host` / `X-Forwarded-Proto`, but only
+    /// from a peer that is a trusted proxy (see `trusted_proxies`). Off by default.
     pub trust_proxy: bool,
+    /// Peers whose forwarded headers are believed when `trust_proxy` is on, besides
+    /// loopback (`NEOBOX_TRUSTED_PROXIES`, comma separated IPs).
+    pub trusted_proxies: Vec<IpAddr>,
     pub default_tick_hz: f64,
     /// UDP address for WebRTC data channels; `None` disables them.
     pub rtc_bind: Option<SocketAddr>,
@@ -64,6 +68,21 @@ fn allowed_origins(list: &str, public_url: &str, main_url: Option<&str>) -> Vec<
         .collect()
 }
 
+/// The proxy addresses listed in `NEOBOX_TRUSTED_PROXIES`. Entries that are not IP addresses are logged and skipped.
+fn trusted_proxies(list: &str) -> Vec<IpAddr> {
+    list.split(',')
+        .map(str::trim)
+        .filter(|e| !e.is_empty())
+        .filter_map(|e| match e.parse() {
+            Ok(ip) => Some(ip),
+            Err(_) => {
+                tracing::warn!("NEOBOX_TRUSTED_PROXIES entry {e} is not an IP address; ignored");
+                None
+            }
+        })
+        .collect()
+}
+
 impl Config {
     pub fn from_env() -> Config {
         let var = |k: &str, d: &str| std::env::var(k).unwrap_or_else(|_| d.to_string());
@@ -79,7 +98,8 @@ impl Config {
             max_rooms: var("NEOBOX_MAX_ROOMS", "200").parse().unwrap_or(200),
             max_players: var("NEOBOX_MAX_PLAYERS", "32").parse().unwrap_or(32).clamp(1, 64),
             max_conns_per_ip: var("NEOBOX_MAX_CONNS_PER_IP", "8").parse().unwrap_or(8),
-            trust_proxy: var("NEOBOX_TRUST_PROXY", "true") == "true",
+            trust_proxy: var("NEOBOX_TRUST_PROXY", "false") == "true",
+            trusted_proxies: trusted_proxies(&var("NEOBOX_TRUSTED_PROXIES", "")),
             default_tick_hz: 30.0,
             rtc_bind: match var("NEOBOX_RTC_BIND", "0.0.0.0:3478").as_str() {
                 "off" | "" => None,

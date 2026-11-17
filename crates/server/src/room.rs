@@ -8,7 +8,7 @@ use neobox_net::*;
 use neobox_sim::start::Outcome;
 use neobox_sim::{GameSettings, MapData};
 use serde::{Deserialize, Serialize};
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::net::IpAddr;
 use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex};
@@ -167,6 +167,47 @@ enum Link {
     Lost(Instant),
 }
 
+/// What a chat line is throttled by: the player, its address and its account.
+/// Sockets of one player share all three, so extra tabs add no budget.
+#[derive(Clone, Copy, Hash, PartialEq, Eq)]
+enum ChatKey {
+    Player(u32),
+    Address(IpAddr),
+    Account(i64),
+}
+
+/// Tokens of one [`ChatKey`]: 3 lines at once, then one line every 3 seconds.
+#[derive(Clone, Copy)]
+struct ChatBucket {
+    tokens: f64,
+    at: Instant,
+}
+
+const CHAT_BURST: f64 = 3.0;
+const CHAT_REFILL_SECS: f64 = 3.0;
+
+impl ChatBucket {
+    fn tokens_at(&self, now: Instant) -> f64 {
+        (self.tokens + now.duration_since(self.at).as_secs_f64() / CHAT_REFILL_SECS).min(CHAT_BURST)
+    }
+}
+
+/// Spends one token from each bucket in `keys`. False, spending nothing, when one of them is empty.
+fn spend_chat(buckets: &mut HashMap<ChatKey, ChatBucket>, keys: &[ChatKey], now: Instant) -> bool {
+    let held: Vec<f64> = keys.iter().map(|k| buckets.get(k).map_or(CHAT_BURST, |b| b.tokens_at(now))).collect();
+    if held.iter().any(|t| *t < 1.0) {
+        return false;
+    }
+    if buckets.len() > 256 {
+        // a bucket that has refilled is the same as no bucket
+        buckets.retain(|_, b| b.tokens_at(now) < CHAT_BURST);
+    }
+    for (key, tokens) in keys.iter().zip(held) {
+        buckets.insert(*key, ChatBucket { tokens: tokens - 1.0, at: now });
+    }
+    true
+}
+
 struct RPlayer {
     id: u32,
     name: String,
@@ -190,8 +231,6 @@ struct RPlayer {
     ack: u32,
     last_sent: Option<u32>,
     margin16: i32,
-    chat_tokens: f64,
-    chat_at: Instant,
     last_bytes: (u64, u64),
     rate: (u64, u64),
     /// The best (map, ticks) already announced for this player; a finish counts only when it beats it.
@@ -299,6 +338,8 @@ pub struct Room {
     closed: bool,
     /// The last chat lines, kept for reports.
     chat_log: VecDeque<ReportChat>,
+    /// Chat budgets (see [`ChatKey`]).
+    chat_buckets: HashMap<ChatKey, ChatBucket>,
 }
 
 fn now_ms() -> u64 {
@@ -409,6 +450,7 @@ pub fn spawn(
         created: now_ms(),
         closed: false,
         chat_log: VecDeque::new(),
+        chat_buckets: HashMap::new(),
     };
     let handle = RoomHandle { tx, summary };
     tokio::spawn(room.run(rx));
@@ -729,8 +771,6 @@ impl Room {
             ack: 0,
             last_sent: None,
             margin16: 0,
-            chat_tokens: 3.0,
-            chat_at: Instant::now(),
             last_bytes: (0, 0),
             rate: (0, 0),
             record_seen: None,
@@ -897,18 +937,13 @@ impl Room {
         }
     }
 
-    /// Spends one chat token; false when the player is sending too fast.
+    /// Spends one chat token from each budget the player is throttled by (see [`ChatKey`]).
+    /// False, spending nothing, when one of them is empty.
     fn take_chat_token(&mut self, id: u32) -> bool {
-        let Some(p) = self.player_mut(id) else { return false };
-        // 3 messages burst, then one every 3 seconds
-        let now = Instant::now();
-        p.chat_tokens = (p.chat_tokens + now.duration_since(p.chat_at).as_secs_f64() / 3.0).min(3.0);
-        p.chat_at = now;
-        if p.chat_tokens < 1.0 {
-            return false;
-        }
-        p.chat_tokens -= 1.0;
-        true
+        let Some(p) = self.player(id) else { return false };
+        let mut keys = vec![ChatKey::Player(id), ChatKey::Address(p.ip)];
+        keys.extend(p.account.as_ref().map(|a| ChatKey::Account(a.id)));
+        spend_chat(&mut self.chat_buckets, &keys, Instant::now())
     }
 
     /// The first player whose name starts `text`, and the rest of `text`.
@@ -1036,16 +1071,16 @@ impl Room {
                 if text.is_empty() {
                     return;
                 }
-                // commands are the same actions the UI sends as plain messages,
-                // which are not throttled; only chat lines are
+                // commands and chat lines spend one budget, across all of the player's
+                // sockets: a flood of `/help` is throttled like a flood of chat
+                if !self.take_chat_token(id) {
+                    return self.error(id, "rate_limited", "You're doing that too much!");
+                }
                 if let Some(cmd) = text.strip_prefix('/') {
                     return self.command(id, cmd);
                 }
                 if self.player(id).is_some_and(|p| p.muted) {
                     return self.error(id, "muted", "The host has muted you");
-                }
-                if !self.take_chat_token(id) {
-                    return self.error(id, "rate_limited", "You're doing that too much!");
                 }
                 let Some(p) = self.player_mut(id) else { return };
                 p.active = Instant::now();
@@ -1948,10 +1983,10 @@ pub fn json<T: Serialize>(v: &T) -> String {
     serde_json::to_string(v).unwrap_or_default()
 }
 
-/// The name of a map as others see it: invisible and bidi characters removed, trimmed and at most 60
-/// characters. A name with nothing visible left reads as the default.
+/// The name of a map as others see it: invisible, bidi and angle-bracket characters removed, trimmed and at most
+/// 60 characters. A name with nothing visible left reads as the default.
 fn map_label(name: Option<&str>) -> String {
-    let label: String = name.map(clean_text).unwrap_or_default().trim().chars().take(60).collect();
+    let label: String = name.map(clean_label).unwrap_or_default().trim().chars().take(60).collect();
     if label.is_empty() { "Custom map".into() } else { label }
 }
 
@@ -2017,9 +2052,37 @@ mod tests {
     #[test]
     fn map_names_are_cleaned_and_capped() {
         assert_eq!(map_label(Some("a\u{202E}bc")), "abc");
+        assert_eq!(map_label(Some("<b>hi</b>")), "bhi/b");
         assert_eq!(map_label(Some("\u{3164}")), "Custom map");
         assert_eq!(map_label(None), "Custom map");
         assert_eq!(map_label(Some(&"x".repeat(80))).chars().count(), 60);
+    }
+
+    #[test]
+    fn chat_budget_is_shared_by_player_address_and_account() {
+        let mut buckets = HashMap::new();
+        let now = Instant::now();
+        let addr = ChatKey::Address("10.0.0.1".parse().unwrap());
+        // two tabs of one player, and a second player from the same address
+        let tab = [ChatKey::Player(1), addr];
+        let other = [ChatKey::Player(2), addr];
+        assert!(spend_chat(&mut buckets, &tab, now));
+        assert!(spend_chat(&mut buckets, &tab, now));
+        assert!(spend_chat(&mut buckets, &tab, now));
+        assert!(!spend_chat(&mut buckets, &tab, now));
+        assert!(!spend_chat(&mut buckets, &other, now));
+        // one line per 3 seconds after the burst
+        let later = now + Duration::from_secs(3);
+        assert!(spend_chat(&mut buckets, &tab, later));
+        assert!(!spend_chat(&mut buckets, &tab, later));
+        // the account budget holds across addresses too
+        let acct = [ChatKey::Player(3), ChatKey::Address("10.0.0.2".parse().unwrap()), ChatKey::Account(7)];
+        let acct_b = [ChatKey::Player(4), ChatKey::Address("10.0.0.3".parse().unwrap()), ChatKey::Account(7)];
+        let much_later = later + Duration::from_secs(30);
+        assert!(spend_chat(&mut buckets, &acct, much_later));
+        assert!(spend_chat(&mut buckets, &acct, much_later));
+        assert!(spend_chat(&mut buckets, &acct, much_later));
+        assert!(!spend_chat(&mut buckets, &acct_b, much_later));
     }
 
     #[tokio::test]

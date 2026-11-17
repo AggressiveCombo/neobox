@@ -157,6 +157,12 @@ Set `NEOBOX_LOCATION` in `/etc/neobox.env` to the server's latitude and
 longitude (your provider's data centre city is close enough, e.g.
 `50.11,8.68` for Frankfurt) so the room list can show distances.
 
+Caddy appends each client's address to `X-Forwarded-For`, and the server believes
+that entry only from a proxy on this host. Keep `NEOBOX_TRUST_PROXY=true` in
+`/etc/neobox.env` (the example file sets it), or every player shares Caddy's
+address for the connection and login limits. Forwarded headers from any other
+address are ignored, so a client that reaches port 8080 directly cannot spoof one.
+
 ## 6. Check
 
 * `systemctl status neobox` shows `active (running)`; the log line
@@ -293,7 +299,8 @@ All settings are environment variables (in `/etc/neobox.env`).
 | `NEOBOX_MAX_ROOMS` | `200` | Room limit. |
 | `NEOBOX_MAX_PLAYERS` | `32` | Players per room limit (rooms choose 1..this). |
 | `NEOBOX_MAX_CONNS_PER_IP` | `8` | Simultaneous connections per IP address. |
-| `NEOBOX_TRUST_PROXY` | `true` | Use the client IP forwarded by Caddy. Set `false` if the server is exposed directly. |
+| `NEOBOX_TRUST_PROXY` | `false` | Believe the `X-Forwarded-For` and `X-Forwarded-Host` headers, but only from a proxy: a loopback peer (Caddy on this host) or one listed in `NEOBOX_TRUSTED_PROXIES`. The client IP is the rightmost `X-Forwarded-For` address that is not a proxy (the one Caddy appended), never the leftmost, which a client can set. **Set `true` when Caddy runs on this host** (the example env file does). With it off, every player behind Caddy shares Caddy's address for the per-IP connection and login limits. |
+| `NEOBOX_TRUSTED_PROXIES` | (empty) | Comma-separated IP addresses of proxies other than loopback (for example a load balancer on another machine). Used only when `NEOBOX_TRUST_PROXY=true`. |
 | `NEOBOX_GEOIP` | (empty: no distances or flags; the service sets `/var/lib/neobox/dbip-city-lite.mmdb`) | MaxMind-format city database for the room list (`neobox-geoip.timer` keeps DB-IP's free one current). |
 | `NEOBOX_LOCATION` | (empty) | This server's `latitude,longitude`; room list distances are measured to it. |
 | `NEOBOX_REGION` | (empty) | Region name shown in the room list when there are game nodes. |

@@ -32,9 +32,13 @@ pub const TEAM_FFA: u8 = 1;
 pub const TEAM_RED: u8 = 2;
 pub const TEAM_BLUE: u8 = 3;
 
+/// A player name: 1 to 15 letters, digits, spaces or underscores, with no
+/// leading or trailing space (callers trim before they check).
 pub fn valid_name(name: &str) -> bool {
     let n = name.chars().count();
-    (1..=MAX_NAME_LEN).contains(&n) && name.chars().all(|c| c.is_ascii_alphanumeric() || c == ' ' || c == '_')
+    (1..=MAX_NAME_LEN).contains(&n)
+        && name.trim() == name
+        && name.chars().all(|c| c.is_ascii_alphanumeric() || c == ' ' || c == '_')
 }
 
 /// Invisible format characters that change how text renders: bidirectional
@@ -70,6 +74,12 @@ pub fn clean_text(s: &str) -> String {
         }
     }
     out
+}
+
+/// [`clean_text`] for room and map names, which the room list and the share
+/// page show: angle brackets are removed as well, so a name can never hold markup.
+pub fn clean_label(s: &str) -> String {
+    clean_text(s).chars().filter(|c| !matches!(c, '<' | '>')).collect()
 }
 
 // ------------------------------------------------------------------ control (JSON)
@@ -700,5 +710,27 @@ mod clean_tests {
         assert_eq!(clean_text("\u{115F}\u{1160}\u{FFA0}\u{2800}\u{034F}"), "");
         assert_eq!(clean_text("a\u{3164}b"), "ab");
         assert_eq!(clean_text("\u{3164} \u{3164}").trim(), "");
+    }
+
+    #[test]
+    fn labels_drop_angle_brackets() {
+        use super::clean_label;
+        assert_eq!(clean_label("<img src=x onerror=1>Map"), "img src=x onerror=1Map");
+        assert_eq!(clean_label("a\u{202E}<b>"), "ab");
+    }
+}
+
+#[cfg(test)]
+mod name_tests {
+    use super::valid_name;
+
+    #[test]
+    fn names_must_not_start_or_end_with_space() {
+        assert!(valid_name("Bob"));
+        assert!(valid_name("Bob Smith"));
+        assert!(!valid_name("Bob "));
+        assert!(!valid_name(" Bob"));
+        assert!(!valid_name("   "));
+        assert!(!valid_name("A_very_long_name_1"));
     }
 }

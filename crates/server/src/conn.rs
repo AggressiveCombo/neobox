@@ -121,7 +121,7 @@ impl Session {
         if password.as_ref().is_some_and(|p| p.chars().count() > crate::room::MAX_PASSWORD_LEN) {
             return self.error("bad_password", &format!("Passwords are at most {} characters", crate::room::MAX_PASSWORD_LEN));
         }
-        let name: String = clean_text(&name).trim().chars().take(MAX_ROOM_NAME_LEN).collect();
+        let name: String = clean_label(&name).trim().chars().take(MAX_ROOM_NAME_LEN).collect();
         let name = if name.is_empty() { format!("{}'s game", self.info.as_ref().unwrap().name) } else { name };
         let code = self.hub.new_code();
         let room = crate::room::spawn(self.hub.clone(), code.clone(), name, password.clone(), max_players, public, setup);
@@ -218,7 +218,7 @@ impl Session {
                 self.presence = self.account.as_ref().map(|a| self.hub.presence(a.id));
                 // signed in: the account name is the player name
                 let name = match &self.account {
-                    Some(a) => a.name.clone(),
+                    Some(a) => a.name.trim().to_string(),
                     None => name.trim().to_string(),
                 };
                 if version != PROTOCOL_VERSION {

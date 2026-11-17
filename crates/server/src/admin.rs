@@ -82,18 +82,39 @@ fn authorized(hub: &Hub, headers: &HeaderMap) -> bool {
     sessions.keys().any(|k| constant_time_eq(k.as_bytes(), token.as_bytes()))
 }
 
+/// Whether this connection came through a proxy whose forwarded headers are
+/// believed: `NEOBOX_TRUST_PROXY` is on and the peer is loopback (a proxy on
+/// this host) or listed in `NEOBOX_TRUSTED_PROXIES`.
+pub fn via_trusted_proxy(hub: &Hub, peer: SocketAddr) -> bool {
+    hub.cfg.trust_proxy && is_proxy(hub, peer.ip())
+}
+
+fn is_proxy(hub: &Hub, ip: IpAddr) -> bool {
+    ip.is_loopback() || hub.cfg.trusted_proxies.contains(&ip)
+}
+
+/// The client's address. Behind a trusted proxy it is the rightmost
+/// `X-Forwarded-For` entry that is not a proxy: the proxy appends the address it
+/// received the request from, so anything to its left is client-chosen. An
+/// unparseable entry, or no entry at all, falls back to the peer.
 pub fn client_ip(hub: &Hub, headers: &HeaderMap, peer: SocketAddr) -> IpAddr {
-    if hub.cfg.trust_proxy {
-        if let Some(ip) = headers
-            .get("x-forwarded-for")
-            .and_then(|v| v.to_str().ok())
-            .and_then(|v| v.split(',').next())
-            .and_then(|s| s.trim().parse().ok())
-        {
-            return ip;
+    if !via_trusted_proxy(hub, peer) {
+        return peer.ip();
+    }
+    forwarded_client(headers, |ip| is_proxy(hub, ip)).unwrap_or(peer.ip())
+}
+
+/// The rightmost forwarded address that is not a proxy. `None` when there is
+/// none, or when an entry on the way is not an address.
+fn forwarded_client(headers: &HeaderMap, is_proxy: impl Fn(IpAddr) -> bool) -> Option<IpAddr> {
+    let forwarded: Vec<&str> = headers.get_all("x-forwarded-for").iter().filter_map(|v| v.to_str().ok()).collect();
+    for entry in forwarded.join(",").rsplit(',') {
+        let ip = entry.trim().parse::<IpAddr>().ok()?;
+        if !is_proxy(ip) {
+            return Some(ip);
         }
     }
-    peer.ip()
+    None
 }
 
 #[derive(Deserialize)]
@@ -117,7 +138,7 @@ async fn login(State(hub): State<Arc<Hub>>, ConnectInfo(peer): ConnectInfo<Socke
     let token: String = (0..32).map(|_| format!("{:02x}", rand::random::<u8>())).collect();
     hub.admin_sessions.lock().unwrap().insert(token.clone(), Instant::now());
     info!(%ip, "admin login");
-    let secure = headers.get("x-forwarded-proto").and_then(|v| v.to_str().ok()) == Some("https");
+    let secure = via_trusted_proxy(&hub, peer) && headers.get("x-forwarded-proto").and_then(|v| v.to_str().ok()) == Some("https");
     let cookie = format!(
         "{COOKIE}={token}; Path=/admin; HttpOnly; SameSite=Strict; Max-Age={}{}",
         SESSION_TTL.as_secs(),
@@ -442,4 +463,39 @@ async fn account_password(State(hub): State<Arc<Hub>>, headers: HeaderMap, Path(
     }
     db(&hub, move |s| s.admin_set_password(id, &b.password)).await?;
     Ok(StatusCode::NO_CONTENT.into_response())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::http::HeaderValue;
+
+    fn xff(values: &[&str]) -> HeaderMap {
+        let mut headers = HeaderMap::new();
+        for v in values {
+            headers.append("x-forwarded-for", HeaderValue::from_str(v).unwrap());
+        }
+        headers
+    }
+
+    fn is_proxy(ip: IpAddr) -> bool {
+        ip.is_loopback() || ip == "10.0.0.1".parse::<IpAddr>().unwrap()
+    }
+
+    #[test]
+    fn the_client_is_the_rightmost_entry_the_proxy_added() {
+        // the client sent 6.6.6.6 itself; the proxy appended the address it saw
+        let headers = xff(&["6.6.6.6", "9.9.9.9"]);
+        assert_eq!(forwarded_client(&headers, is_proxy), Some("9.9.9.9".parse().unwrap()));
+        // a proxy in the chain is skipped
+        let headers = xff(&["9.9.9.9, 10.0.0.1"]);
+        assert_eq!(forwarded_client(&headers, is_proxy), Some("9.9.9.9".parse().unwrap()));
+    }
+
+    #[test]
+    fn garbage_or_missing_forwarding_gives_no_client() {
+        assert_eq!(forwarded_client(&xff(&["9.9.9.9, nope"]), is_proxy), None);
+        assert_eq!(forwarded_client(&xff(&[""]), is_proxy), None);
+        assert_eq!(forwarded_client(&HeaderMap::new(), is_proxy), None);
+    }
 }
