@@ -948,6 +948,66 @@ async function editorPhone(s) {
   return "editor and test play fit the phone";
 }
 
+/** Back asks before leaving unsaved map edits, and page unload warns only then. */
+async function editorLeave(s) {
+  const h = await s.open("editor-leave");
+  const { page } = h;
+  await page.goto(s.base);
+  await menuName(page).waitFor();
+  await navTo(page, "Map editor");
+  const canvas = page.locator("canvas.editor-canvas");
+  await canvas.waitFor({ state: "visible" });
+  await sleep(300);
+  // No edits: Back leaves at once.
+  await back(page).click();
+  await menuName(page).waitFor();
+  await navTo(page, "Map editor");
+  await canvas.waitFor({ state: "visible" });
+  await sleep(300);
+  const box = await canvas.boundingBox();
+  const cx = box.x + box.width / 2;
+  const cy = box.y + box.height / 2;
+  await button(page, "Box").click();
+  await page.mouse.move(cx - 80, cy - 50);
+  await page.mouse.down();
+  await page.mouse.move(cx + 80, cy + 50, { steps: 8 });
+  await page.mouse.up();
+  check(await button(page, "Undo").isEnabled(), "box drawn does not enable Undo");
+  // Page unload with unsaved edits asks the browser to confirm; the harness dismisses it, which keeps the page.
+  const unload = page.waitForEvent("dialog", { timeout: 10000 }).then((d) => d.type());
+  void page.reload().catch(() => {});
+  check((await unload) === "beforeunload", "reload with unsaved edits did not ask before unloading");
+  // The harness reports every dialog as a problem; this one is the expected unload prompt.
+  h.problems.splice(0, h.problems.length, ...h.problems.filter((p) => !p.endsWith("unexpected dialog: ")));
+  await canvas.waitFor({ state: "visible" });
+  // In-app Back asks too: Cancel keeps the editor open, Leave goes back.
+  const dialog = page.getByRole("alertdialog", { name: "Leave without saving?", exact: true });
+  await back(page).click();
+  await dialog.waitFor();
+  await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
+  await dialog.waitFor({ state: "detached" });
+  await canvas.waitFor({ state: "visible" });
+  await back(page).click();
+  await dialog.waitFor();
+  await dialog.getByRole("button", { name: "Leave", exact: true }).click();
+  await menuName(page).waitFor();
+  return "Back and unload ask only with unsaved edits; Cancel keeps the editor";
+}
+
+/** A guest name typed on the menu is kept for the next visit before any play action. */
+async function quickPlayName(s) {
+  const h = await s.open("quick-name");
+  const { page } = h;
+  await page.goto(s.base);
+  await menuName(page).waitFor();
+  await menuName(page).fill("QuickKept7");
+  await page.reload();
+  await menuName(page).waitFor();
+  const after = await menuName(page).inputValue();
+  check(after === "QuickKept7", `name after reload is "${after}", not the typed name`);
+  return "typed name kept across reload without a play action";
+}
+
 /** The room-list row of `roomName` on the room list (`ul[aria-label="rooms"]`). */
 const roomRow = (page, roomName) =>
   page.locator('ul[aria-label="rooms"] li.room-item').filter({ hasText: roomName }).locator("button.room-row");
@@ -1127,7 +1187,89 @@ async function resyncKeepsMap(s) {
   return `${sent} snapshot resyncs; map unchanged; no resyncs after recovery`;
 }
 
+/** The training hall opens while the engine's wasm is still downloading: it waits for the engine, then shows the lesson. */
+async function trainingSlowEngine(s) {
+  const h = await s.open("training slow", { name: uniqueName("tr") });
+  const { page } = h;
+  let release = () => {};
+  const gate = new Promise((resolve) => {
+    release = resolve;
+  });
+  await page.route("**/neobox.wasm*", async (route) => {
+    await gate;
+    await route.continue();
+  });
+  await page.goto(s.base);
+  await menuName(page).waitFor();
+  await navTo(page, "Training");
+  await page.getByText("Loading the training hall…", { exact: true }).waitFor();
+  release();
+  await page.locator(".training-text").waitFor();
+  check((await page.getByText("could not load", { exact: false }).count()) === 0, "the hall reported a load failure");
+  await button(page, "Leave").click();
+  await menuName(page).waitFor();
+  return "training opened before the engine; lesson shown once it loaded";
+}
+
+/** A room's Choose a map -> Library -> pick: Back then leaves the room, not a dead modal entry. */
+async function libraryPickBack(s) {
+  const user = await signedIn(s, "picker");
+  const maps = await builtinMaps(s.base);
+  const name = uniqueName("pb");
+  const { page } = user;
+  await navTo(page, "Library");
+  await page.getByRole("tab", { name: "Mine", exact: true }).or(button(page, "Mine")).first().click();
+  await page.getByRole("button", { name: "Upload a map", exact: true }).click();
+  await page.getByPlaceholder("Map name", { exact: true }).fill(name);
+  await page.getByLabel("map code", { exact: true }).fill(maps[0].code);
+  await page.getByRole("button", { name: "Upload map", exact: true }).click();
+  await page.locator("ul[aria-label=maps] li").filter({ hasText: name }).waitFor();
+  await back(page).click();
+  const roomName = uniqueName("pickback");
+  await createRoom(user, s.base, roomName, { isPublic: true });
+  await button(page, "Change map").click();
+  await button(page, "Library").click();
+  const picker = page.getByRole("dialog", { name: "Pick a map" });
+  await picker.waitFor();
+  await picker.getByRole("tab", { name: "Mine", exact: true }).or(picker.getByRole("button", { name: "Mine", exact: true })).first().click();
+  await picker.locator(".map-card").filter({ hasText: name }).first().click();
+  await page.locator(".room-map-name").filter({ hasText: name }).waitFor();
+  await page.goBack();
+  await roomTitle(page, roomName).waitFor({ state: "detached" });
+  return `picked ${name} from Library in the room; Back left the room`;
+}
+
+/** No WebGPU or WebGL 2: the first game screen gets the dialog, a later one gets a toast instead of a silent empty arena. */
+async function rendererGone(s) {
+  const h = await s.open("no graphics", { name: uniqueName("ng") });
+  const { page } = h;
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator, "gpu", { value: undefined, configurable: true });
+    const getContext = HTMLCanvasElement.prototype.getContext;
+    HTMLCanvasElement.prototype.getContext = function (type, ...rest) {
+      return /webgl|webgpu/.test(String(type)) ? null : getContext.call(this, type, ...rest);
+    };
+  });
+  await page.goto(s.base);
+  await menuName(page).waitFor();
+  // the renderer is tried at boot: the dialog covers the menu before any game screen is entered
+  const dialog = page.getByRole("dialog", { name: "This browser cannot draw the game", exact: true });
+  await dialog.waitFor();
+  await dialog.getByRole("button", { name: "Back", exact: true }).click();
+  await dialog.waitFor({ state: "detached" });
+  await navTo(page, "Practice");
+  await button(page, "Start").click();
+  await page.getByText("WebGPU and WebGL 2 are unavailable", { exact: false }).waitFor();
+  await button(page, "Leave").click();
+  await back(page).click();
+  await menuName(page).waitFor();
+  return "graphics dialog once; practice entered again says so";
+}
+
 export const scenarios = [
+  { name: "training slow engine", run: trainingSlowEngine },
+  { name: "library pick back", run: libraryPickBack },
+  { name: "renderer lost", run: rendererGone },
   { name: "menu", run: menu },
   { name: "settings", run: settings },
   { name: "accessibility prefs", run: accessibilityPrefs },
@@ -1139,6 +1281,7 @@ export const scenarios = [
   { name: "match menu", run: matchMenu },
   { name: "reconnect", run: reconnect },
   { name: "quick play", run: quickPlay },
+  { name: "quick play name", run: quickPlayName },
   { name: "levels", run: levels },
   { name: "jukebox", run: jukebox },
   { name: "lobby signals", run: lobbySignals },
@@ -1152,6 +1295,7 @@ export const scenarios = [
   { name: "input latency", run: latency },
   { name: "map editor", run: editor },
   { name: "map editor phone", run: editorPhone },
+  { name: "map editor leave", run: editorLeave },
   { name: "geo room list", run: geoRoomList, topology: geoServer },
   { name: "regions", run: regionRooms, topology: regionServers },
   { name: "regions account", run: regionAccount, topology: regionServers },
