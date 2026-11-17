@@ -9,6 +9,7 @@ import type { Engine, ReplayInfo } from "../engine";
 import { fetchClipReplay, listClips, type ClipSummary } from "../clips";
 import { fetchPrecached } from "../precached";
 import { HttpError } from "../http-error";
+import { reducedMotion } from "./a11y";
 import { h } from "./dom";
 
 /** Clips per page; matches the server's page size, so a short page means the end. */
@@ -47,6 +48,8 @@ export function mountMenuClips(ctx: AppCtx, host: HTMLElement, onPlaying?: (on: 
   let atEnd = false;
   let cursor = 0;
   let playing: Playing | null = null;
+  /** The clip last held still under reduced motion; it is drawn once, not every frame. */
+  let frozenFor: Playing | null = null;
   let loading = false;
   let rafId = 0;
   let last = 0;
@@ -157,6 +160,16 @@ export function mountMenuClips(ctx: AppCtx, host: HTMLElement, onPlaying?: (on: 
     last = now;
     if (!playing || !eng || document.hidden) return;
     const p = playing;
+    if (reducedMotion()) {
+      // Reduced motion holds the clip on one frame: draw it once, then stop advancing until the setting is off.
+      if (frozenFor !== p) {
+        frozenFor = p;
+        eng.replayFrame(p.tick, p.follow);
+        ctx.present(p.names, p.info.hz, false);
+      }
+      return;
+    }
+    frozenFor = null;
     p.tick += (dt / 1000) * p.info.hz;
     if (p.tick >= p.info.end) {
       playing = null;
