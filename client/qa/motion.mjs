@@ -11,11 +11,14 @@
 //   scene.menu.browse         menu "Browse rooms" -> the Browse screen             limit 400 ms
 //   scene.browse.room         create-room "Create room" -> the room lobby          limit 400 ms
 //   scene.room.match          room "Start" -> the match HUD                        limit 400 ms
+//   chrome.pages                menu -> each page -> Back; shared chrome vs Browse rooms  limit 0.5 px at rest, 2 px in flight
 //
 // Keys: motion.transition.ms (settle time, absent when not settled), motion.transition.limit,
 // motion.samples (screenshots taken), motion.sample.ms (median interval between samples),
 // motion.cssEnd.ms (in-page cross-check: longest remaining finite CSS animation or transition at the
 // trigger, from document.getAnimations), motion.masked.px (idle-animated pixels excluded).
+// motion.chromeShift.px (shared chrome vs Browse rooms at rest) and motion.chromeTravel.px (chrome travel
+// in flight), from chrome.pages.
 //
 // Resolution: one screenshot takes tens of ms, so the 16 ms sample period of the RUBRIC cannot be
 // reached through Playwright. Every value comes with the measured median sample period; the settle
@@ -26,6 +29,7 @@
 //         (QA_ENGINES=chromium narrows the engines)
 // Self-test (QA_SELF_TEST=janky): every CSS animation and transition is stretched to 1500 ms with
 // !important, so every case must FAIL on its limit.
+// Chrome self-test (QA_SELF_TEST=chromejump): restores the old Account column width; chrome.pages must FAIL.
 
 import { PNG } from "pngjs";
 import {
@@ -41,7 +45,7 @@ import {
   uniqueName,
   writeIndex,
 } from "./lib-qa.mjs";
-import { ensureRoomMap, playFromMenu } from "../e2e/lib.mjs";
+import { ensureRoomMap, navTo, playFromMenu } from "../e2e/lib.mjs";
 
 const mode = selfTestMode();
 const CHANGE = 0.005; // RUBRIC D20: change below 0.5% of region pixels
@@ -50,6 +54,11 @@ const MAX_MS = 3000; // a transition that is not stable by then fails
 const SETTLE_SETUP_MS = 600; // let load-time animations finish before the reference frame
 const BASELINE_MS = 250; // idle gap between the two baseline frames that find animated pixels
 const JANKY = "*{animation-duration:1500ms!important;transition-duration:1500ms!important}";
+const CHROMEJUMP = ".account-page .page-inner{max-width:1040px!important}"; // the old Account column width this case exists to catch
+const CHROME_SETTLE_MS = 600; // page transitions are 240 ms; settled chrome is read after this
+const CHROME_SHIFT_PX = 0.5; // shared chrome does not move between pages (sub-pixel rounding only)
+const CHROME_TRAVEL_PX = 2; // no travel while a page changes: the crossfade keeps chrome in place
+const round = (n) => Math.round(n * 10) / 10;
 
 /** Remaining time of the longest finite running CSS animation or transition, in ms. */
 const CSS_END = () => {
@@ -225,6 +234,111 @@ async function openCreateForm(page) {
   await page.getByLabel("room name", { exact: true }).fill(uniqueName("room"));
 }
 
+/** Installs a per-frame reader of the top page's shared chrome (head box, Back, title, primary column) into window.__chrome. */
+function installChromeSampler() {
+  const geom = () => {
+    const pg = [...document.querySelectorAll("#ui .page")].find((p) => !p.parentElement.closest(".page") && !p.closest(".screen-out"));
+    if (!pg) return null;
+    const box = (el) => {
+      if (!el) return null;
+      const b = el.getBoundingClientRect();
+      return { x: b.x, y: b.y, r: b.right };
+    };
+    return {
+      head: box(pg.querySelector(":scope > .page-head")),
+      back: box(pg.querySelector(".page-back")),
+      title: box(pg.querySelector(".page-head h1")),
+      column: box(pg.querySelector(":scope > .page-inner")),
+    };
+  };
+  window.__chrome = [];
+  const tick = () => {
+    window.__chrome.push({ g: geom() });
+    requestAnimationFrame(tick);
+  };
+  requestAnimationFrame(tick);
+}
+
+/** Largest displacement of shared chrome between two geometries. Title width varies with its text, so only its origin counts; the column's right edge counts too. */
+function chromeDelta(a, b) {
+  if (!a || !b) return Infinity;
+  let max = 0;
+  for (const k of ["head", "back", "title", "column"]) {
+    const p = a[k];
+    const q = b[k];
+    if (!p || !q) return Infinity;
+    for (const f of k === "column" ? ["x", "y", "r"] : ["x", "y"]) max = Math.max(max, Math.abs(p[f] - q[f]));
+  }
+  return max;
+}
+
+/** A sampled frame has every shared element (none missing mid-swap). */
+function chromeComplete(g) {
+  return !!g && ["head", "back", "title", "column"].every((k) => g[k]);
+}
+
+const CHROME_PAGES = [
+  { id: "browse", title: "Browse rooms", open: (p) => button(p, "Browse rooms").click() },
+  { id: "quick", title: "Quick play", open: (p) => button(p, "Quick play").click() },
+  { id: "settings", title: "Settings", open: (p) => navTo(p, "Settings") },
+  { id: "account", title: "Account", open: (p) => p.locator(".home-account").click() },
+  { id: "library", title: "Library", open: (p) => navTo(p, "Library") },
+  { id: "practice", title: "Practice", open: (p) => navTo(p, "Practice") },
+  { id: "about", title: "About neobox", open: (p) => navTo(p, "About") },
+  { id: "friends", title: "Friends", open: (p) => navTo(p, "Friends") },
+];
+
+/** Back to the menu from a page: its Back control, then the menu's name field. */
+async function backToMenu(page) {
+  const back = page.locator("#ui .page-back");
+  if (await back.count()) await back.first().click();
+  else await button(page, "Back").first().click();
+  await page.locator(".home-name-input").waitFor({ state: "visible", timeout: MAX_MS });
+  await sleep(CHROME_SETTLE_MS);
+}
+
+/**
+ * Menu -> each page -> Back. The first page (Browse rooms) is the reference; every page's chrome must
+ * sit where it does there (motion.chromeShift.px, after settle), and must not travel while it changes
+ * (motion.chromeTravel.px, sampled every frame).
+ */
+async function chromePages(s) {
+  const { page } = await openMenu(s, "chrome");
+  if (mode === "chromejump") await page.addStyleTag({ content: CHROMEJUMP });
+  await page.evaluate(installChromeSampler);
+  let ref = null;
+  let shift = 0;
+  let travel = 0;
+  const lines = [];
+  for (const p of CHROME_PAGES) {
+    await page.evaluate(() => {
+      window.__chrome.length = 0;
+    });
+    await p.open(page);
+    await page.locator("#ui .page-head h1", { hasText: p.title }).waitFor({ state: "visible", timeout: MAX_MS });
+    await sleep(CHROME_SETTLE_MS);
+    const frames = await page.evaluate(() => window.__chrome.splice(0));
+    const ready = frames.filter((f) => chromeComplete(f.g));
+    const settled = ready.at(-1)?.g ?? null;
+    if (!settled) return { pass: false, detail: `${p.id}: no page chrome found` };
+    ref ??= settled;
+    const dShift = chromeDelta(settled, ref);
+    const dTravel = ready.reduce((m, f) => Math.max(m, chromeDelta(f.g, settled)), 0);
+    shift = Math.max(shift, dShift);
+    travel = Math.max(travel, dTravel);
+    lines.push(`${p.id} ${round(dShift)} px at rest, ${round(dTravel)} px in flight (${frames.length - ready.length} frames without page chrome)`);
+    await backToMenu(page);
+  }
+  const metrics = {
+    "motion.chromeShift.px": round(shift),
+    "motion.chromeTravel.px": round(travel),
+    "motion.chromeShift.limit": CHROME_SHIFT_PX,
+    "motion.chromeTravel.limit": CHROME_TRAVEL_PX,
+  };
+  const pass = shift <= CHROME_SHIFT_PX && travel <= CHROME_TRAVEL_PX;
+  return { pass, detail: `chrome vs Browse rooms: ${lines.join("; ")}`, metrics };
+}
+
 const CASES = [
   {
     id: "ui.modal.open.news",
@@ -323,6 +437,10 @@ const CASES = [
         arrived: () => hud.waitFor({ state: "visible", timeout: MAX_MS }),
       });
     },
+  },
+  {
+    id: "chrome.pages",
+    run: chromePages,
   },
 ];
 
