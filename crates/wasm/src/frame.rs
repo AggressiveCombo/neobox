@@ -689,7 +689,7 @@ pub struct Feed {
     /// (swinger, victim kind, victim index, tick) quadruples of bat hits of confirmed ticks: the event log
     pub log_hits: Vec<u32>,
     /// predicted sounds already fed, per tick: a rollback feeds the recomputed ticks again
-    fed_sounds: FedKeys<(u32, u32, u32, u32, i32)>,
+    fed_sounds: FedKeys<(u32, i32, i32, i32)>,
     /// predicted bat hits already fed, per tick
     fed_hits: FedKeys<(u32, u32, u32)>,
 }
@@ -712,7 +712,10 @@ impl Feed {
         let mut sounds = Vec::new();
         new_sounds(prev, cur, &mut sounds);
         for s in sounds {
-            let key = (s.kind, s.x.to_bits(), s.y.to_bits(), s.volume.to_bits(), s.player);
+            // a player's sound is one per kind per tick; a world sound is placed to the nearest 16 units. A rollback
+            // recomputes positions, so the exact bits of x and y do not identify a sound
+            let cell = |v: f32| (v / 16.0).round() as i32;
+            let key = if s.player >= 0 { (s.kind, s.player, 0, 0) } else { (s.kind, s.player, cell(s.x), cell(s.y)) };
             if self.fed_sounds.first(tick, key) {
                 self.sounds.push(s);
             }
@@ -851,5 +854,30 @@ mod tests {
         assert!(!xs.is_empty());
         let mid = xs.iter().sum::<f32>() / xs.len() as f32;
         assert!((mid - 5.0).abs() < 0.01, "projectile centre {mid}, expected 5");
+    }
+
+    #[test]
+    fn rollback_that_moves_a_sound_does_not_feed_it_again() {
+        let sound = |x: f64, player: f64| {
+            let mut s = State::default();
+            s.sounds.push(neobox_sim::state::Sound { x, y: 0.0, kind: 3.0, ttl: 5.0, volume: 0.5, player, effect_row: false });
+            s
+        };
+        let mut feed = Feed::default();
+        // a player's sound: recomputed by a rollback at a moved position, it is not fed again
+        feed.add_predicted(7, &State::default(), &sound(100.0, 2.0));
+        assert_eq!(feed.sounds.len(), 1);
+        feed.clear();
+        feed.add_predicted(7, &State::default(), &sound(101.0, 2.0));
+        assert!(feed.sounds.is_empty());
+        // a world sound keeps its cell: a move inside the same 16-unit cell is not fed again
+        feed.add_predicted(8, &State::default(), &sound(100.0, -1.0));
+        assert_eq!(feed.sounds.len(), 1);
+        feed.clear();
+        feed.add_predicted(8, &State::default(), &sound(102.0, -1.0));
+        assert!(feed.sounds.is_empty());
+        // another tick is a new sound
+        feed.add_predicted(9, &State::default(), &sound(101.0, 2.0));
+        assert_eq!(feed.sounds.len(), 1);
     }
 }
