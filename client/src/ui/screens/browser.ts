@@ -113,6 +113,7 @@ export const browserScreen: ScreenFactory = (ctx) => {
     codeJoin,
   );
 
+  const noticeSlot = h("div", { class: "browser-notice-slot" });
   const inviteSlot = h("div", { class: "invite-slot" });
 
   /** The create-room form in a modal: fresh fields each time it opens; Create room submits them. */
@@ -208,6 +209,21 @@ export const browserScreen: ScreenFactory = (ctx) => {
         "div",
         { class: "actions" },
         h("button", { type: "button", onclick: () => store.set({ invite: null }) }, "Cancel"),
+      ),
+    );
+  }
+
+  function renderNotice(text: string | null): void {
+    if (text === null) {
+      noticeSlot.replaceChildren();
+      return;
+    }
+    noticeSlot.replaceChildren(
+      h(
+        "section",
+        { class: "panel browser-notice", role: "alert" },
+        h("p", null, text),
+        h("button", { type: "button", onclick: () => store.set({ notice: null }) }, "Dismiss"),
       ),
     );
   }
@@ -365,8 +381,9 @@ export const browserScreen: ScreenFactory = (ctx) => {
     emptyHint,
   );
 
-  const el = page("browser", head, codeForm, inviteSlot, roomsSection);
+  const el = page("browser", head, noticeSlot, codeForm, inviteSlot, roomsSection);
 
+  renderNotice(store.state.notice);
   renderRooms();
   renderInvite(store.state.invite);
 
@@ -377,6 +394,7 @@ export const browserScreen: ScreenFactory = (ctx) => {
         rooms = state.rooms;
         renderRooms();
       }
+      if (state.notice !== prev.notice) renderNotice(state.notice);
       if (state.invite !== prev.invite) renderInvite(state.invite);
     },
     destroy() {

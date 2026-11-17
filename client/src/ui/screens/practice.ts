@@ -171,7 +171,14 @@ export const practiceScreen: ScreenFactory = (ctx) => {
     const items: Node[] = [];
     if (maps === null && !mapsError) items.push(h("p", { class: "offline-status", role: "status" }, "Loading maps…"));
     if (mapsError) {
-      items.push(h("p", { class: "offline-error", role: "alert" }, `Could not load maps: ${mapsError}`));
+      items.push(
+        h(
+          "div",
+          { class: "offline-error", role: "alert" },
+          h("p", null, "Could not load maps. Check your connection, then try again."),
+          h("details", null, h("summary", null, "Details"), h("p", null, mapsError)),
+        ),
+      );
       items.push(h("button", { type: "button", class: "quiet", onclick: retryMaps }, icon("rotate-ccw", 18), "Try again"));
     }
     for (const m of maps ?? []) {

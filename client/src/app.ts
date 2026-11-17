@@ -389,6 +389,7 @@ export function start(): Store<AppState> {
     "div",
     { class: "reconnect-banner", role: "status", "aria-live": "polite" },
     h("span", null, "Connection lost. Reconnecting…"),
+    h("button", { type: "button", onclick: () => retryNow() }, "Retry now"),
     h("button", { type: "button", onclick: () => disconnect() }, "Leave"),
   );
   banner.hidden = true;
@@ -710,6 +711,11 @@ export function start(): Store<AppState> {
           roomNotFound(joinAttempt);
           return;
         }
+        // A join from the list was refused: the browser keeps the cause on screen until it is dismissed.
+        if (msg.code === "room_full" && roomCode === null) {
+          store.set({ notice: "The room is full. Pick another room from the list.", screen: "browse" });
+          return;
+        }
         toast(msg.message, "error");
         return;
       }
@@ -742,8 +748,8 @@ export function start(): Store<AppState> {
         if (roomCode !== null) leaveRoom();
         return;
       case "kicked":
-        toast(msg.reason, "error");
         leaveRoom();
+        store.set({ notice: `${msg.reason} from the room.` });
         return;
       case "chat":
         if (msg.from !== null && msg.from !== store.state.myId) sfx.chatPop();
@@ -1049,10 +1055,21 @@ export function start(): Store<AppState> {
       },
       "Browse rooms",
     );
+    const menu = h(
+      "button",
+      {
+        type: "button",
+        onclick: () => {
+          store.set({ screen: "menu" });
+          m?.close();
+        },
+      },
+      "Back to menu",
+    );
     m = openModal({
       title: "Room not found",
       body: [h("p", null, `No open room has the code ${code.toUpperCase()}. It may have closed, or the link may have a typo.`)],
-      actions: [browse],
+      actions: [browse, menu],
     });
   }
 

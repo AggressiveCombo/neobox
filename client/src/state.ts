@@ -88,6 +88,8 @@ export interface AppState {
   typing: Readonly<Record<number, number>>;
   /** The map editor was opened from the room by the host: it can send its map back to the room. */
   editorForRoom: boolean;
+  /** A refusal or removal from the server, shown on the browser until dismissed (e.g. kicked from a room). */
+  notice: string | null;
 }
 
 export type Listener<T> = (state: T, prev: T) => void;
@@ -136,5 +138,6 @@ export function initialState(): AppState {
     xp: null,
     typing: {},
     editorForRoom: false,
+    notice: null,
   };
 }

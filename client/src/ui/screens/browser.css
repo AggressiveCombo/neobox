@@ -5,6 +5,21 @@
   position: static;
 }
 
+/* A removal from a room, kept on screen until dismissed (not a toast that fades). */
+.browser-notice {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  max-width: 560px;
+  margin-bottom: 16px;
+}
+
+.browser-notice p {
+  margin: 0;
+  flex: 1 1 200px;
+}
+
 /* Join by code: the field and the Join button in one row. */
 .code-join {
   display: flex;
