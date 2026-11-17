@@ -278,7 +278,7 @@ async function library(s) {
     .locator("table#maps tbody tr")
     .filter({ hasText: name })
     .getByRole("button", { name: "Approve", exact: true })
-    .dispatchEvent("click"); // the admin page re-renders this table every second: a mouse click can land across a rebuild and be lost
+    .click();
   await admin.page.getByText(`Approved ${name}.`).waitFor();
 
   await page.reload();
