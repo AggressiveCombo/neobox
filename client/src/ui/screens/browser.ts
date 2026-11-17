@@ -77,6 +77,8 @@ export const browserScreen: ScreenFactory = (ctx) => {
   const roomList = h("ul", { class: "room-table", "aria-label": "rooms" });
   const emptyHint = h("p", { class: "empty" });
   const total = h("p", { class: "muted num room-total", role: "status" });
+  /** Each listed room's row by code, with the key it was built from: a row is rebuilt only when what it shows changes. */
+  const rowCache = new Map<string, { key: string; el: HTMLLIElement }>();
 
   const searchInput = h("input", {
     type: "search",
@@ -237,6 +239,7 @@ export const browserScreen: ScreenFactory = (ctx) => {
     const input = h("input", {
       type: "password",
       class: "join-password",
+      "data-focus-key": "password",
       placeholder: "Password",
       autocomplete: "off",
       "aria-label": `password for ${room.name}`,
@@ -244,7 +247,7 @@ export const browserScreen: ScreenFactory = (ctx) => {
         join.disabled = input.value === "";
       },
     });
-    const join = h("button", { type: "submit", class: "primary", disabled: true }, "Join");
+    const join = h("button", { type: "submit", class: "primary", "data-focus-key": "join", disabled: true }, "Join");
     return h(
       "form",
       {
@@ -284,6 +287,7 @@ export const browserScreen: ScreenFactory = (ctx) => {
       {
         type: "button",
         class: "room-row",
+        "data-focus-key": "row",
         "aria-expanded": room.password ? String(open) : null,
         onclick: () => onRoomClick(room),
       },
@@ -325,10 +329,10 @@ export const browserScreen: ScreenFactory = (ctx) => {
     row.addEventListener("focus", sharpen, { once: true });
     const friends =
       room.friends.length > 0 ? h("p", { class: "room-friends" }, `Friends: ${room.friends.join(", ")}`) : null;
-    return h("li", { class: "room-item" }, row, friends, open ? joinForm(room) : null);
+    return h("li", { class: "room-item", "data-code": room.code }, row, friends, open ? joinForm(room) : null);
   }
 
-  /** The rooms that pass the filters, nearest first with friends on top. */
+  /** The rooms that pass the filters, nearest first with friends on top. Unchanged rows are kept as they are. */
   function renderRooms(): void {
     const query = searchInput.value.trim().toLowerCase();
     const shown = sortRooms(rooms).filter((room) => {
@@ -336,8 +340,43 @@ export const browserScreen: ScreenFactory = (ctx) => {
       if (query === "") return true;
       return [room.name, room.map, GAME_MODES.find((m) => m.id === room.mode)?.name ?? "Unknown", room.region].some((s) => s.toLowerCase().includes(query));
     });
-    clear(roomList);
-    for (const room of shown) roomList.appendChild(roomItem(room));
+    const active = document.activeElement;
+    const owner = active instanceof HTMLElement ? active.closest<HTMLElement>(".room-item") : null;
+    const focusKey = active instanceof HTMLElement ? active.dataset.focusKey : undefined;
+    const items: HTMLLIElement[] = [];
+    for (const room of shown) {
+      const key = JSON.stringify([room, pendingCode === room.code, store.state.country]);
+      const cached = rowCache.get(room.code);
+      if (cached !== undefined && cached.key === key) {
+        items.push(cached.el);
+        continue;
+      }
+      const el = roomItem(room);
+      if (cached !== undefined) {
+        // a rebuilt row keeps the password the viewer has typed so far
+        const typed = cached.el.querySelector<HTMLInputElement>(".join-password")?.value ?? "";
+        const input = el.querySelector<HTMLInputElement>(".join-password");
+        if (input !== null && typed !== "") {
+          input.value = typed;
+          input.dispatchEvent(new Event("input"));
+        }
+      }
+      rowCache.set(room.code, { key, el });
+      items.push(el);
+    }
+    const listed = new Set<Element>(items);
+    for (const child of Array.from(roomList.children)) if (!listed.has(child)) child.remove();
+    // a row is moved only when the order changed: moving a focused row drops its focus
+    items.forEach((el, i) => {
+      if (roomList.children.item(i) !== el) roomList.insertBefore(el, roomList.children.item(i));
+    });
+    const codes = new Set(shown.map((room) => room.code));
+    for (const code of rowCache.keys()) if (!codes.has(code)) rowCache.delete(code);
+    // focus that a rebuild or move dropped goes back to the same control of the same room
+    if (owner !== null && focusKey !== undefined && document.activeElement !== active) {
+      const next = rowCache.get(owner.dataset.code ?? "")?.el;
+      next?.querySelector<HTMLElement>(`[data-focus-key="${focusKey}"]`)?.focus({ preventScroll: true });
+    }
     total.textContent = shown.length === rooms.length ? `${rooms.length} open` : `${shown.length} of ${rooms.length} open`;
     emptyHint.textContent =
       rooms.length === 0

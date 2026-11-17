@@ -219,13 +219,31 @@ function pingTier(ms: number): string {
   return ms < 160 ? "is-fair" : "is-poor";
 }
 
-/** Rebuilds `slot` only when `key` differs from the previous call. */
+/**
+ * Rebuilds `slot` only when `key` differs from the previous call. A rebuild keeps the scroll position of the
+ * slot's scrolling ancestors, and returns focus to the rebuilt control with the same `data-focus-key`.
+ */
 function keyed(slot: HTMLElement, build: () => Node[]): (key: string) => void {
   let last: string | null = null;
   return (key) => {
     if (key === last) return;
     last = key;
+    const active = document.activeElement;
+    const focusKey = active instanceof HTMLElement && slot.contains(active) ? (active.dataset.focusKey ?? null) : null;
+    const scrolled: [HTMLElement, number][] = [];
+    for (let el = slot.parentElement; el !== null; el = el.parentElement) {
+      if (el.scrollTop > 0) scrolled.push([el, el.scrollTop]);
+    }
     slot.replaceChildren(...build());
+    for (const [el, top] of scrolled) el.scrollTop = top;
+    if (focusKey !== null) {
+      for (const el of slot.querySelectorAll<HTMLElement>("[data-focus-key]")) {
+        if (el.dataset.focusKey === focusKey) {
+          el.focus({ preventScroll: true });
+          break;
+        }
+      }
+    }
   };
 }
 
@@ -265,7 +283,7 @@ export const roomScreen: ScreenFactory = (ctx: AppCtx) => {
   let draft = "";
   let lastTypingSent = Number.NEGATIVE_INFINITY;
   /** What the chat log was last built from; it is rebuilt only when one of these changes. */
-  let shownChat: { list: readonly ChatLine[]; myId: number | null; host: boolean; filter: boolean } | null = null;
+  let shownChat: { list: readonly ChatLine[]; count: number; last: ChatLine | null; myId: number | null; host: boolean; filter: boolean } | null = null;
 
   const isHost = (): boolean =>
     st.room !== null && st.room.quick === null && st.room.players.some((p) => p.id === st.myId && p.host);
@@ -511,7 +529,7 @@ export const roomScreen: ScreenFactory = (ctx: AppCtx) => {
         "div",
         { class: "room-player-stats" },
         p.level > 0 ? h("span", { class: "room-level", title: "account level" }, `Lv ${p.level}`) : null,
-        h("span", { class: `room-ping ${pingTier(p.ping_ms)}`, title: p.ping_ms >= 0 ? "ping" : "no ping" }, icon("signal", 14), p.ping_ms >= 0 ? `${p.ping_ms} ms` : "-"),
+        h("span", { class: "room-ping", "data-ping": String(p.id) }, icon("signal", 14), h("span", { class: "room-ping-text" })),
       ),
       isMe
         ? null
@@ -523,6 +541,7 @@ export const roomScreen: ScreenFactory = (ctx: AppCtx) => {
               {
                 type: "button",
                 class: "room-more",
+                "data-focus-key": `more:${p.id}`,
                 "aria-label": `Actions for ${p.name}`,
                 "aria-haspopup": "menu",
                 "aria-expanded": open ? "true" : "false",
@@ -543,7 +562,8 @@ export const roomScreen: ScreenFactory = (ctx: AppCtx) => {
     const mode = roomMode(room);
     renderPlayers(
       JSON.stringify([
-        room.players,
+        // ping changes every broadcast: it repaints in place (paintPings) instead of rebuilding the roster
+        room.players.map(({ ping_ms: _ping, ...p }) => p),
         st.myId,
         mode,
         isHost(),
@@ -555,6 +575,19 @@ export const roomScreen: ScreenFactory = (ctx: AppCtx) => {
         menuFor,
       ]),
     );
+    paintPings(room);
+  }
+
+  /** Sets each roster ping to the room's latest figure. */
+  function paintPings(room: RoomState): void {
+    for (const p of room.players) {
+      const el = playersBody.querySelector<HTMLElement>(`[data-ping="${p.id}"]`);
+      if (el === null) continue;
+      el.className = `room-ping ${pingTier(p.ping_ms)}`;
+      el.title = p.ping_ms >= 0 ? "ping" : "no ping";
+      const text = el.querySelector(".room-ping-text");
+      if (text !== null) text.textContent = p.ping_ms >= 0 ? `${p.ping_ms} ms` : "-";
+    }
   }
 
   function buildPlayers(): Node[] {
@@ -637,7 +670,7 @@ export const roomScreen: ScreenFactory = (ctx: AppCtx) => {
       h(
         "div",
         { class: "actions" },
-        h("button", { type: "button", class: "room-btn", disabled: st.reconnecting, onclick: () => setLock(!room.locked) }, icon(room.locked ? "lock-open" : "lock", 16), room.locked ? "Unlock teams" : "Lock teams"),
+        h("button", { type: "button", class: "room-btn", "data-focus-key": "lock", disabled: st.reconnecting, onclick: () => setLock(!room.locked) }, icon(room.locked ? "lock-open" : "lock", 16), room.locked ? "Unlock teams" : "Lock teams"),
         h("button", { type: "button", class: "room-btn danger", disabled: !room.in_match, onclick: endMatch }, icon("x", 16), "End match"),
       ),
       h("p", { class: "room-muted" }, room.locked ? "Players cannot change team." : "Players can change team."),
@@ -921,7 +954,7 @@ export const roomScreen: ScreenFactory = (ctx: AppCtx) => {
   /** Opens the built-in maps in a dialog; picking one sets the room's map and closes it. */
   function openMapPicker(): void {
     closeMapPicker?.();
-    mapList.replaceChildren(...buildMapList());
+    refreshMapList();
     const modal = openModal({
       title: "Choose a map",
       body: [mapList, mapControls],
@@ -935,7 +968,7 @@ export const roomScreen: ScreenFactory = (ctx: AppCtx) => {
   /** Opens the game modes in a dialog; picking one sets the room's mode and closes it. */
   function openModePicker(): void {
     closeModePicker?.();
-    modeList.replaceChildren(...buildModeList());
+    refreshModeList();
     const modal = openModal({
       title: "Game mode",
       body: [modeList],
@@ -955,6 +988,7 @@ export const roomScreen: ScreenFactory = (ctx: AppCtx) => {
         {
           type: "button",
           class: "room-mode-option",
+          "data-focus-key": String(m.id),
           "aria-pressed": m.id === current ? "true" : "false",
           onclick: () => {
             setMode(m.id);
@@ -990,6 +1024,7 @@ export const roomScreen: ScreenFactory = (ctx: AppCtx) => {
         {
           type: "button",
           class: current ? "room-btn is-current" : "room-btn",
+          "data-focus-key": map.code,
           "aria-pressed": current ? "true" : "false",
           onclick: () => {
             if (chooseMap(map.code, map.name)) closeMapPicker?.();
@@ -1140,6 +1175,12 @@ export const roomScreen: ScreenFactory = (ctx: AppCtx) => {
   const renderSettings = keyed(settingsBody, buildSettings);
   const settingsPanel = h("section", { class: "room-panel room-settings-panel" }, h("h2", { class: "room-panel-title" }, "Settings"), settingsBody);
 
+  const renderHeader = keyed(header, () => (st.room === null ? [] : buildHeader(st.room)));
+  const renderStartNotice = keyed(startNotice, () => startNoticeNodes(isHost()));
+  const renderMapInfo = keyed(mapInfo, () => (st.room === null ? [] : buildMapInfo(st.room)));
+  const renderMapList = keyed(mapList, buildMapList);
+  const renderModeList = keyed(modeList, buildModeList);
+
   const chatLog = h("div", { class: "room-chat-log", role: "log", "aria-live": "polite" });
   const chatInput = h("input", {
     type: "text",
@@ -1206,18 +1247,18 @@ export const roomScreen: ScreenFactory = (ctx: AppCtx) => {
         { class: "actions room-header-actions" },
         // the lobby opened from the match menu: the match keeps running behind it
         st.inMatch
-          ? h("button", { type: "button", class: "room-btn", onclick: () => ctx.store.set({ screen: "match" }) }, icon("arrow-left", 16), "Back to game")
+          ? h("button", { type: "button", class: "room-btn", "data-focus-key": "back", onclick: () => ctx.store.set({ screen: "match" }) }, icon("arrow-left", 16), "Back to game")
           : null,
-        h("button", { type: "button", class: "room-btn room-invite", title: "Copy invite link", disabled: st.reconnecting, onclick: () => void shareInvite() }, icon("link", 16), "Invite"),
+        h("button", { type: "button", class: "room-btn room-invite", "data-focus-key": "invite", title: "Copy invite link", disabled: st.reconnecting, onclick: () => void shareInvite() }, icon("link", 16), "Invite"),
         st.replayReady
           ? h(
               "button",
-              { type: "button", class: "room-btn", onclick: () => void saveReplay().catch(toastError) },
+              { type: "button", class: "room-btn", "data-focus-key": "save", onclick: () => void saveReplay().catch(toastError) },
               icon("download", 16),
               "Save replay",
             )
           : null,
-        h("button", { type: "button", class: "room-btn quiet", onclick: leave }, icon("log-out", 16), "Leave"),
+        h("button", { type: "button", class: "room-btn quiet", "data-focus-key": "leave", onclick: leave }, icon("log-out", 16), "Leave"),
       ),
     ];
   }
@@ -1236,6 +1277,7 @@ export const roomScreen: ScreenFactory = (ctx: AppCtx) => {
       const box = h("input", {
         type: "checkbox",
         checked: value === true,
+        "data-focus-key": def.field,
         disabled: !host,
         onchange: () => setSetting(def, String(box.checked)),
       });
@@ -1243,6 +1285,7 @@ export const roomScreen: ScreenFactory = (ctx: AppCtx) => {
     }
     const num = h("input", {
       type: "number",
+      "data-focus-key": def.field,
       step: def.kind === "f" ? "any" : "1",
       value: show(value),
       disabled: !host,
@@ -1349,43 +1392,64 @@ export const roomScreen: ScreenFactory = (ctx: AppCtx) => {
     const mode = roomMode(room);
     lastMapName = room.map_name;
     previewRoomMap();
-    header.replaceChildren(...buildHeader(room));
-    startNotice.replaceChildren(
-      h("span", null, "Match starting"),
-      ...(host ? [h("button", { type: "button", class: "room-btn room-btn-small", onclick: abortStart }, "Abort start")] : []),
-    );
+    renderHeader(JSON.stringify([room.name, room.code, room.quick === null, st.inMatch, st.replayReady, st.reconnecting]));
+    renderStartNotice(String(host));
     startButton.hidden = !host;
     startButton.disabled = room.in_match || room.starting || st.reconnecting;
     dockStatus.textContent = dockText(room, host);
     refreshPlayers();
     renderMode(`${host}|${mode}`);
     mapName.textContent = room.map_name;
-    mapInfo.replaceChildren(...buildMapInfo(room));
+    renderMapInfo(JSON.stringify([room.map, host, st.account !== null, room.map === null ? null : ageText(room.map.created)]));
     managePanel.hidden = !host;
-    renderManage(`${host}|${room.locked}|${room.in_match}|${room.bans.join("\n")}`);
-    // the picker's list is built when it opens; while open it follows builtins and the current map
-    if (closeMapPicker !== null) mapList.replaceChildren(...buildMapList());
-    if (closeModePicker !== null) modeList.replaceChildren(...buildModeList());
+    renderManage(JSON.stringify([host, room.locked, room.in_match, room.bans, st.reconnecting]));
+    // a picker's list is built when it opens; while open it follows builtins, the current map and the mode
+    if (closeMapPicker !== null) refreshMapList();
+    if (closeModePicker !== null) refreshModeList();
     renderSettings(`${host}|${JSON.stringify(room.settings)}`);
   }
 
-  /** Rebuilds the chat log only when its lines, the viewer's identity or host status, or the profanity filter changed. */
+  /** The map picker's list: what it shows (the host's view, the load state, the built-ins and the current map). */
+  function refreshMapList(): void {
+    renderMapList(JSON.stringify([isHost(), mapsError, builtins?.length ?? -1, lastMapName]));
+  }
+
+  function refreshModeList(): void {
+    renderModeList(String(st.room === null ? null : roomMode(st.room)));
+  }
+
+  function startNoticeNodes(host: boolean): Node[] {
+    return [
+      h("span", null, "Match starting"),
+      ...(host ? [h("button", { type: "button", class: "room-btn room-btn-small", "data-focus-key": "abort", onclick: abortStart }, "Abort start")] : []),
+    ];
+  }
+
+  function chatNode(line: ChatLine, host: boolean, filter: boolean): HTMLElement {
+    // Other players' lines are masked when the viewer filters profanity; their own lines show as typed.
+    const masked = line.from !== null && line.from !== st.myId && filter;
+    return chatLine(line, st.myId, masked ? filterProfanity(line.text) : line.text, host ? playOnJukebox : null);
+  }
+
+  /**
+   * Keeps the chat log in step with the chat list. New lines are appended; the log rebuilds when the viewer, the
+   * host status or the profanity filter changed, or when the list no longer extends the lines already shown.
+   */
   function renderChat(): void {
     const host = isHost();
     const filter = prefs.value.filterProfanity;
-    if (shownChat !== null && shownChat.list === st.chat && shownChat.myId === st.myId && shownChat.host === host && shownChat.filter === filter) {
-      return;
+    const shown = shownChat;
+    const sameView = shown !== null && shown.myId === st.myId && shown.host === host && shown.filter === filter;
+    if (shown !== null && sameView && shown.list === st.chat) return;
+    const extendsShown =
+      shown !== null && sameView && shown.count <= st.chat.length && (shown.count === 0 || st.chat[shown.count - 1] === shown.last);
+    shownChat = { list: st.chat, count: st.chat.length, last: st.chat[st.chat.length - 1] ?? null, myId: st.myId, host, filter };
+    if (shown !== null && extendsShown) {
+      chatLog.append(...st.chat.slice(shown.count).map((line) => chatNode(line, host, filter)));
+    } else {
+      chatLog.replaceChildren(...st.chat.map((line) => chatNode(line, host, filter)));
     }
-    const listChanged = shownChat === null || shownChat.list !== st.chat;
-    shownChat = { list: st.chat, myId: st.myId, host, filter };
-    chatLog.replaceChildren(
-      ...st.chat.map((line) => {
-        // Other players' lines are masked when the viewer filters profanity; their own lines show as typed.
-        const masked = line.from !== null && line.from !== st.myId && prefs.value.filterProfanity;
-        return chatLine(line, st.myId, masked ? filterProfanity(line.text) : line.text, host ? playOnJukebox : null);
-      }),
-    );
-    if (listChanged) chatLog.scrollTop = chatLog.scrollHeight;
+    chatLog.scrollTop = chatLog.scrollHeight;
   }
 
   renderRoom();
