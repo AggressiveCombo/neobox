@@ -6,7 +6,8 @@
 // except for the contrast sample, which reads the match canvas.
 //
 // Run: cd client && QA_OUT=<dir> bun qa/playfield.mjs        (QA_ENGINES=chromium to limit engines)
-// Env: PALETTES (default "default,deuteranopia"), QA_CAM_MS (15000), QA_PLAY_MS (30000).
+// Env: PALETTES (default "default,deuteranopia"), QA_CAM_MS (15000), QA_PLAY_MS (30000), QA_CASES (comma list of
+//      "tier", "camera", "feedback"; default all: runs only the named cases of the matrix).
 // Output: <QA_OUT>/playfield-<engine>.{json,md}, screenshots under <QA_OUT>/evidence/playfield-<engine>/.
 // Self-tests (QA_SELF_TEST, use a separate QA_OUT; each must FAIL):
 //   hud       a fixed box is put over the local live sprite before each HUD sample
@@ -14,6 +15,7 @@
 //   camera    a fake live player is added in the arena's far corner to the in-view check
 //   feedback  a synthetic engine log with a 5-tick delay (no browser)
 
+import { writeFile } from "node:fs/promises";
 import path from "node:path";
 import {
   Results,
@@ -38,6 +40,7 @@ import {
   rel,
 } from "./lib-qa.mjs";
 import { ROWS, isTouch } from "./presets.mjs";
+import { fixtureMatch } from "./gameplay.mjs";
 
 // Tier viewports (rubric section 2.1): one row per tier, primary geometry only.
 const TIERS = ["T1-M", "T2-M", "T3-T", "T4-T", "T5-T", "T6-T", "T7-T", "T8-T", "T9-T", "T10-M", "T11-T"];
@@ -50,6 +53,9 @@ const HUD_EVERY_MS = 250;
 const SAMPLE_MS = 250;
 const CAM_MS = Number(process.env.QA_CAM_MS ?? 15000);
 const PLAY_MS = Number(process.env.QA_PLAY_MS ?? 30000);
+const FEEDBACK_SWINGS = 6; // point-blank bat swings per player on the fixture map
+const BAT_HOLD_MS = 600; // KeyC held this long fires the bat
+const BAT_GAP_MS = 1500; // after release the bat cycle resets
 const CONTRAST_MIN = 3;
 const FEEDBACK_MAX = 2;
 // Engine sound kinds of a hit (src/audio.ts): 3 push hit, 6 impact, 12 body impact, 14 bat hit.
@@ -83,6 +89,9 @@ function playfieldInit(cfg) {
     camTick: -1,
     camFrames: 0,
     camOut: 0,
+    camLocalOut: 0,
+    camUnind: 0,
+    camLocalDetail: [],
     camDetail: [],
     contrastOn: false,
     contrast: [],
@@ -233,21 +242,30 @@ function playfieldInit(cfg) {
   };
 
   // Once per published camera frame (camera.ts sets __qaCam in computeCamera, before the draw):
-  // every live player's centre must lie inside the view.
+  // every live player's centre must lie inside the view, or (an opponent only) be listed in cam.away for an edge indicator.
   const onDraw = () => {
     const cam = globalThis.__qaCam;
     if (!cam || cam.tick < 0 || cam.tick === acc.camTick) return;
     const snap = acc.snaps.get(cam.tick);
     if (!snap) return;
     acc.camTick = cam.tick;
+    const inside = (p) => Math.abs(p.x - cam.cx) <= cam.w / 2 && Math.abs(p.y - cam.cy) <= cam.h / 2;
     const pts = snap.live.map((p) => ({ id: p.id, x: p.x, y: p.y }));
     // Self-test: a fake player one view width beyond the view's right and bottom edges, which the check must fail.
     if (acc.selfTest === "camera") pts.push({ id: -1, x: cam.cx + cam.w, y: cam.cy + cam.h });
-    const out = pts.filter((p) => Math.abs(p.x - cam.cx) > cam.w / 2 || Math.abs(p.y - cam.cy) > cam.h / 2);
+    const out = pts.filter((p) => !inside(p));
+    const localOut = snap.localLive && out.some((p) => p.id === snap.localId);
+    const unindicated = out.filter((p) => p.id !== snap.localId && !cam.away.includes(p.id));
     acc.camFrames++;
+    if (localOut) {
+      acc.camLocalOut++;
+      const lp = snap.live.find((p) => p.id === snap.localId);
+      if (acc.camLocalDetail.length < 12) acc.camLocalDetail.push({ tick: cam.tick, follow: cam.follow, lx: lp.x, ly: lp.y, cx: cam.cx, cy: cam.cy, w: cam.w, h: cam.h, arenaW: snap.arenaW, arenaH: snap.arenaH });
+    }
+    if (unindicated.length) acc.camUnind++;
     if (out.length) {
       acc.camOut++;
-      if (acc.camDetail.length < 20) acc.camDetail.push({ tick: cam.tick, ids: out.map((p) => p.id) });
+      if (acc.camDetail.length < 20) acc.camDetail.push({ tick: cam.tick, ids: out.map((p) => p.id), localOut, unindicated: unindicated.map((p) => p.id) });
     }
     if (acc.contrastOn && snap.live.length && performance.now() - acc.lastSample >= cfg.sampleMs) {
       acc.lastSample = performance.now();
@@ -561,8 +579,11 @@ async function tierCell(results, browser, engine, base, tier, palette, renderer,
   return out;
 }
 
+/** The renderer each engine can run here: WebGPU on chromium only, WebGL2 elsewhere. */
+const rendererFor = (engine) => (engine === "chromium" ? "webgpu" : "webgl2");
+
 /** Two clients in one room on `mapName` (or the room default), running random inputs for `ms`. */
-async function pairMatch(s, browser, engine, base, { mapName, selfTest, renderer = "webgpu", palette = "default" }, opened) {
+async function pairMatch(s, browser, engine, base, { mapName, selfTest, renderer = rendererFor(engine), palette = "default" }, opened) {
   const row = rowOf("T1-M");
   const roomName = uniqueName("room");
   const hostName = uniqueName("host");
@@ -592,19 +613,23 @@ async function cameraCase(results, browser, engine, base, mapName, selfTest) {
     id,
     async (s) => {
       const { host, guest } = await pairMatch(s, browser, engine, base, { mapName, selfTest }, opened);
-      for (const h of [host, guest]) await h.page.evaluate(() => Object.assign(window.__qaPF, { camFrames: 0, camOut: 0, camDetail: [] }));
+      for (const h of [host, guest]) await h.page.evaluate(() => Object.assign(window.__qaPF, { camFrames: 0, camOut: 0, camLocalOut: 0, camUnind: 0, camDetail: [], camLocalDetail: [] }));
       await drive([host.page, guest.page], CAM_MS);
       const per = [];
-      for (const h of [host, guest]) per.push(await h.page.evaluate(() => ({ frames: window.__qaPF.camFrames, out: window.__qaPF.camOut, detail: window.__qaPF.camDetail })));
+      for (const h of [host, guest]) per.push(await h.page.evaluate(() => ({ frames: window.__qaPF.camFrames, out: window.__qaPF.camOut, localOut: window.__qaPF.camLocalOut, unind: window.__qaPF.camUnind, detail: window.__qaPF.camDetail, localDetail: window.__qaPF.camLocalDetail })));
       const frames = per.reduce((n, p) => n + p.frames, 0);
       const outFrames = per.reduce((n, p) => n + p.out, 0);
-      const inView = frames > 0 && outFrames === 0 ? 1 : 0;
+      const localOut = per.reduce((n, p) => n + p.localOut, 0);
+      const unind = per.reduce((n, p) => n + p.unind, 0);
+      // Pass (R1-60): the local player is in view on every frame and every off-screen opponent has an edge indicator.
+      const inView = frames > 0 && localOut === 0 && unind === 0 ? 1 : 0;
+      const allInView = frames > 0 ? (frames - outFrames) / frames : 0;
       const file = path.join(results.evidenceDir, `${id}.png`);
       const saved = await shot(host.page, file);
       return {
         pass: inView === 1,
-        detail: `camera.inView=${inView}: ${outFrames} of ${frames} frames with a live player outside the view (host ${per[0].out}/${per[0].frames}, guest ${per[1].out}/${per[1].frames})`,
-        metrics: { "camera.inView": inView, "camera.outFrames": outFrames, "camera.frames": frames, "camera.detail": per.flatMap((p) => p.detail).slice(0, 10) },
+        detail: `camera.inView=${inView}: local out on ${localOut} frames, opponents out without indicator on ${unind}; all live in view on ${(allInView * 100).toFixed(1)}% of ${frames} frames (host ${per[0].out}/${per[0].frames} out, guest ${per[1].out}/${per[1].frames} out)`,
+        metrics: { "camera.inView": inView, "camera.localOutFrames": localOut, "camera.indicatorMissFrames": unind, "camera.allInView": Math.round(allInView * 1000) / 1000, "camera.outFrames": outFrames, "camera.frames": frames, "camera.detail": per.flatMap((p) => p.detail).slice(0, 10), "camera.localDetail": per.flatMap((p) => p.localDetail).slice(0, 12) },
         evidence: saved ? [rel(saved)] : [],
       };
     },
@@ -620,12 +645,25 @@ async function feedbackCase(results, browser, engine, base) {
   const out = await results.case(
     "feedback.hit.frames",
     async (s) => {
-      const { host, guest } = await pairMatch(s, browser, engine, base, {}, opened);
+      const renderer = rendererFor(engine);
+      const fixture = { base, open: (label, o) => openPage(s, browser, engine, rowOf("T1-M"), { label, renderer, palette: "default", name: o.name, selfTest: null }, opened) };
+      const { host, guest } = await fixtureMatch(fixture, 99);
+      await sleep(3000); // spawn grace before a bat can hit (sim SPAWN_GRACE)
+      await Promise.all([host.page, guest.page].map(async (page) => {
+        for (let i = 0; i < FEEDBACK_SWINGS; i++) {
+          await page.keyboard.down("KeyC");
+          await sleep(BAT_HOLD_MS); // the bat fires at tick 13 (bat_fire_on)
+          await page.keyboard.up("KeyC");
+          await sleep(BAT_GAP_MS); // the bat cycle resets at tick 35 (bat_reset_on)
+        }
+      }));
       await host.page.evaluate(() => {
         window.__qaPF.log.length = 0;
       });
       await drive([host.page, guest.page], PLAY_MS);
       const log = await host.page.evaluate(() => window.__qaPF.log.slice());
+      const hud = await host.page.evaluate(() => document.querySelectorAll(".hud-events li.hud-event-hit").length);
+      await writeFile(path.join(results.evidenceDir, "feedback-events.json"), JSON.stringify({ logLength: log.length, logHits: log.reduce((n, f) => n + f.hits, 0), hudHitEvents: hud, events: feedbackEvents(log) }, null, 1));
       const verdict = feedbackVerdict(log);
       const file = path.join(results.evidenceDir, "feedback-hit-frames.png");
       const saved = await shot(host.page, file);
@@ -638,6 +676,9 @@ async function feedbackCase(results, browser, engine, base) {
 }
 
 const mode = selfTestMode();
+
+const CASES = (process.env.QA_CASES ?? "").split(",").map((s) => s.trim()).filter(Boolean);
+const wantCase = (name) => CASES.length === 0 || CASES.includes(name);
 
 if (mode === "feedback") {
   // Pure self-test: no browser, no server.
@@ -653,15 +694,13 @@ if (mode === "feedback") {
     const results = new Results("playfield", engine);
     const renderers = engine === "chromium" ? ["webgpu", "webgl2"] : ["webgl2"];
     if (mode === null) {
-      for (const tier of TIERS) {
+      for (const tier of wantCase("tier") ? TIERS : []) {
         for (const palette of PALETTES) {
           for (const renderer of renderers) await tierCell(results, browser, engine, base, tier, palette, renderer, null);
         }
       }
-      if (engine === "chromium") {
-        for (const map of REFERENCE_MAPS) await cameraCase(results, browser, engine, base, map, null);
-        await feedbackCase(results, browser, engine, base);
-      }
+      for (const map of wantCase("camera") ? REFERENCE_MAPS : []) await cameraCase(results, browser, engine, base, map, null);
+      if (engine === "chromium" && wantCase("feedback")) await feedbackCase(results, browser, engine, base);
     } else if (mode === "hud" || mode === "contrast") {
       await tierCell(results, browser, engine, base, "T1-M", "default", renderers[0], mode);
     } else if (mode === "camera") {
