@@ -10,6 +10,8 @@
 //   platform and swing the bat HITBOX_SWINGS times (KeyC held SWING_HOLD_MS, then SWING_GAP_MS). Pass: no resync
 //   on either client; the hit log (.hud-events li.hud-event-hit, as data-tick|text) is non-empty and equal on both
 //   clients (same tick, same swinger and victim); the scoreboards agree; at least 5 checksum frames arrived.
+//   Hits are often one-way: the swings land a few ms apart, and a hit knocks the other player out of reach before
+//   its own bat fires (sim rule, crates/net/tests/bat_hits.rs). The two directions are reported, not passed.
 // - replay.fidelity (per match, 1 = pass): the match is recorded with objectiveLimit 2 (kills mode: it ends at
 //   the second KO), both players keep swinging until "Back to room" (or PLAY_MS, then End match). The replay is
 //   played to the end without seeking; its KO order (.hud-events li " KO "), scoreboard (.hud-scores rows) equal
@@ -51,7 +53,7 @@ import {
 } from "./lib-qa.mjs";
 
 const SELF = selfTestMode();
-const HITBOX_SWINGS = 6; // hitbox: point-blank swings per player
+const HITBOX_SWINGS = 10; // hitbox: point-blank swings per player
 const SWING_HOLD_MS = 600; // KeyC held this long: the bat fires at tick 13 (sim settings bat_fire_on)
 const SWING_GAP_MS = 1500; // after release: the bat cycle resets at tick 35 (settings bat_reset_on)
 const KO_LIMIT = 2; // replay: kills mode ends the match at this many KOs
@@ -176,12 +178,12 @@ async function fixtureMatch(s, killLimit) {
   await chat.press("Enter");
   await host.page.locator("div.room-chat-log").getByText(`objectiveLimit: ${killLimit}`).waitFor();
   await startMatch(host, [guest]);
-  return { host, guest, code };
+  return { host, guest, code, hostName, guestName };
 }
 
 /** Hitbox case: two clients on the fixture map; both players swing point-blank HITBOX_SWINGS times. */
 async function hitboxCase(s, renderer, out) {
-  const { host, guest, code } = await fixtureMatch(s, 99);
+  const { host, guest, code, hostName, guestName } = await fixtureMatch(s, 99);
   await checkRenderer(host.page, renderer);
   await checkRenderer(guest.page, renderer);
   await ensureProbe(host.page);
@@ -193,16 +195,20 @@ async function hitboxCase(s, renderer, out) {
   const px0 = { host: await probeChanges(host.page), guest: await probeChanges(guest.page) };
   const boardBefore = await readBoard(host.page);
 
-  await Promise.all(
-    [host.page, guest.page].map(async (page) => {
-      for (let i = 0; i < HITBOX_SWINGS; i++) await swing(page);
-    }),
-  );
+  // Each round both players swing; the player whose key lands first hits the other (the victim is knocked
+  // out of reach before its own bat fires, bat_hits.rs). A fixed press order would credit one direction
+  // only, so the first presser alternates by round. Same total window as before: 10 rounds of one swing.
+  for (let i = 0; i < HITBOX_SWINGS; i++) {
+    const pages = i % 2 === 0 ? [host.page, guest.page] : [guest.page, host.page];
+    await Promise.all(pages.map((page) => swing(page)));
+  }
   await sleep(1500);
 
   const hitsHost = await host.page.evaluate(HITS_JS);
   const hitsGuest = await guest.page.evaluate(HITS_JS);
   const hitsAgree = hitsHost.length > 0 && JSON.stringify(hitsHost) === JSON.stringify(hitsGuest);
+  const toGuest = hitsHost.filter((h) => h.includes(`${hostName} hit ${guestName}`)).length;
+  const toHost = hitsHost.filter((h) => h.includes(`${guestName} hit ${hostName}`)).length;
   const m = {
     "gameplay.hitbox.swings": HITBOX_SWINGS,
     "gameplay.hitbox.resyncs.host": host.n.resync - n0.host.resync,
@@ -213,6 +219,8 @@ async function hitboxCase(s, renderer, out) {
     "gameplay.hitbox.canvasChanges.guest": (await probeChanges(guest.page)) - px0.guest,
     "gameplay.hitbox.hits.host": hitsHost.length,
     "gameplay.hitbox.hits.guest": hitsGuest.length,
+    "gameplay.hitbox.hits.hostToGuest": toGuest,
+    "gameplay.hitbox.hits.guestToHost": toHost,
   };
   const boardHost = await readBoard(host.page);
   const boardGuest = await readBoard(guest.page);
@@ -238,7 +246,7 @@ async function hitboxCase(s, renderer, out) {
   return {
     pass: agree,
     metrics: m,
-    detail: `code ${code}; hits host ${hitsHost.length} guest ${hitsGuest.length} (${hitsAgree ? "same" : "differ"}): ${JSON.stringify(hitsHost)} vs ${JSON.stringify(hitsGuest)}; resyncs ${m["gameplay.hitbox.resyncs.host"]}/${m["gameplay.hitbox.resyncs.guest"]}; board ${boardAgree ? "agrees" : `differs: host ${JSON.stringify(boardHost)} guest ${JSON.stringify(boardGuest)}`}`,
+    detail: `code ${code}; hits host ${hitsHost.length} guest ${hitsGuest.length} (${hitsAgree ? "same" : "differ"}), host->guest ${toGuest} guest->host ${toHost}: ${JSON.stringify(hitsHost)} vs ${JSON.stringify(hitsGuest)}; resyncs ${m["gameplay.hitbox.resyncs.host"]}/${m["gameplay.hitbox.resyncs.guest"]}; board ${boardAgree ? "agrees" : `differs: host ${JSON.stringify(boardHost)} guest ${JSON.stringify(boardGuest)}`}`,
     evidence: shots,
   };
 }
