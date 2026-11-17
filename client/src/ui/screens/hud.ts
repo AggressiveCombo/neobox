@@ -433,7 +433,8 @@ export const hudScreen: HudFactory = (ctx) => {
   const endBtn = h("button", { type: "button", class: "hud-end", hidden: true, onclick: endMatch }, icon("flag", 18), h("span", { class: "hud-chip-label" }, "End match"));
   const barLeft = h("div", { class: "hud-bar hud-bar-left" }, menuBtn, linkEl, menuPanel);
   const barRight = h("div", { class: "hud-bar hud-bar-right" }, chatBtn, endBtn, leaveBtn);
-  const releaseChips = [ctx.reserveChrome(barLeft), ctx.reserveChrome(barRight)];
+  // The event and chat column grows down from the chips: reserve it too, so the objective bar keeps clear.
+  const releaseChips = [ctx.reserveChrome(barLeft), ctx.reserveChrome(barRight), ctx.reserveChrome(topLeftEl)];
   const rotate = rotateGate();
   const el = h(
     "main",

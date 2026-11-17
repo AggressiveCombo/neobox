@@ -252,11 +252,12 @@
 .hud-table td {
   padding: 7px 10px;
   text-align: left;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
 }
 
 .hud-table th {
   color: var(--hud-muted);
+  white-space: nowrap;
   font-size: 0.8125rem;
   font-weight: 500;
   border-bottom: 2px solid rgb(255 255 255 / 0.2);
@@ -268,12 +269,10 @@
 
 .hud-table .hud-num {
   text-align: right;
+  white-space: nowrap;
 }
 
 .hud-name {
-  max-width: 180px;
-  overflow: hidden;
-  text-overflow: ellipsis;
   font-weight: 500;
 }
 
@@ -860,5 +859,6 @@
 @media (forced-colors: active) {
   .hud-root :not(:disabled) {
     color: CanvasText;
+    background-color: Canvas;
   }
 }
