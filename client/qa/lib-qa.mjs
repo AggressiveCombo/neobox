@@ -248,7 +248,9 @@ export class Results {
     } catch (err) {
       error = err instanceof Error ? err.message : String(err);
     }
-    const problems = s.problems().filter((p) => !ignore.some((re) => re.test(p)) && !engineNoise(this.engine, p));
+    const unignored = s.problems().filter((p) => !ignore.some((re) => re.test(p)));
+    const exempt = unignored.filter((p) => engineNoise(this.engine, p));
+    const problems = unignored.filter((p) => !engineNoise(this.engine, p));
     const warnings = s.handles.flatMap((h) => h.warnings ?? []);
     const netFailed = s.handles.flatMap((h) => h.netFailed ?? []);
     const netAborted = s.handles.flatMap((h) => h.netAborted ?? []);
@@ -273,6 +275,7 @@ export class Results {
       warnings: warnings.length ? warnings.slice(0, 20) : undefined,
       netFailed: netFailed.length ? netFailed : undefined,
       netExpected: netExpected.length ? netExpected : undefined,
+      exempt: exempt.length ? exempt : undefined,
       evidence: evidence.length ? evidence : undefined,
       seconds: Number(((Date.now() - t0) / 1000).toFixed(1)),
     };
@@ -309,7 +312,7 @@ function markdownFor(sum) {
   lines.push("| case | verdict | detail | evidence |");
   lines.push("| --- | --- | --- | --- |");
   for (const c of sum.cases) {
-    const detail = [c.detail, c.problems?.join(" | "), c.netFailed?.join(" | ")].filter(Boolean).join(" ").replaceAll("|", "\\|");
+    const detail = [c.detail, c.problems?.join(" | "), c.netFailed?.join(" | "), c.exempt && `exempt: ${c.exempt.join(" | ")}`].filter(Boolean).join(" ").replaceAll("|", "\\|");
     const ev = (c.evidence ?? []).join(", ");
     lines.push(`| ${c.id} | ${c.verdict} | ${detail} | ${ev} |`);
   }
