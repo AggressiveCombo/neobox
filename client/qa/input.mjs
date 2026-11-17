@@ -51,7 +51,7 @@ import {
   uniqueName,
   writeIndex,
 } from "./lib-qa.mjs";
-import { createRoom, ensureRoomMap, probeChanges, signedIn, waitForPixels, waitQuiet } from "../e2e/lib.mjs";
+import { createRoom, ensureRoomMap, signedIn, waitForPixels } from "../e2e/lib.mjs";
 
 // Mirrors DEFAULT_KEYS in client/src/prefs.ts (the qa directory cannot import the TS source).
 const DEFAULT_KEYS = {
@@ -195,6 +195,7 @@ const HOOK = () => {
     const localFrame = ex.nb_local_frame;
     api.nb_local_frame = (dt, mask) => {
       acc.mask |= mask;
+      acc.cur = mask;
       if (acc.maskStart === null) acc.maskStart = mask;
       acc.calls++;
       const rc = localFrame(dt, mask);
@@ -205,6 +206,7 @@ const HOOK = () => {
     const frame = ex.nb_frame;
     api.nb_frame = (nowMs, mask) => {
       acc.mask |= mask;
+      acc.cur = mask;
       acc.calls++;
       const rc = frame(nowMs, mask);
       parse(ex);
@@ -992,39 +994,37 @@ async function touchRebindCase(s, base, engine) {
   return verdict("input.keys.rebind.touch", checks, rows.filter((r) => !r.ok).map((r) => `${r.name} (${r.reason})`).join(", ") || undefined);
 }
 
-/** keys.chatLeak: every game key typed into the chat field leaves the player still; closing chat restores movement. */
+/** keys.chatLeak: game keys typed into the chat field never reach the engine's input mask; closing chat restores it. */
 async function chatLeakCase(s, base) {
   const h = await roomDesktop(s, base);
   const { page } = h;
   const inChat = () => page.evaluate(() => document.activeElement?.classList.contains("hud-chat-input") === true);
   await page.keyboard.press("Enter");
   await page.locator(".hud-chat-input").waitFor({ state: "visible", timeout: 5000 });
-  // A room has no HOOK (the server simulates it), so the canvas is the only view of the player:
-  // a key that reaches the game moves it and changes the canvas.
+  // The engine's own input mask (HOOK, nb_frame) is the exact view: any bit set while chat has focus is a leak.
   const leaks = [];
   for (const [action, codes] of Object.entries(DEFAULT_KEYS)) {
     for (const code of codes) {
-      await waitQuiet(page, 500, 5000);
-      const before = await probeChanges(page);
-      await page.keyboard.down(code);
-      await sleep(WINDOW_MS);
-      await page.keyboard.up(code);
-      const moved = (await probeChanges(page)) - before;
+      const acc = await window1({
+        page,
+        press: () => page.keyboard.down(code),
+        release: () => page.keyboard.up(code),
+      });
       if (!(await inChat())) leaks.push(`${code} (focus left chat)`);
-      else if (moved > 5) leaks.push(`${code} (${action}: ${moved} canvas changes)`);
+      else if (acc.mask !== 0) leaks.push(`${code} (${action}: mask ${acc.mask})`);
     }
   }
   await page.keyboard.press("Escape");
   const closed = !(await inChat());
-  await waitQuiet(page, 500, 5000);
-  const before = await probeChanges(page);
-  await page.keyboard.down("ArrowRight");
-  await sleep(WINDOW_MS);
-  await page.keyboard.up("ArrowRight");
-  const control = (await probeChanges(page)) - before;
-  return verdict("input.keys.chatLeak", { noLeak: leaks.length === 0, closed, control: control > 5 }, [
-    leaks.length ? `game keys reached the player from chat: ${leaks.join(", ")}` : undefined,
-    control > 5 ? undefined : `chat closed: ArrowRight changed the canvas ${control} times`,
+  const control = await window1({
+    page,
+    press: () => page.keyboard.down("ArrowRight"),
+    release: () => page.keyboard.up("ArrowRight"),
+  });
+  const controlOk = (control.mask & BIT.right) !== 0;
+  return verdict("input.keys.chatLeak", { noLeak: leaks.length === 0, closed, control: controlOk }, [
+    leaks.length ? `game keys reached the engine from chat: ${leaks.join(", ")}` : undefined,
+    controlOk ? undefined : `chat closed: ArrowRight did not set the right bit (mask ${control.mask})`,
   ].filter(Boolean).join("; ") || undefined);
 }
 
@@ -1032,8 +1032,10 @@ async function chatLeakCase(s, base) {
  * In-page probe for input.latency, installed once after the match starts. It reads back the full game canvas only while
  * a sample needs it: `settle` until the scene has been still for 500 ms, then `watch`, which compares every frame with that
  * rest frame. A change before the trusted keydown is a control flip and returns the probe to `settle`. The first change
- * after the keydown is the presented frame. Every rAF interval is recorded with whether a readback ran in it, so the
- * probe's own cost shows in input.rafMs.on against input.rafMs.off.
+ * after the keydown is the presented frame. Readbacks follow the draws (WebGL drawArrays, WebGPU queue.submit) through a
+ * microtask, as in e2e/lib.mjs installProbe: a rAF callback can read a drawing buffer the browser has already cleared.
+ * rAF only times the frames: every interval is recorded with whether a readback phase was active in it, so the probe's
+ * own cost shows in input.rafMs.on against input.rafMs.off.
  */
 const PIXEL_PROBE = () => {
   const p = (window.__latProbe = { phase: "off", base: null, prev: null, stillSince: 0, hit: null, control: 0, raf: [], last: 0, ctx: null, w: 0, h: 0 });
@@ -1054,6 +1056,58 @@ const PIXEL_PROBE = () => {
     for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
     return true;
   };
+  const sample = () => {
+    if (p.phase !== "settle" && p.phase !== "watch") return;
+    const src = document.querySelector("#gl-host canvas");
+    if (!(src instanceof HTMLCanvasElement) || src.width === 0) return;
+    const t = performance.now();
+    const cur = grab(src);
+    if (p.phase === "settle") {
+      if (p.prev && same(p.prev, cur)) {
+        if (t - p.stillSince >= 500) {
+          p.base = cur;
+          p.phase = "watch";
+        }
+      } else p.stillSince = t;
+      p.prev = cur;
+    } else if (!same(p.base, cur)) {
+      const key = window.__qaKeyT;
+      if (key === null || t < key) {
+        p.control++;
+        p.phase = "settle";
+        p.prev = cur;
+        p.stillSince = t;
+      } else {
+        p.hit = t;
+        p.phase = "done";
+      }
+    }
+  };
+  // One readback per task: draws within a frame callback coalesce, and the microtask runs after the last of them.
+  let queued = false;
+  const sampleAfterDraw = () => {
+    if (queued) return;
+    queued = true;
+    queueMicrotask(() => {
+      queued = false;
+      sample();
+    });
+  };
+  const glProto = WebGL2RenderingContext.prototype;
+  const drawArrays = glProto.drawArrays;
+  glProto.drawArrays = function (...args) {
+    const result = drawArrays.apply(this, args);
+    if (this.canvas.parentElement?.id === "gl-host") sampleAfterDraw();
+    return result;
+  };
+  if (typeof GPUQueue !== "undefined") {
+    const submit = GPUQueue.prototype.submit;
+    GPUQueue.prototype.submit = function (...args) {
+      const result = submit.apply(this, args);
+      sampleAfterDraw();
+      return result;
+    };
+  }
   const step = () => {
     const t = performance.now();
     const on = p.phase === "settle" || p.phase === "watch";
@@ -1062,30 +1116,6 @@ const PIXEL_PROBE = () => {
       if (p.raf.length > 20000) p.raf.splice(0, 5000);
     }
     p.last = t;
-    const src = document.querySelector("#gl-host canvas");
-    if (on && src instanceof HTMLCanvasElement && src.width > 0) {
-      const cur = grab(src);
-      if (p.phase === "settle") {
-        if (p.prev && same(p.prev, cur)) {
-          if (t - p.stillSince >= 500) {
-            p.base = cur;
-            p.phase = "watch";
-          }
-        } else p.stillSince = t;
-        p.prev = cur;
-      } else if (!same(p.base, cur)) {
-        const key = window.__qaKeyT;
-        if (key === null || t < key) {
-          p.control++;
-          p.phase = "settle";
-          p.prev = cur;
-          p.stillSince = t;
-        } else {
-          p.hit = t;
-          p.phase = "done";
-        }
-      }
-    }
     requestAnimationFrame(step);
   };
   requestAnimationFrame(step);
@@ -1155,7 +1185,7 @@ async function latencyCase(s, base, engine) {
     await page.keyboard.down("ArrowRight");
     let r = null;
     const t0 = Date.now();
-    while (Date.now() - t0 < 1500) {
+    while (Date.now() - t0 < 5000) {
       r = await page.evaluate(() => ({ keyT: window.__qaKeyT, hit: window.__latProbe.hit, stateT: window.__qa.stateT, control: window.__latProbe.control }));
       if (r.hit !== null && r.stateT !== null) break;
       await sleep(10);
@@ -1165,11 +1195,25 @@ async function latencyCase(s, base, engine) {
       window.__latProbe.phase = "off";
       window.__qa.watch = false;
     });
+    const miss = r?.keyT == null || r.hit === null || r.stateT === null
+      ? await page.evaluate(() => ({
+          keyT: window.__qaKeyT,
+          hitPhase: window.__latProbe.phase,
+          x: window.__qa.x,
+          y: window.__qa.y,
+          ref: window.__qa.ref,
+          mask: window.__qa.cur,
+          ready: window.__qa.ready,
+          stamina: window.__qa.stamina,
+          focus: document.activeElement?.tagName ?? null,
+        }))
+      : undefined;
     samples.push({
       i,
       latencyMs: r?.keyT != null && r.hit !== null ? r.hit - r.keyT : null,
       stateMs: r?.keyT != null && r.stateT !== null ? r.stateT - r.keyT : null,
       controlFlips: (r?.control ?? control0) - control0,
+      miss,
     });
   }
   const raf = await page.evaluate(() => window.__latProbe.raf.slice());

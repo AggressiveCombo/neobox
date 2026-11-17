@@ -33,11 +33,14 @@ import {
   watchPage,
   writeIndex,
 } from "./lib-qa.mjs";
+import { joinByInvite, signedIn } from "../e2e/lib.mjs";
 
 // Deliberate faults the instrument creates on purpose. Their failed requests are expected.
 let offline = false;
 let allowUrl = null;
 let trackSockets = false;
+let blockSockets = false;
+let gateSockets = false;
 const MODE = selfTestMode();
 // Failed websocket and offline requests are expected while the instrument cuts the network.
 const CONSOLE_OFFLINE = /WebSocket|websocket|establish a connection|ERR_INTERNET_DISCONNECTED|ERR_NAME|NetworkError|Failed to fetch|NS_ERROR|Failed to load resource/i;
@@ -45,6 +48,7 @@ const RECONNECT_CYCLES = 3;
 const BANNER_BUDGET_MS = 10000;
 const RECOVER_BUDGET_MS = 30000;
 const OFFLINE_HOLD_MS = 20000;
+const HIDDEN_HOLD_MS = 60000;
 const SLOW_TIMEOUT_MS = 90000;
 // Whole-case budget (see withBudget); a hung case fails as 'timeout' instead of hanging the run.
 const CASE_TIMEOUT_MS = 240000;
@@ -64,6 +68,18 @@ const TRACK_SOCKETS = () => {
   });
 };
 
+// Routes a page's sockets through the instrument. While blockSockets is set a socket is refused at once, so a
+// reconnect cannot succeed; otherwise it is passed through to the server unchanged.
+const gateSocket = async (ws) => {
+  if (blockSockets) {
+    await ws.close({ code: 4001, reason: "qa offline" });
+    return;
+  }
+  const server = ws.connectToServer();
+  ws.onMessage((msg) => server.send(msg));
+  server.onMessage((msg) => ws.send(msg));
+};
+
 /** Hides navigator.gpu for the WebGL2 path, records sockets when asked, and watches every page. */
 function prepare(s, renderer = "webgpu") {
   const openOriginal = s.open.bind(s);
@@ -79,6 +95,7 @@ function prepare(s, renderer = "webgpu") {
     if (MODE === "console") await h.context.addInitScript(() => console.error("qa self-test: injected console error"));
     if (MODE === "request") await h.context.addInitScript(() => fetch("http://127.0.0.1:1/qa-selftest").catch(() => undefined));
     if (trackSockets) await h.context.addInitScript(TRACK_SOCKETS);
+    if (gateSockets) await h.page.routeWebSocket(/.*/, gateSocket);
     watchPage(h, { expected: (url) => offline || (allowUrl !== null && allowUrl.test(url)) });
     return h;
   };
@@ -145,6 +162,7 @@ async function openPhoneAt(s, label, viewport) {
   s.env = {
     ...s.env,
     browser: {
+      browserType: () => browser.browserType(),
       newContext: async (opts) => {
         const context = await browser.newContext({ ...opts, viewport });
         await holdViewport(context);
@@ -283,22 +301,66 @@ async function reconnectCase(s) {
   };
 }
 
-/** The network itself goes away for a while (Playwright offline), as on a dropped Wi-Fi. */
-async function networkOffCase(s) {
+/**
+ * Cuts or restores the network for the whole window. Chromium uses CDP offline emulation: unlike setOffline it also
+ * refuses new WebSockets, so the reconnect cannot succeed. Other engines use setOffline; their new sockets are
+ * refused by the route (blockSockets).
+ */
+async function setNetworkOff(host, session, off) {
+  if (session) {
+    await session.send("Network.emulateNetworkConditions", { offline: off, latency: 0, downloadThroughput: -1, uploadThroughput: -1 });
+  } else {
+    await host.context.setOffline(off);
+  }
+}
+
+/**
+ * The network itself goes away for a while, as on a dropped Wi-Fi. The window is held offline and the page's
+ * sockets are refused (blockSockets) so the reconnect cannot succeed; the banner has to stay up for the whole window.
+ */
+async function networkOffCase(s, cdp) {
   prepare(s);
   trackSockets = true;
-  const { host } = await matchWithGuest(s, { clipboard: false });
+  gateSockets = true;
+  let match;
+  try {
+    match = await matchWithGuest(s, { clipboard: false });
+  } finally {
+    trackSockets = false;
+    gateSockets = false;
+  }
+  const { host } = match;
   const banner = host.page.locator(".reconnect-banner");
+  // CDP network emulation is per session: the same session cuts and restores the network.
+  const session = cdp ? await host.context.newCDPSession(host.page) : null;
+  // The gate refuses new sockets before the drop, so the reconnect cannot succeed while the page is still online.
   offline = true;
-  await host.context.setOffline(true);
-  // Playwright offline leaves an open socket alone; a real Wi-Fi loss kills it, so drop it too.
-  await dropSockets(host.page);
+  blockSockets = true;
   const t0 = Date.now();
+  // A real Wi-Fi loss kills the live socket. Close it while online: taking the network down first leaves the close
+  // handshake waiting for a server reply that never comes, so no close event fires (states.mjs dropAndGoOffline).
+  await dropSockets(host.page);
   const shownAt = await banner
-    .waitFor({ state: "visible", timeout: OFFLINE_HOLD_MS })
+    .waitFor({ state: "visible", timeout: BANNER_BUDGET_MS })
     .then(() => Date.now() - t0, () => null);
-  await sleep(Math.max(0, OFFLINE_HOLD_MS - (Date.now() - t0)));
-  await host.context.setOffline(false);
+  await setNetworkOff(host, session, true);
+  const holdFrom = Date.now();
+  // Timeline of the window (every 500 ms) so a miss is visible as a sequence, not one reading.
+  const timeline = [];
+  const sampling = (async () => {
+    while (Date.now() - holdFrom < OFFLINE_HOLD_MS) {
+      timeline.push({
+        t: Date.now() - holdFrom,
+        shown: await banner.isVisible().catch(() => "err"),
+      });
+      await sleep(500);
+    }
+  })();
+  await sleep(Math.max(0, OFFLINE_HOLD_MS - (Date.now() - holdFrom)));
+  const heldToEnd = await banner.isVisible().catch(() => false);
+  await sampling;
+  await setNetworkOff(host, session, false);
+  blockSockets = false;
   offline = false;
   const back = Date.now();
   const gone = await banner
@@ -306,15 +368,16 @@ async function networkOffCase(s) {
     .then(() => true, () => false);
   const recoverMs = Date.now() - back;
   const hud = await host.page.locator(".hud-leave").isVisible();
-  const pass = shownAt !== null && shownAt <= BANNER_BUDGET_MS && gone && hud;
+  const pass = shownAt !== null && shownAt <= BANNER_BUDGET_MS && heldToEnd && gone && hud;
   return {
     pass,
     metrics: {
       "offline.bannerAfterMs": shownAt,
+      "offline.heldToEnd": heldToEnd,
       "offline.recoverMs": gone ? recoverMs : null,
       "offline.hudBack": hud,
     },
-    detail: pass ? undefined : `banner after ${shownAt ?? "never"} ms, recovered: ${gone}`,
+    detail: pass ? undefined : `banner after ${shownAt ?? "never"} ms, recovered: ${gone}; timeline ${JSON.stringify(timeline)}`,
   };
 }
 
@@ -392,21 +455,90 @@ async function rotatePhoneSplit(s, base) {
   };
 }
 
+/**
+ * Hides or shows the page as a tab switch does: the browser's own visibility when headless reports it,
+ * otherwise an override of document.visibilityState/hidden plus the visibilitychange event the page listens for.
+ */
+function setPageHidden(page, hidden) {
+  return page.evaluate((hide) => {
+    if (hide) {
+      Object.defineProperty(document, "visibilityState", { configurable: true, get: () => "hidden" });
+      Object.defineProperty(document, "hidden", { configurable: true, get: () => true });
+    } else {
+      delete document.visibilityState;
+      delete document.hidden;
+    }
+    document.dispatchEvent(new Event("visibilitychange"));
+  }, hidden);
+}
+
+/** The match tab is hidden for HIDDEN_HOLD_MS while another tab is in front, then returned to. */
 async function tabSwitchCase(s) {
   prepare(s);
   const { host } = await matchWithGuest(s, { clipboard: false });
+  const page = host.page;
   const other = await host.context.newPage();
   await other.bringToFront();
-  await sleep(2000);
-  const background = await host.page.evaluate(() => document.visibilityState);
-  await other.close();
-  await host.page.bringToFront();
   await sleep(1000);
-  const hud = await host.page.locator(".hud-leave").isVisible();
+  const native = (await page.evaluate(() => document.visibilityState)) === "hidden";
+  if (!native) await setPageHidden(page, true);
+  const hidden = (await page.evaluate(() => document.visibilityState)) === "hidden";
+  if (!hidden) {
+    await other.close();
+    return { info: true, detail: "not exercised: the page could not be hidden" };
+  }
+  await sleep(HIDDEN_HOLD_MS);
+  const visibilityWhileBackground = await page.evaluate(() => document.visibilityState);
+  await other.close();
+  if (native) await page.bringToFront();
+  else await setPageHidden(page, false);
+  await sleep(1000);
+  const visibleAfterReturn = (await page.evaluate(() => document.visibilityState)) === "visible";
+  const hud = await page.locator(".hud-leave").isVisible();
+  const pass = visibilityWhileBackground === "hidden" && visibleAfterReturn && hud;
   return {
-    pass: hud,
-    metrics: { "tab.visibilityWhileBackground": background, "tab.hudAfterReturn": hud },
-    detail: background === "visible" ? "headless did not hide the background tab" : undefined,
+    pass,
+    metrics: {
+      "tab.hiddenMethod": native ? "native" : "synthetic",
+      "tab.visibilityWhileBackground": visibilityWhileBackground,
+      "tab.visibleAfterReturn": visibleAfterReturn,
+      "tab.hudAfterReturn": hud,
+    },
+    detail: pass ? undefined : `background ${visibilityWhileBackground}, visible after return ${visibleAfterReturn}, hud ${hud}`,
+  };
+}
+
+/**
+ * The same account in two tabs of one context (one localStorage, one session): the second tab takes the
+ * account's seat over, so the room lists each player once.
+ */
+async function sameAccountTabsCase(s, base) {
+  prepare(s);
+  const host = await signedIn(s, "host");
+  const roomName = uniqueName("room");
+  const code = await createRoom(host, base, roomName, { isPublic: true });
+  const guest = await s.open("guest", { name: uniqueName("guest") });
+  await joinByInvite(guest, base, code, roomName);
+  const page = await host.context.newPage();
+  const twin = { label: "host-tab2", context: host.context, page, ip: host.ip, problems: [] };
+  // Same capture as Scenario.open: the browser's own font abort is not the page's error.
+  page.on("pageerror", (err) => twin.problems.push(`${twin.label}: page error: ${err.message}`));
+  page.on("console", (msg) => {
+    if (msg.type() === "error" && !/downloadable font: download failed .*status=2152398850\b/.test(msg.text())) {
+      twin.problems.push(`${twin.label}: console error: ${msg.text()}`);
+    }
+  });
+  watchPage(twin);
+  s.handles.push(twin);
+  await joinByInvite(twin, base, code, roomName);
+  await sleep(2000);
+  const entries = await guest.page.locator(".room-player").count();
+  const hostEntries = await guest.page.locator(".room-player").filter({ hasText: host.userName }).count();
+  const pass = entries === 2 && hostEntries === 1;
+  return {
+    pass,
+    metrics: { "twin.roomEntries": entries, "twin.hostEntries": hostEntries },
+    detail: pass ? undefined : `room lists ${entries} entries, ${hostEntries} for the account (expected 2 and 1)`,
   };
 }
 
@@ -466,9 +598,10 @@ for (const engine of engines) {
   await runCase(results, "resize.match", (s) => resizeMatchCase(s), opts);
   await runCase(results, "rotate.phone.practice", (s) => rotatePhoneCase(s, base, engine), opts);
   await runCase(results, "tab.switch.match", (s) => tabSwitchCase(s), opts);
+  await runCase(results, "two.tabs.sameAccount.match", (s) => sameAccountTabsCase(s, base), opts);
   await runCase(results, "badroom", (s) => badRoomCase(s, base), { ...opts, ignore: [CONSOLE_OFFLINE] });
   await runCase(results, "reconnect.match", (s) => reconnectCase(s), noisy);
-  await runCase(results, "net.offline20s.match", (s) => networkOffCase(s), noisy);
+  await runCase(results, "net.offline20s.match", (s) => networkOffCase(s, cdp), noisy);
 
   if (cdp) {
     await runCase(results, "net.slow3g.practice", (s) => slowNetCase(s, base, "webgpu"), opts);
