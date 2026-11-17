@@ -19,7 +19,7 @@
 //      and all 7 lessons completed (T1-M)
 //   T  landscape phone (844x390): touch stick moves the character, tap Next; chips must follow the touch
 //      profile (T4-T)
-//   G  gamepad mock (PAD_INIT): d-pad moves the character; A is tried on Next (G1)
+//   G  gamepad mock (PAD_INIT): d-pad moves the character; chips name pad buttons; Start is pressed on Next (G1)
 // Every lesson step checks Leave (skip) is visible and enabled, and saves a screenshot.
 // Splash (phone): dialog "Welcome" shown once per device; Not now and Escape both close it; a reload after
 // either shows none (splash-once).
@@ -53,7 +53,8 @@ const GATE_SETTLE_MS = 2000;
 const RIGHT = "ArrowRight"; // default prefs (client/src/input.ts DEFAULT_KEYS)
 const LEFT = "ArrowLeft";
 const PAD_DPAD_RIGHT = 15;
-const PAD_A = 0;
+const PAD_START = 9; // standard mapping: Start advances a lesson (A jumps in Training, so it cannot)
+const GAMEPAD_LEFT = "D-pad left, left stick"; // GAMEPAD_LABELS.left (client/src/input.ts)
 
 // Keyboard lesson chips per engine, so the touch run can tell whether its chips follow its profile.
 const keyboardChips = new Map();
@@ -467,26 +468,30 @@ async function completeGamepad(s, results, caseId) {
     () => padSet(page, PAD_DPAD_RIGHT, true),
     () => padSet(page, PAD_DPAD_RIGHT, false),
   );
-  await padSet(page, PAD_A, true);
+  // The d-pad made the pad the input profile: lesson 1's first chip must name its pad control.
+  const padChips = await page.locator(".training-text .key").allTextContents();
+  const chipsPad = padChips[0] === GAMEPAD_LEFT;
+  await padSet(page, PAD_START, true);
   await sleep(400);
-  await padSet(page, PAD_A, false);
+  await padSet(page, PAD_START, false);
   await sleep(200);
   const padAdvances = (await lessonCount(page)) !== `1 of ${LESSONS}`;
-  // Pad A did not advance lesson 1: Next is clicked with the mouse so the run continues (a gap).
+  // Start did not advance lesson 1: Next is clicked with the mouse so the run continues (a gap).
   if (!padAdvances) await page.locator(".training-next").click();
   for (let n = 2; n <= LESSONS; n++) {
     seen.push(await lessonStep(h, results, caseId, n));
     await page.locator(".training-next").click();
   }
   await menuName(page).waitFor({ timeout: 5000 });
-  const pass = mv.at !== null && padAdvances;
+  const pass = mv.at !== null && padAdvances && chipsPad;
   const gaps = [];
   if (mv.at === null) gaps.push("d-pad did not move the character");
-  if (!padAdvances) gaps.push("gamepad A does not advance a lesson (Next is mouse or keyboard only)");
+  if (!padAdvances) gaps.push("gamepad Start does not advance a lesson (Next is mouse or keyboard only)");
+  if (!chipsPad) gaps.push(`lesson chips do not name pad buttons (first chip "${padChips[0] ?? ""}")`);
   return {
     pass,
     detail: gaps.length ? gaps.join("; ") : undefined,
-    metrics: { "onboarding.pad.moved": mv.at !== null ? 1 : 0, "onboarding.pad.advances": padAdvances ? 1 : 0 },
+    metrics: { "onboarding.pad.moved": mv.at !== null ? 1 : 0, "onboarding.pad.advances": padAdvances ? 1 : 0, "onboarding.pad.chips": chipsPad ? 1 : 0 },
     evidence: evidenceOf(seen),
   };
 }
