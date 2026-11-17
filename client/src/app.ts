@@ -16,6 +16,7 @@ import { createRenderer, type Renderer } from "./render";
 import { Overlay } from "./render/overlay";
 import { CHAT_LIMIT, Store, initialState, type AppState, type ChatLine, type Screen } from "./state";
 import { NAME_STORAGE_KEY, SEAT_STORAGE_KEY } from "./storage-keys";
+import { local, session } from "./storage";
 import { aboutScreen } from "./ui/screens/about";
 import { browserScreen } from "./ui/screens/browser";
 import { hudScreen } from "./ui/screens/hud";
@@ -124,8 +125,10 @@ export function start(): Store<AppState> {
   let engine: Engine | null = null;
   let renderer: Renderer | null = null;
   let rendererP: Promise<void> | null = null;
-  /** Set once the game could not be drawn: no further attempts (the dialog says so). */
+  /** Set once the game could not be drawn: no further attempts. The dialog says so once; game screens entered later toast it. */
   let rendererFailed = false;
+  /** The failure has been said on the current screen (ensureRenderer); reset on every screen change. */
+  let failureSaid = false;
   let mapsP: Promise<BuiltinMap[]> | null = null;
   let pendingName: string | null = null;
   /** Room to join once the server has welcomed us (invite links, friends). */
@@ -392,7 +395,15 @@ export function start(): Store<AppState> {
 
   /** Renderer creation is async (WebGPU or WebGL2 init); the loop skips drawing until it is ready. */
   function ensureRenderer(): void {
-    if (renderer || rendererP || rendererFailed) return;
+    if (renderer || rendererP) return;
+    if (rendererFailed) {
+      // Drawn frames would be empty: say so on the first call on each screen (the dialog covered the first failure).
+      if (!failureSaid) {
+        failureSaid = true;
+        toast("This browser cannot draw the game: WebGPU and WebGL 2 are unavailable.", "error");
+      }
+      return;
+    }
     rendererP = createRenderer(glHost, onRendererLost).then(
       (r) => {
         renderer = r;
@@ -412,6 +423,7 @@ export function start(): Store<AppState> {
    */
   function graphicsFailed(detail: string): void {
     rendererFailed = true;
+    failureSaid = true;
     let m: { close(): void } | null = null;
     const back = h(
       "button",
@@ -440,6 +452,10 @@ export function start(): Store<AppState> {
     });
   }
 
+  store.subscribe((state, prev) => {
+    if (state.screen !== prev.screen) failureSaid = false;
+  });
+
   function onRendererLost(): void {
     renderer?.destroy();
     renderer = null;
@@ -464,9 +480,9 @@ export function start(): Store<AppState> {
   function saveSeat(): void {
     try {
       if (roomCode !== null && resumeToken !== null) {
-        window.sessionStorage.setItem(SEAT_STORAGE_KEY, JSON.stringify({ room: roomCode, token: resumeToken, server }));
+        session.setItem(SEAT_STORAGE_KEY, JSON.stringify({ room: roomCode, token: resumeToken, server }));
       } else {
-        window.sessionStorage.removeItem(SEAT_STORAGE_KEY);
+        session.removeItem(SEAT_STORAGE_KEY);
       }
     } catch {
       // Storage blocked: a reload joins as a new player.
@@ -476,7 +492,7 @@ export function start(): Store<AppState> {
   /** This tab's seat in `room` (resume token and the server it is on), if any. */
   function seat(room: string): { token: string; server: string | null } | null {
     try {
-      const saved: unknown = JSON.parse(window.sessionStorage.getItem(SEAT_STORAGE_KEY) ?? "null");
+      const saved: unknown = JSON.parse(session.getItem(SEAT_STORAGE_KEY) ?? "null");
       if (typeof saved !== "object" || saved === null || !("room" in saved) || !("token" in saved)) return null;
       if (saved.room !== room || typeof saved.token !== "string") return null;
       return { token: saved.token, server: "server" in saved && typeof saved.server === "string" ? saved.server : null };
@@ -841,7 +857,7 @@ export function start(): Store<AppState> {
   /** Connect if needed, then say hello with `name`. The welcome message moves the app to the browser. */
   function play(name: string): void {
     store.set({ name });
-    window.localStorage.setItem(NAME_STORAGE_KEY, name);
+    local.setItem(NAME_STORAGE_KEY, name);
     if (net.status === "open") {
       void sendHello(name);
       return;
@@ -865,7 +881,7 @@ export function start(): Store<AppState> {
       return;
     }
     pendingJoin = code;
-    let name = store.state.account?.name ?? (store.state.name || window.localStorage.getItem(NAME_STORAGE_KEY) || "");
+    let name = store.state.account?.name ?? (store.state.name || local.getItem(NAME_STORAGE_KEY) || "");
     // A first visit has no name yet: join as a guest, as the menu offers one.
     if (!NAME_RE.test(name)) name = guestName();
     if (net.status === "closed") server = target;
