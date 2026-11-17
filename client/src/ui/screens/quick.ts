@@ -44,6 +44,7 @@ export const quickScreen: ScreenFactory = (ctx) => {
   const { store } = ctx;
   let waiting = false;
   let attempted = false;
+  let nameTouched = false;
   /** Set once the transport starts connecting, so an earlier "closed" state is not read as a failure. */
   let sawConnecting = false;
   let counts: Record<string, number> | null = null;
@@ -62,8 +63,13 @@ export const quickScreen: ScreenFactory = (ctx) => {
     value: account?.name ?? (store.state.name || readStoredName()),
     readonly: account !== null,
     oninput: () => {
+      nameTouched = true;
       sync();
       saveTypedName(nameInput.value);
+    },
+    onblur: () => {
+      nameTouched = true;
+      sync();
     },
   });
   const nameError = h("p", { class: "field-error", role: "alert", hidden: true });
@@ -156,14 +162,15 @@ export const quickScreen: ScreenFactory = (ctx) => {
     sync();
   }
 
-  /** Cards need a valid name unless the account supplies one. */
+  /** Cards need a valid name unless the account supplies one. The error shows once the player has typed or left the field. */
   function sync(): void {
     const problem = account !== null ? null : nameProblem(nameInput.value);
+    const shown = nameTouched ? problem : null;
     for (const card of cards.values()) {
       card.choose.disabled = problem !== null || waiting;
     }
-    nameError.textContent = problem ?? "";
-    nameError.hidden = problem === null;
+    nameError.textContent = shown ?? "";
+    nameError.hidden = shown === null;
     renderStatus();
   }
 
@@ -206,6 +213,7 @@ export const quickScreen: ScreenFactory = (ctx) => {
     const name = account?.name ?? nameInput.value.trim();
     if (!account && nameProblem(name) !== null) {
       waiting = false;
+      nameTouched = true;
       sync();
       return;
     }
