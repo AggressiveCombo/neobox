@@ -22,15 +22,10 @@
 
 .settings-nav {
   display: flex;
+  flex-wrap: wrap;
   gap: 4px;
-  margin: 0 calc(var(--margin) * -1);
-  padding: 0 var(--margin);
-  overflow-x: auto;
-  scrollbar-width: none;
-}
-
-.settings-nav::-webkit-scrollbar {
-  display: none;
+  margin: 0;
+  padding: 0;
 }
 
 .settings-nav-item {
@@ -385,9 +380,6 @@
     position: sticky;
     top: 88px;
     gap: 8px;
-    margin: 0;
-    padding: 0;
-    overflow: visible;
   }
 
   .settings-nav-item {
