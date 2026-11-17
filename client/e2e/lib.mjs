@@ -17,7 +17,17 @@ export const PASSWORD = "e2e-password";
 export const ROOM_CODE_RE = /^[A-HJ-NP-Z2-9]{6}$/;
 export const DESKTOP = { viewport: { width: 1280, height: 800 } };
 export const PHONE = { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, deviceScaleFactor: 2 };
+/**
+ * Phone context options for `browser`. Firefox drops pointer events from synthetic mouse input in an isMobile
+ * context (only mousedown arrives, so the touch stick's pointer handlers never run), so there it is emulated
+ * as hasTouch without isMobile.
+ */
+export function phoneOptions(browser) {
+  return browser.browserType().name() === "firefox" ? { ...PHONE, isMobile: false } : PHONE;
+}
 const STEP_TIMEOUT = 15_000;
+/** Firefox logs a web font still downloading when the page navigates away as a console error (NS_BINDING_ABORTED, status 2152398850). */
+const FONT_ABORT_RE = /downloadable font: download failed .*status=2152398850\b/;
 
 export const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -147,6 +157,10 @@ export async function launchEngine(name) {
   else if (name === "webkit") browser = await pw.webkit.launch({ headless: true });
   else throw new Error(`unknown engine ${name}`);
   if (name !== "chromium") onCleanup(() => browser.close());
+  // Clipboard permissions exist on Chromium only; the clipboard scenarios fall back to the invite link without them.
+  browser.clipboard = await probeClipboard(browser);
+  // Playwright's WebKit build has no RTCPeerConnection or Web Audio: those features are skipped or asserted absent there.
+  Object.assign(browser, await probeFeatures(browser));
   const newContext = browser.newContext.bind(browser);
   browser.newContext = async (opts) => {
     const ctx = await newContext(opts);
@@ -155,6 +169,33 @@ export async function launchEngine(name) {
   };
   browser.newPage = async (opts) => (await browser.newContext(opts)).newPage();
   return browser;
+}
+
+/** Whether the engine grants clipboard permissions. Firefox refuses the grant ("Unknown permission"); WebKit accepts it but refuses the page once granted. Both must work. */
+async function probeClipboard(browser) {
+  const ctx = await browser.newContext();
+  try {
+    await ctx.grantPermissions(["clipboard-read", "clipboard-write"], { origin: "http://127.0.0.1" });
+    await (await ctx.newPage()).close();
+    return true;
+  } catch {
+    return false;
+  } finally {
+    await ctx.close();
+  }
+}
+
+/** Which web APIs the engine ships: RTCPeerConnection (the UDP data channel) and Web Audio (sound effects). */
+async function probeFeatures(browser) {
+  const ctx = await browser.newContext();
+  try {
+    return await (await ctx.newPage()).evaluate(() => ({
+      webrtc: typeof RTCPeerConnection === "function",
+      webAudio: typeof AudioContext === "function" || typeof webkitAudioContext === "function",
+    }));
+  } finally {
+    await ctx.close();
+  }
 }
 
 // ---------------------------------------------------------------- server
@@ -276,11 +317,12 @@ export class Scenario {
    * (localStorage "neobox.name", only when unset). Native dialogs (alert, confirm, prompt) fail the scenario;
    * the app's own confirms are DOM dialogs and are driven like any other control.
    */
-  async open(label, { phone = false, name, clipboard = false, ip: forcedIp } = {}) {
+  async open(label, { phone = false, viewport, name, clipboard = false, ip: forcedIp } = {}) {
     // `ip` is the client address the browser sends as X-Forwarded-For (picks its GeoIP location).
     const ip = forcedIp ?? nextClientIp();
     const context = await this.env.browser.newContext({
-      ...(phone ? PHONE : DESKTOP),
+      ...(phone ? phoneOptions(this.env.browser) : DESKTOP),
+      ...(viewport && { viewport }),
       acceptDownloads: true,
       extraHTTPHeaders: { "X-Forwarded-For": ip },
     });
@@ -302,6 +344,8 @@ export class Scenario {
     page.on("pageerror", (err) => handle.problems.push(`${label}: page error: ${err.message}`));
     page.on("console", (msg) => {
       if (msg.type() !== "error") return;
+      // The font abort is the browser's own, not the page's: only that exact status is ignored.
+      if (FONT_ABORT_RE.test(msg.text())) return;
       const url = msg.location().url ?? "";
       handle.problems.push(`${label}: console error: ${msg.text()}${url ? ` (${url})` : ""}`);
     });
@@ -427,10 +471,22 @@ export async function regionServers() {
   };
 }
 
-/** A server with WebRTC on loopback (every other scenario runs on the WebSocket alone). */
+/**
+ * The machine's LAN IPv4 address (127.0.0.1 without one). Firefox never pairs a loopback candidate: its host
+ * candidates are mDNS names, and loopback peers are dropped even with media.peerconnection.ice.loopback.
+ */
+function lanAddress() {
+  for (const infos of Object.values(os.networkInterfaces())) {
+    const v4 = infos?.find((info) => info.family === "IPv4" && !info.internal);
+    if (v4) return v4.address;
+  }
+  return "127.0.0.1";
+}
+
+/** A server with WebRTC on the LAN address (every other scenario runs on the WebSocket alone). */
 export async function rtcServer() {
   const rtcPort = await freePort();
-  const rtc = `127.0.0.1:${rtcPort}`;
+  const rtc = `${lanAddress()}:${rtcPort}`;
   const main = await startServer({ extraEnv: { NEOBOX_RTC_BIND: rtc, NEOBOX_RTC_PUBLIC: rtc } });
   return { base: main.base, nodeBase: null, output: main.output, stop: main.stop };
 }
@@ -528,7 +584,9 @@ export async function startMatch(host, others = []) {
 }
 
 /** A room with a host and a guest (via the host's invite link, read from the clipboard), in a running match. */
-export async function matchWithGuest(s, { clipboard = true } = {}) {
+export async function matchWithGuest(s, { clipboard: wantClipboard = true } = {}) {
+  // Engines without clipboard permissions (Firefox, WebKit) take the invite link by navigating to it instead.
+  const clipboard = wantClipboard && s.env.browser.clipboard;
   const hostName = uniqueName("host");
   const guestName = uniqueName("guest");
   const roomName = uniqueName("room");
@@ -560,10 +618,16 @@ export async function matchWithGuest(s, { clipboard = true } = {}) {
 // ---------------------------------------------------------------- canvas probe
 
 /**
- * Installs (once per page) a requestAnimationFrame probe. Each frame it copies
- * the match canvas (#gl-host canvas) into a small 2D canvas and hashes it, so
- * pixel readback happens inside the frame the WebGL/WebGPU buffer is valid.
- * Also records the time of the last ArrowRight keydown.
+ * Installs (once per page) a sampler of the match canvas (#gl-host canvas): it copies the
+ * canvas into a small 2D canvas, hashes it and records the time of each change. Also records
+ * the time of the last ArrowRight keydown.
+ *
+ * Sampling follows the draws, not requestAnimationFrame. Firefox clears a WebGL drawing buffer
+ * once the frame is composited (preserveDrawingBuffer is off), so a copy taken in a rAF callback
+ * that runs before the app's draw reads a blank canvas. Which of the two runs first depends on
+ * the order in which the callbacks registered, and that changes from screen to screen. A
+ * microtask queued by a draw runs as soon as the drawing callback returns, before compositing,
+ * whatever that order is.
  */
 export function installProbe() {
   if (window.__e2eProbe) return;
@@ -589,31 +653,54 @@ export function installProbe() {
     },
     true,
   );
-  const step = (now) => {
+  const sample = () => {
     const src = document.querySelector("#gl-host canvas");
-    if (src instanceof HTMLCanvasElement && src.width > 0 && src.height > 0) {
-      sctx.clearRect(0, 0, W, H);
-      sctx.drawImage(src, 0, 0, W, H);
-      const data = new Uint32Array(sctx.getImageData(0, 0, W, H).data.buffer);
-      const seen = new Set();
-      let hash = 0x811c9dc5;
-      for (let i = 0; i < data.length; i++) {
-        const v = data[i];
-        hash = Math.imul(hash ^ v, 16777619);
-        if (seen.size < 64) seen.add(v);
-      }
-      probe.distinct = seen.size;
-      probe.frames++;
-      if (hash !== probe.hash) {
-        probe.hash = hash;
-        probe.changes.push(now);
-        if (probe.changes.length > 5000) probe.changes.shift();
-        probe.lastChange = now;
-      }
+    if (!(src instanceof HTMLCanvasElement) || src.width === 0 || src.height === 0) return;
+    sctx.clearRect(0, 0, W, H);
+    sctx.drawImage(src, 0, 0, W, H);
+    const data = new Uint32Array(sctx.getImageData(0, 0, W, H).data.buffer);
+    const seen = new Set();
+    let hash = 0x811c9dc5;
+    for (let i = 0; i < data.length; i++) {
+      const v = data[i];
+      hash = Math.imul(hash ^ v, 16777619);
+      if (seen.size < 64) seen.add(v);
     }
-    requestAnimationFrame(step);
+    probe.distinct = seen.size;
+    probe.frames++;
+    if (hash !== probe.hash) {
+      const now = performance.now();
+      probe.hash = hash;
+      probe.changes.push(now);
+      if (probe.changes.length > 5000) probe.changes.shift();
+      probe.lastChange = now;
+    }
   };
-  requestAnimationFrame(step);
+  let queued = false;
+  const sampleAfterDraw = () => {
+    if (queued) return;
+    queued = true;
+    queueMicrotask(() => {
+      queued = false;
+      sample();
+    });
+  };
+  // Both renderers draw synchronously inside the frame callback: WebGL2 through drawArrays, WebGPU through queue.submit.
+  const glProto = WebGL2RenderingContext.prototype;
+  const drawArrays = glProto.drawArrays;
+  glProto.drawArrays = function (...args) {
+    const result = drawArrays.apply(this, args);
+    if (this.canvas.parentElement?.id === "gl-host") sampleAfterDraw();
+    return result;
+  };
+  if (typeof GPUQueue !== "undefined") {
+    const submit = GPUQueue.prototype.submit;
+    GPUQueue.prototype.submit = function (...args) {
+      const result = submit.apply(this, args);
+      sampleAfterDraw();
+      return result;
+    };
+  }
 }
 
 export async function ensureProbe(page) {

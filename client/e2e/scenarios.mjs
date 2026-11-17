@@ -55,13 +55,13 @@ async function expectMenuName(page, name) {
 }
 
 /** Waits for a friend row matching `text`, re-opening the Friends screen (it only refreshes on open). */
-async function friendRow(page, text, timeoutMs = 25_000) {
+async function friendRow(page, text, sub = "", timeoutMs = 25_000) {
   const end = Date.now() + timeoutMs;
+  const row = page.locator("li.friend-row").filter({ hasText: text }).filter({ hasText: sub }).first();
   for (;;) {
-    const row = page.locator("li.friend-row").filter({ hasText: text });
-    if ((await row.count()) > 0) return row.first();
+    // the list loads after the screen opens, so give each open a moment before re-opening
+    if (await row.waitFor({ state: "attached", timeout: 2_000 }).then(() => true, () => false)) return row;
     if (Date.now() > end) throw new Error(`friend row "${text}" never appeared`);
-    await sleep(500);
     await back(page).click();
     await navTo(page, "Friends");
   }
@@ -225,13 +225,14 @@ async function friends(s) {
   await navTo(b.page, "Friends");
   const incoming = await friendRow(b.page, a.userName);
   await incoming.getByRole("button", { name: "Accept", exact: true }).click();
+  await b.page.getByText(`You are now friends with ${a.userName}.`).waitFor();
   // B enters a room, which also marks B online: A sees the room in the friend row and can join it.
   const roomName = uniqueName("fr");
   await createRoom(b, s.base, roomName, { isPublic: true });
   await a.page.goto(s.base);
   await menuName(a.page).waitFor();
   await navTo(a.page, "Friends");
-  const inRoom = await friendRow(a.page, b.userName);
+  const inRoom = await friendRow(a.page, b.userName, `in ${roomName}`);
   await inRoom.getByText(`in ${roomName}`, { exact: true }).waitFor();
   await inRoom.getByRole("button", { name: "Join", exact: true }).click();
   await roomTitle(a.page, roomName).waitFor();
@@ -614,6 +615,11 @@ async function sounds(s) {
   await menuName(page).waitFor();
   await sleep(300);
   check(missing.length === 0, `sound or music files missing: ${missing.join(", ")}`);
+  // Without Web Audio the page creates no audio context, so it never requests a sound effect.
+  if (!s.env.browser.webAudio) {
+    check(fetched.length === 0, `${fetched.length} sound effects fetched with no Web Audio in this engine`);
+    return "no Web Audio in this engine: no sound effects requested";
+  }
   check(fetched.length > 0, "a click fetched no sound effect");
   return `${fetched.length} sound effects fetched, none missing`;
 }
@@ -702,14 +708,36 @@ async function phone(s) {
   return "menu, practice touch layer, room: no overflow";
 }
 
+/**
+ * Sends touch points as `{ type, points }` with `touchStart` / `touchMove` / `touchEnd`. Chromium
+ * gets real touch events over CDP. Firefox and WebKit have no CDP, so the same pointer handlers
+ * (the HUD listens to pointer events, not touch-specific ones) get a mouse press instead.
+ */
+async function touchDriver(page, browser) {
+  if (browser.browserType().name() === "chromium") {
+    const cdp = await page.context().newCDPSession(page);
+    return (type, points) => cdp.send("Input.dispatchTouchEvent", { type, touchPoints: points });
+  }
+  return async (type, points) => {
+    if (type === "touchStart") {
+      await page.mouse.move(points[0].x, points[0].y);
+      await page.mouse.down();
+    } else if (type === "touchMove") {
+      await page.mouse.move(points[0].x, points[0].y);
+    } else {
+      await page.mouse.up();
+    }
+  };
+}
+
 /** A landscape phone joins a match and drives the touch stick and Jump with real touch events. */
 async function phoneLandscapeTouch(s) {
   const roomName = uniqueName("touch room");
   const host = await s.open("host", { name: uniqueName("host") });
   const code = await createRoom(host, s.base, roomName, { isPublic: true });
-  const guest = await s.open("guest", { phone: true, name: uniqueName("touch") });
+  // Opened at landscape size: resizing a live WebGL page hangs headless Firefox's viewport.
+  const guest = await s.open("guest", { phone: true, viewport: { width: 844, height: 390 }, name: uniqueName("touch") });
   const { page } = guest;
-  await page.setViewportSize({ width: 844, height: 390 });
   await joinByInvite(guest, s.base, code, roomName);
   await dismissPhoneSplash(page);
   await roomTitle(page, roomName).waitFor();
@@ -719,21 +747,22 @@ async function phoneLandscapeTouch(s) {
   // Frames freeze during the start countdown; wait it out before touching the controls.
   await sleep(4000);
   await ensureProbe(page);
-  const cdp = await page.context().newCDPSession(page);
-  const send = (type, points) => cdp.send("Input.dispatchTouchEvent", { type, touchPoints: points });
+  const send = await touchDriver(page, s.env.browser);
   const centre = async (selector) => {
     const box = await page.locator(selector).boundingBox();
     check(box && box.width > 0, `${selector} has no size`);
     return { x: box.x + box.width / 2, y: box.y + box.height / 2, r: box.width / 2, box };
   };
 
-  const vp = page.viewportSize();
+  const geom = (c) => `${Math.round(c.box.x)},${Math.round(c.box.y)} ${Math.round(c.box.width)}x${Math.round(c.box.height)}`;
+  // Live size, not the emulated one: entering fullscreen (the landscape splash) makes headless Firefox use the screen size.
+  const vp = await page.evaluate(() => ({ width: innerWidth, height: innerHeight }));
   const stick = await centre(".hud-stick");
   const actions = await centre(".hud-actions");
   check(stick.box.x + stick.box.width <= actions.box.x, "touch stick and action buttons overlap");
   check(
     stick.box.y + stick.box.height <= vp.height && actions.box.y + actions.box.height <= vp.height,
-    "touch controls run off the landscape screen",
+    `touch controls run off the landscape screen (viewport ${vp.width}x${vp.height}, stick ${geom(stick)}, actions ${geom(actions)})`,
   );
 
   // Thumb on the stick, slid right: the player moves, so the canvas keeps changing.
@@ -1031,22 +1060,26 @@ async function inviteSignedIn(s) {
   return "a signed-in player without a saved guest name joined from the invite link";
 }
 
-/** Waits until both players of room `code` have their game data on UDP (the data channel). */
-async function waitForUdp(s, code) {
+/** Waits until both players of room `code` have their game data on `transport` (`udp`: the data channel). */
+async function waitForTransports(s, code, transport) {
   const end = Date.now() + 15_000;
   let transports = [];
   for (;;) {
     transports = (await adminRoom(s.base, code)).players.map((p) => p.transport);
-    if (transports.length === 2 && transports.every((t) => t === "udp")) return;
-    if (Date.now() > end) throw new Error(`transports stayed ${JSON.stringify(transports)}, expected udp for both`);
+    if (transports.length === 2 && transports.every((t) => t === transport)) return;
+    if (Date.now() > end) throw new Error(`transports stayed ${JSON.stringify(transports)}, expected ${transport} for both`);
     await sleep(250);
   }
 }
 
-/** WebRTC: with UDP offered, both players' game data moves to the data channel and the match runs. */
+const waitForUdp = (s, code) => waitForTransports(s, code, "udp");
+
+/** WebRTC: with UDP offered, both players' game data moves to the data channel and the match runs. Engines without RTCPeerConnection stay on the WebSocket. */
 async function rtcMatch(s) {
   const m = await matchWithGuest(s, { clipboard: false });
-  await waitForUdp(s, m.code);
+  const transport = s.env.browser.webrtc ? "udp" : "ws";
+  if (transport === "udp") await waitForUdp(s, m.code);
+  else await waitForTransports(s, m.code, "ws");
   await waitForPixels(m.guest, "guest canvas");
   // the start countdown freezes frames; then holding Right moves the guest
   await sleep(4000);
@@ -1055,8 +1088,8 @@ async function rtcMatch(s) {
   await sleep(1000);
   await m.guest.page.keyboard.up("ArrowRight");
   const moved = (await probeChanges(m.guest.page)) - before;
-  check(moved > 5, `guest frames barely changed over WebRTC (${moved} changes)`);
-  return `both players on udp; ${moved} frame changes while holding Right`;
+  check(moved > 5, `guest frames barely changed over ${transport} (${moved} changes)`);
+  return `both players on ${transport}${transport === "ws" ? " (no RTCPeerConnection in this engine)" : ""}; ${moved} frame changes while holding Right`;
 }
 
 /**
@@ -1124,6 +1157,6 @@ export const scenarios = [
   { name: "regions account", run: regionAccount, topology: regionServers },
   { name: "invite signed in", run: inviteSignedIn },
   { name: "webrtc match", run: rtcMatch, topology: rtcServer },
-  { name: "resync keeps map", run: resyncKeepsMap, topology: rtcServer },
+  { name: "resync keeps map", run: resyncKeepsMap, topology: rtcServer, webrtc: true },
   { name: "sounds", run: sounds },
 ];
