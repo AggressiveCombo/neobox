@@ -200,9 +200,7 @@ fn begin(a: &mut App, mut session: ClientSession, now_ms: f64) {
     let tick = session.head() as f64;
     // start ahead of the server by half a round trip plus a small margin
     let lead = (a.rtt.rtt().unwrap_or(0.0) / 2000.0) * hz + 2.0;
-    let mut clock = TickClock::new(hz, tick, lead);
-    clock.target_margin = a.rtt.target_margin(hz);
-    a.clock = Some(clock);
+    a.clock = Some(TickClock::new(hz, tick, lead));
     a.warm_ms = Some(0.0);
     session.attach_feed();
     a.last_sent = 0;
@@ -314,9 +312,6 @@ pub unsafe extern "C" fn nb_server_frame(ptr: u32, len: u32, now_ms: f64) -> i32
             ServerFrame::Pong { client_time, .. } => {
                 let rtt = (now_ms - client_time).max(0.0);
                 a.rtt.sample(rtt);
-                if let (Some(c), Some(s)) = (a.clock.as_mut(), a.session.as_ref()) {
-                    c.target_margin = a.rtt.target_margin(s.start.tick_hz);
-                }
                 0
             }
         }

@@ -766,26 +766,36 @@ impl ClientSession {
     }
 }
 
-/// Local tick clock that keeps the client's inputs arriving slightly ahead
-/// of the server (`margin`), speeding up or slowing down smoothly.
+/// Local tick clock: keeps our inputs arriving at the server a few ticks ahead
+/// of when it needs them, speeding up or slowing down smoothly.
+///
+/// The target lead is sized from the spread of the arrival margins the server
+/// reports: a spread is what makes an input late. Round-trip samples are not
+/// used, because they include the client's own scheduling delay.
 #[derive(Clone, Debug)]
 pub struct TickClock {
     pub hz: f64,
     /// fractional tick
     pub tick: f64,
     /// target arrival margin in ticks
-    pub target_margin: f64,
+    target_margin: f64,
+    /// smoothed arrival margin in ticks
     margin: f64,
     have_margin: bool,
+    spread: Spread,
 }
 
 impl TickClock {
     pub fn new(hz: f64, start_tick: f64, lead: f64) -> TickClock {
-        TickClock { hz, tick: start_tick + lead, target_margin: 1.5, margin: 0.0, have_margin: false }
+        TickClock { hz, tick: start_tick + lead, target_margin: 1.5, margin: 0.0, have_margin: false, spread: Spread::default() }
     }
 
-    /// Feedback from the server: how early our newest input arrived.
+    /// Feedback from the server: how early our newest input arrived. The target
+    /// lead is one tick plus twice the spread of the recent margins, clamped to
+    /// one to six ticks.
     pub fn on_margin(&mut self, margin_ticks: f64) {
+        self.spread.push(margin_ticks);
+        self.target_margin = (1.0 + 2.0 * self.spread.get()).clamp(1.0, 6.0);
         if !self.have_margin {
             self.margin = margin_ticks;
             self.have_margin = true;
@@ -812,30 +822,52 @@ impl TickClock {
     }
 }
 
-/// Pong samples kept for the jitter estimate.
-const RTT_SAMPLES: usize = 16;
+/// Samples kept by a [`Spread`].
+const SPREAD_SAMPLES: usize = 16;
 
-/// Round-trip time and jitter of a link, from ping/pong samples.
-///
-/// Jitter is the median of each sample's excess over the window minimum. A pong
-/// delayed by a busy client thread is an outlier the median ignores, where a
-/// running mean of successive differences would absorb it and push the tick
-/// clock further ahead of the server.
+/// Spread of the latest samples: the median excess over their minimum. A single
+/// sample far above the rest, such as a reply delayed by a busy thread, does not
+/// move it.
 #[derive(Clone, Debug, Default)]
-pub struct RttTracker {
-    window: [f64; RTT_SAMPLES],
+struct Spread {
+    window: [f64; SPREAD_SAMPLES],
     /// samples held in `window`
     count: usize,
     /// slot the next sample is written to
     next: usize,
+}
+
+impl Spread {
+    fn push(&mut self, x: f64) {
+        self.window[self.next] = x;
+        self.next = (self.next + 1) % SPREAD_SAMPLES;
+        self.count = (self.count + 1).min(SPREAD_SAMPLES);
+    }
+
+    fn get(&self) -> f64 {
+        let w = &self.window[..self.count];
+        let Some(min) = w.iter().copied().reduce(f64::min) else {
+            return 0.0;
+        };
+        let mut excess = [0.0f64; SPREAD_SAMPLES];
+        for (e, &x) in excess.iter_mut().zip(w) {
+            *e = x - min;
+        }
+        let e = &mut excess[..self.count];
+        e.sort_unstable_by(f64::total_cmp);
+        e[e.len() / 2]
+    }
+}
+
+/// Smoothed round-trip time of the link in ms, from ping/pong samples. It sizes
+/// the initial clock lead and the HUD; it does not set the target margin.
+#[derive(Clone, Debug, Default)]
+pub struct RttTracker {
     smooth: Option<f64>,
 }
 
 impl RttTracker {
     pub fn sample(&mut self, rtt_ms: f64) {
-        self.window[self.next] = rtt_ms;
-        self.next = (self.next + 1) % RTT_SAMPLES;
-        self.count = (self.count + 1).min(RTT_SAMPLES);
         self.smooth = Some(match self.smooth {
             None => rtt_ms,
             Some(prev) => prev + (rtt_ms - prev) * 0.2,
@@ -845,27 +877,6 @@ impl RttTracker {
     /// Smoothed round-trip time in ms; None before the first sample.
     pub fn rtt(&self) -> Option<f64> {
         self.smooth
-    }
-
-    /// Median excess of the window's samples over its minimum, in ms.
-    pub fn jitter(&self) -> f64 {
-        let w = &self.window[..self.count];
-        let Some(min) = w.iter().copied().reduce(f64::min) else {
-            return 0.0;
-        };
-        let mut excess = [0.0f64; RTT_SAMPLES];
-        for (e, &r) in excess.iter_mut().zip(w) {
-            *e = r - min;
-        }
-        let e = &mut excess[..self.count];
-        e.sort_unstable_by(f64::total_cmp);
-        e[e.len() / 2]
-    }
-
-    /// Target arrival margin in ticks at `hz`: a jitter of `j` ms wants `2 j`
-    /// of extra lead, clamped to one to six ticks.
-    pub fn target_margin(&self, hz: f64) -> f64 {
-        (1.0 + 2.0 * self.jitter() / 1000.0 * hz).clamp(1.0, 6.0)
     }
 }
 
@@ -984,19 +995,10 @@ mod tests {
     const FRAME_MS: f64 = 1000.0 / 60.0;
     /// match tick rate
     const HZ: f64 = 30.0;
-    /// ping cadence of the client (`PING_MS` in game.ts)
-    const PING_MS: f64 = 1000.0;
     /// the stats skip this much of a session, as the wasm does
     const WARMUP_MS: f64 = 3000.0;
-
-    /// Which round-trip estimate sets the target margin.
-    #[derive(Clone, Copy, PartialEq)]
-    enum Est {
-        /// the EMA of successive RTT differences the wasm used before
-        Ema,
-        /// [`RttTracker`]
-        Window,
-    }
+    /// the stall pattern of the rollback tests: 60 ms busy every 700 ms
+    const STALL: Stall = Stall { period: 700.0, len: 60.0, phase: 0.0 };
 
     /// Main-thread stalls of one client: busy for `len` ms every `period` ms from `phase`.
     #[derive(Clone, Copy)]
@@ -1020,14 +1022,10 @@ mod tests {
     struct Peer {
         session: ClientSession,
         clock: TickClock,
-        rtt: RttTracker,
-        ema_rtt: Option<f64>,
-        ema_jitter: f64,
         stall: Option<Stall>,
         last_t: f64,
         last_sent: u32,
         sent_seq: u32,
-        last_ping: f64,
         mask: u8,
         typing: bool,
         rng: u64,
@@ -1036,8 +1034,6 @@ mod tests {
         to_server: VecDeque<(f64, InputFrame)>,
         /// (arrival ms, tick, server input ack, margin in ticks) from the server
         to_client: VecDeque<(f64, TickData, u32, f64)>,
-        /// (arrival ms, send time) of pings awaiting their pong
-        pongs: VecDeque<(f64, f64)>,
     }
 
     enum Ev {
@@ -1045,7 +1041,6 @@ mod tests {
         Frame(usize),
         Up(usize),
         Down(usize),
-        Pong(usize),
     }
 
     fn next_rand(s: &mut u64) -> u64 {
@@ -1056,66 +1051,56 @@ mod tests {
     }
 
     /// Client frame, as `nb_frame` does it: predict to `target + 1` with the
-    /// local input stamped at `target`, then send the heartbeat and changes.
-    fn frame(p: &mut Peer, t: f64, owl: f64) {
+    /// local input stamped at `target`, then send the changes.
+    fn frame(p: &mut Peer, t: f64, owl: f64, net: f64) {
         let dt = (t - p.last_t) / 1000.0;
         p.last_t = t;
         if p.typing && next_rand(&mut p.rng) % 30 == 0 {
             p.mask = (next_rand(&mut p.rng) % 8) as u8;
-        }
-        if t - p.last_ping >= PING_MS {
-            p.last_ping = t;
-            p.pongs.push_back((t + 2.0 * owl, t));
         }
         let target = p.clock.update(dt).floor().max(0.0) as u32;
         p.session.local_input(target, p.mask);
         p.session.advance_to(target + 1);
         let newest = p.session.last_input_seq();
         if target >= p.last_sent || newest != p.sent_seq {
-            p.to_server.push_back((t + owl, p.session.input_frame(target, MAX_RESEND)));
+            let at = jittered(&mut p.rng, net, t + owl, p.to_server.back().map(|b| b.0));
+            p.to_server.push_back((at, p.session.input_frame(target, MAX_RESEND)));
             p.last_sent = p.last_sent.max(target + 1);
             p.sent_seq = newest;
         }
     }
 
-    /// The target arrival margin in ticks that `est` gives this client.
-    fn target(p: &Peer, est: Est) -> f64 {
-        match est {
-            Est::Window => p.rtt.target_margin(HZ),
-            Est::Ema => (1.0 + 2.0 * p.ema_jitter / 1000.0 * HZ).clamp(1.0, 6.0),
-        }
+    /// Arrival `at` plus a uniform delay in `[0, jit)` ms, never before `last` (in-order delivery).
+    fn jittered(rng: &mut u64, jit: f64, at: f64, last: Option<f64>) -> f64 {
+        let at = at + (next_rand(rng) % 10_000) as f64 / 10_000.0 * jit;
+        last.map_or(at, |l| at.max(l))
     }
 
     /// Two clients in one match over a link with `owl` ms one-way delay, ticks
-    /// at 30 Hz, frames at 60 Hz, both starting at time 0. With `stall`, each
-    /// client's thread (frames, pings, received batches, pongs) waits out its
-    /// stalls. Returns peer 0's session with its depth stats after warm-up.
-    fn two_peer_rollbacks(owl: f64, typing: [bool; 2], stall: Option<Stall>, est: Est, secs: f64) -> ClientSession {
+    /// at 30 Hz, frames at 60 Hz, both starting at time 0. `net` is the uplink and
+    /// downlink jitter in ms. With `stall`, each client's thread (frames and
+    /// received batches) waits out its stalls. Returns peer 0's session with its
+    /// depth stats after warm-up.
+    fn two_peer_rollbacks(owl: f64, net: f64, typing: [bool; 2], stall: Option<Stall>, secs: f64) -> ClientSession {
         let tick_ms = 1000.0 / HZ;
         let mut server = ServerMatch::new(start()).unwrap();
         let mut peers: Vec<Peer> = (0..2usize)
             .map(|i| {
                 let session = ClientSession::new(start(), Some(i as u32)).unwrap();
-                let mut clock = TickClock::new(HZ, session.head() as f64, owl / 1000.0 * HZ + 2.0);
-                clock.target_margin = 1.0;
+                let clock = TickClock::new(HZ, session.head() as f64, owl / 1000.0 * HZ + 2.0);
                 Peer {
                     session,
                     clock,
-                    rtt: RttTracker::default(),
-                    ema_rtt: None,
-                    ema_jitter: 0.0,
                     stall: stall.map(|s| Stall { phase: s.phase + i as f64 * s.period / 2.0, ..s }),
                     last_t: 0.0,
                     last_sent: 0,
                     sent_seq: 0,
-                    last_ping: -PING_MS,
                     mask: 0,
                     typing: typing[i],
                     rng: 0x9E37_79B9_7F4A_7C15 ^ (i as u64 + 1),
                     warm: false,
                     to_server: VecDeque::new(),
                     to_client: VecDeque::new(),
-                    pongs: VecDeque::new(),
                 }
             })
             .collect();
@@ -1141,12 +1126,6 @@ mod tests {
                         best = (t, Ev::Down(i));
                     }
                 }
-                if let Some(&(t, _)) = p.pongs.front() {
-                    let t = free_at(p.stall, t);
-                    if t < best.0 {
-                        best = (t, Ev::Pong(i));
-                    }
-                }
             }
             let (t, ev) = best;
             if t >= end {
@@ -1162,12 +1141,13 @@ mod tests {
                 Ev::Step => {
                     let data = server.step();
                     for (i, p) in peers.iter_mut().enumerate() {
-                        p.to_client.push_back((t + owl, data.clone(), server.input_ack(i as u32), margins[i]));
+                        let at = jittered(&mut p.rng, net, t + owl, p.to_client.back().map(|b| b.0));
+                        p.to_client.push_back((at, data.clone(), server.input_ack(i as u32), margins[i]));
                     }
                     next_step += tick_ms;
                 }
                 Ev::Frame(i) => {
-                    frame(&mut peers[i], t, owl);
+                    frame(&mut peers[i], t, owl, net);
                     // a frame loop resumes one frame after the stall, not on a backlog
                     next_frame[i] = t + FRAME_MS;
                 }
@@ -1185,47 +1165,9 @@ mod tests {
                     p.session.input_ack(ack);
                     p.clock.on_margin(margin);
                 }
-                Ev::Pong(i) => {
-                    let (_, sent) = peers[i].pongs.pop_front().unwrap();
-                    let rtt = t - sent;
-                    let p = &mut peers[i];
-                    match p.ema_rtt {
-                        None => p.ema_rtt = Some(rtt),
-                        Some(prev) => {
-                            p.ema_jitter += ((rtt - prev).abs() - p.ema_jitter) * 0.2;
-                            p.ema_rtt = Some(prev + (rtt - prev) * 0.2);
-                        }
-                    }
-                    p.rtt.sample(rtt);
-                    p.clock.target_margin = target(p, est);
-                }
             }
         }
         peers.swap_remove(0).session
-    }
-
-    /// Outlier pongs from a busy client thread do not move the median jitter.
-    #[test]
-    fn stalled_pongs_do_not_move_jitter() {
-        let mut t = RttTracker::default();
-        for i in 0..RTT_SAMPLES {
-            t.sample(if i % 4 == 3 { 52.0 } else { 2.0 });
-        }
-        assert!(t.jitter() < 0.5, "jitter {}", t.jitter());
-        assert_eq!(t.target_margin(HZ), 1.0);
-    }
-
-    /// Jitter is the median excess over the minimum: excess spread over 0..40 ms gives about 21.
-    #[test]
-    fn jitter_is_median_excess_over_min() {
-        let mut t = RttTracker::default();
-        for i in 0..RTT_SAMPLES {
-            t.sample(100.0 + i as f64 * 40.0 / (RTT_SAMPLES - 1) as f64);
-        }
-        let j = t.jitter();
-        assert!((j - 21.3).abs() < 1.0, "jitter {j}");
-        let m = t.target_margin(HZ);
-        assert!((2.0..2.5).contains(&m), "margin {m}");
     }
 
     /// The depth percentile is nearest-rank over the counted depths and restarts on reset.
@@ -1241,30 +1183,57 @@ mod tests {
         assert_eq!(c.rollback_depth_pct(95), 0);
     }
 
-    /// Diagnostic: the observer's rollback depths on 0 ms and 100 ms links, clean and with
-    /// main-thread stalls (60 ms every 700 ms), under the old and the windowed estimate.
+    /// The spread is the median excess over the minimum: excess spread over 0..40 gives about 21.
     #[test]
-    fn two_peer_rollback_depths() {
-        let stall = Some(Stall { period: 700.0, len: 60.0, phase: 0.0 });
-        let cases: [(&str, f64, Option<Stall>, Est); 8] = [
-            ("rtt0 clean ema", 0.0, None, Est::Ema),
-            ("rtt0 clean window", 0.0, None, Est::Window),
-            ("rtt0 stall ema", 0.0, stall, Est::Ema),
-            ("rtt0 stall window", 0.0, stall, Est::Window),
-            ("rtt100 clean ema", 50.0, None, Est::Ema),
-            ("rtt100 clean window", 50.0, None, Est::Window),
-            ("rtt100 stall ema", 50.0, stall, Est::Ema),
-            ("rtt100 stall window", 50.0, stall, Est::Window),
-        ];
-        for (label, owl, stall, est) in cases {
-            let s = two_peer_rollbacks(owl, [true, true], stall, est, 60.0);
-            let n: u64 = s.depth_hist.iter().sum();
-            eprintln!(
-                "{label}: n={n} p50={} p95={} max={}",
-                s.rollback_depth_pct(50),
-                s.rollback_depth_pct(95),
-                s.rollback_depth_pct(100)
-            );
+    fn spread_is_median_excess_over_min() {
+        let mut s = Spread::default();
+        for i in 0..SPREAD_SAMPLES {
+            s.push(100.0 + i as f64 * 40.0 / (SPREAD_SAMPLES - 1) as f64);
+        }
+        let v = s.get();
+        assert!((v - 21.3).abs() < 1.0, "spread {v}");
+    }
+
+    /// One late sample among steady ones does not move the spread.
+    #[test]
+    fn single_outlier_leaves_spread_unchanged() {
+        let mut s = Spread::default();
+        for i in 0..SPREAD_SAMPLES {
+            s.push(if i == 3 { 50.0 } else { 2.0 });
+        }
+        assert_eq!(s.get(), 0.0);
+    }
+
+    /// Steady input margins want the minimum lead of one tick.
+    #[test]
+    fn steady_margin_wants_minimum_lead() {
+        let mut c = TickClock::new(HZ, 0.0, 0.0);
+        for _ in 0..SPREAD_SAMPLES {
+            c.on_margin(2.0);
+        }
+        assert_eq!(c.target_margin, 1.0);
+    }
+
+    /// Margins alternating between 0 and 2 ticks (spread 2) ask for 1 + 2 * 2 = 5 ticks of lead.
+    #[test]
+    fn margin_spread_sets_target() {
+        let mut c = TickClock::new(HZ, 0.0, 0.0);
+        for i in 0..SPREAD_SAMPLES {
+            c.on_margin(if i % 2 == 0 { 0.0 } else { 2.0 });
+        }
+        assert_eq!(c.target_margin, 5.0);
+    }
+
+    /// Rollback depth p95 at 100 ms RTT stays within 8 ticks on a clean link, with
+    /// main-thread stalls, and with uplink and downlink jitter.
+    #[test]
+    fn rtt100_rollback_depth_p95_within_budget() {
+        let cases = [("clean", 0.0, None), ("stall", 0.0, Some(STALL)), ("net25", 25.0, None)];
+        for (label, net, stall) in cases {
+            let s = two_peer_rollbacks(50.0, net, [true, true], stall, 60.0);
+            let (p50, p95) = (s.rollback_depth_pct(50), s.rollback_depth_pct(95));
+            eprintln!("{label}: p50 {p50} p95 {p95}");
+            assert!(p95 <= 8, "{label}: p95 {p95} (p50 {p50})");
         }
     }
 
