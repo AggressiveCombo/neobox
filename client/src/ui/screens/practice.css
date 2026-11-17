@@ -43,6 +43,14 @@
   margin: 0;
 }
 
+/* The details disclosure is a touch target: 48px tall, not the bare text line. */
+.practice-page .offline-error summary {
+  display: flex;
+  align-items: center;
+  min-height: 48px;
+  cursor: pointer;
+}
+
 /* Map rows: large, full width, the chosen one is ink. */
 .practice-page .offline-list {
   display: flex;
