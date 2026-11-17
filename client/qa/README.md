@@ -12,7 +12,7 @@ Headless browser instruments for the neobox client. Each one drives the built cl
 
 | Variable | Default | Used by |
 | --- | --- | --- |
-| `NEOBOX_DIST` | `C:/Users/aggressivecombo/neobox-scratch/dist-main` | all (set in `lib-qa.mjs`, `sweep.mjs`, `e2e/lib.mjs`) |
+| `NEOBOX_DIST` | none, required (or `--dist <build dir>`); the path and its `BUILT_FROM` are printed at start | all (`lib-qa.mjs`, `sweep.mjs`, `e2e/lib.mjs`) |
 | `QA_OUT` | `neobox-scratch/qa/round0-perf` (lib-qa); per-instrument defaults noted below | all record instruments |
 | `QA_ENGINES` | `chromium,firefox,webkit` | every instrument that runs in browsers (`selectedEngines()`) |
 | `QA_SELF_TEST` | unset | instruments with a self-test: see each section |

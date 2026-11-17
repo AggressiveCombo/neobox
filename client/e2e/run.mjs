@@ -1,4 +1,4 @@
-// Browser end-to-end suite: drives the real UI of the built server (dist-server) in headless browsers and reports one
+// Browser end-to-end suite: drives the real UI of the built server (--dist or NEOBOX_DIST) in headless browsers and reports one
 // line per scenario. Every scenario gets its own server (fresh database) unless it brings a topology of its own.
 //
 // Usage: `bun run e2e [--jobs N] [--engines chromium,firefox,webkit] [name-substring ...]`

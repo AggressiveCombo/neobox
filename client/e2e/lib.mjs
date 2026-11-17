@@ -12,7 +12,24 @@ import { fileURLToPath } from "node:url";
 export const E2E_DIR = path.dirname(fileURLToPath(import.meta.url));
 export const CLIENT_DIR = path.resolve(E2E_DIR, "..");
 export const SHOTS_DIR = path.join(E2E_DIR, "shots");
-export const DIST_DIR = path.resolve(process.env.NEOBOX_DIST || path.join(CLIENT_DIR, "..", "dist-server"));
+/**
+ * The server build every run uses: --dist or NEOBOX_DIST, with no default (a stale default measured the wrong build).
+ * Prints the build and its BUILT_FROM stamp (the commit it was built from) so the run's log names it.
+ */
+function resolveDist() {
+  const i = process.argv.indexOf("--dist");
+  if (i >= 0 && process.argv[i + 1]) process.env.NEOBOX_DIST = process.argv[i + 1];
+  const dir = process.env.NEOBOX_DIST;
+  if (!dir) {
+    console.error("no build: pass --dist <build dir> or set NEOBOX_DIST");
+    process.exit(2);
+  }
+  const abs = path.resolve(dir);
+  const stamp = path.join(abs, "BUILT_FROM");
+  console.error(`build: ${abs} (BUILT_FROM ${existsSync(stamp) ? readFileSync(stamp, "utf8").trim() : "none"})`);
+  return abs;
+}
+export const DIST_DIR = resolveDist();
 export const ADMIN_PASSWORD = "e2e-admin";
 export const PASSWORD = "e2e-password";
 export const ROOM_CODE_RE = /^[A-HJ-NP-Z2-9]{6}$/;
@@ -374,7 +391,12 @@ export class Scenario {
     }
     if (name) {
       await context.addInitScript((value) => {
-        if (localStorage.getItem("neobox.name") === null) localStorage.setItem("neobox.name", value);
+        // about:blank has an opaque origin: reading localStorage there throws; there is nothing to prefill.
+        try {
+          if (localStorage.getItem("neobox.name") === null) localStorage.setItem("neobox.name", value);
+        } catch {
+          // storage unavailable in this document
+        }
       }, name);
     }
     const page = await context.newPage();

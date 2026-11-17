@@ -8,9 +8,7 @@ import { fileURLToPath } from "node:url";
 
 export const QA_DIR = path.dirname(fileURLToPath(import.meta.url));
 
-// The shared test build (QA-PLAN.md). e2e/lib.mjs reads NEOBOX_DIST when it loads, so the
-// default is set before its (top-level awaited) import.
-process.env.NEOBOX_DIST ??= "C:/Users/aggressivecombo/neobox-scratch/dist-main";
+// The build under test comes from --dist or NEOBOX_DIST (required; e2e/lib.mjs resolves it and prints it on load).
 const lib = await import("../e2e/lib.mjs");
 export const {
   DESKTOP,
