@@ -102,6 +102,66 @@ class TouchMask {
   }
 }
 
+/** The input the player last used; Training's lesson chips name the controls of that one. */
+export type InputProfile = "keyboard" | "touch" | "pad";
+
+/** Touch-only device: a coarse pointer and no fine one (the same test as phone-splash.ts). */
+const touchOnly = (): boolean => matchMedia("(pointer: coarse)").matches && !matchMedia("(any-pointer: fine)").matches;
+
+// Set on first use (not at import), so the module loads without a DOM.
+let profile: InputProfile | null = null;
+const profileListeners = new Set<() => void>();
+
+function currentProfile(): InputProfile {
+  profile ??= touchOnly() ? "touch" : "keyboard";
+  return profile;
+}
+
+function setProfile(next: InputProfile): void {
+  if (next === currentProfile()) return;
+  profile = next;
+  for (const fn of profileListeners) fn();
+}
+
+export function inputProfile(): InputProfile {
+  return currentProfile();
+}
+
+/** Calls `fn` whenever the profile changes; returns the unsubscribe. */
+export function onInputProfile(fn: () => void): () => void {
+  profileListeners.add(fn);
+  return () => {
+    profileListeners.delete(fn);
+  };
+}
+
+function readPad(): number {
+  // The Gamepad API is absent in insecure contexts (plain http) and some WebKit builds.
+  if (typeof navigator.getGamepads !== "function") return 0;
+  let m = 0;
+  for (const pad of navigator.getGamepads()) {
+    if (!pad) continue;
+    for (const [button, bit] of PAD_BUTTONS) if (pad.buttons[button]?.pressed === true) m |= bit;
+    const x = pad.axes[0] ?? 0;
+    const y = pad.axes[1] ?? 0;
+    if (x < -STICK_DEAD) m |= BIT.LEFT;
+    if (x > STICK_DEAD) m |= BIT.RIGHT;
+    if (y < -STICK_DEAD) m |= BIT.UP;
+    if (y > STICK_DEAD) m |= BIT.DOWN;
+  }
+  if (m !== 0) setProfile("pad");
+  return m;
+}
+
+/** Whether `index` (standard mapping) is held on any connected pad; holding it marks the pad profile. */
+export function padButton(index: number): boolean {
+  if (typeof navigator.getGamepads !== "function") return false;
+  let held = false;
+  for (const pad of navigator.getGamepads()) if (pad?.buttons[index]?.pressed === true) held = true;
+  if (held) setProfile("pad");
+  return held;
+}
+
 export class Input {
   private keys = 0;
   /** Stick and buttons have their own bits: Jump (UP) and the stick's up share a bit, so one must not clear the other. */
@@ -117,6 +177,8 @@ export class Input {
   constructor() {
     window.addEventListener("keydown", (e) => this.handle(e, true));
     window.addEventListener("keyup", (e) => this.handle(e, false));
+    window.addEventListener("keydown", () => setProfile("keyboard"));
+    window.addEventListener("pointerdown", (e) => setProfile(touchOnly() || e.pointerType !== "mouse" ? "touch" : "keyboard"), { capture: true });
     window.addEventListener("blur", () => {
       this.held.clear();
       this.settle(null);
@@ -212,20 +274,3 @@ const PAD_BUTTONS: [number, number][] = [
   [4, BIT.GRAB],
 ];
 const STICK_DEAD = 0.5;
-
-function readPad(): number {
-  // The Gamepad API is absent in insecure contexts (plain http) and some WebKit builds.
-  if (typeof navigator.getGamepads !== "function") return 0;
-  let m = 0;
-  for (const pad of navigator.getGamepads()) {
-    if (!pad) continue;
-    for (const [button, bit] of PAD_BUTTONS) if (pad.buttons[button]?.pressed === true) m |= bit;
-    const x = pad.axes[0] ?? 0;
-    const y = pad.axes[1] ?? 0;
-    if (x < -STICK_DEAD) m |= BIT.LEFT;
-    if (x > STICK_DEAD) m |= BIT.RIGHT;
-    if (y < -STICK_DEAD) m |= BIT.UP;
-    if (y > STICK_DEAD) m |= BIT.DOWN;
-  }
-  return m;
-}

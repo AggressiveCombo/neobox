@@ -4,7 +4,7 @@
 
 import type { ScreenFactory, ScreenHandle } from "../../ctx";
 import type { Engine, LocalStart } from "../../engine";
-import { keyLabel } from "../../input";
+import { GAMEPAD_LABELS, inputProfile, keyLabel, onInputProfile, padButton } from "../../input";
 import { type Action, prefs } from "../../prefs";
 import { FrameLoop } from "../../local-loop";
 import type { Screen } from "../../state";
@@ -12,27 +12,51 @@ import { type Child, h } from "../dom";
 import { type EngineStatus, engineStatus } from "../engine-status";
 import { icon } from "../icons";
 import { page, pageHead } from "../kit";
-import { rotateGate, touchControls } from "./hud";
+import { TOUCH_BUTTONS, rotateGate, touchControls } from "./hud";
 
 const TICK_HZ = 30;
 /** Endless game mode id, the same one practice uses (lives would strand a player). */
 const ENDLESS = 6;
 
-/** The key bound to a game action, as the player set it in Settings. */
-function keyName(action: Action): Child {
-  const code = prefs.value.keys[action][0];
-  return h("span", { class: "key" }, code === undefined ? "an unbound key" : keyLabel(code));
+/** Standard gamepad mapping: Start advances a lesson. A stays jump, so it cannot confirm. */
+const PAD_START = 9;
+
+/** Label for an action in the player's current input profile: keys, touch controls or pad buttons. */
+function controlLabel(action: Action): string {
+  switch (inputProfile()) {
+    case "pad":
+      return GAMEPAD_LABELS[action];
+    case "touch":
+      return touchLabel(action);
+    case "keyboard": {
+      const code = prefs.value.keys[action][0];
+      return code === undefined ? "an unbound key" : keyLabel(code);
+    }
+  }
+}
+
+/** Touch names: the stick for directions, the on-screen buttons (labelled as in the HUD) for the rest. */
+function touchLabel(action: Action): string {
+  if (action === "left") return "Stick left";
+  if (action === "right") return "Stick right";
+  if (action === "down") return "Stick down";
+  return TOUCH_BUTTONS[action].label;
+}
+
+/** A control named in a lesson: a `.key` box with its label for the current profile. */
+function control(action: Action): Child {
+  return h("span", { class: "key" }, controlLabel(action));
 }
 
 /** Lesson texts, one per step, worded with the player's current bindings (keys are `.key` boxes). */
 function lessons(): Child[][] {
-  const left = keyName("left");
-  const right = keyName("right");
-  const jump = keyName("up");
-  const push = keyName("push");
-  const rocket = keyName("rocket");
-  const bat = keyName("bat");
-  const grab = keyName("grab");
+  const left = control("left");
+  const right = control("right");
+  const jump = control("up");
+  const push = control("push");
+  const rocket = control("rocket");
+  const bat = control("bat");
+  const grab = control("grab");
   return [
     ["Run with ", left, " and ", right, ". Jump with ", jump, ", and press it again in the air for a second jump. Jump off walls too."],
     ["Keep holding ", jump, " after a jump to rise higher. Your marker turns yellow while the second jump is ready."],
@@ -79,9 +103,13 @@ export const trainingScreen: ScreenFactory = (ctx) => {
   let countEl: HTMLElement | null = null;
   let stepEls: HTMLElement[] = [];
   let nextBtn: HTMLButtonElement | null = null;
+  /** Start hint on Next (pad profile only). Created once per showGame, so profile changes never re-create it. */
+  let startKey: HTMLElement | null = null;
   let releaseTop: (() => void) | null = null;
   let mapCode = "";
   let engineUi: EngineStatus | null = null;
+  let startHeld = false;
+  let unsubProfile: (() => void) | null = null;
 
   const loop = new FrameLoop(
     (dt) => frame(dt),
@@ -112,10 +140,21 @@ export const trainingScreen: ScreenFactory = (ctx) => {
     rotate = null;
     releaseTop?.();
     releaseTop = null;
+    unsubProfile?.();
+    unsubProfile = null;
+    startHeld = false;
   }
 
   function frame(dt: number): void {
     if (!eng) return;
+    // Start advances on its press edge; a press is not repeated while held.
+    const startDown = padButton(PAD_START);
+    const press = startDown && !startHeld;
+    startHeld = startDown;
+    if (press) {
+      next();
+      return;
+    }
     eng.localFrame(dt, ctx.input.mask());
     ctx.present(names, TICK_HZ);
   }
@@ -172,17 +211,29 @@ export const trainingScreen: ScreenFactory = (ctx) => {
     showPage(h("p", { class: "offline-error" }, message));
   }
 
+  /** Chips and their control names: rebuilt on a profile change, which must not touch the Next button. */
+  function renderText(): void {
+    if (!lessonEl) return;
+    const texts = lessons();
+    lessonEl.replaceChildren(h("span", null, ...texts[lesson]));
+  }
+
+  function syncStart(): void {
+    if (startKey) startKey.style.display = inputProfile() === "pad" ? "" : "none";
+  }
+
   function renderLesson(): void {
-    if (!lessonEl || !nextBtn || !countEl) return;
+    if (!lessonEl || !nextBtn || !countEl || !startKey) return;
     const texts = lessons();
     const last = lesson === texts.length - 1;
-    lessonEl.replaceChildren(h("span", null, ...texts[lesson]));
+    renderText();
     countEl.textContent = `${lesson + 1} of ${texts.length}`;
     stepEls.forEach((step, i) => {
       step.classList.toggle("is-done", i < lesson);
       step.classList.toggle("is-current", i === lesson);
     });
-    nextBtn.replaceChildren(last ? "Finish" : "Next", icon(last ? "flag" : "arrow-right", 18));
+    nextBtn.replaceChildren(last ? "Finish" : "Next", icon(last ? "flag" : "arrow-right", 18), startKey);
+    syncStart();
   }
 
   function next(): void {
@@ -209,9 +260,15 @@ export const trainingScreen: ScreenFactory = (ctx) => {
   function showGame(): void {
     touch = touchControls(ctx);
     rotate = rotateGate();
+    unsubProfile?.();
+    unsubProfile = onInputProfile(() => {
+      renderText();
+      syncStart();
+    });
     lessonEl = h("p", { class: "training-text", "aria-live": "polite" });
     countEl = h("span", { class: "training-count" });
     stepEls = lessons().map(() => h("span", { class: "training-step", "aria-hidden": "true" }));
+    startKey = h("span", { class: "key" }, "Start");
     nextBtn = h("button", { type: "button", class: "primary training-next", onclick: next });
     root.className = "offline playing";
     const bar = h(
