@@ -29,8 +29,6 @@ export function closeNotice(reason: string, wasClean: boolean): CloseNotice {
       return { label: "Sending too fast", text: "Disconnected: sending messages too fast.", reconnect: false };
     case "too_big":
       return { label: "Message too large", text: "Disconnected: a message was too large.", reconnect: false };
-    case "too_many":
-      return { label: "Too many connections", text: "Too many connections from your network.", reconnect: false };
     case "shutdown":
       return { label: "Server restarting", text: "The server is restarting.", reconnect: true };
     default:

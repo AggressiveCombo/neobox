@@ -165,8 +165,6 @@ pub mod close {
     pub const SILENT: Close = Close { code: close_code::POLICY, reason: "silent" };
     /// A message exceeded the size limit.
     pub const TOO_BIG: Close = Close { code: close_code::SIZE, reason: "too_big" };
-    /// Too many sockets from one address.
-    pub const TOO_MANY: Close = Close { code: close_code::POLICY, reason: "too_many" };
     /// The server is restarting.
     pub const SHUTDOWN: Close = Close { code: close_code::AWAY, reason: "shutdown" };
 }
