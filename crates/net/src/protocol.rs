@@ -41,11 +41,14 @@ pub fn valid_name(name: &str) -> bool {
         && name.chars().all(|c| c.is_ascii_alphanumeric() || c == ' ' || c == '_')
 }
 
-/// Invisible format characters that change how text renders: bidirectional
-/// controls (they reverse the text after them), zero-width spaces and joiners
-/// (they make a line look blank), word joiners, byte-order marks and blank fillers (Hangul and braille blanks).
+/// Characters that must not reach other players: control characters (C0,
+/// DEL and C1, such as a bell or a line break) and invisible format
+/// characters that change how text renders: bidirectional controls (they
+/// reverse the text after them), zero-width spaces and joiners (they make a
+/// line look blank), word joiners, byte-order marks and blank fillers (Hangul
+/// and braille blanks).
 fn is_format(c: char) -> bool {
-    matches!(
+    c.is_control() || matches!(
         c,
         '\u{00AD}' | '\u{0600}'..='\u{0605}' | '\u{061C}' | '\u{06DD}' | '\u{070F}' | '\u{180E}'
             | '\u{200B}'..='\u{200C}' | '\u{200E}'..='\u{200F}' | '\u{202A}'..='\u{202E}'
@@ -695,6 +698,13 @@ mod clean_tests {
         assert_eq!(clean_text("\u{200B}\u{200B}\u{FEFF}"), "");
         assert_eq!(clean_text("\u{2066}x\u{2069}"), "x");
         assert_eq!(clean_text("a\u{2060}b"), "ab");
+    }
+
+    #[test]
+    fn control_characters_are_removed() {
+        assert_eq!(clean_text("ab\u{7}cd"), "abcd");
+        assert_eq!(clean_text("x\u{0}\u{1B}\u{7F}\u{85}y"), "xy");
+        assert_eq!(clean_text("a\nb\tc"), "abc");
     }
 
     #[test]
