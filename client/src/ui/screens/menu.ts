@@ -4,7 +4,7 @@
 // square). With no clip the square is a flat field with the mark. Signed-in accounts play
 // under their account name.
 
-import { listMakers } from "../../account";
+import { listMakers, refreshAccount } from "../../account";
 import { fetchStats } from "../../api";
 import type { ScreenFactory } from "../../ctx";
 import { levelOf } from "../../levels";
@@ -118,10 +118,17 @@ export const menuScreen: ScreenFactory = (ctx) => {
   let nameTouched = false;
   let liveClip = false;
   let shownAccount: Account | null | undefined;
+  let statsDown = false;
 
   const status = h("p", { class: "status", role: "status", "aria-live": "polite" });
   const nameError = h("p", { class: "field-error", role: "alert", hidden: true });
-  const onlineLine = h("p", { class: "menu-online" });
+  // Server lines with no data say so and offer a retry; the chip in the top bar says the connection is down.
+  const onlineText = h("span");
+  const statsRetry = h("button", { type: "button", class: "quiet menu-retry", hidden: true, onclick: () => retryConnection() }, "Retry");
+  const onlineLine = h("p", { class: "menu-online" }, onlineText, statsRetry);
+  const accountRetry = h("button", { type: "button", class: "quiet menu-retry", onclick: () => retryConnection() }, "Retry");
+  const accountLine = h("p", { class: "menu-account-line", hidden: true }, h("span", null, "Account unavailable offline"), accountRetry);
+  const offlineChip = h("p", { class: "home-offline", role: "status", hidden: true }, "Offline: online play, accounts and the library need a connection");
   const makersLine = h("p", { class: "menu-makers", hidden: true });
 
   // Signed-in accounts play under their account name, which cannot be edited here.
@@ -232,16 +239,35 @@ export const menuScreen: ScreenFactory = (ctx) => {
     setToolIcon(fullscreenBtn, on ? "minimize" : "maximize", on ? "Exit fullscreen" : "Fullscreen");
   }
 
+  /** Players online: a fetch now. A failure marks the server unreachable until a fetch works. */
   async function refreshStats(): Promise<void> {
     try {
       const s = await fetchStats();
-      onlineLine.textContent = `${s.online} ${s.online === 1 ? "player" : "players"} online`;
+      statsDown = false;
+      onlineText.textContent = `${s.online} ${s.online === 1 ? "player" : "players"} online`;
     } catch {
-      // Keep the last number; the next tick retries.
+      statsDown = true;
     }
+    syncConnection();
+  }
+
+  /** Timer and connection events: fetch only while the browser is online; offline the lines say so. */
+  function pollStats(): void {
+    if (navigator.onLine) void refreshStats();
+    else syncConnection();
+  }
+
+  /** Retry the server lines that have no data: players online, and the account. */
+  function retryConnection(): void {
+    void refreshStats();
+    void refreshAccount(ctx);
   }
 
   async function loadMakers(): Promise<void> {
+    if (!navigator.onLine) {
+      makersLine.hidden = true;
+      return;
+    }
     try {
       const makers = await listMakers();
       makersLine.textContent = `Top map makers this week: ${makers.map((m) => m.name).join(" · ")}`;
@@ -249,6 +275,16 @@ export const menuScreen: ScreenFactory = (ctx) => {
     } catch {
       makersLine.hidden = true;
     }
+  }
+
+  /** The connection as the menu shows it: the top-bar chip, and the server lines that have no data. */
+  function syncConnection(): void {
+    const down = !navigator.onLine || statsDown;
+    offlineChip.hidden = !down;
+    onlineLine.classList.toggle("is-down", down);
+    statsRetry.hidden = !down;
+    if (down) onlineText.textContent = "Players online unavailable";
+    accountLine.hidden = navigator.onLine || Boolean(shownAccount);
   }
 
   // The clip square: the GL view behind the UI shows only inside it while a clip plays.
@@ -342,16 +378,25 @@ export const menuScreen: ScreenFactory = (ctx) => {
   sync();
   syncMute();
   syncFullscreen();
-  void refreshStats();
+  pollStats();
   void loadMakers();
-  const statsTimer = window.setInterval(() => void refreshStats(), STATS_REFRESH_MS);
+  const statsTimer = window.setInterval(pollStats, STATS_REFRESH_MS);
+  const onConnection = (): void => {
+    if (navigator.onLine) {
+      pollStats();
+      void loadMakers();
+    }
+    syncConnection();
+  };
+  window.addEventListener("online", onConnection);
+  window.addEventListener("offline", onConnection);
   const unsubPrefs = prefs.subscribe(() => syncMute());
   document.addEventListener("fullscreenchange", syncFullscreen);
 
   const el = h(
     "main",
     { class: "page home" },
-    h("header", { class: "home-top" }, h("div", { class: "home-tools" }, accountBtn, newsBtn, muteBtn, fullscreenBtn)),
+    h("header", { class: "home-top" }, offlineChip, h("div", { class: "home-tools" }, accountBtn, newsBtn, muteBtn, fullscreenBtn)),
     h(
       "div",
       { class: "home-copy enter" },
@@ -359,6 +404,7 @@ export const menuScreen: ScreenFactory = (ctx) => {
       form,
       nameError,
       onlineLine,
+      accountLine,
       status,
     ),
     art,
@@ -380,6 +426,7 @@ export const menuScreen: ScreenFactory = (ctx) => {
 
   setAccount(account);
   shownAccount = account;
+  syncConnection();
 
   return {
     el,
@@ -387,6 +434,7 @@ export const menuScreen: ScreenFactory = (ctx) => {
       status.textContent = attempted ? statusText(state) : "";
       if (state.account !== shownAccount) {
         shownAccount = state.account;
+        syncConnection();
         setAccount(state.account);
       }
       if (state.account) {
@@ -397,6 +445,8 @@ export const menuScreen: ScreenFactory = (ctx) => {
     },
     destroy() {
       window.clearInterval(statsTimer);
+      window.removeEventListener("online", onConnection);
+      window.removeEventListener("offline", onConnection);
       unsubPrefs();
       document.removeEventListener("fullscreenchange", syncFullscreen);
       window.removeEventListener("resize", fitView);

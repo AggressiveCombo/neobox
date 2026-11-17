@@ -323,16 +323,22 @@ export function startAccountSync(ctx: AppCtx, ready: () => void): void {
     pushTimer = undefined;
     void pushPrefs(ctx, true);
   });
-  // Offline the lookup cannot succeed and the browser already says so; it runs again once the connection is back.
-  const checkAccount = async (): Promise<void> => {
-    try {
-      ctx.store.set({ account: await fetchMe() });
-    } catch (err) {
-      if (navigator.onLine) ctx.toast(`could not check your account: ${errorText(err)}`, "error");
-    }
-  };
-  void checkAccount().then(ready);
-  window.addEventListener("online", () => void checkAccount());
+  // Offline the lookup cannot succeed; the `online` listener runs it again once the browser connects.
+  if (navigator.onLine) void refreshAccount(ctx).then(ready);
+  else ready();
+  window.addEventListener("online", () => void refreshAccount(ctx));
+}
+
+/**
+ * Look up the session now and store it. A failed lookup is silent offline (the browser already
+ * says so); the menu's Retry calls this too.
+ */
+export async function refreshAccount(ctx: AppCtx): Promise<void> {
+  try {
+    ctx.store.set({ account: await fetchMe() });
+  } catch (err) {
+    if (navigator.onLine) ctx.toast(`could not check your account: ${errorText(err)}`, "error");
+  }
 }
 
 /**

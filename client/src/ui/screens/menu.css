@@ -186,6 +186,34 @@ button.home-account {
   background: var(--good);
 }
 
+.menu-online.is-down::before {
+  display: none;
+}
+
+.menu-account-line:not([hidden]) {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  font-size: var(--step-small);
+}
+
+/* Retry for a server line with no data: a quiet control at the touch floor. */
+.menu-retry {
+  min-height: var(--control);
+  padding-inline: 12px;
+}
+
+/* Offline chip in the top bar: says what needs the connection; takes the spare width at the left. */
+.home-offline:not([hidden]) {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 0 auto 0 0;
+  align-self: center;
+  color: var(--muted);
+  font-size: var(--step-small);
+}
+
 .home-copy .status {
   color: var(--muted);
   font-size: var(--step-small);

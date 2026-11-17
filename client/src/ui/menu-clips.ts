@@ -128,7 +128,8 @@ export function mountMenuClips(ctx: AppCtx, host: HTMLElement, onPlaying?: (on: 
   }
 
   function startNext(): void {
-    if (loading || destroyed) return;
+    // Offline the clip list cannot load and would only log errors; the `online` listener starts it again.
+    if (loading || destroyed || !navigator.onLine) return;
     if (net.signal.aborted) net = new AbortController();
     loading = true;
     loadNext().then(
@@ -184,8 +185,10 @@ export function mountMenuClips(ctx: AppCtx, host: HTMLElement, onPlaying?: (on: 
 
   rafId = requestAnimationFrame(tick);
   startNext();
+  window.addEventListener("online", startNext);
 
   return () => {
+    window.removeEventListener("online", startNext);
     destroyed = true;
     window.removeEventListener("beforeunload", abortLoads);
     window.removeEventListener("pagehide", abortLoads);
