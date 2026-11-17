@@ -383,3 +383,14 @@
     min-height: 48px;
   }
 }
+
+/* Very short landscape phones: Leave and Restart (or Replay tutorial) go icon-only, the text stays as the accessible
+   name. The title then has the row, so the bar stays one 44px line and clears the touch rows below it. */
+@media (max-height: 200px) {
+  .offline-top > button {
+    gap: 0;
+    min-width: 44px;
+    padding: 0;
+    font-size: 0;
+  }
+}

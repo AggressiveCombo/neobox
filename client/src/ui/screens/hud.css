@@ -754,6 +754,24 @@
   }
 }
 
+/* Very short landscape phones (320 px tall at 200% zoom is 160 CSS px). The chip row ends at 52px and the touch
+   rows start below it, so nothing overlaps; every target keeps 44px. Sized here, after the coarse block, so it wins. */
+@media (max-height: 200px) {
+  .hud-touch-layer,
+  .hud-root {
+    --hud-inset: 8px;
+  }
+
+  .hud-touch-layer {
+    --hud-btn: 44px;
+  }
+
+  .hud-root button,
+  .hud-link {
+    min-height: 44px;
+  }
+}
+
 /* Phones in landscape: the chat and stats columns shrink so the arena stays visible. */
 @media (max-height: 500px) {
   .hud-topleft {
