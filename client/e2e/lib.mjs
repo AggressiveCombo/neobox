@@ -2,7 +2,7 @@
 // canvas probe, and UI actions. Everything runs against the real server build.
 
 import { spawn } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import net from "node:net";
 import os from "node:os";
 import path from "node:path";
@@ -211,12 +211,34 @@ export function freePort() {
   });
 }
 
+/**
+ * Windows Firewall asks the desktop user (an elevation prompt) the first time an executable at a new path listens on a
+ * non-loopback address. Every build lives in its own dist directory, so a server that binds WebRTC to the LAN runs from
+ * this one fixed path instead: at most one prompt, ever, on this machine. Loopback-only servers run from the dist.
+ */
+const LAN_EXE = path.join(os.homedir(), ".neobox-qa", process.platform === "win32" ? "neobox-server.exe" : "neobox-server");
+
+function lanExe(exe) {
+  const want = readFileSync(exe);
+  if (existsSync(LAN_EXE) && readFileSync(LAN_EXE).equals(want)) return LAN_EXE;
+  mkdirSync(path.dirname(LAN_EXE), { recursive: true });
+  try {
+    copyFileSync(exe, LAN_EXE);
+  } catch (err) {
+    throw new Error(`${LAN_EXE} is in use by another build's server (${err.code}): run LAN (WebRTC) scenarios one build at a time`);
+  }
+  return LAN_EXE;
+}
+
+const isLoopbackBind = (v) => v === undefined || v === "off" || /^(127\.|\[?::1\]?:|localhost:)/.test(v);
+
 /** Starts the built server (on `port`, or a free one) with a fresh database and `extraEnv` on top; stopped and cleaned at exit. */
 export async function startServer({ port: wantPort, extraEnv = {} } = {}) {
-  const exe = path.join(DIST_DIR, process.platform === "win32" ? "neobox-server.exe" : "neobox-server");
-  if (!existsSync(exe) || !existsSync(path.join(DIST_DIR, "client", "index.html"))) {
+  const distExe = path.join(DIST_DIR, process.platform === "win32" ? "neobox-server.exe" : "neobox-server");
+  if (!existsSync(distExe) || !existsSync(path.join(DIST_DIR, "client", "index.html"))) {
     throw new Error(`no server build in ${DIST_DIR}: run \`bash deploy/build.sh\` first (or set NEOBOX_DIST)`);
   }
+  const exe = isLoopbackBind(extraEnv.NEOBOX_RTC_BIND) && isLoopbackBind(extraEnv.NEOBOX_BIND) ? distExe : lanExe(distExe);
   const dataDir = mkdtempSync(path.join(os.tmpdir(), "neobox-e2e-"));
   const port = wantPort ?? (await freePort());
   const env = {
