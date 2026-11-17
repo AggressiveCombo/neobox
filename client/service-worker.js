@@ -11,8 +11,6 @@ const PRECACHE = __PRECACHE__;
 const SERVER_PATH = /^\/(api|ws|admin|internal|healthz)(\/|$)/;
 // Sounds and music load on demand and are kept for later offline play.
 const MEDIA_PATH = /^\/(sfx|music|flags)\//;
-// Bundle output is named by content hash (name-8chars.ext): a copy cached under that name is always right.
-const HASHED = /-[a-z0-9]{8}\.[a-z0-9]+$/;
 
 self.addEventListener("install", (event) => {
   event.waitUntil(
@@ -45,8 +43,6 @@ self.addEventListener("fetch", (event) => {
   } else if (MEDIA_PATH.test(url.pathname)) {
     // Range requests (seeking in audio) go to the network: the cache holds whole files only.
     if (!req.headers.has("range")) event.respondWith(cacheThenNetwork(MEDIA, req, true));
-  } else if (HASHED.test(url.pathname)) {
-    event.respondWith(cacheThenNetwork(SHELL, req, false));
   } else {
     event.respondWith(networkThenShell(req));
   }
@@ -64,10 +60,11 @@ async function networkFirst(req) {
   }
 }
 
-// Shell files that keep their name across builds (fonts/, logo.svg, training.json, ...) come from the network:
-// an old worker must not hand this build's page the previous build's copy. This build's precache answers only
-// when the network is unreachable. neobox.wasm is requested with a build-id query (engine-loader.ts): the precache
-// ignores the query offline.
+// Shell files that keep their name across builds (fonts/, logo.svg, training.json, ...) and content-hashed bundle files
+// come from the network: an old worker must not hand this build's page the previous build's copy. This build's precache
+// answers only when the network is unreachable. neobox.wasm is requested with a build-id query (engine-loader.ts): the
+// precache ignores the query offline. Network-first for hashed files: a cache-hit response for a favicon/image load
+// failed in Firefox ("A ServiceWorker intercepted the request and encountered an unexpected error").
 async function networkThenShell(req) {
   try {
     return await fetch(req);
@@ -76,9 +73,8 @@ async function networkThenShell(req) {
   }
 }
 
-// Content-hashed files (HASHED): a cached copy under the same name is always right.
-// The cache is an optimisation: when it throws (storage full, cache not yet open) the page gets
-// the network response instead. An exception escaping respondWith is a page error in Firefox.
+// Sounds and music: a cached copy is always right. The cache is an optimisation: when it throws (storage full,
+// cache not yet open) the page gets the network response instead. An exception escaping respondWith is a page error in Firefox.
 async function cacheThenNetwork(name, req, store) {
   const hit = await matchCached(name, req);
   if (hit) return hit;
