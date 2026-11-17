@@ -36,7 +36,7 @@ export function profileSummary(name: string): HTMLElement {
 }
 
 function status(text: string, ...extra: Node[]): HTMLElement {
-  return h("p", { class: "profile-status" }, text, ...extra);
+  return h("p", { class: "profile-status", role: "status" }, text, ...extra);
 }
 
 /** Not found is a fact about the name; anything else is worth a retry. */
