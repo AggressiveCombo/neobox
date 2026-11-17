@@ -51,12 +51,12 @@ async function writeOfflineMaps(dir: string): Promise<void> {
   await Bun.write(`${dir}/offline-maps.json`, JSON.stringify(entries));
 }
 
-/** sw.js: the service worker with this build's id and the files it precaches (everything but the media and maps). */
+/** sw.js: the service worker with this build's id and the files it precaches (everything but music, flags and maps). */
 async function writeServiceWorker(dir: string): Promise<void> {
   const files: string[] = [];
   for await (const raw of new Bun.Glob("**/*").scan({ cwd: dir })) {
     const f = raw.replaceAll("\\", "/");
-    if (f.endsWith(".map") || f === "sw.js" || f === "og.png" || /^(sfx|music|flags)\//.test(f)) continue;
+    if (f.endsWith(".map") || f === "sw.js" || f === "og.png" || /^(music|flags)\//.test(f)) continue;
     files.push(f);
   }
   files.sort();

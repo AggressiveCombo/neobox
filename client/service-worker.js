@@ -9,8 +9,10 @@ const PRECACHE = __PRECACHE__;
 
 // Live server traffic: always the network.
 const SERVER_PATH = /^\/(api|ws|admin|internal|healthz)(\/|$)/;
-// Sounds and music load on demand and are kept for later offline play.
-const MEDIA_PATH = /^\/(sfx|music|flags)\//;
+// Sound effects are precached with the shell (build.ts): a hit never touches the network.
+const SFX_PATH = /^\/sfx\//;
+// Music and flags load on demand; kept for later offline play.
+const MEDIA_PATH = /^\/(music|flags)\//;
 
 self.addEventListener("install", (event) => {
   event.waitUntil(
@@ -40,9 +42,10 @@ self.addEventListener("fetch", (event) => {
   if (req.method !== "GET" || url.origin !== self.location.origin || SERVER_PATH.test(url.pathname)) return;
   if (req.mode === "navigate") {
     event.respondWith(networkFirst(req));
+  } else if (SFX_PATH.test(url.pathname)) {
+    if (!req.headers.has("range")) event.respondWith(sfx(req));
   } else if (MEDIA_PATH.test(url.pathname)) {
-    // Range requests (seeking in audio) go to the network: the cache holds whole files only.
-    if (!req.headers.has("range")) event.respondWith(cacheThenNetwork(MEDIA, req, true));
+    if (!req.headers.has("range")) event.respondWith(networkThenMedia(MEDIA, req));
   } else {
     event.respondWith(networkThenShell(req));
   }
@@ -73,20 +76,24 @@ async function networkThenShell(req) {
   }
 }
 
-// Sounds and music: a cached copy is always right. The cache is an optimisation: when it throws (storage full,
-// cache not yet open) the page gets the network response instead. An exception escaping respondWith is a page error in Firefox.
-async function cacheThenNetwork(name, req, store) {
-  const hit = await matchCached(name, req);
+// Sound effects: the shell cache holds them (build.ts precaches sfx/), so a hit answers without the network. The network
+// is asked only on a miss, and a fetch the page abandons (reload, navigation) rejects: answer with a network error rather
+// than a worker exception (an exception escaping respondWith is a page error in Firefox).
+async function sfx(req) {
+  const hit = await matchCached(SHELL, req);
   if (hit) return hit;
-  // A fetch the page abandons (reload, navigation) rejects; answer with a network error rather than a worker exception.
-  let res;
+  return networkThenMedia(MEDIA, req);
+}
+
+// Music and flags: the network first, every good response kept; the cache answers only when the network fails.
+async function networkThenMedia(name, req) {
   try {
-    res = await fetch(req);
+    const res = await fetch(req);
+    if (res.ok) void remember(name, req, res.clone());
+    return res;
   } catch {
-    return Response.error();
+    return (await matchCached(name, req)) ?? Response.error();
   }
-  if (store && res.ok) void remember(name, req, res.clone());
-  return res;
 }
 
 async function matchCached(name, req, options) {
