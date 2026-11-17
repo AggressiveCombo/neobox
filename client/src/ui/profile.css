@@ -6,6 +6,11 @@ dialog.modal.profile-dialog {
   width: min(calc(100vw - 32px), 480px);
 }
 
+/* A short viewport scrolls the card; the foot keeps 40px so the last row can scroll clear of the footer. */
+dialog.modal.profile-dialog .modal-body {
+  padding-bottom: 40px;
+}
+
 .profile {
   display: grid;
   gap: 24px;
