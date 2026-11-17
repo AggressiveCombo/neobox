@@ -7,13 +7,13 @@
 
 import { fetchQuickModes, fetchStats, type QuickMode } from "../../api";
 import type { ScreenFactory } from "../../ctx";
-import { MAX_NAME_LEN, NAME_RE } from "../../protocol";
+import { MAX_NAME_LEN } from "../../protocol";
 import type { AppState } from "../../state";
 import { h } from "../dom";
 import { field, loading, page, pageHead } from "../kit";
 import { icon } from "../icons";
 import { previewCode } from "../map-list";
-import { readStoredName, sanitizeName, writeStoredName } from "./menu";
+import { nameProblem, readStoredName, saveTypedName, writeStoredName } from "./menu";
 
 const REFRESH_MS = 30_000;
 
@@ -61,9 +61,13 @@ export const quickScreen: ScreenFactory = (ctx) => {
     spellcheck: "false",
     value: account?.name ?? (store.state.name || readStoredName()),
     readonly: account !== null,
-    oninput: () => sync(),
+    oninput: () => {
+      sync();
+      saveTypedName(nameInput.value);
+    },
   });
-  const nameField = field("Name", nameInput);
+  const nameError = h("p", { class: "field-error", role: "alert", hidden: true });
+  const nameBlock = h("div", { class: "quick-name" }, field("Name", nameInput), nameError);
 
   const cards = new Map<string, Card>();
   const cardBox = h("div", { class: "quick-cards" }, h("p", { class: "muted" }, "Loading…"));
@@ -154,10 +158,12 @@ export const quickScreen: ScreenFactory = (ctx) => {
 
   /** Cards need a valid name unless the account supplies one. */
   function sync(): void {
-    const valid = account !== null || NAME_RE.test(sanitizeName(nameInput.value));
+    const problem = account !== null ? null : nameProblem(nameInput.value);
     for (const card of cards.values()) {
-      card.choose.disabled = !valid || waiting;
+      card.choose.disabled = problem !== null || waiting;
     }
+    nameError.textContent = problem ?? "";
+    nameError.hidden = problem === null;
     renderStatus();
   }
 
@@ -197,8 +203,8 @@ export const quickScreen: ScreenFactory = (ctx) => {
       ctx.quickPlay(queue);
       return;
     }
-    const name = account?.name ?? sanitizeName(nameInput.value);
-    if (!account && !NAME_RE.test(name)) {
+    const name = account?.name ?? nameInput.value.trim();
+    if (!account && nameProblem(name) !== null) {
       waiting = false;
       sync();
       return;
@@ -241,7 +247,7 @@ export const quickScreen: ScreenFactory = (ctx) => {
   const el = page(
     "quick",
     head,
-    account ? null : nameField,
+    account ? null : nameBlock,
     cardBox,
     waitBox,
     status,

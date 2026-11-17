@@ -11,6 +11,7 @@ import { levelOf } from "../../levels";
 import { MAX_NAME_LEN, NAME_RE } from "../../protocol";
 import { prefs } from "../../prefs";
 import { type Account, type AppState, type Screen } from "../../state";
+import { local } from "../../storage";
 import { NAME_STORAGE_KEY, TRAINING_SEEN_KEY } from "../../storage-keys";
 import { type Child, h } from "../dom";
 import { type IconName, icon } from "../icons";
@@ -35,14 +36,21 @@ const DESTINATIONS: { label: string; screen: Screen; icon: IconName; desc: strin
   { label: "About", screen: "about", icon: "info", desc: "What neobox is, credits and the licence." },
 ];
 
-/** Keep only allowed characters, cut to the server limit, trim. */
-export function sanitizeName(raw: string): string {
-  return raw.replace(/[^A-Za-z0-9 _]/g, "").slice(0, MAX_NAME_LEN).trim();
+/** The rule every name follows (the server applies the same one). */
+const NAME_RULE = "Names are 1 to 15 letters, numbers, spaces or _.";
+
+/** Why `raw` cannot be a name, naming the characters not allowed, or null when it can. Names are never rewritten. */
+export function nameProblem(raw: string): string | null {
+  const name = raw.trim();
+  if (NAME_RE.test(name)) return null;
+  const bad = Array.from(new Set(name.replace(/[A-Za-z0-9 _]/g, "")));
+  if (bad.length === 0) return NAME_RULE;
+  return `Names can't use ${bad.map((c) => `"${c}"`).join(" ")}. ${NAME_RULE}`;
 }
 
 export function readStoredName(): string {
   try {
-    return window.localStorage.getItem(NAME_STORAGE_KEY) ?? "";
+    return local.getItem(NAME_STORAGE_KEY) ?? "";
   } catch {
     return "";
   }
@@ -50,10 +58,16 @@ export function readStoredName(): string {
 
 export function writeStoredName(name: string): void {
   try {
-    window.localStorage.setItem(NAME_STORAGE_KEY, name);
+    local.setItem(NAME_STORAGE_KEY, name);
   } catch {
     // Storage blocked (private mode, quota): the name still applies to this session.
   }
+}
+
+/** Keep a typed guest name for the next visit as soon as it is valid, so every entry path starts with it. */
+export function saveTypedName(raw: string): void {
+  const name = raw.trim();
+  if (nameProblem(name) === null) writeStoredName(name);
 }
 
 /** A guest name for a first visit: "Box" and four digits. */
@@ -63,7 +77,7 @@ export function guestName(): string {
 
 function readFlag(key: string): boolean {
   try {
-    return window.localStorage.getItem(key) === "1";
+    return local.getItem(key) === "1";
   } catch {
     return false;
   }
@@ -71,7 +85,7 @@ function readFlag(key: string): boolean {
 
 function writeFlag(key: string): void {
   try {
-    window.localStorage.setItem(key, "1");
+    local.setItem(key, "1");
   } catch {
     // Storage blocked: the badge simply shows again next visit.
   }
@@ -105,6 +119,7 @@ export const menuScreen: ScreenFactory = (ctx) => {
   let shownAccount: Account | null | undefined;
 
   const status = h("p", { class: "status", role: "status", "aria-live": "polite" });
+  const nameError = h("p", { class: "field-error", role: "alert", hidden: true });
   const onlineLine = h("p", { class: "menu-online" });
   const makersLine = h("p", { class: "menu-makers", hidden: true });
 
@@ -126,6 +141,7 @@ export const menuScreen: ScreenFactory = (ctx) => {
     readonly: account !== null,
     oninput: () => {
       sync();
+      saveTypedName(nameInput.value);
     },
   });
 
@@ -167,15 +183,23 @@ export const menuScreen: ScreenFactory = (ctx) => {
   const fullscreenBtn = toolButton("maximize", "Fullscreen", () => toggleFullscreen());
   fullscreenBtn.hidden = !document.fullscreenEnabled;
 
-  /** Enable Browse rooms only when the name is valid. */
+  /** Enable Browse rooms only when the name is valid; say why when it is not. */
   function sync(): void {
-    browseBtn.disabled = !NAME_RE.test(sanitizeName(nameInput.value));
+    const problem = nameProblem(nameInput.value);
+    browseBtn.disabled = problem !== null;
+    nameError.textContent = problem ?? "";
+    nameError.hidden = problem === null;
+    nameInput.setAttribute("aria-invalid", String(problem !== null));
   }
 
   /** Connect with the name and show the room browser once the server welcomes us. */
   function go(): void {
-    const name = sanitizeName(nameInput.value);
-    if (!NAME_RE.test(name)) return;
+    if (nameProblem(nameInput.value) !== null) {
+      sync();
+      nameInput.focus();
+      return;
+    }
+    const name = nameInput.value.trim();
     nameInput.value = name;
     writeStoredName(name);
     attempted = true;
@@ -325,6 +349,7 @@ export const menuScreen: ScreenFactory = (ctx) => {
       { class: "home-copy enter" },
       h("h1", { class: "home-title" }, h("span", { class: "mark", "aria-hidden": "true" }), "neobox"),
       form,
+      nameError,
       onlineLine,
       status,
     ),
