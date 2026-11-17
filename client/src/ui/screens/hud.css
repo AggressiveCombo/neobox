@@ -854,3 +854,11 @@
 :root[data-motion="reduce"] .hud-menu:not([hidden]) {
   animation: none;
 }
+
+/* Forced colours replace the Canvas, so the authored HUD inks (amber, mint, grey) fail contrast on it.
+   Enabled text takes the system ink; disabled controls keep the UA's GrayText. */
+@media (forced-colors: active) {
+  .hud-root :not(:disabled) {
+    color: CanvasText;
+  }
+}

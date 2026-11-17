@@ -797,15 +797,6 @@ input[type="range"]::-moz-range-thumb {
   background: var(--ink);
 }
 
-@media (forced-colors: active) {
-  .seg-option[aria-checked="true"],
-  .seg-option[aria-pressed="true"],
-  .seg-option[aria-selected="true"] {
-    background: Highlight;
-    color: HighlightText;
-  }
-}
-
 /* The chosen option is ink, drawn by one square that slides between options (kit.ts seg). */
 .seg-indicator {
   position: absolute;
@@ -822,6 +813,51 @@ input[type="range"]::-moz-range-thumb {
 .seg.is-indicated .seg-option[aria-checked="true"],
 .seg.is-indicated .seg-option[aria-checked="true"]:hover:not(:disabled) {
   background: transparent;
+}
+
+/* Forced colours drop the ink fill, the indicator and the tab bar's box-shadow. The chosen option keeps the system
+   ButtonText label (a Highlight fill is dropped, so a HighlightText label would vanish) and every chosen state gets an
+   outline in that colour, so it stays visible. This block follows the .is-indicated rule: its transparent fill would win
+   on specificity otherwise. */
+@media (forced-colors: active) {
+  .seg-option[aria-checked="true"],
+  .seg-option[aria-pressed="true"],
+  .seg-option[aria-selected="true"],
+  .seg.is-indicated .seg-option[aria-checked="true"],
+  .seg-option[aria-checked="true"]:hover:not(:disabled),
+  .seg-option[aria-pressed="true"]:hover:not(:disabled),
+  .seg-option[aria-selected="true"]:hover:not(:disabled),
+  .seg.is-indicated .seg-option[aria-checked="true"]:hover:not(:disabled) {
+    color: ButtonText;
+  }
+
+  .seg-indicator {
+    display: none;
+  }
+
+  [aria-checked="true"]:not(:focus-visible),
+  [aria-pressed="true"]:not(:focus-visible),
+  [aria-selected="true"]:not(:focus-visible) {
+    outline: 2px solid;
+    outline-offset: -2px;
+  }
+
+  input[type="checkbox"][role="switch"] {
+    outline: 2px solid;
+    outline-offset: -2px;
+  }
+
+  input[type="checkbox"][role="switch"]:checked {
+    background: Highlight;
+  }
+
+  /* Forced colours drop button backgrounds and borders, so an unfilled button reads as bare text. An outline
+     (no layout shift) in ButtonBorder draws its edge. :where keeps the selected-state outlines above winning. */
+  :where(button:not(:disabled):not(:focus-visible)),
+  .menu-square {
+    outline: 1px solid ButtonBorder;
+    outline-offset: -1px;
+  }
 }
 
 /* Tabs: words with a 3px ink bar under the current one. */
