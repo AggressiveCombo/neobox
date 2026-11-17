@@ -67,8 +67,8 @@ function scoreRow(row: ScoreRow, name: string, self: boolean, tickHz: number): H
 export function createScoreboard(): Scoreboard {
   const tbody = h("tbody");
   const el = h(
-    "div",
-    { class: "hud-scores" },
+    "section",
+    { class: "hud-scores", "aria-label": "Scoreboard" },
     h(
       "table",
       { class: "hud-table" },
