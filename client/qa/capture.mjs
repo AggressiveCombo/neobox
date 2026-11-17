@@ -35,29 +35,43 @@ export const RENDERERS = ["webgpu", "webgl2"];
 /** Relative font-size growth the textScale pass must reach (html font-size 200%). */
 const MIN_FONT_RATIO = 1.9;
 
+/** Any URL a console line names (Chromium and Firefox print the failed URL inside the text), without closing punctuation. */
+const URL_IN_TEXT = /\b(?:https?|wss?):\/\/[^\s"'()<>[\]{}]+/g;
+
 /**
- * Attaches the robustness listeners to a page; problems and warnings land on `handle`. A state injects some
- * failures on purpose: `handle.expected` (URL patterns) and `handle.expectedWarnings` (text patterns) mark them,
- * and they land in `handle.induced` (console errors) or `netExpected` (requests) instead of counting as defects.
+ * True when a console line or warning is one the state's own fault produced: a URL it names (its location, or a URL in
+ * the text) matches `h.expected`, or its text matches an anchored `h.expectedWarnings` pattern (app log lines with no URL).
+ */
+function isInduced(h, text, url = "") {
+  const named = [url, ...(text.match(URL_IN_TEXT) ?? []).map((u) => u.replace(/[.,;:]+$/, ""))];
+  return named.some((u) => u !== "" && (h.expected ?? []).some((re) => re.test(u))) || (h.expectedWarnings ?? []).some((re) => re.test(text));
+}
+
+/**
+ * Attaches the robustness listeners to a page; problems and warnings land on `handle`. A state injects failures on
+ * purpose and says which: `handle.expected` (URL patterns: the dropped socket, a failed or blocked request) and
+ * `handle.expectedWarnings` (anchored text for app log lines the fault produces). Such lines land in `handle.induced`
+ * instead of counting as defects.
  */
 export function trackPage(page, handle) {
   handle.page = page;
   handle.problems = handle.problems ?? [];
   handle.induced = handle.induced ?? [];
   page.setDefaultTimeout(15_000);
-  const isExpected = (text) => (handle.expected ?? []).some((re) => re.test(text));
+  const expectedUrl = (url) => (handle.expected ?? []).some((re) => re.test(url));
   page.on("pageerror", (err) => handle.problems.push(`${handle.label}: page error: ${err.message}`));
   page.on("console", (msg) => {
     if (msg.type() !== "error") return;
     const url = msg.location().url ?? "";
-    const line = `${handle.label}: console error: ${msg.text()}${url ? ` (${url})` : ""}`;
-    (isExpected(url) || isExpected(msg.text()) ? handle.induced : handle.problems).push(line);
+    const text = msg.text();
+    const line = `${handle.label}: console error: ${text}${url ? ` (${url})` : ""}`;
+    (isInduced(handle, text, url) ? handle.induced : handle.problems).push(line);
   });
   page.on("dialog", (dialog) => {
     handle.problems.push(`${handle.label}: unexpected dialog: ${dialog.message()}`);
     void dialog.dismiss();
   });
-  watchPage(handle, { expected: isExpected });
+  watchPage(handle, { expected: expectedUrl });
   return handle;
 }
 
@@ -148,16 +162,20 @@ export class QaScenario extends Scenario {
 }
 
 /**
- * Browser-originated console warnings the app does not cause. Matched by substring: Firefox wraps the
- * text as `[JavaScript Warning: "WebGPU is disabled by blocklist." ...]`, Chromium prints it bare.
+ * Browser-originated console warnings the app does not cause, matched on the whole text (Firefox's wrapper included).
+ * The list is documented in client/qa/README.md; a line that only contains these words is app code and counts.
  */
-const BROWSER_WARNINGS = ["WebGPU is disabled by blocklist", "Service Worker registration blocked by Playwright"];
-const isBrowserWarning = (text) => BROWSER_WARNINGS.some((s) => text.includes(s));
+const BROWSER_WARNINGS = [
+  /^\[JavaScript Warning: "WebGPU is disabled by blocklist\." \{file: "[^"]*" line: \d+\}\]$/,
+  /^\[JavaScript Warning: "The execution of microtasks on this page was reordered to avoid unsafe execution\." \{file: "[^"]*" line: \d+\}\]$/,
+  /^Service Worker registration blocked by Playwright$/,
+];
 
 /** Warning classes: the browser's own notice, the state's injected fault, or the app (the only class that counts). */
 function warningClass(h, warning) {
-  if (isBrowserWarning(warning)) return "browser";
-  if ((h.expectedWarnings ?? []).some((re) => re.test(warning))) return "induced";
+  const text = warning.startsWith(`${h.label}: `) ? warning.slice(h.label.length + 2) : warning;
+  if (BROWSER_WARNINGS.some((re) => re.test(text))) return "browser";
+  if (isInduced(h, text)) return "induced";
   return "app";
 }
 
@@ -186,9 +204,12 @@ async function pseudoLocalise(page) {
       if (n.parentElement?.closest("script,style,noscript")) continue;
       if (n.textContent.trim()) nodes.push(n);
     }
+    window.__plOriginal = new WeakMap();
     for (const n of nodes) {
+      const original = n.textContent.length;
       const len = n.textContent.trim().length;
       n.textContent = `${n.textContent} ${"·".repeat(Math.ceil(len * 0.4))}`;
+      window.__plOriginal.set(n, original);
     }
   });
 }

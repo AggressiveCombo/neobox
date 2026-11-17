@@ -574,17 +574,33 @@ export async function ensureRoomMap(page) {
   await mapName.filter({ hasText: /\S/ }).waitFor();
 }
 
-/** Host starts the match; waits until every listed page shows the HUD. */
-export async function startMatch(host, others = []) {
+/**
+ * Host starts the match; waits until every listed page shows the HUD. On a portrait phone the rotate gate hides the
+ * HUD (hud.css `:has(> .hud-rotate:not([hidden]))`) until it is dismissed; `keepRotateGate` leaves the gate up, for
+ * a state that is the gate itself.
+ */
+export async function startMatch(host, others = [], { keepRotateGate = false } = {}) {
   await ensureRoomMap(host.page);
   await button(host.page, "Start").click();
   for (const h of [host, ...others]) {
-    await h.page.locator(".hud-leave").waitFor({ state: "visible" });
+    const leave = h.page.locator(".hud-leave");
+    await leave.waitFor({ state: "attached" });
+    if (keepRotateGate) continue;
+    await dismissRotateGate(h.page);
+    await leave.waitFor({ state: "visible" });
   }
 }
 
+/** Portrait phone: dismisses the rotate gate with its own "Play in portrait anyway" control. No-op when no gate is up. */
+export async function dismissRotateGate(page) {
+  const gate = page.locator(".hud-rotate:not([hidden])");
+  if ((await gate.count()) === 0) return;
+  await gate.getByRole("button", { name: "Play in portrait anyway", exact: true }).click();
+  await gate.waitFor({ state: "hidden" });
+}
+
 /** A room with a host and a guest (via the host's invite link, read from the clipboard), in a running match. */
-export async function matchWithGuest(s, { clipboard: wantClipboard = true } = {}) {
+export async function matchWithGuest(s, { clipboard: wantClipboard = true, keepRotateGate = false } = {}) {
   // Engines without clipboard permissions (Firefox, WebKit) take the invite link by navigating to it instead.
   const clipboard = wantClipboard && s.env.browser.clipboard;
   const hostName = uniqueName("host");
@@ -611,7 +627,7 @@ export async function matchWithGuest(s, { clipboard: wantClipboard = true } = {}
   await roomTitle(guest.page, roomName).waitFor();
   await dismissPhoneSplash(guest.page);
   await host.page.locator("li.room-player").filter({ hasText: guestName }).waitFor();
-  await startMatch(host, [guest]);
+  await startMatch(host, [guest], { keepRotateGate });
   return { host, guest, code, roomName, hostName, guestName };
 }
 

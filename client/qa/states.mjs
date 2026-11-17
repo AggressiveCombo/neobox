@@ -12,6 +12,7 @@ import {
   button,
   createRoom,
   dismissPhoneSplash,
+  dismissRotateGate,
   joinByInvite,
   matchWithGuest,
   menuName,
@@ -33,6 +34,11 @@ const state = (id, flags, prepare) => ({
 });
 /** Requests a state fails on purpose (offline, stubbed API): their failures are induced, not defects. */
 const SERVER_PATH = /\/(api|ws|admin|internal|healthz)(\/|\?|$)/;
+/** The app's socket to the server (api.ts: `/ws` on the server origin). Its failures are the fault a disconnect state simulates. */
+const SOCKET_URL = /^wss?:\/\/[^/]+\/ws(\?|$)/;
+/** Sound files are not in the app shell: their fetches fail offline. */
+const SFX_FILE = /\/sfx\/.*\.mp3(\?|$)/;
+const MUSIC_FILE = /\/music\/.*\.mp3(\?|$)/;
 
 /** Guest on the home menu. A fresh phone device shows the welcome over it: dismissed, or the controls under it time out. */
 async function guestHome(s, label = "anon") {
@@ -92,8 +98,11 @@ async function approvedMap(s) {
   return name;
 }
 
-/** A two-player match, host on the returned handle. Scenario handles keep the guest for robustness counts. */
-const inMatch = (s) => matchWithGuest(s, { clipboard: false });
+/**
+ * A two-player match, host on the returned handle. Scenario handles keep the guest for robustness counts. A portrait
+ * phone gets the rotate gate, which is dismissed here (the state is the match); rotate-prompt keeps it up.
+ */
+const inMatch = (s, opts = {}) => matchWithGuest(s, { clipboard: false, ...opts });
 
 /**
  * Plays a void-map match to its end: one life each, so the sim ends the match and awards XP and the post-game panel
@@ -174,6 +183,19 @@ async function dropSockets(page) {
   await page.evaluate(() => {
     for (const socket of window.__ws ?? []) if (socket.readyState === WebSocket.OPEN) socket.close(4000, "qa drop");
   });
+}
+
+/**
+ * Drops the host's socket while online, waits for the banner, then takes the network down so the reconnect cannot
+ * finish and the banner stays. The order matters: offline first and then close(4000) leaves the close handshake waiting
+ * for a server reply that never arrives, so no close event fires and the banner never shows (the flake).
+ */
+async function dropAndGoOffline(h, timeout) {
+  // The dropped socket and its failed reconnects are the fault these states simulate (C07 exempts them by URL).
+  h.expected = [SOCKET_URL];
+  await dropSockets(h.page);
+  await h.page.locator(".reconnect-banner").waitFor({ state: "visible", timeout });
+  await h.context.setOffline(true);
 }
 
 /** A room with `max` player slots, created from the menu; returns its code (createRoom has no max option). */
@@ -265,9 +287,9 @@ export const STATES = [
     // serves the page, and the server paths fail as they do with the server unreachable.
     const h = await s.open("anon");
     // Sound files are not in the app shell: their fetches fail offline, and the app logs the failure it caught.
-    h.expected = [SERVER_PATH, /\/sfx\/.*\.mp3(\?|$)/, /Sound effects failed to load: TypeError: Failed to fetch/];
-    // The offline reload re-checks the worker script, which cannot be fetched.
-    h.expectedWarnings = [/Failed to register a ServiceWorker .* fetching the script/];
+    h.expected = [SERVER_PATH, SFX_FILE, MUSIC_FILE, /\/sw\.js(\?|$)/];
+    // The offline reload re-checks the worker script, which cannot be fetched; the sound files fail too, and the app logs it.
+    h.expectedWarnings = [/Sound effects failed to load: TypeError: Failed to fetch/, /Failed to register a ServiceWorker .* fetching the script/, /service worker update: TypeError: Script .* load failed/];
     await h.page.goto(s.base);
     await menuName(h.page).waitFor();
     // The first visit installs the worker; activate claims the page, so wait until it controls the page.
@@ -391,9 +413,7 @@ export const STATES = [
     // As match-disconnected: the network stays down, so the dropped socket cannot reconnect and the banner stays.
     trackSockets(s);
     const { h } = await hostRoom(s);
-    await h.context.setOffline(true);
-    await dropSockets(h.page);
-    await h.page.locator(".reconnect-banner").waitFor({ timeout: 20_000 });
+    await dropAndGoOffline(h, 20_000);
     return h;
   }),
   state("room-full", {}, async (s) => {
@@ -441,27 +461,23 @@ export const STATES = [
     return host;
   }),
   state("rotate-prompt", { dialog: true }, async (s) => {
-    const { host } = await inMatch(s);
+    const { host } = await inMatch(s, { keepRotateGate: true });
     await host.page.getByRole("dialog", { name: "Turn your phone sideways" }).waitFor({ timeout: 4000 }).catch(() => {});
     return host;
   }),
   state("match-disconnected", {}, async (s) => {
     // Playwright cannot send a 1006 close from page script, so the socket is dropped as robust.mjs does;
-    // the network stays down so the reconnect cannot finish. The only action is Leave (no Retry exists).
+    // then the network stays down so the reconnect cannot finish. The only action is Leave (no Retry exists).
     trackSockets(s);
     const { host } = await inMatch(s);
-    await host.context.setOffline(true);
-    await dropSockets(host.page);
-    await host.page.locator(".reconnect-banner").waitFor({ state: "visible", timeout: 10_000 });
+    await dropAndGoOffline(host, 10_000);
     return host;
   }),
   state("offline-match", {}, async (s) => {
-    // The network drops first, then the socket: the reconnect banner must show within 3 s.
+    // The socket drops, the banner must show within 3 s, then the network goes down so it stays.
     trackSockets(s);
     const { host } = await inMatch(s);
-    await host.context.setOffline(true);
-    await dropSockets(host.page);
-    await host.page.locator(".reconnect-banner").waitFor({ state: "visible", timeout: 3000 });
+    await dropAndGoOffline(host, 3000);
     return host;
   }),
   state("match-kicked", {}, async (s) => {
@@ -489,6 +505,8 @@ export const STATES = [
   state("training", { fit: true }, async (s) => {
     const h = await guestHome(s);
     await navTo(h.page, "Training");
+    await h.page.locator(".training-text").waitFor({ state: "attached" });
+    await dismissRotateGate(h.page);
     await h.page.locator(".training-text").waitFor();
     return h;
   }),
@@ -515,11 +533,7 @@ export const STATES = [
   state("replay-loaded", { fit: true }, async (s) => {
     const { host } = await inMatch(s);
     // End match opens the app's confirm dialog; the ended match then shows "Save replay" in the room lobby.
-    // A portrait phone shows the "Turn your phone sideways" sheet over the HUD (correct product behaviour), which
-    // intercepts pointer clicks on .hud-end. Ending the match is only setup here, so click the button in the DOM on that shape.
-    const portrait = await host.page.evaluate(() => innerHeight > innerWidth);
-    if (portrait) await host.page.locator(".hud-end").evaluate((el) => el.click());
-    else await host.page.locator(".hud-end").click();
+    await host.page.locator(".hud-end").click();
     const endDialog = host.page.getByRole("alertdialog", { name: "End the match?", exact: true });
     await endDialog.getByRole("button", { name: "End match", exact: true }).click();
     await button(host.page, "Save replay").waitFor();

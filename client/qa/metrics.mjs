@@ -112,6 +112,13 @@ export function domMeasure(opts) {
     }
   }
 
+  // The element that scrolls the page: the nearest ancestor with an overflow-y scroll that overflows; else the document.
+  const scrollerOf = (el) => {
+    for (let a = el.parentElement; a; a = a.parentElement) {
+      if (/auto|scroll/.test(cs(a).overflowY) && a.scrollHeight > a.clientHeight + 1) return a;
+    }
+    return doc;
+  };
   // The part of a box the reader sees: clipped to the viewport and to each ancestor that clips its overflow on that
   // axis (clipping is at the padding box). Null when under 2px on either side. stripL/stripR: the clip on that side
   // is a horizontal scroll strip, so the box continues past it and that side is not a page edge.
@@ -149,21 +156,34 @@ export function domMeasure(opts) {
     }
     return rt - l >= 2 && b - t >= 2 ? { l, t, r: rt, b, stripL, stripR } : null;
   };
-  // The glyph boxes of an element's own text (its line boxes): padding is not text, so it is not measured.
+  // The glyph boxes of an element's own text (its line boxes): padding is not text, so it is not measured. A
+  // pseudo-localised node's filler (capture.mjs pseudoLocalise) is not the app's text: only the original characters count.
   const textRects = (el) => {
     const range = document.createRange();
     const out = [];
     for (const n of el.childNodes) {
       if (n.nodeType !== 3 || n.textContent.trim() === "") continue;
-      range.selectNodeContents(n);
+      range.setStart(n, 0);
+      range.setEnd(n, window.__plOriginal?.get(n) ?? n.textContent.length);
       out.push(...range.getClientRects());
     }
     return out;
   };
   // The shown parts of what an element paints: an inline element's fragments (a wrapped link is one per line), a
-  // text leaf's glyph boxes trimmed to the font's em box (a line box is taller than its ink), else its border box.
+  // text leaf's glyph boxes trimmed to the font's em box (a line box is taller than its ink) and to the element's own
+  // padding box when it clips (an ellipsis leaf's overflowing glyphs are not painted), else its border box.
   // Cached: every caller runs before the scroll passes below change the layout.
   const interactiveSet = new Set(interactive);
+  const ownClip = (el) => {
+    const s = cs(el);
+    const clipX = /hidden|auto|scroll|clip/.test(s.overflowX);
+    const clipY = /hidden|auto|scroll|clip/.test(s.overflowY);
+    if (!clipX && !clipY) return null;
+    const ar = el.getBoundingClientRect();
+    const l = ar.left + el.clientLeft;
+    const t = ar.top + el.clientTop;
+    return { clipX, clipY, l, t, r: l + el.clientWidth, b: t + el.clientHeight };
+  };
   const paintCache = new Map();
   const paint = (el) => {
     if (!paintCache.has(el)) {
@@ -172,9 +192,22 @@ export function domMeasure(opts) {
         raw = [...el.getClientRects()];
       } else if (hasDirectText(el) && !interactiveSet.has(el)) {
         const fontPx = parseFloat(cs(el).fontSize);
+        const clip = ownClip(el);
         raw = textRects(el).map((g) => {
           const pad = Math.max(0, (g.height - fontPx) / 2);
-          return { left: g.left, right: g.right, top: g.top + pad, bottom: g.bottom - pad };
+          let l = g.left;
+          let r = g.right;
+          let t = g.top + pad;
+          let b = g.bottom - pad;
+          if (clip?.clipX) {
+            l = Math.max(l, clip.l);
+            r = Math.min(r, clip.r);
+          }
+          if (clip?.clipY) {
+            t = Math.max(t, clip.t);
+            b = Math.min(b, clip.b);
+          }
+          return { left: l, right: r, top: t, bottom: b };
         });
       } else {
         raw = [el.getBoundingClientRect()];
@@ -407,15 +440,24 @@ export function domMeasure(opts) {
   let notchOk = null;
   if (opts.notch) {
     const { top, bottom } = opts.notch;
-    const maxScroll = Math.max(0, docScrollH - H);
+    // The page scrolls inside its nearest overflow-y ancestor (the app shell #ui in this app), not the window: a
+    // window scroll leaves the positions unchanged. Every position is measured from the top, then the scroll is restored.
+    const sc = scrollerOf(document.querySelector("main.page") ?? document.body);
+    const at = (y) => { if (sc === doc) window.scrollTo(0, y); else sc.scrollTop = y; };
+    const notchScrollBefore = sc === doc ? window.scrollY : sc.scrollTop;
+    const maxScroll = Math.max(0, sc === doc ? docScrollH - H : sc.scrollHeight - sc.clientHeight);
     const stepPx = Math.max(16, Math.ceil(maxScroll / 60));
     const positions = [];
     for (let y = 0; y < maxScroll; y += stepPx) positions.push(y);
     positions.push(maxScroll);
-    const pinnedOf = new Map(interactive.map((el) => [el, ancestorMatch(el, (a) => /fixed|sticky/.test(cs(a).position)) !== null]));
+    // Pinned means a fixed/sticky box between the control and its scroller: the walk stops at the scroller, so the app shell (#ui, fixed) above it does not pin every control.
+    const pinnedOf = new Map(interactive.map((el) => {
+      for (let a = el; a && a !== sc && a !== doc; a = a.parentElement) if (/fixed|sticky/.test(cs(a).position)) return [el, true];
+      return [el, false];
+    }));
     const inInset = new Set();
     for (const y of positions) {
-      window.scrollTo({ top: y, behavior: "instant" });
+      at(y);
       for (const el of interactive) {
         const pinned = pinnedOf.get(el);
         if (!pinned && y !== 0 && y !== maxScroll) continue;
@@ -429,7 +471,7 @@ export function domMeasure(opts) {
         }
       }
     }
-    window.scrollTo(0, scrollBefore);
+    at(notchScrollBefore);
     const gapOk = bottomGap === null || bottomGap >= Math.max(16, bottom);
     notchOk = inInset.size === 0 && gapOk ? 1 : 0;
   }

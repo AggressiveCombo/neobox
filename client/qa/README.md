@@ -93,7 +93,7 @@ Console and network health, slow network, disconnect and reconnect, offline wind
 - Fails on uncaught page errors, unexpected console errors, and unexpected failed or >= 400 requests. Deliberate faults (offline windows, the bad room) are recorded as `netExpected`, not failed.
 - Outputs: `robust-<engine>.{json,md}`.
 - Self-test (`QA_SELF_TEST`): `console` (console error at load), `request` (failed cross-origin request at load), `badroom` (a real room code where the unknown one is expected). Each runs only its own case (`boot.clean.webgl2` or `badroom`) and must FAIL.
-- Offline (`net.offline20s.match`): `setOffline` cuts HTTP, and the page's WebSockets go through `routeWebSocket` (`gateSocket`), which refuses every socket while the 20 s window is open, so a reconnect cannot succeed. Pass: the reconnect banner appears within 10 s, stays up for the whole window, clears after recovery, and the HUD is back.
+- Offline (`net.offline20s.match`): the page's WebSockets go through `routeWebSocket` (`gateSocket`), which refuses every socket while the 20 s window is open. The live socket is dropped first, while the page is still online (taking the network down before the close leaves the close handshake without a reply, so no close event fires). Then the network is cut (CDP `Network.emulateNetworkConditions` offline on chromium, `setOffline` on other engines) and held for 20 s. Pass: the reconnect banner appears within 10 s, stays up for the whole window (sampled every 500 ms and checked at the end, `offline.heldToEnd`), clears after recovery, and the HUD is back.
 - Tab switch (`tab.switch.match`): a second page is brought to front and the match page stays hidden for 60 s. When headless reports the page as visible, the case hides it by overriding `document.visibilityState`/`hidden` and dispatching `visibilitychange` (`tab.hiddenMethod: synthetic`). If the page still is not hidden, the case is `info` with `not exercised: the page could not be hidden`, never a pass. Pass: hidden for the whole window, visible again and HUD back on return.
 - Two tabs (`two.tabs.sameAccount.match`): a guest joins the room, then the host account opens a second tab in the same context. The room must list two entries, one of them for the host account.
 - Phone pages (`rotate.phone.practice`) open through `openPhoneAt`: an exact viewport, and a browserType shim so firefox and webkit resolve their device profile.
@@ -110,6 +110,15 @@ Keyboard bindings, reserved keys, on-screen touch controls and gamepads.
 - `input.latency`: each sample walks the player to the left wall, waits until the canvas has been still 500 ms, then presses ArrowRight. `input.latency.ms` is the p95 of keydown to the first presented frame whose pixels differ from rest; `input.latency.stateMs` is the same to the first engine frame with a changed local state. Pass: p95 <= 250 ms, no sample without a presented change, no change in a frame before the keydown. `input.rafMs.off|on` are rAF intervals without and with the readback running, so the probe's own cost is visible. Runs on chromium, firefox and webkit.
 - Known limits: inputs with no visible effect in the current state (rocket with no ammo, grab with no target) read as silent; the detail names them. Latency numbers measured on a loaded host are not comparable to quiet-host numbers.
 - Self-test: `QA_SELF_TEST=delay-input` (ArrowRight delivered 300 ms late) must FAIL `input.latency`; `QA_SELF_TEST=chat-leak` (game keys reach the engine from the chat field) must FAIL `keys.chatLeak`. Other faults are listed in `input.mjs`.
+
+## netgame.mjs (RUBRIC D22; netcode under impairment)
+
+Two clients play one match while a relay on the WebSocket path delays, jitters and loses messages. Reports desync, rollback depth and whether the match survives impairment.
+
+- Command: `cd client && node qa/netgame.mjs <chromium|firefox|webkit>` (one engine per process). `JN_CONDS` picks conditions from `rtt0,rtt100,impair,jit,loss,lat` (default `rtt0,rtt100,impair`); `JN_DUR` is the play window in ms (default 30000). Chromium runs webgpu and webgl2; firefox and webkit run webgl2.
+- Outputs: `netgame-<engine>.jsonl` (one record per renderer and condition) and `evidence/netgame-<engine>-<renderer>-<cond>-{host,guest}.png`, under `QA_OUT`.
+- Metrics: `net.desync.count` (clients whose Snapshot row showed `gap a-b` or `hash t`; threshold 0), `net.rollback.depth.p95` (max final `Rollback p95` row at rtt100; threshold <= 8), `net.impair.pass` (impair condition: 1 when no resync, no desync, both canvases still change and the scoreboards agree).
+- Relay is FIFO only. A WebSocket is an ordered TCP stream: each direction has one queue released strictly in order, and a lost message stalls every later one (head-of-line), as TCP does. A relay that let a later message overtake an earlier one would model a transport the game never runs on, so there is no reorder mode.
 
 ## audit.mjs
 
@@ -131,6 +140,9 @@ One capture is a page state at one (engine, theme, row, axis, renderer). `measur
 - `--dist` (or `NEOBOX_DIST`) is required; there is no default build. Default out: `neobox-scratch/qa/capture/<dist basename>`. Writes `summary.json` and `summary.md`.
 - The cells come from `plan.mjs`, the rubric RUBRIC rev7 section 2.2 plan: tier P (14 page states, 18 rows plus T3-notch on chromium), F (5 fit states on four engine/renderer combos, plus the gamepad mock on gameplay), A (appearance axes), S (canvas and other states). 2572 cells; `--plan` prints the per-tier states, rows, combos and counts against the rubric and runs nothing. Cells that name the same physical run (postgame) capture once.
 - Themes are `light` and `dark`. `--states` and `--rows` narrow the plan; the per-tier summary reports planned cells, runs and passes.
+- C07 expected entries (rubric rev7f). A state that injects a failure lists what it breaks: `handle.expected` (URL patterns: the dropped socket `SOCKET_URL` in `states.mjs`, the sound files, the stubbed `/api/maps`) and `handle.expectedWarnings` (anchored text for app log lines the fault produces). Console errors match by the URL the browser names (`msg.location()` or any URL in the text), never by loose text. Matches land in `details.induced` and are not counted in `console.errors`.
+- Browser-generated warnings (`BROWSER_WARNINGS` in `capture.mjs`) are matched on the whole text, not by substring: Firefox's `[JavaScript Warning: "WebGPU is disabled by blocklist." {file: ... line: N}]`, Firefox's `[JavaScript Warning: "The execution of microtasks on this page was reordered to avoid unsafe execution." {file: ... line: N}]`, and Playwright's `Service Worker registration blocked by Playwright`. Those are listed under `console.warnings` with the `browser |` prefix and not counted.
+- Summary: `details.induced` and `browser |` warnings are the exempt entries; every app-class entry counts toward `console.errors`, `console.warnings` or `page.errors`.
 
 ## states.mjs (data)
 
