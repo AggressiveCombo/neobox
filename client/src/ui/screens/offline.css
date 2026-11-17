@@ -154,8 +154,8 @@
   gap: 8px;
   margin: 0;
   width: 100%;
-  padding: calc(env(safe-area-inset-top, 0px) + 8px) calc(env(safe-area-inset-right, 0px) + 8px)
-    calc(env(safe-area-inset-bottom, 0px) + 8px) calc(env(safe-area-inset-left, 0px) + 8px);
+  padding: calc(env(safe-area-inset-top, 0px) + 8px) calc(env(safe-area-inset-right, 0px) + var(--margin))
+    calc(env(safe-area-inset-bottom, 0px) + 8px) calc(env(safe-area-inset-left, 0px) + var(--margin));
   pointer-events: none;
   overflow: hidden;
   color: var(--hud-ink);
@@ -166,6 +166,11 @@
 
 #ui > .offline.playing > * {
   pointer-events: auto;
+}
+
+/* The landmark around the playing controls: a box-less wrapper, so the layout is unchanged. */
+.offline-play {
+  display: contents;
 }
 
 /* The top row: Leave, the title, one action. Solid chips, 44px tall. */
@@ -209,6 +214,12 @@
   box-shadow: inset 0 -2px 0 var(--accent-bright);
 }
 
+/* style.css paints hovered buttons surface-2; the overlay's ink text needs the solid dark chip underneath. */
+.offline-top button:hover:not(:disabled),
+.offline-dock button:hover:not(:disabled) {
+  background: var(--hud-solid);
+}
+
 .offline-top button:focus-visible,
 .offline-top select:focus-visible,
 .offline-dock button:focus-visible,
@@ -225,17 +236,22 @@
 }
 
 .offline-title {
-  flex: 1;
+  flex: 1 1 0;
   min-width: 0;
   display: flex;
-  align-items: center;
+  flex-direction: column;
+  justify-content: center;
+  overflow-wrap: anywhere;
   min-height: 44px;
   padding: 0 12px;
   background: var(--hud-solid);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  /* Wraps rather than clips when text scale or zoom narrows the row. */
   font-weight: 500;
+}
+
+.offline-top > button,
+.offline-top > select {
+  flex: none;
 }
 
 .offline-overlay {
@@ -351,10 +367,19 @@
 
 @media (max-height: 500px) {
   #ui > .offline.playing {
-    padding: 4px 8px;
+    padding-block: 4px;
   }
 
   .offline-dock {
     padding: 4px 8px;
+  }
+}
+
+@media (pointer: coarse) {
+  .offline-top button,
+  .offline-top select,
+  .offline-dock button,
+  .offline-dock select {
+    min-height: 48px;
   }
 }

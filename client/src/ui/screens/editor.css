@@ -43,6 +43,7 @@
   display: flex;
   align-items: center;
   gap: 8px;
+  flex-wrap: wrap;
   padding: 10px 16px;
 }
 
@@ -78,12 +79,12 @@
 
 .editor-tools {
   flex: none;
-  width: 60px;
+  width: calc(var(--control) + 2 * var(--margin));
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 8px;
-  padding: 10px 8px;
+  padding: 10px 0;
   overflow-y: auto;
   background: var(--ground);
   border-right: 1px solid var(--line);
@@ -109,8 +110,8 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 44px;
-  height: 44px;
+  width: var(--control);
+  height: var(--control);
   padding: 0;
   background: var(--surface);
 }
@@ -175,7 +176,7 @@
 
 .editor-lag {
   position: absolute;
-  left: 12px;
+  left: 16px;
   bottom: 68px;
   max-width: calc(100% - 24px);
   margin: 0;
@@ -193,7 +194,7 @@
   justify-content: space-between;
   flex-wrap: wrap;
   gap: 8px 16px;
-  padding: 8px 12px;
+  padding: 8px 16px;
   background: var(--ground);
 }
 
@@ -207,7 +208,7 @@
 
 .editor-float {
   position: absolute;
-  right: 12px;
+  right: var(--margin);
   bottom: 12px;
   display: flex;
   align-items: center;
@@ -221,11 +222,17 @@
 }
 
 .editor-float .icon {
-  width: 40px;
-  height: 40px;
+  width: var(--control);
+  height: var(--control);
   padding: 0;
   background: var(--hud-ink);
   color: var(--ink);
+}
+
+/* The float is dark in both themes: the ink ring would vanish on it, so the ring uses the accent. */
+.editor-float :is(button, input):focus-visible {
+  outline: 3px solid var(--accent-bright);
+  outline-offset: 2px;
 }
 
 .editor-cluster {
@@ -276,7 +283,7 @@ body:has(.screen.editor) #toasts {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  padding: 12px 12px 4px 20px;
+  padding: 12px var(--margin) 4px 20px;
 }
 
 .editor-side-title {
@@ -487,8 +494,8 @@ body:has(.screen.editor) #toasts {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 44px;
-    height: 44px;
+    width: var(--control);
+    height: var(--control);
     padding: 0;
     background: var(--surface);
   }
@@ -519,7 +526,7 @@ body:has(.screen.editor) #toasts {
     flex-direction: row;
     align-items: center;
     gap: 0;
-    padding: 6px 28px 6px 10px;
+    padding: 6px 28px 6px 16px;
     /* Fades the right edge: more tools lie past it; scroll to reach them. */
     -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent);
     mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent);
@@ -547,11 +554,6 @@ body:has(.screen.editor) #toasts {
     border-right: 0;
   }
 
-  .editor-tool {
-    width: 44px;
-    height: 44px;
-  }
-
   .editor-side {
     top: auto;
     left: 0;
@@ -562,22 +564,26 @@ body:has(.screen.editor) #toasts {
   }
 
   .editor-top {
-    padding: 8px 10px;
-    gap: 6px;
+    padding: 8px 16px;
+    gap: 6px 8px;
+    flex-wrap: wrap;
   }
 
   .editor-name {
-    flex: 1 1 0;
+    order: 2;
+    flex: 1 0 100%;
     max-width: none;
   }
 
   .editor-top-tools {
     flex: none;
+    order: 1;
+    margin-left: auto;
     gap: 4px;
   }
 
   .editor-top button {
-    width: 40px;
+    width: var(--control);
     padding: 0;
   }
 
@@ -596,7 +602,7 @@ body:has(.screen.editor) #toasts {
   }
 
   .editor-float {
-    right: 8px;
+    right: var(--margin);
     bottom: 8px;
   }
 
@@ -618,15 +624,9 @@ body:has(.screen.editor) #toasts {
 /* Landscape phone: a narrow icon rail on the left (it scrolls when short); the sheet covers the right. */
 @media (max-height: 500px) and (orientation: landscape) {
   .editor-tools {
-    width: 52px;
+    width: calc(var(--control) + 2 * var(--margin));
     gap: 6px;
-    padding: 6px;
-  }
-
-  .editor-tool,
-  .editor-side-toggle {
-    width: 40px;
-    height: 40px;
+    padding: 6px 0;
   }
 
   .editor-side {
@@ -634,12 +634,24 @@ body:has(.screen.editor) #toasts {
   }
 
   .editor-top {
-    padding: 6px 12px;
+    padding: 6px 16px;
   }
 
   .editor-menu {
     inset: 0;
     width: auto;
     max-height: none;
+  }
+}
+
+/* Touch: every editor control is at least the 48px target, whatever the label or breakpoint sets. */
+@media (pointer: coarse) {
+  .editor-top button,
+  .editor-top input,
+  .editor-side-toggle,
+  .editor-tool,
+  .editor-float .icon {
+    min-width: var(--control);
+    min-height: var(--control);
   }
 }

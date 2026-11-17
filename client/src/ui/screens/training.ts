@@ -230,7 +230,7 @@ export const trainingScreen: ScreenFactory = (ctx) => {
     );
     engineUi?.destroy();
     engineUi = null;
-    root.replaceChildren(touch.el, bar, card, rotate.el);
+    root.replaceChildren(h("main", { class: "offline-play" }, touch.el, bar, card), rotate.el);
     releaseTop = ctx.reserveTop(bar);
     renderLesson();
     loop.start();

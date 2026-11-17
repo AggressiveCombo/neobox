@@ -194,4 +194,13 @@
   .replay-view select {
     min-height: 48px;
   }
+
+  .replay-view input[type="range"],
+  .replay-controls .seg-option {
+    min-height: 48px;
+  }
+
+  .replay-controls .seg-option {
+    min-width: 48px;
+  }
 }

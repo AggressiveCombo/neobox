@@ -160,7 +160,7 @@ export const practiceScreen: ScreenFactory = (ctx) => {
       h("span", { class: "offline-title" }, mapName),
       h("button", { type: "button", onclick: restart }, icon("rotate-ccw", 18), "Restart"),
     );
-    root.replaceChildren(touch.el, bar, rotate.el);
+    root.replaceChildren(h("main", { class: "offline-play" }, touch.el, bar), rotate.el);
     releaseTop = ctx.reserveTop(bar);
     loop.start();
   }

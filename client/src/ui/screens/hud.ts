@@ -497,7 +497,7 @@ export const hudScreen: HudFactory = (ctx) => {
   const releaseChips = [ctx.reserveChrome(barLeft), ctx.reserveChrome(barRight)];
   const rotate = rotateGate();
   const el = h(
-    "div",
+    "main",
     { class: "hud-root" },
     spectateLayer,
     touch.el,
