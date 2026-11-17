@@ -103,11 +103,15 @@ const HARVEST = () => {
   return els.map((el, i) => {
     el.setAttribute("data-qa-i", String(i));
     const name = (el.getAttribute("aria-label") || labelled(el) || labelOf(el) || textOf(el) || el.getAttribute("title") || "").replace(/\s+/g, " ").trim();
+    const r = el.getBoundingClientRect();
+    const top = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
     return {
       i,
       name: name || "(unnamed)",
       href: el.tagName === "A" ? el.href : null,
       disabled: el.disabled === true || el.getAttribute("aria-disabled") === "true",
+      // Something else sits on the control's centre (an open modal): it cannot be clicked from here.
+      covered: !!top && !el.contains(top) && !top.contains(el),
     };
   });
 };
@@ -166,7 +170,8 @@ const EFFECT_STATE = () => {
     for (const v of ctx.getImageData(0, 0, 64, 64).data) s = (s * 31 + v) | 0;
     return String(s);
   };
-  return JSON.stringify([window.scrollX, window.scrollY, scrolls, [...document.querySelectorAll("canvas")].map(digest)]);
+  const fields = [...document.querySelectorAll("input,select,textarea")].map((e) => (e.type === "checkbox" || e.type === "radio" ? `${e.checked}` : e.value));
+  return JSON.stringify([window.scrollX, window.scrollY, scrolls, fields, [...document.querySelectorAll("canvas")].map(digest)]);
 };
 
 let engine = "";
@@ -333,6 +338,19 @@ async function tokensCase(s) {
   };
 }
 
+// Harvest once the screen has stopped changing (two consecutive reads agree): a screen can still be mid-transition when prepare() returns.
+async function settledHarvest(page) {
+  let fresh = await page.evaluate(HARVEST);
+  for (let t = 0; t < 10; t++) {
+    await sleep(150);
+    const next = await page.evaluate(HARVEST);
+    const same = next.length === fresh.length && next.every((f, j) => f.name === fresh[j].name);
+    fresh = next;
+    if (same) break;
+  }
+  return fresh;
+}
+
 async function deadCase(s) {
   const dead = [];
   const skipped = [];
@@ -344,15 +362,20 @@ async function deadCase(s) {
       if (cur) await closeHandle(cur.h);
       const h = track(await stateById(id).prepare(s));
       await inject(h.page);
-      const controls = await h.page.evaluate(HARVEST);
+      const controls = await settledHarvest(h.page);
       await h.page.evaluate(INSTALL_MUTATION);
       cur = { h, controls, dirty: false };
     };
     await open();
+    console.error(`dead ${id}: ${cur.controls.length} controls, ${new Date().toISOString().slice(11, 19)}`);
     for (const c of cur.controls) {
       const label = `${id} "${c.name}"`;
       if (c.disabled) {
         skipped.push(`${label} (disabled)`);
+        continue;
+      }
+      if (c.covered) {
+        skipped.push(`${label} (covered by an open overlay)`);
         continue;
       }
       if (DEAD_SKIP.test(c.name)) {
@@ -376,20 +399,41 @@ async function deadCase(s) {
       const before = await page.evaluate(EFFECT_STATE);
       h.reqs = 0;
       clicked += 1;
+      let k = c.i;
       try {
+        // Re-tag and re-find the control by name: a re-render since open() can move or drop data-qa-i.
+        const fresh = await settledHarvest(page);
         await page.evaluate(() => {
-          window.__qaMut = 0;
+          window.__qaMut = 0; // the re-tag itself is a DOM mutation; it is not the click's effect
         });
-        await page.locator(`[data-qa-i="${c.i}"]`).click({ timeout: 3000 });
-        await sleep(1000);
-        const mut = await page.evaluate(() => window.__qaMut);
-        const moved = page.url() !== url;
-        const changed = (await page.evaluate(EFFECT_STATE)) !== before;
+        k = fresh[c.i]?.name === c.name ? c.i : fresh.findIndex((f) => f.name === c.name);
+        if (k < 0) throw new Error(`control "${c.name}" is no longer on screen`);
+        await page.locator(`[data-qa-i="${k}"]`).click({ timeout: 3000 });
+        // Up to 1 s for any effect (DOM mutation, request, navigation, state change); stop early once one shows.
+        let mut = 0;
+        let moved = false;
+        let changed = false;
+        for (let t = 0; t < 10 && !(mut || h.reqs || moved || changed); t++) {
+          await sleep(100);
+          mut = await page.evaluate(() => window.__qaMut);
+          moved = page.url() !== url;
+          changed = (await page.evaluate(EFFECT_STATE)) !== before;
+        }
         if (mut === 0 && h.reqs === 0 && !moved && !changed) dead.push(label);
         // Reopen only when the click navigated or changed the control list; a toggle keeps the page (reopening after each one made the scan too slow).
         else cur.dirty = moved || !sameControls(cur.controls, await page.evaluate(HARVEST));
       } catch (err) {
-        unclickable.push(`${label}: ${firstLine(err)}`);
+        // What sits on top of the control's centre point (a modal or overlay blocks the click; the harness should say so).
+        const cover = await page
+          .evaluate((i) => {
+            const el = document.querySelector(`[data-qa-i="${i}"]`);
+            if (!el) return "no element";
+            const r = el.getBoundingClientRect();
+            const top = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
+            return top && top !== el && !el.contains(top) ? `covered by <${top.tagName.toLowerCase()} class="${top.className}">` : "not covered";
+          }, k)
+          .catch((e) => `cover probe failed: ${firstLine(e)}`);
+        unclickable.push(`${label}: ${firstLine(err)} [${cover}]`);
         cur.dirty = true;
       }
     }
