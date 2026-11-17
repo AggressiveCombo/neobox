@@ -6,6 +6,8 @@ import { icon, type IconName } from "./icons";
 import { reducedMotion } from "./a11y";
 
 const MODAL_CLOSE_MS = 140;
+/** What Tab can land on inside a modal. */
+const TAB_STOPS = 'a[href],button:not(:disabled),input:not(:disabled):not([type=hidden]),select:not(:disabled),textarea:not(:disabled),[tabindex]:not([tabindex="-1"])';
 
 /** The mark and the name, as one link-like unit. */
 export function wordmark(): HTMLElement {
@@ -302,6 +304,26 @@ export function openModal(opts: ModalOptions): { dialog: HTMLDialogElement; clos
   if (modalPopPending()) unpushed.push(entry);
   else pushModalEntry(entry);
   dialog.showModal();
+  // Native modal focus can leave the dialog (to BODY or browser chrome) on Tab past its ends, so the trap is explicit.
+  // It stops itself once the dialog is closed, so the close path needs no change.
+  const trapTab = (e: KeyboardEvent): void => {
+    if (!dialog.open) {
+      document.removeEventListener("keydown", trapTab, true);
+      return;
+    }
+    if (e.key !== "Tab" || openStack[openStack.length - 1] !== entry) return;
+    const stops = [...dialog.querySelectorAll<HTMLElement>(TAB_STOPS)].filter((el) => el.getClientRects().length > 0);
+    if (stops.length === 0) return;
+    const first = stops[0];
+    const last = stops[stops.length - 1];
+    const active = document.activeElement;
+    const inside = dialog.contains(active);
+    if (e.shiftKey ? !inside || active === first || active === dialog : !inside || active === last) {
+      e.preventDefault();
+      (e.shiftKey ? last : first).focus();
+    }
+  };
+  document.addEventListener("keydown", trapTab, true);
   // Without an explicit [autofocus], start on the dialog itself rather than ringing its first button.
   if (!dialog.querySelector("[autofocus]")) {
     dialog.tabIndex = -1;
