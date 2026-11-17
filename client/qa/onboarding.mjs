@@ -438,7 +438,9 @@ async function completeTouch(s, results, caseId) {
   const touchOk = mv.at !== null && layer.stick && layer.buttons > 0;
   const pass = touchOk && lessonsOk(seen) && chipsFollow;
   const gaps = [];
-  if (!touchOk) gaps.push("touch controls did not move the character");
+  if (!layer.stick) gaps.push("touch stick is not on the screen");
+  if (layer.buttons === 0) gaps.push("touch buttons are not on the screen");
+  if (mv.at === null) gaps.push("touch stick did not move the character");
   if (!chipsFollow) gaps.push(`lesson chips show keyboard keys on the touch profile (lessons ${onKeys.join(", ")})`);
   return {
     pass,
