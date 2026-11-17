@@ -354,8 +354,12 @@ export const replayScreen: ScreenFactory = (ctx) => {
     );
     board = createScoreboard();
     root.replaceChildren(
-      bar,
-      h("div", { class: "replay-board" }, board.el, board.events),
+      h(
+        "div",
+        { class: "replay-head" },
+        bar,
+        h("aside", { class: "replay-board", "aria-label": "Scoreboard and kill log" }, board.el, board.events),
+      ),
       h(
         "main",
         { class: "offline-dock offline-overlay replay-dock" },

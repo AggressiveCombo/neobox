@@ -124,6 +124,17 @@
   min-height: var(--control);
 }
 
+/* The chosen speed is a solid inverted chip (the ink indicator sits behind it), so its text keeps contrast at any text scale. */
+.replay-controls .seg-indicator {
+  background: var(--hud-ink);
+}
+
+.replay-controls .seg-option[aria-checked="true"],
+.replay-controls .seg-option[aria-checked="true"]:hover:not(:disabled) {
+  background: var(--hud-ink);
+  color: var(--hud-solid);
+}
+
 @media (max-width: 600px) {
   .replay-dock {
     gap: 12px;
@@ -164,6 +175,16 @@
 
   .replay-controls .seg-option {
     flex: 1;
+  }
+
+  /* The file name gets its own row under Close and the follow select, so it wraps at full width. */
+  .replay-view .offline-top {
+    flex-wrap: wrap;
+  }
+
+  .replay-view .offline-title {
+    order: 3;
+    flex: 1 0 100%;
   }
 }
 
@@ -207,10 +228,16 @@
   }
 }
 
+/* Replay header: the bar, with the live scoreboard hung under it. Pointer events stay off the table. */
+.replay-head {
+  position: relative;
+  min-width: 0;
+}
+
 /* Replay scoreboard: the live table, centred under the bar. Pointer events stay off. */
-#ui > .offline.playing.replay-view > .replay-board {
+.replay-head > .replay-board {
   position: absolute;
-  top: calc(env(safe-area-inset-top, 0px) + 64px);
+  top: calc(100% + 8px);
   left: 50%;
   transform: translateX(-50%);
   width: min(560px, calc(100% - 32px));
@@ -221,4 +248,98 @@
   position: static;
   transform: none;
   width: auto;
+}
+
+/* Phones in portrait: the scoreboard spans the header's width with compact cells, so the table fits 320 px and stays
+   above the dock. The landscape rule below overrides it. */
+@media (max-width: 600px) {
+  .replay-head > .replay-board {
+    left: 0;
+    transform: none;
+    width: 100%;
+  }
+
+  .replay-board .hud-scores {
+    padding: 6px 8px;
+  }
+
+  .replay-board .hud-table th,
+  .replay-board .hud-table td {
+    padding: 4px 4px;
+  }
+
+  .replay-board .hud-table th {
+    white-space: normal;
+  }
+}
+
+/* Phones in portrait: the scoreboard stacks in the column under the bar, so it never sits over the dock, and the layer
+   scrolls when text scaling makes the column taller than the screen. The landscape rule below keeps its own placement. */
+@media (max-width: 600px) and (orientation: portrait) {
+  #ui > .offline.playing.replay-view {
+    overflow-y: auto;
+  }
+
+  .replay-head > .replay-board {
+    position: static;
+    margin-top: 8px;
+  }
+}
+
+/* Short landscape phones (568x320 and similar): the dock is one transport row and one control row, and the scoreboard
+   hangs at the right so the playfield keeps the middle of the screen. */
+@media (max-height: 500px) and (orientation: landscape) {
+  .replay-dock {
+    gap: 6px;
+  }
+
+  .replay-transport {
+    flex-wrap: nowrap;
+  }
+
+  .replay-transport input[type="range"] {
+    order: 0;
+    flex-basis: auto;
+  }
+
+  .replay-controls {
+    flex-direction: row;
+    align-items: center;
+  }
+
+  .replay-step {
+    display: flex;
+  }
+
+  .replay-step button {
+    padding: 0 6px;
+  }
+
+  .replay-controls .seg {
+    width: auto;
+  }
+
+  .replay-head > .replay-board {
+    top: calc(100% + 4px);
+    left: 0;
+    right: 0;
+    transform: none;
+    width: auto;
+  }
+
+  /* One header row (Close, title, follow) leaves the band between the header and the dock to the scoreboard. */
+  .replay-view .offline-top {
+    flex-wrap: nowrap;
+  }
+
+  .replay-view .offline-title {
+    order: 0;
+    flex: 1 1 auto;
+    min-width: 0;
+    padding: 4px 8px;
+  }
+
+  .replay-step button {
+    min-width: 48px;
+  }
 }
