@@ -31,7 +31,7 @@ interface YtPlayer {
 interface YtApi {
   Player: new (
     el: HTMLElement,
-    options: { width: string; height: string; events: { onReady: () => void; onError: () => void } },
+    options: { width: string; height: string; playerVars: { origin: string }; events: { onReady: () => void; onError: () => void } },
   ) => YtPlayer;
 }
 
@@ -118,6 +118,8 @@ export function mountJukebox(ctx: AppCtx): void {
         const created = new yt.Player(playerMount, {
           width: "100%",
           height: "100%",
+          // The page origin lets the embed target its postMessage calls; without it the API warns on each message.
+          playerVars: { origin: location.origin },
           events: {
             onReady: () => resolve(created),
             // removed, private or not embeddable: like the original, ask for another song
