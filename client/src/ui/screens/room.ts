@@ -637,7 +637,7 @@ export const roomScreen: ScreenFactory = (ctx: AppCtx) => {
       h(
         "div",
         { class: "actions" },
-        h("button", { type: "button", class: "room-btn", onclick: () => setLock(!room.locked) }, icon(room.locked ? "lock-open" : "lock", 16), room.locked ? "Unlock teams" : "Lock teams"),
+        h("button", { type: "button", class: "room-btn", disabled: st.reconnecting, onclick: () => setLock(!room.locked) }, icon(room.locked ? "lock-open" : "lock", 16), room.locked ? "Unlock teams" : "Lock teams"),
         h("button", { type: "button", class: "room-btn danger", disabled: !room.in_match, onclick: endMatch }, icon("x", 16), "End match"),
       ),
       h("p", { class: "room-muted" }, room.locked ? "Players cannot change team." : "Players can change team."),
@@ -739,7 +739,7 @@ export const roomScreen: ScreenFactory = (ctx: AppCtx) => {
 
   const sendChat = (): void => {
     const text = chatInput.value.trim();
-    if (text === "") return;
+    if (text === "" || st.reconnecting) return;
     ctx.send({ t: "chat", text });
     sentHistory.push(text);
     if (sentHistory.length > SENT_LIMIT) sentHistory.shift();
@@ -1208,7 +1208,7 @@ export const roomScreen: ScreenFactory = (ctx: AppCtx) => {
         st.inMatch
           ? h("button", { type: "button", class: "room-btn", onclick: () => ctx.store.set({ screen: "match" }) }, icon("arrow-left", 16), "Back to game")
           : null,
-        h("button", { type: "button", class: "room-btn room-invite", title: "Copy invite link", onclick: () => void shareInvite() }, icon("link", 16), "Invite"),
+        h("button", { type: "button", class: "room-btn room-invite", title: "Copy invite link", disabled: st.reconnecting, onclick: () => void shareInvite() }, icon("link", 16), "Invite"),
         st.replayReady
           ? h(
               "button",
@@ -1355,7 +1355,7 @@ export const roomScreen: ScreenFactory = (ctx: AppCtx) => {
       ...(host ? [h("button", { type: "button", class: "room-btn room-btn-small", onclick: abortStart }, "Abort start")] : []),
     );
     startButton.hidden = !host;
-    startButton.disabled = room.in_match || room.starting;
+    startButton.disabled = room.in_match || room.starting || st.reconnecting;
     dockStatus.textContent = dockText(room, host);
     refreshPlayers();
     renderMode(`${host}|${mode}`);
@@ -1426,6 +1426,7 @@ export const roomScreen: ScreenFactory = (ctx: AppCtx) => {
         next.myId !== prev.myId ||
         next.inMatch !== prev.inMatch ||
         next.replayReady !== prev.replayReady ||
+        next.reconnecting !== prev.reconnecting ||
         next.account !== prev.account
       ) {
         renderRoom();
@@ -1433,6 +1434,9 @@ export const roomScreen: ScreenFactory = (ctx: AppCtx) => {
         refreshPlayers();
       }
       renderChat();
+      // The room's server-bound actions wait for the connection: they are disabled, not silently dropped, while it is restored.
+      const send = root.querySelector<HTMLButtonElement>('.room-chat-form button[aria-label="Send"]');
+      if (send) send.disabled = next.reconnecting;
     },
     destroy() {
       alive = false;

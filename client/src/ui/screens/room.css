@@ -860,7 +860,7 @@ button.room-menu-item[aria-checked="true"] {
     top: 0;
     z-index: 5;
     margin: 0 calc(-1 * var(--margin));
-    padding: 8px var(--margin);
+    padding: 8px calc(var(--margin) + 4px);
     background: var(--surface);
   }
 
