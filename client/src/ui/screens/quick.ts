@@ -227,7 +227,7 @@ export const quickScreen: ScreenFactory = (ctx) => {
       return;
     }
     nameInput.value = name;
-    writeStoredName(name);
+    if (!account) writeStoredName(name);
     attempted = true;
     store.set({ name, intent: queue });
     ctx.play(name);

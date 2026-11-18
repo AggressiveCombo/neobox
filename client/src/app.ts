@@ -932,7 +932,8 @@ export function start(): Store<AppState> {
   /** Connect if needed, then say hello with `name`. The welcome message moves the app to the browser. */
   function play(name: string): void {
     store.set({ name });
-    local.setItem(NAME_STORAGE_KEY, name);
+    // Signed in, the name is the account's: the guest name key keeps this device's own guest name.
+    if (store.state.account === null) local.setItem(NAME_STORAGE_KEY, name);
     if (net.status === "open") {
       void sendHello(name);
       return;

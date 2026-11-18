@@ -4,7 +4,7 @@
 // square). With no clip the square is a flat field with the mark. Signed-in accounts play
 // under their account name.
 
-import { listMakers, refreshAccount } from "../../account";
+import { lastAccountName, listMakers, refreshAccount } from "../../account";
 import { fetchStats } from "../../api";
 import type { ScreenFactory } from "../../ctx";
 import { levelOf } from "../../levels";
@@ -73,6 +73,15 @@ export function saveTypedName(raw: string): void {
 /** A guest name for a first visit: "Box" and four digits. */
 export function guestName(): string {
   return `Box${String(Math.floor(Math.random() * 10_000)).padStart(4, "0")}`;
+}
+
+/** The guest name kept on this device; a first visit gets one now, so sign-out can restore it. */
+function storedGuestName(): string {
+  const stored = readStoredName();
+  if (stored !== "") return stored;
+  const fresh = guestName();
+  writeStoredName(fresh);
+  return fresh;
 }
 
 function readFlag(key: string): boolean {
@@ -157,6 +166,8 @@ export const menuScreen: ScreenFactory = (ctx) => {
       sync();
     },
   });
+  const leadEl = h("span", { class: "home-name-lead" }, "Playing as");
+  const pencil = icon("pencil", 16);
 
   const quickBtn = h(
     "button",
@@ -214,9 +225,15 @@ export const menuScreen: ScreenFactory = (ctx) => {
       nameInput.focus();
       return;
     }
-    const name = nameInput.value.trim();
-    nameInput.value = name;
-    writeStoredName(name);
+    const typed = nameInput.value.trim();
+    let name = typed;
+    // A locked field shows an account name: a signed-in player plays under it; offline it is only remembered, so the guest name plays.
+    if (!nameInput.readOnly) {
+      nameInput.value = typed;
+      writeStoredName(typed);
+    } else if (!shownAccount) {
+      name = storedGuestName();
+    }
     attempted = true;
     store.set({ name, intent: null });
     // Offline there is nothing to connect to: the offline page for Browse takes over, and its Retry connects.
@@ -289,6 +306,22 @@ export const menuScreen: ScreenFactory = (ctx) => {
     accountLine.hidden = navigator.onLine || Boolean(shownAccount);
     // Offline the account is unknown, not absent: the button says Account and its page says why.
     if (!shownAccount) setAccount(null);
+    syncName();
+  }
+
+  /**
+   * The name field. A signed-in player's name, or on this device the account last seen while offline,
+   * is shown read-only; a guest types their own name, restored when the lock lifts.
+   */
+  function syncName(): void {
+    const name = shownAccount ? shownAccount.name : navigator.onLine ? "" : lastAccountName();
+    const wasLocked = nameInput.readOnly;
+    if (name !== "") nameInput.value = name;
+    else if (wasLocked) nameInput.value = storedGuestName();
+    nameInput.readOnly = name !== "";
+    leadEl.textContent = shownAccount ? "Signed in as" : name !== "" ? "Last signed in as" : "Playing as";
+    pencil.style.display = name !== "" ? "none" : "";
+    sync();
   }
 
   // The clip square: the GL view behind the UI shows only inside it while a clip plays.
@@ -349,9 +382,9 @@ export const menuScreen: ScreenFactory = (ctx) => {
     h(
       "label",
       { class: "home-name" },
-      h("span", { class: "home-name-lead" }, account ? "Signed in as" : "Playing as"),
+      leadEl,
       nameInput,
-      account ? null : icon("pencil", 16),
+      pencil,
     ),
     h("div", { class: "home-actions" }, quickBtn, browseBtn),
   );
@@ -440,11 +473,6 @@ export const menuScreen: ScreenFactory = (ctx) => {
         shownAccount = state.account;
         syncConnection();
         setAccount(state.account);
-      }
-      if (state.account) {
-        nameInput.value = state.account.name;
-        nameInput.readOnly = true;
-        sync();
       }
     },
     destroy() {

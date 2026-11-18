@@ -6,6 +6,8 @@
 
 export const REMEMBER_KEY = "neobox.staySignedIn";
 export const NAME_STORAGE_KEY = "neobox.name";
+/** The account name this device last saw signed in: shown while offline, cleared on sign-out. */
+export const ACCOUNT_NAME_KEY = "neobox.account";
 /** sessionStorage: this tab's room seat `{ room, token }`, so a reload resumes it. */
 export const SEAT_STORAGE_KEY = "neobox.seat";
 export const PREFS_KEY = "neobox.prefs";
@@ -26,7 +28,8 @@ export interface StorageKey {
 
 export const STORAGE_KEYS: readonly StorageKey[] = [
   { key: REMEMBER_KEY, scope: "local", purpose: "your choice to stay signed in" },
-  { key: NAME_STORAGE_KEY, scope: "local", purpose: "the name you last played under" },
+  { key: NAME_STORAGE_KEY, scope: "local", purpose: "the guest name you last played under" },
+  { key: ACCOUNT_NAME_KEY, scope: "local", purpose: "the account name you last signed in with, shown while you are offline" },
   { key: PREFS_KEY, scope: "local", purpose: "your settings while you are a guest" },
   { key: GUEST_XP_KEY, scope: "local", purpose: "XP you earned as a guest" },
   { key: NEWS_SEEN_KEY, scope: "local", purpose: "the news items you have read" },

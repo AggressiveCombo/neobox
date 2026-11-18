@@ -5,7 +5,7 @@
 import type { AppCtx } from "./ctx";
 import { NAME_RE } from "./protocol";
 import { prefs, sanitizePrefs } from "./prefs";
-import { NAME_STORAGE_KEY, REMEMBER_KEY } from "./storage-keys";
+import { ACCOUNT_NAME_KEY, NAME_STORAGE_KEY, REMEMBER_KEY } from "./storage-keys";
 import { local } from "./storage";
 import { type Account, type AppState, type Screen } from "./state";
 import { HttpError } from "./http-error";
@@ -335,10 +335,26 @@ export function startAccountSync(ctx: AppCtx, ready: () => void): void {
  */
 export async function refreshAccount(ctx: AppCtx): Promise<void> {
   try {
-    ctx.store.set({ account: await fetchMe() });
+    setAccountState(ctx, await fetchMe());
   } catch (err) {
     if (navigator.onLine) ctx.toast(`could not check your account: ${errorText(err)}`, "error");
   }
+}
+
+/** The account name this device last saw signed in, for the menu while offline ("" when none). */
+export function lastAccountName(): string {
+  return local.getItem(ACCOUNT_NAME_KEY) ?? "";
+}
+
+/**
+ * Store the signed-in account (null for a guest). The name is remembered for offline use and cleared on
+ * sign-out. A player who leaves an account plays under their own guest name again, never the account's.
+ */
+function setAccountState(ctx: AppCtx, account: Account | null): void {
+  if (account) local.setItem(ACCOUNT_NAME_KEY, account.name);
+  else local.removeItem(ACCOUNT_NAME_KEY);
+  const leaving = account === null && ctx.store.state.account !== null;
+  ctx.store.set(leaving ? { account, name: readStoredName() } : { account });
 }
 
 /**
@@ -347,7 +363,7 @@ export async function refreshAccount(ctx: AppCtx): Promise<void> {
  * and the browser comes back. Inside a match the change waits for the next connect.
  */
 export function applyAccount(ctx: AppCtx, account: Account | null): void {
-  ctx.store.set({ account });
+  setAccountState(ctx, account);
   const { connection, inMatch, name } = ctx.store.state;
   if (connection === "closed") return;
   if (inMatch) {
