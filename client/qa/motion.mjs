@@ -17,6 +17,9 @@
 // motion.samples (screenshots taken), motion.sample.ms (median interval between samples),
 // motion.cssEnd.ms (in-page cross-check: longest remaining finite CSS animation or transition at the
 // trigger, from document.getAnimations), motion.masked.px (idle-animated pixels excluded).
+// Scene cases (scene.*) time the transition directly: trigger click -> last screen-in/screen-out
+// animationend on the page clock (style.css: screen-in 240 ms, screen-out 160 ms). Their
+// motion.screenshot.ms is the screenshot settle, a diagnostic only.
 // motion.chromeShift.px (shared chrome vs Browse rooms at rest) and motion.chromeTravel.px (chrome travel
 // in flight), from chrome.pages.
 //
@@ -156,11 +159,39 @@ function median(xs) {
   return sorted[Math.floor(sorted.length / 2)];
 }
 
+// Scene timer (direct, no screenshots): the first click after arming sets the start; the screen-in and screen-out
+// animations that follow record their end times on the page's clock.
+const SCENE_ARM = () => {
+  window.__qaScene = { start: null, ends: [] };
+  if (window.__qaSceneOn) return;
+  window.__qaSceneOn = true;
+  document.addEventListener("click", () => {
+    if (window.__qaScene.start === null) window.__qaScene.start = performance.now();
+  }, true);
+  document.addEventListener("animationend", (e) => {
+    if (e.animationName === "screen-in" || e.animationName === "screen-out") window.__qaScene.ends.push({ name: e.animationName, t: e.timeStamp });
+  }, true);
+};
+// Settle time of the armed scene change, or null while the screen-in animation has not ended.
+const SCENE_END = () => {
+  const s = window.__qaScene;
+  if (!s || s.start === null || !s.ends.some((e) => e.name === "screen-in")) return null;
+  return Math.round(Math.max(...s.ends.map((e) => e.t)) - s.start);
+};
+async function sceneEnd(page) {
+  const until = Date.now() + MAX_MS;
+  for (;;) {
+    const ms = await page.evaluate(SCENE_END);
+    if (ms !== null || Date.now() > until) return ms;
+    await sleep(20);
+  }
+}
+
 /**
  * Measures one transition. `trigger` performs the action; `arrived` rejects unless the destination
  * is on screen. Never throws for a slow or unstable transition: returns pass false with a detail.
  */
-async function measure(page, { id, limit, trigger, arrived, liveSquare = false }) {
+async function measure(page, { id, limit, trigger, arrived, liveSquare = false, direct = false }) {
   const shot = () => page.screenshot({ animations: "allow", caret: "hide", timeout: 8000 });
   // Two idle frames before the trigger: pixels that still move between them are masked for the case.
   const idle = decode(await shot());
@@ -179,6 +210,7 @@ async function measure(page, { id, limit, trigger, arrived, liveSquare = false }
   let prev = ref;
 
   const t0 = Date.now();
+  if (direct) await page.evaluate(SCENE_ARM);
   await trigger();
   const cssEnd = await page.evaluate(CSS_END);
 
@@ -201,19 +233,25 @@ async function measure(page, { id, limit, trigger, arrived, liveSquare = false }
     "motion.cssEnd.ms": cssEnd,
     "motion.masked.px": masked,
   };
-  if (res.error) {
+  if (res.error && !direct) {
     return { pass: false, detail: `${id}: ${res.error} (${diffs.length} samples)`, metrics };
   }
-  metrics["motion.transition.ms"] = res.ms;
+  // A scene change is timed from the trigger click to its last screen animation ending (style.css: screen-in 240 ms,
+  // screen-out 160 ms). The screenshot settle is a diagnostic only: its sampling cost is the host's, not the transition's.
+  const ms = direct ? await sceneEnd(page) : res.ms;
+  if (ms === null) return { pass: false, detail: `${id}: no screen-in animation ended after the trigger`, metrics };
+  metrics["motion.transition.ms"] = ms;
+  if (direct) metrics["motion.screenshot.ms"] = res.error ? null : res.ms;
   // The destination must be there: a transition that settles on the wrong screen fails.
   const reached = await arrived().then(
     () => true,
     () => false,
   );
+  const shotNote = direct ? `screenshot settle ${res.error ? "not reached" : `${res.ms} ms`}` : `change began at ${res.startMs} ms`;
   const detail =
-    `${id} settled at ${res.ms} ms, limit ${limit} ms; ${diffs.length} samples, median ${metrics["motion.sample.ms"]} ms apart; `
-    + `change began at ${res.startMs} ms${reached ? "" : "; destination not reached"}`;
-  return { pass: reached && res.ms <= limit, detail, metrics };
+    `${id} ${direct ? "animation ended" : "settled"} at ${ms} ms, limit ${limit} ms; ${diffs.length} samples, median ${metrics["motion.sample.ms"]} ms apart; `
+    + `${shotNote}${reached ? "" : "; destination not reached"}`;
+  return { pass: reached && ms <= limit, detail, metrics };
 }
 
 /** Opens the menu with a valid guest name and waits for it to load. Janky mode stretches animations. */
@@ -429,6 +467,7 @@ const CASES = [
       const { page } = await openMenu(s, "browse");
       return measure(page, {
         id: "scene.menu.browse",
+        direct: true,
         limit: 400,
         trigger: () => button(page, "Browse rooms").evaluate((el) => el.click()),
         arrived: () => button(page, "New room").waitFor({ state: "visible", timeout: MAX_MS }),
@@ -445,6 +484,7 @@ const CASES = [
       const lobby = button(page, "Start");
       return measure(page, {
         id: "scene.browse.room",
+        direct: true,
         limit: 400,
         trigger: () => button(page, "Create room").evaluate((el) => el.click()),
         arrived: () => lobby.waitFor({ state: "visible", timeout: MAX_MS }),
@@ -464,6 +504,7 @@ const CASES = [
       const hud = page.locator(".hud-leave");
       return measure(page, {
         id: "scene.room.match",
+        direct: true,
         limit: 400,
         trigger: () => button(page, "Start").evaluate((el) => el.click()),
         arrived: () => hud.waitFor({ state: "visible", timeout: MAX_MS }),
