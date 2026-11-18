@@ -66,7 +66,8 @@ export const replayScreen: ScreenFactory = (ctx) => {
   // Playing-view controls (rebuilt by showPlaying).
   let playBtn: HTMLButtonElement | null = null;
   let seekEl: HTMLInputElement | null = null;
-  let timeEl: HTMLElement | null = null;
+  let timeNowEl: HTMLElement | null = null;
+  let timeTickEl: HTMLElement | null = null;
   let board: Scoreboard | null = null;
   let speedSeg: { set(v: string): void } | null = null;
   // Picker-view status line (rebuilt by showPicker).
@@ -105,16 +106,27 @@ export const replayScreen: ScreenFactory = (ctx) => {
     releaseTop = null;
   }
 
-  function timeText(): string {
-    if (!info) return "";
-    const hz = info.hz;
-    return `${clock((tick - info.first) / hz)} / ${clock((info.end - info.first) / hz)}  ·  tick ${Math.floor(tick)}`;
+  /** The readout: the position against the total (fixed when the replay opens, see showPlaying), and the tick. */
+  function renderTime(): void {
+    if (!info || !timeNowEl || !timeTickEl) return;
+    timeNowEl.textContent = clock((tick - info.first) / info.hz);
+    timeTickEl.textContent = `  ·  tick ${Math.floor(tick)}`;
   }
 
   function seek(t: number): void {
     if (!info) return;
     tick = Math.min(info.end, Math.max(info.first, t));
     board?.clear();
+  }
+
+  /** Seek to the pointer's place along the track. The track's first and last pixels map to the replay's start and end (a press at the far end reaches the end, not a tick short of it). */
+  function seekAt(e: PointerEvent): void {
+    if (!seekEl || !info) return;
+    const r = seekEl.getBoundingClientRect();
+    if (r.width <= 1) return;
+    const f = Math.min(1, Math.max(0, (e.clientX - r.left) / (r.width - 1)));
+    seek(Math.round(info.first + f * (info.end - info.first)));
+    seekEl.value = String(Math.round(tick));
   }
 
   function step(dir: 1 | -1): void {
@@ -141,8 +153,16 @@ export const replayScreen: ScreenFactory = (ctx) => {
     syncControls();
   }
 
+  /** Phones fold the scoreboard and the step and speed controls behind the bar's Scores and the dock's More. The arena's band is refitted to what is open. */
+  function togglePanel(panel: "scores" | "more", btn: HTMLElement): void {
+    const open = !root.classList.contains(`${panel}-open`);
+    root.classList.toggle(`${panel}-open`, open);
+    btn.setAttribute("aria-expanded", String(open));
+    window.dispatchEvent(new Event("resize"));
+  }
+
   function syncControls(): void {
-    if (playBtn) playBtn.replaceChildren(icon(playing ? "pause" : "play", 20), playing ? "Pause" : "Play");
+    if (playBtn) playBtn.replaceChildren(icon(playing ? "pause" : "play", 20), h("span", { class: "replay-play-label" }, playing ? "Pause" : "Play"));
     speedSeg?.set(String(speed));
   }
 
@@ -164,7 +184,7 @@ export const replayScreen: ScreenFactory = (ctx) => {
       board.record(scene, names);
     }
     if (seekEl && !dragging) seekEl.value = String(Math.round(tick));
-    if (timeEl) timeEl.textContent = timeText();
+    renderTime();
   }
 
   const onKey = (e: KeyboardEvent): void => {
@@ -298,13 +318,13 @@ export const replayScreen: ScreenFactory = (ctx) => {
     );
   }
 
-  /** The playback view: close and follow selector on top, transport and seek bar below. */
+  /** The playback view. The bar holds Close, the title, the Scores toggle and the follow selector; the dock is one transport row (play, seek, time, More), and More opens the step and speed controls. Phones fold the scoreboard and those controls; desktop shows both. */
   function showPlaying(): void {
     if (!info) return;
     const loaded = info;
     root.className = "offline playing replay-view";
 
-    playBtn = h("button", { type: "button", class: "primary replay-play", onclick: togglePlay }, icon("play", 20), "Play");
+    playBtn = h("button", { type: "button", class: "primary replay-play", onclick: togglePlay }, icon("play", 20), h("span", { class: "replay-play-label" }, "Play"));
     seekEl = h("input", {
       type: "range",
       min: String(loaded.first),
@@ -312,6 +332,25 @@ export const replayScreen: ScreenFactory = (ctx) => {
       step: "1",
       value: String(loaded.first),
       "aria-label": "Seek",
+      onpointerdown: (ev: Event) => {
+        const e = ev as PointerEvent;
+        if (!seekEl || e.button !== 0) return;
+        e.preventDefault();
+        seekEl.focus();
+        seekEl.setPointerCapture(e.pointerId);
+        dragging = true;
+        seekAt(e);
+      },
+      onpointermove: (ev: Event) => {
+        const e = ev as PointerEvent;
+        if (seekEl?.hasPointerCapture(e.pointerId)) seekAt(e);
+      },
+      onpointerup: () => {
+        dragging = false;
+      },
+      onpointercancel: () => {
+        dragging = false;
+      },
       oninput: () => {
         dragging = true;
         if (seekEl) seek(Number(seekEl.value));
@@ -320,7 +359,17 @@ export const replayScreen: ScreenFactory = (ctx) => {
         dragging = false;
       },
     });
-    timeEl = h("span", { class: "replay-time num" }, timeText());
+    timeNowEl = h("span", { class: "replay-now" });
+    timeTickEl = h("span", { class: "replay-tick" });
+    const timeEl = h(
+      "span",
+      { class: "replay-time num" },
+      timeNowEl,
+      h("span", { class: "replay-sep" }, " / "),
+      h("span", { class: "replay-total" }, clock((loaded.end - loaded.first) / loaded.hz)),
+      timeTickEl,
+    );
+    renderTime();
 
     const followSel = h(
       "select",
@@ -345,11 +394,38 @@ export const replayScreen: ScreenFactory = (ctx) => {
     );
     speedSeg = speedGroup;
 
+    const scoresBtn = h(
+      "button",
+      {
+        type: "button",
+        class: "replay-panel-toggle",
+        "aria-controls": "replay-board",
+        "aria-expanded": "false",
+        onclick: (e: Event) => togglePanel("scores", e.currentTarget as HTMLElement),
+      },
+      icon("list", 18),
+      "Scores",
+    );
+    const moreBtn = h(
+      "button",
+      {
+        type: "button",
+        class: "replay-panel-toggle replay-more",
+        "aria-controls": "replay-controls",
+        "aria-expanded": "false",
+        "aria-label": "More controls",
+        title: "More controls",
+        onclick: (e: Event) => togglePanel("more", e.currentTarget as HTMLElement),
+      },
+      icon("ellipsis", 20),
+    );
+
     const bar = h(
       "header",
       { class: "offline-top offline-overlay" },
       h("button", { type: "button", onclick: leave }, icon("x", 18), "Close"),
       h("h1", { class: "offline-title" }, fileName),
+      scoresBtn,
       followSel,
     );
     board = createScoreboard();
@@ -358,15 +434,15 @@ export const replayScreen: ScreenFactory = (ctx) => {
         "div",
         { class: "replay-head" },
         bar,
-        h("aside", { class: "replay-board playfield-clear", "aria-label": "Scoreboard and kill log" }, board.el, board.events),
+        h("aside", { id: "replay-board", class: "replay-board playfield-clear", "aria-label": "Scoreboard and kill log" }, board.el, board.events),
       ),
       h(
         "main",
         { class: "offline-dock offline-overlay replay-dock playfield-clear" },
-        h("div", { class: "replay-transport" }, playBtn, seekEl, timeEl),
+        h("div", { class: "replay-transport" }, playBtn, seekEl, timeEl, moreBtn),
         h(
           "div",
-          { class: "replay-controls" },
+          { id: "replay-controls", class: "replay-controls" },
           h(
             "div",
             { class: "replay-step", role: "group", "aria-label": "Jump and step" },
