@@ -18,6 +18,7 @@ import {
   type KeyBindings,
   type Motion,
   type Palette,
+  type Prefs,
   type Theme,
   type TouchAction,
   type TouchSlot,
@@ -70,6 +71,16 @@ const SECTIONS = [
   { id: "chat", label: "Chat", icon: "message-square" },
 ] as const;
 type SectionId = (typeof SECTIONS)[number]["id"];
+
+/** The settings each section owns; its "Reset" button puts exactly these back to their defaults. */
+const SECTION_PREFS: Record<SectionId, (keyof Prefs)[]> = {
+  controls: ["keys"],
+  touch: ["touchScale", "touchLeftHanded", "touchLayout"],
+  sound: ["volume", "muted", "musicVolume", "musicMuted", "matchMusicMuted", "sfxVolume", "uiSounds", "jukeboxVolume"],
+  display: ["theme", "renderScale", "antialias", "showStats", "color"],
+  access: ["motion", "textScale", "readableFont", "captions", "palette"],
+  chat: ["filterProfanity"],
+};
 
 function labelOf(action: Action): string {
   return ACTIONS.find((a) => a.action === action)?.label ?? action;
@@ -374,6 +385,19 @@ export const settingsScreen: ScreenFactory = (ctx) => {
     ctx.toast("Settings reset to the defaults.");
   }
 
+  /** One section's settings back to their defaults; the rest of the page is untouched. */
+  function resetSection(id: SectionId, title: string): void {
+    if (id === "controls") {
+      stopCapture();
+      conflict = null;
+      notice = null;
+    }
+    const patch = Object.fromEntries(SECTION_PREFS[id].map((key) => [key, DEFAULT_PREFS[key]])) as Partial<Prefs>;
+    prefs.set(patch);
+    if ("showStats" in patch) store.set({ showStats: DEFAULT_PREFS.showStats });
+    ctx.toast(`${title} reset to the defaults.`);
+  }
+
   function confirmReset(): void {
     const modal = openModal({
       title: "Reset settings?",
@@ -550,6 +574,7 @@ export const settingsScreen: ScreenFactory = (ctx) => {
       h("h2", { id: `settings-${id}-title` }, name ? icon(name, 22) : null, title),
       hint ? h("p", { class: "field-hint" }, hint) : null,
       ...content,
+      h("div", { class: "settings-group" }, h("button", { type: "button", class: "quiet", onclick: () => resetSection(id, title) }, icon("rotate-ccw", 18), `Reset ${title.toLowerCase()} to defaults`)),
     );
     bodies.set(id, el);
     return el;

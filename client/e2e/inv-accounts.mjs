@@ -356,7 +356,7 @@ async function profileStates(s) {
   await loadingDialog.getByRole("button", { name: "Close", exact: true }).click();
   await ap.unroute("**/api/players/**");
 
-  // error, then Retry succeeds
+  // error, then Try again succeeds
   let failed = false;
   await ap.route("**/api/players/**", async (route) => {
     if (!failed) {
@@ -367,7 +367,7 @@ async function profileStates(s) {
   });
   const errDialog = await openProfile();
   await errDialog.getByText(`Couldn't load ${b.userName}`, { exact: false }).waitFor();
-  await errDialog.getByRole("button", { name: "Retry", exact: true }).click();
+  await errDialog.getByRole("button", { name: "Try again", exact: true }).click();
   await errDialog.getByText("Level 1", { exact: false }).first().waitFor();
   await errDialog.getByRole("button", { name: "Close", exact: true }).click();
   await ap.unroute("**/api/players/**");
@@ -377,7 +377,7 @@ async function profileStates(s) {
   const emptyDialog = await openProfile();
   await emptyDialog.getByText(`No profile for ${b.userName}. Only signed-in players have one.`, { exact: false }).waitFor();
   await ap.unroute("**/api/players/**");
-  return "profile loading, error then Retry, and 404 empty state";
+  return "profile loading, error then Try again, and 404 empty state";
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -563,7 +563,12 @@ async function settingsReset(s) {
   await page.getByRole("dialog", { name: /Reset settings/ }).getByRole("button", { name: "Reset everything", exact: true }).click();
   await page.getByText("Settings reset to the defaults.", { exact: true }).waitFor();
   check((await prefs(page)).volume === 0.6, "reset did not restore the default volume");
-  return "reset cancel keeps values, confirm restores defaults";
+  await section(page, "Sound");
+  await page.getByRole("slider", { name: "Volume", exact: true }).fill("30");
+  await button(page, "Reset sound to defaults").click();
+  await page.getByText("Sound reset to the defaults.", { exact: true }).waitFor();
+  check((await prefs(page)).volume === 0.6, "section reset did not restore the Sound volume");
+  return "reset cancel keeps values, confirm restores defaults, section reset restores one group";
 }
 
 async function settingsPrefs(s) {
