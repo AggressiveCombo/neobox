@@ -69,6 +69,13 @@ const CAPTIONS: Partial<Record<number, string>> = {
   20: "Fanfare",
 };
 
+/** Caption text for the interface cues that end a match: the victory and defeat jingles. */
+const UI_CAPTIONS: Partial<Record<UiSound, string>> = { win: "Victory fanfare", lose: "Defeat" };
+
+/** QA hook (like __qaClip): the engine sound kinds played this session, and those that got a caption. The game never reads it. */
+const qaSounds = { emitted: new Set<number>(), captioned: new Set<number>() };
+Object.assign(globalThis, { __qaSounds: qaSounds });
+
 /** Every distinct file, loaded once on the first gesture. */
 const FILES = [...new Set(Object.values(CLIPS).flatMap((clips) => clips ?? []))];
 
@@ -114,12 +121,20 @@ export class Sfx {
   /** Play an engine sound kind at a volume (0..1), panned (-1 left .. 1 right). Repeats of one kind are rate-limited. */
   play(kind: number, volume: number, pan = 0): void {
     if (this.sceneMuted) return;
+    qaSounds.emitted.add(kind);
+    const text = CAPTIONS[kind];
+    if (text && prefs.value.captions) {
+      qaSounds.captioned.add(kind);
+      showCaption(text);
+    }
     const level = prefs.value.volume * prefs.value.sfxVolume * clamp01(volume);
     this.trigger(kind, level, pan);
   }
 
   /** An interface sound, when the "Interface sounds" switch is on. */
   ui(name: UiSound): void {
+    const text = UI_CAPTIONS[name];
+    if (text && prefs.value.captions) showCaption(text);
     if (!prefs.value.uiSounds) return;
     this.trigger(name, prefs.value.volume * UI_LEVEL * (name === "hover" ? HOVER_LEVEL : 1), 0);
   }
@@ -183,7 +198,6 @@ export class Sfx {
       gain.connect(ctx.destination);
     }
     src.start();
-    if (typeof key === "number" && prefs.value.captions) showCaption(CAPTIONS[key] ?? "");
   }
 }
 
@@ -211,6 +225,7 @@ function clamp01(v: number): number {
 
 /** The one audio engine of the page. */
 export const sfx = new Sfx();
+Object.assign(globalThis, { __qaSfx: sfx });
 
 /** What a hover tick marks: the things a click acts on. */
 const HOVERABLE = "button:not(:disabled), a[href], summary, select:not(:disabled), [role='tab'], .seg-option, label:has(> input:not(:disabled))";
