@@ -1,7 +1,10 @@
 // Inventory rows for the match HUD, its menu, chat, input, offline, phone and editor screens. Each scenario names
 // the rows it proves in `inv`; every check asserts a row's "shows" column, with role/name locators where they exist.
 
-import { button, createRoom, dismissPhoneSplash, joinByInvite, matchWithGuest, menuName, playFromMenu, probeChanges, roomTitle, signedIn, sleep, startMatch, uniqueName, waitForPixels, waitQuiet } from "./lib.mjs";
+import { builtinMaps, button, createRoom, dismissPhoneSplash, joinByInvite, matchWithGuest, menuName, navTo, playFromMenu, probeChanges, roomTitle, signedIn, sleep, startMatch, uniqueName, waitForPixels, waitQuiet } from "./lib.mjs";
+import { mkdtempSync } from "node:fs";
+import os from "node:os";
+import path from "node:path";
 
 const check = (ok, message) => {
   if (!ok) throw new Error(message);
@@ -202,6 +205,8 @@ async function matchDefaults(s) {
   const { host } = await matchWithGuest(s, { clipboard: true });
   const { page } = host;
   await waitForPixels(host, "match canvas");
+  // Keys go to the host's page; bring it to front after the guest's page was opened.
+  await page.bringToFront();
   // Frames freeze during the start countdown (see roomMatch in scenarios.mjs); wait it out before holding keys.
   await sleep(4000);
   const held = async (code) => {
@@ -214,7 +219,13 @@ async function matchDefaults(s) {
   };
   check((await held("KeyD")) > 0, "holding KeyD (right) does not change the canvas");
   check((await held("KeyA")) > 0, "holding KeyA (left) does not change the canvas");
-  check((await held("Space")) > 0, "holding Space (jump) does not change the canvas");
+  // A jump needs ground (or the single air jump); a first press can land while the host is still airborne from D/A.
+  let jumped = 0;
+  for (let attempt = 0; attempt < 3 && jumped === 0; attempt++) {
+    if (attempt > 0) await sleep(1000);
+    jumped = await held("Space");
+  }
+  check(jumped > 0, "holding Space (jump) does not change the canvas");
   return "KeyD, KeyA and Space change the match canvas";
 }
 
@@ -480,24 +491,35 @@ async function matchChatRecord(s) {
   return "/record reports the clip as saved in the match chat log";
 }
 
-/** A phone host alone in a public room; its match runs with the rotate gate up unless `dismissGate` clears it. */
-async function phoneSoloMatch(s, { dismissGate }) {
+/**
+ * A phone host alone in a public room; its match runs with the rotate gate up unless `dismissGate` clears it.
+ * `portrait` holds the phone upright. Firefox's non-mobile phone context (phoneOptions) keeps the window size and
+ * drops the phone viewport on the splash step, so the viewport is set after that step, right before the match.
+ */
+async function phoneSoloMatch(s, { dismissGate, portrait = false }) {
   const host = await s.open("phone", { phone: true, name: uniqueName("phone") });
   const roomName = uniqueName("room");
   await createRoom(host, s.base, roomName, { isPublic: true });
   await dismissPhoneSplash(host.page);
+  if (portrait) {
+    await host.page.setViewportSize({ width: 390, height: 844 });
+    await host.page.waitForFunction(() => innerWidth === 390);
+  }
   await startMatch(host, [], { keepRotateGate: !dismissGate });
   return host;
 }
 
 /** hud-rotate: a portrait phone in a running match shows the turn-sideways dialog with Full screen and Play in portrait anyway. */
 async function matchRotateGate(s) {
-  const { page } = await phoneSoloMatch(s, { dismissGate: false });
+  const { page } = await phoneSoloMatch(s, { dismissGate: false, portrait: true });
   const gate = page.getByRole("dialog", { name: "Turn your phone sideways", exact: true });
   await gate.waitFor({ state: "visible" });
-  check(await gate.getByRole("button", { name: "Full screen" }).isVisible(), "rotate gate has no visible Full screen button");
+  // Full screen is offered only where the browser can go full screen (hud.ts rotateGate: hidden when unsupported).
+  const fullscreen = await page.evaluate(() => document.fullscreenEnabled === true);
+  const fullVisible = await gate.getByRole("button", { name: "Full screen" }).isVisible();
+  check(fullVisible === fullscreen, `rotate gate Full screen visible=${fullVisible}, but the browser fullscreenEnabled=${fullscreen}`);
   check((await gate.getByRole("button", { name: "Play in portrait anyway", exact: true }).count()) === 1, "rotate gate has no Play in portrait anyway button");
-  return 'portrait phone match: the rotate dialog shows Full screen and "Play in portrait anyway"';
+  return `portrait phone match: the rotate dialog shows "Play in portrait anyway" and Full screen ${fullscreen ? "(browser supports it)" : "hidden (browser has no fullscreen)"}`;
 }
 
 /** hud-chat (touch Chat button): on a phone the top-bar Chat button opens the chat form on tap and closes it on a second tap. */
@@ -527,9 +549,45 @@ async function matchQuickAlone(s) {
   return `quick play alone shows "${text}"`;
 }
 
+/** Opens the Sweaty Bois quick-play card from the menu and waits for the match HUD. */
+async function quickSweaty(page) {
+  await playFromMenu(page, null, { quick: true });
+  await page.locator(".quick-card", { hasText: "Sweaty Bois" }).locator(".quick-choose").click();
+  await page.locator(".hud-leave").waitFor({ state: "visible", timeout: 30_000 });
+}
+
+/**
+ * hud-xp and xp-quick: a signed-in player who wins a Sweaty Bois game (two round wins) gets the quick-play XP chip.
+ * A rival that joins a solo round ends it as a draw; once the next round starts both are alive, and the rival's leave
+ * hands the round to the winner. Each rival stays about 12 s (round over plus intro) before it leaves.
+ */
+async function matchQuickXp(s) {
+  const winner = await signedIn(s, "xpwin", uniqueName("xpwin"));
+  await quickSweaty(winner.page);
+  const chip = winner.page.locator(".hud-xp");
+  // the chip shows for three seconds, so the poll runs right after each rival leaves
+  for (let attempt = 0; attempt < 6; attempt++) {
+    const rival = await s.open(`xp-rival${attempt}`, { name: uniqueName("rival") });
+    await rival.page.goto(s.base);
+    await menuName(rival.page).waitFor();
+    await quickSweaty(rival.page);
+    await sleep(12_000);
+    await rival.page.locator(".hud-leave").click();
+    await rival.context.close();
+    if (await chip.waitFor({ state: "visible", timeout: 15_000 }).then(() => true, () => false)) {
+      const gained = ((await winner.page.locator(".hud-xp-gain").textContent()) ?? "").trim();
+      check(gained === "+50 xp", `quick-play win shows "${gained}", not the first-place quick award +50 xp`);
+      return `signed-in quick-play win shows the XP chip "${gained}"`;
+    }
+    // the round went on: another rival makes the next one
+  }
+  throw new Error("the signed-in quick-play winner never got the XP chip");
+}
+
 /** hud-error: the server refuses sign-out; the player stays signed in and an error toast shows (hud.ts signOut). */
 async function matchSignOutError(s) {
-  const host = await signedIn(s, "acct", uniqueName("acct"));
+  // The service worker passes /api through, and WebKit does not route those fetches for a controlled page: block it here so the route below sees the sign-out.
+  const host = await signedIn(s, "acct", uniqueName("acct"), { serviceWorkers: "block" });
   await createRoom(host, s.base, uniqueName("room"), { isPublic: true });
   await startMatch(host, []);
   const { page } = host;
@@ -546,6 +604,310 @@ async function matchSignOutError(s) {
   check(text.length > 0, "the error toast is empty");
   check(await menuItem(page, "Sign out").isVisible(), "the player lost the signed-in menu after a refused sign-out");
   return `refused sign-out shows the error toast ("${text}") and the player stays signed in`;
+}
+
+const back = (page) => button(page, "Back").first();
+const editorCanvas = (page) => page.locator("canvas.editor-canvas");
+
+/** jukebox-url-enter, jukebox-panel, jukebox-toasts and toast-host: a pasted link suggests a play; the panel opens; a bad link in the box toasts an error. */
+async function matchJukebox(s) {
+  const roomName = uniqueName("jb");
+  const host = await s.open("jb-host", { name: uniqueName("jh") });
+  const code = await createRoom(host, s.base, roomName, { isPublic: true });
+  const guest = await s.open("jb-guest", { name: uniqueName("jg") });
+  await joinByInvite(guest, s.base, code, roomName);
+  const chat = guest.page.getByLabel("Chat message", { exact: true });
+  await chat.fill("https://www.youtube.com/watch?v=dQw4w9WgXcQ");
+  await chat.press("Enter");
+  const play = host.page.getByRole("button", { name: "Play on jukebox" });
+  await play.waitFor({ timeout: 15_000 });
+  await play.click();
+  await host.page.getByLabel("Jukebox", { exact: true }).waitFor({ state: "visible" });
+  await guest.page.getByLabel("Jukebox", { exact: true }).waitFor({ state: "visible" });
+  const url = host.page.getByLabel("YouTube link", { exact: true });
+  await url.fill("hello");
+  await url.press("Enter");
+  const toast = host.page.locator(".toast.toast-error").filter({ hasText: "Paste a YouTube video link." });
+  await toast.waitFor({ state: "visible" });
+  check((await toast.getAttribute("role")) === "alert", "the error toast has no alert role");
+  return "suggestion, panel on both pages, and the bad-link error toast";
+}
+
+/** screen-transition: a menu change animates the entering screen and the frozen old one (document.getAnimations during the change). */
+async function matchScreenTransition(s) {
+  const visitor = await s.open("tr", { name: uniqueName("tr") });
+  const { page } = visitor;
+  await page.goto(s.base);
+  await menuName(page).waitFor();
+  const animated = async (go) => {
+    await page.evaluate(() => {
+      const names = new Set();
+      window.__animNames = names;
+      const end = performance.now() + 1500;
+      const sample = () => {
+        for (const a of document.getAnimations()) names.add(a.animationName ?? a.constructor.name);
+        if (performance.now() < end) requestAnimationFrame(sample);
+      };
+      sample();
+    });
+    await go();
+    await sleep(1600);
+    return page.evaluate(() => [...window.__animNames]);
+  };
+  const settings = await animated(() => navTo(page, "Settings"));
+  check(settings.length > 0, "opening Settings ran no animation");
+  await back(page).click();
+  await menuName(page).waitFor();
+  const library = await animated(() => navTo(page, "Library"));
+  check(library.length > 0, "opening Library ran no animation");
+  await back(page).click();
+  await menuName(page).waitFor();
+  return `Settings animated [${settings.join(", ")}]; Library animated [${library.join(", ")}]`;
+}
+
+/** boot-splash: the boot card is up while the page loads (status role, Loading label) and hides once the menu is ready. */
+async function matchBoot(s) {
+  const h = await s.open("boot");
+  const { page } = h;
+  await page.goto(s.base, { waitUntil: "commit" });
+  await page.waitForFunction(() => document.getElementById("boot") !== null, null, { timeout: 10_000 });
+  const boot = page.locator("#boot");
+  check((await boot.getAttribute("role")) === "status", "boot card has no status role");
+  check((await boot.getAttribute("aria-label")) === "Loading neobox", "boot card is not labelled Loading neobox");
+  await menuName(page).waitFor();
+  await page.waitForFunction(() => {
+    const el = document.getElementById("boot");
+    return el === null || el.hidden;
+  });
+  return "boot card (status, Loading neobox) shown on load, hidden once the menu is up";
+}
+
+/** phone-splash-play and phone-splash-dismiss: a touch-only first visit shows the Welcome sheet; Play closes it and it stays gone after a reload. */
+async function matchPhoneSplash(s) {
+  const h = await s.open("splash", { phone: true });
+  const { page } = h;
+  await page.goto(s.base);
+  const welcome = page.getByRole("dialog", { name: "Welcome", exact: true });
+  await welcome.waitFor({ state: "visible" });
+  await welcome.getByRole("button", { name: "Play", exact: true }).click();
+  await welcome.waitFor({ state: "detached" });
+  await menuName(page).waitFor();
+  await page.reload();
+  await menuName(page).waitFor();
+  await sleep(800);
+  check((await welcome.count()) === 0, "the Welcome sheet came back after a reload");
+  return "Welcome sheet: Play closes it to the menu; it stays gone after reload";
+}
+
+/** practice-setup and practice-play: the setup lists the built-in maps with Start; a map plays, Leave returns to setup, Back to the menu. */
+async function matchPractice(s) {
+  const h = await s.open("practice");
+  const { page } = h;
+  await page.goto(s.base);
+  await menuName(page).waitFor();
+  await navTo(page, "Practice");
+  const choices = page.locator(".offline-list .offline-choice");
+  await choices.first().waitFor({ state: "visible" });
+  const maps = await builtinMaps(s.base);
+  const shown = await choices.count();
+  check(shown === maps.length, `practice lists ${shown} map choices, the server has ${maps.length}`);
+  await button(page, "Start").waitFor({ state: "visible" });
+  await choices.first().click();
+  await button(page, "Start").click();
+  await page.locator(".offline.playing").waitFor();
+  await waitForPixels(h, "practice canvas");
+  await button(page, "Leave").click();
+  await button(page, "Start").waitFor({ state: "visible" });
+  await back(page).click();
+  await menuName(page).waitFor();
+  return `${shown} map choices and Start; the first map plays, Leave returns to setup, Back to the menu`;
+}
+
+/** training-hall: Next advances the lesson text; Replay tutorial returns to lesson 1; Leave returns to the menu. */
+async function matchTraining(s) {
+  const h = await s.open("training");
+  const { page } = h;
+  await page.goto(s.base);
+  await menuName(page).waitFor();
+  await navTo(page, "Training");
+  const text = page.locator(".training-text");
+  const count = page.locator(".training-count");
+  await text.waitFor({ state: "visible" });
+  const first = ((await text.textContent()) ?? "").trim();
+  check((await count.textContent())?.startsWith("1 of"), `first lesson counter reads "${await count.textContent()}"`);
+  await page.getByRole("button", { name: /^Next/ }).click();
+  await count.filter({ hasText: "2 of" }).waitFor({ state: "visible" });
+  const second = ((await text.textContent()) ?? "").trim();
+  check(second !== first, "Next did not change the lesson text");
+  await button(page, "Replay tutorial").click();
+  await count.filter({ hasText: "1 of" }).waitFor({ state: "visible" });
+  check(((await text.textContent()) ?? "").trim() === first, "Replay tutorial did not return to lesson 1");
+  await button(page, "Leave").click();
+  await menuName(page).waitFor();
+  return "Next changes the lesson, Replay tutorial returns to lesson 1, Leave returns to the menu";
+}
+
+/** NEW-replay-save, replay-picker and replay-view: a match's Save replay downloads a .nbreplay that the Replay screen opens and plays. */
+async function matchReplay(s) {
+  const { host } = await matchWithGuest(s, { clipboard: false });
+  await waitForPixels(host, "match canvas");
+  await host.page.locator(".hud-end").click();
+  // a closed dialog stays in the DOM while it animates out, so only an open one counts
+  const endDialog = host.page.getByRole("alertdialog", { name: "End the match?", exact: true }).and(host.page.locator("dialog[open]"));
+  await endDialog.waitFor();
+  await endDialog.getByRole("button", { name: "End match", exact: true }).click();
+  const save = button(host.page, "Save replay");
+  await save.waitFor();
+  const [download] = await Promise.all([host.page.waitForEvent("download"), save.click()]);
+  check(download.suggestedFilename().endsWith(".nbreplay"), `download is ${download.suggestedFilename()}`);
+  const dir = mkdtempSync(path.join(os.tmpdir(), "neobox-replay-"));
+  const file = path.join(dir, download.suggestedFilename());
+  await download.saveAs(file);
+  await host.page.goto(s.base);
+  await menuName(host.page).waitFor();
+  await navTo(host.page, "Replay");
+  // replay-picker: the Replay screen takes a .nbreplay file
+  const picker = host.page.locator("input[type=file]").first();
+  await picker.waitFor({ state: "attached" });
+  check(((await picker.getAttribute("accept")) ?? "").includes(".nbreplay"), "the replay file input does not accept .nbreplay");
+  await picker.setInputFiles(file);
+  await host.page.locator(".offline.playing").waitFor();
+  await waitForPixels(host, "replay canvas");
+  // replay-view: Play and Pause toggle; the seek bar moves the replay
+  await button(host.page, "Play").click();
+  await button(host.page, "Pause").waitFor({ state: "visible" });
+  await button(host.page, "Pause").click();
+  await button(host.page, "Play").waitFor({ state: "visible" });
+  const seek = host.page.getByLabel("Seek", { exact: true });
+  const target = String(Math.floor(Number(await seek.getAttribute("max")) / 2));
+  await seek.fill(target);
+  check((await seek.inputValue()) === target, "the seek bar did not take the new position");
+  return `saved ${download.suggestedFilename()}; the Replay screen opened it, Play/Pause toggled, seek moved`;
+}
+
+/** editor-page, editor-menu and editor-testplay: the editor canvas and tools, its Menu with the built-in maps and share code, and Test play. */
+async function matchEditorMenu(s) {
+  const user = await signedIn(s, "edmenu");
+  const { page } = user;
+  await navTo(page, "Map editor");
+  const canvas = editorCanvas(page);
+  await canvas.waitFor({ state: "visible" });
+  // The canvas takes the stage's size (the side panel and viewport decide it); its backing store follows that box at the device ratio.
+  const size = await canvas.evaluate((c) => ({ w: c.width, h: c.height, cssW: c.clientWidth, cssH: c.clientHeight, dpr: Math.min(window.devicePixelRatio || 1, 2) }));
+  check(size.cssW > 0 && size.cssH > 0, `editor canvas has no box (${size.cssW}x${size.cssH})`);
+  check(Math.abs(size.w - Math.round(size.cssW * size.dpr)) <= 1 && Math.abs(size.h - Math.round(size.cssH * size.dpr)) <= 1, `editor canvas backing ${size.w}x${size.h} does not match its box ${size.cssW}x${size.cssH} at ${size.dpr}x`);
+  for (const name of ["Box", "Select", "Undo", "Redo", "Menu"]) await button(page, name).waitFor({ state: "visible" });
+  const menu = page.locator(".editor-menu");
+  const items = page.locator(".editor-list .editor-item");
+  await button(page, "Menu").click();
+  await menu.waitFor({ state: "visible" });
+  const maps = await builtinMaps(s.base);
+  check((await items.count()) === maps.length, `editor menu lists ${await items.count()} maps, the server has ${maps.length}`);
+  await button(page, "Close").click();
+  await menu.waitFor({ state: "hidden" });
+  // a built-in map from the menu; a fresh editor has nothing to replace
+  await button(page, "Menu").click();
+  await items.first().click();
+  const replace = page.getByRole("alertdialog", { name: "Replace the current map?", exact: true });
+  if (await replace.waitFor({ state: "visible", timeout: 1500 }).then(() => true, () => false)) {
+    await replace.getByRole("button", { name: "Replace map", exact: true }).click();
+  }
+  await menu.waitFor({ state: "hidden" });
+  await button(page, "Menu").click();
+  await menu.waitFor({ state: "visible" });
+  const code = await page.locator("textarea.editor-code").inputValue();
+  check(code.length > 0, "share code is empty");
+  await button(page, "Close").click();
+  await menu.waitFor({ state: "hidden" });
+  // editor-testplay: Test play starts an offline match; Edit returns to the canvas
+  await button(page, "Test play").click();
+  const title = page.locator(".offline.playing .offline-title");
+  await title.waitFor({ state: "visible" });
+  check(((await title.textContent()) ?? "").trim().length > 0, "test play shows no match title");
+  await button(page, "Edit").click();
+  await canvas.waitFor({ state: "visible" });
+  return "editor canvas drawn at its box with tools; Menu lists the built-in maps and Close hides it; Test play then Edit";
+}
+
+/** modal-kit and editor-save-dialog: Save to library opens a modal with Map name and Upload; Cancel closes it. editor-toasts: Upload saves and toasts. */
+async function matchEditorSave(s) {
+  const user = await signedIn(s, "edsave");
+  const { page } = user;
+  await navTo(page, "Map editor");
+  await editorCanvas(page).waitFor({ state: "visible" });
+  const modal = page.locator("dialog.modal[open]");
+  await button(page, "Menu").click();
+  await page.getByRole("button", { name: "Save to library", exact: true }).click();
+  await modal.waitFor({ state: "visible" });
+  check((await modal.count()) === 1, `${await modal.count()} modals open after Save to library`);
+  check(await modal.getByLabel("Map name", { exact: true }).isVisible(), "save dialog has no Map name field");
+  check(await modal.getByRole("button", { name: "Upload", exact: true }).isVisible(), "save dialog has no Upload button");
+  await modal.getByRole("button", { name: "Cancel", exact: true }).click();
+  await modal.waitFor({ state: "hidden" });
+  const name = uniqueName("edsave");
+  await button(page, "Menu").click();
+  await page.getByRole("button", { name: "Save to library", exact: true }).click();
+  await modal.getByLabel("Map name", { exact: true }).fill(name);
+  await modal.getByRole("button", { name: "Upload", exact: true }).click();
+  await page.locator(".toast-info").filter({ hasText: "Saved to your library" }).waitFor({ state: "visible" });
+  return `Save dialog (Map name, Upload) closes on Cancel; Upload toasts "Saved to your library" (${name})`;
+}
+
+/** editor-save-dialog (guest variant): a guest's Save to library opens the modal that asks them to sign in. */
+async function matchEditorGuest(s) {
+  const guest = await s.open("edguest", { name: uniqueName("edg") });
+  const { page } = guest;
+  await page.goto(s.base);
+  await menuName(page).waitFor();
+  await navTo(page, "Map editor");
+  await editorCanvas(page).waitFor({ state: "visible" });
+  await button(page, "Menu").click();
+  for (const name of ["Save to library", "Load file", "Download", "Copy map code", "New map"]) {
+    check(await page.getByRole("button", { name, exact: true }).first().isVisible(), `editor menu has no ${name}`);
+  }
+  await page.getByRole("button", { name: "Save to library", exact: true }).click();
+  const modal = page.locator("dialog.modal[open]");
+  await modal.waitFor({ state: "visible" });
+  check((await modal.count()) === 1, `${await modal.count()} modals open for a guest save`);
+  await modal.getByText("Sign in to save maps to your library.").waitFor({ state: "visible" });
+  await modal.getByRole("button", { name: /^(Cancel|Close)$/ }).first().click();
+  await modal.waitFor({ state: "hidden" });
+  return "guest Save to library shows the sign-in prompt in one modal";
+}
+
+/** postgame: a private room's signed-in host and guest see Game over with an XP line; Escape closes the host's; the room roster shows the level chip. */
+async function matchPostgame(s) {
+  const user = await signedIn(s, "pg");
+  const { page } = user;
+  const roomName = uniqueName("pg");
+  const code = await createRoom(user, s.base, roomName, { isPublic: false });
+  const guest = await signedIn(s, "pgg");
+  await joinByInvite(guest, s.base, code, roomName);
+  await page.locator("li.room-player").filter({ hasText: guest.userName }).waitFor();
+  // a map with no ground and one life each: the match ends by itself
+  const voidMap = '{"b":[],"j":[],"s":[{"1":15,"2":10},{"1":25,"2":10}],"p":[],"tu":[],"tc":[],"gp":[],"c":[],"set":{"3":40,"15":40,"16":25}}';
+  await button(page, "Change map").click();
+  await page.getByLabel("Map code or JSON", { exact: true }).fill(voidMap);
+  await button(page, "Use code").click();
+  const chat = page.getByLabel("Chat message", { exact: true });
+  await chat.fill("/mode 1");
+  await chat.press("Enter");
+  await chat.fill("/set objectiveLimit 1");
+  await chat.press("Enter");
+  await page.locator("div.room-chat-log").getByText("objectiveLimit: 1").waitFor();
+  await button(page, "Start").click();
+  const panel = page.getByRole("dialog", { name: "Game over" });
+  await panel.waitFor({ timeout: 60_000 });
+  const xp = panel.getByText(/\+\d+ xp/);
+  // the count runs up to the award after a short delay; read it once it lands
+  await panel.getByText(/\+[1-9]\d* xp/).waitFor();
+  const guestPanel = guest.page.getByRole("dialog", { name: "Game over" });
+  await guestPanel.waitFor({ timeout: 20_000 });
+  const gain = (await xp.textContent())?.trim();
+  await page.keyboard.press("Escape");
+  await panel.waitFor({ state: "detached" });
+  await page.locator("span.room-level").filter({ hasText: /^Lv \d+$/ }).first().waitFor();
+  return `Game over on both pages with "${gain}"; Escape closes it; level chip shows`;
 }
 
 export const matchInvScenarios = [
@@ -566,4 +928,16 @@ export const matchInvScenarios = [
   { name: "inv match phone chat", inv: ["hud-chat (touch Chat button)"], run: matchPhoneChat },
   { name: "inv match matching", inv: ["hud-matching"], run: matchQuickAlone },
   { name: "inv match sign-out error", inv: ["hud-error"], run: matchSignOutError },
+  { name: "inv match quick xp", inv: ["hud-xp", "xp-quick"], run: matchQuickXp },
+  { name: "inv match jukebox", inv: ["jukebox-url-enter", "jukebox-panel", "jukebox-toasts", "toast-host"], run: matchJukebox },
+  { name: "inv match screen transition", inv: ["screen-transition", "modal-kit"], run: matchScreenTransition },
+  { name: "inv match boot", inv: ["boot-splash"], run: matchBoot },
+  { name: "inv match phone splash", inv: ["phone-splash-play", "phone-splash-dismiss"], run: matchPhoneSplash },
+  { name: "inv match practice", inv: ["practice-setup", "practice-play"], run: matchPractice },
+  { name: "inv match training", inv: ["training-hall"], run: matchTraining },
+  { name: "inv match replay", inv: ["NEW-replay-save", "replay-picker", "replay-view"], run: matchReplay },
+  { name: "inv match editor menu", inv: ["editor-page", "editor-menu", "editor-testplay"], run: matchEditorMenu },
+  { name: "inv match editor save", inv: ["editor-save-dialog", "editor-toasts"], run: matchEditorSave },
+  { name: "inv match editor guest", inv: ["editor-save-dialog (guest)"], run: matchEditorGuest },
+  { name: "inv match postgame", inv: ["postgame"], run: matchPostgame },
 ];
