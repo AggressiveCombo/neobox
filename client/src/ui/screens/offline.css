@@ -17,6 +17,35 @@
   margin-inline: auto;
 }
 
+/* Server screens with no connection: what is unavailable, and Retry. */
+.offline-state {
+  display: grid;
+  gap: 12px;
+  justify-items: start;
+}
+
+.offline-state h2 {
+  font-size: var(--step-lead);
+  font-weight: 500;
+}
+
+.offline-state p {
+  margin: 0;
+  color: var(--muted);
+}
+
+.offline-state-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.offline-state-note {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--step-small);
+}
+
 .offline-status {
   min-height: 1.45em;
   color: var(--muted);

@@ -345,6 +345,13 @@ export function start(): Store<AppState> {
     }
   });
 
+  /** The offline page's Retry once the server answers: Browse needs its socket (welcome mounts the list); the rest mount. */
+  function reopen(screen: Screen): void {
+    if (screen !== "browse") mount(screen);
+    else if (store.state.name === "") store.set({ screen: "menu" });
+    else play(store.state.name);
+  }
+
   /** Mount a screen factory's output, replacing whatever is shown. */
   function mount(screen: Screen): void {
     current?.destroy();
@@ -356,7 +363,7 @@ export function start(): Store<AppState> {
       hud = hudHandle;
       handle = hudHandle;
     } else {
-      handle = offlineShown ? offlinePage(ctx, screen) : SCREEN_FACTORIES[screen](ctx);
+      handle = offlineShown ? offlinePage(ctx, screen, () => reopen(screen)) : SCREEN_FACTORIES[screen](ctx);
     }
     const from = mounted;
     const leaving = current?.el ?? null;
@@ -541,8 +548,8 @@ export function start(): Store<AppState> {
     }
   }
 
-  /** Back to the main menu, forgetting the room and any reconnect in progress. */
-  function resetToMenu(): void {
+  /** Back to `screen` (the main menu by default), forgetting the room and any reconnect in progress. */
+  function resetToMenu(screen: Screen = "menu"): void {
     stopReconnect();
     pendingMatch = null;
     roomCode = null;
@@ -551,7 +558,7 @@ export function start(): Store<AppState> {
     pendingThen = null;
     saveSeat();
     store.set({
-      screen: "menu",
+      screen,
       myId: null,
       serverName: "",
       rooms: [],
@@ -692,6 +699,8 @@ export function start(): Store<AppState> {
         }
         const queue = store.state.intent;
         store.set({ serverName: msg.server, screen: queue === null ? "browse" : "quick", intent: null });
+        // The offline page for Browse waits on this welcome: mount the list now that the socket is open.
+        if (offlineShown) mount(store.state.screen);
         net.send({ t: "list_rooms" });
         if (pendingJoin !== null) {
           // A join on a game server resumes this tab's seat (see joinRoom): if that fails, the server is gone.
@@ -914,8 +923,10 @@ export function start(): Store<AppState> {
         return;
       }
     }
-    resetToMenu();
-    if (notice?.text) toast(notice.text, "error");
+    // Offline, Browse stays where it is: its offline page says so, and Retry reconnects. Other screens go to the menu.
+    const offlineBrowse = !navigator.onLine && store.state.screen === "browse";
+    resetToMenu(offlineBrowse ? "browse" : "menu");
+    if (notice?.text && !offlineBrowse) toast(notice.text, "error");
   }
 
   /** Connect if needed, then say hello with `name`. The welcome message moves the app to the browser. */
@@ -992,11 +1003,10 @@ export function start(): Store<AppState> {
     net.probe();
     retryNow();
   });
-  // A server screen gives way to the offline page while the connection is gone, and comes back with it.
+  // A server screen gives way to the offline page while the connection is gone. Coming back is the page's own Retry.
   const onConnectionChange = (): void => {
-    if (mounted !== null && needsServer(mounted) && offlineShown !== !navigator.onLine) mount(mounted);
+    if (mounted !== null && needsServer(mounted) && !offlineShown && !navigator.onLine) mount(mounted);
   };
-  window.addEventListener("online", onConnectionChange);
   window.addEventListener("offline", () => {
     net.probe();
     onConnectionChange();
