@@ -51,8 +51,8 @@ const EXPECT = {
   showStats: true, color: 0x3366cc, musicMuted: true, matchMusicMuted: true, musicVolume: 0.3, sfxVolume: 0.4, uiSounds: false,
   filterProfanity: false, jukeboxVolume: 0.2, theme: "dark", motion: "reduce", textScale: 1.3, readableFont: true, captions: true,
 };
-// Destructive or irreversible controls are not clicked by the dead-control scan.
-const DEAD_SKIP = /\b(leave|delete|reset|sign out|log out|remove|kick|ban|forfeit|quit|report|block|unfriend|disband|decline|reject|abandon|revoke)\b/i;
+// Controls that leave the harness's fixture (sign out, account delete, filing a report, moderation) are not clicked. Leave, remove, reset, delete and decline act on fixture state, which the scan re-prepares after any change.
+const DEAD_SKIP = /\b(sign out|log out|delete account|report|kick|ban|forfeit|quit|block|unfriend|disband|revoke)\b/i;
 // Names the harness generates as fixture data (room, player, password, map, roster rows): user content, not product controls.
 const FIXTURE_NAME = /^(room|pw|host|guest|user)[a-z0-9]{6,8}(?![a-z])|^Actions for guest[a-z0-9]+|^map[a-z0-9]{5,9} by [a-z0-9]+ \d+ votes ?\d+ plays$/;
 const DEAD_SCREENS = process.env.QA_DEAD_SCREENS ? process.env.QA_DEAD_SCREENS.split(",").map((s) => s.trim()) : STATES.map((st) => st.id);
@@ -539,9 +539,15 @@ async function deadCase(s) {
   }
   pruneInduced(s);
   const file = writeEvidence("dead-controls", { dead, skipped, unclickable, worked });
+  // Skip classes (the reason in each "(...)" suffix), so a skip count is never read without its reason.
+  const byReason = {};
+  for (const s of skipped) {
+    const reason = s.slice(s.lastIndexOf("(") + 1, -1);
+    byReason[reason] = (byReason[reason] ?? 0) + 1;
+  }
   return {
     pass: dead.length === 0,
-    detail: `${dead.length} dead controls of ${clicked} clicked (${dead.slice(0, 10).join("; ") || "none"}); ${skipped.length} skipped; ${unclickable.length} not clickable`,
+    detail: `${dead.length} dead controls of ${clicked} clicked (${dead.slice(0, 10).join("; ") || "none"}); ${skipped.length} skipped (${Object.entries(byReason).map(([k, v]) => `${k} ${v}`).join(", ") || "none"}); ${unclickable.length} not clickable`,
     metrics: {
       "deadControl.count": dead.length,
       "deadControl.clicked": clicked,
