@@ -124,9 +124,9 @@ export const menuScreen: ScreenFactory = (ctx) => {
   const nameError = h("p", { class: "field-error", role: "alert", hidden: true });
   // Server lines with no data say so and offer a retry; the chip in the top bar says the connection is down.
   const onlineText = h("span");
-  const statsRetry = h("button", { type: "button", class: "quiet menu-retry", hidden: true, onclick: () => retryConnection() }, "Retry");
+  const statsRetry = h("button", { type: "button", class: "quiet menu-retry", hidden: true, "aria-label": "Retry players online", onclick: () => retryConnection() }, "Retry");
   const onlineLine = h("p", { class: "menu-online" }, onlineText, statsRetry);
-  const accountRetry = h("button", { type: "button", class: "quiet menu-retry", onclick: () => retryConnection() }, "Retry");
+  const accountRetry = h("button", { type: "button", class: "quiet menu-retry", "aria-label": "Retry account", onclick: () => retryConnection() }, "Retry");
   const accountLine = h("p", { class: "menu-account-line", hidden: true }, h("span", null, "Account unavailable offline"), accountRetry);
   const offlineChip = h("p", { class: "home-offline", role: "status", hidden: true }, "Offline: online play, accounts and the library need a connection");
   const makersLine = h("p", { class: "menu-makers", hidden: true });
@@ -182,7 +182,7 @@ export const menuScreen: ScreenFactory = (ctx) => {
       accountBtn.replaceChildren(swatch, h("span", { class: "home-level" }, `Level ${levelOf(acc.xp)}`));
     } else {
       accountBtn.removeAttribute("aria-label");
-      accountBtn.replaceChildren(icon("user", 20), h("span", null, "Sign in"));
+      accountBtn.replaceChildren(icon("user", 20), h("span", null, navigator.onLine ? "Sign in" : "Account"));
     }
   }
 
@@ -219,7 +219,9 @@ export const menuScreen: ScreenFactory = (ctx) => {
     writeStoredName(name);
     attempted = true;
     store.set({ name, intent: null });
-    ctx.play(name);
+    // Offline there is nothing to connect to: the offline page for Browse takes over, and its Retry connects.
+    if (navigator.onLine) ctx.play(name);
+    else store.set({ screen: "browse" });
   }
 
   function syncMute(): void {
@@ -285,6 +287,8 @@ export const menuScreen: ScreenFactory = (ctx) => {
     statsRetry.hidden = !down;
     if (down) onlineText.textContent = "Players online unavailable";
     accountLine.hidden = navigator.onLine || Boolean(shownAccount);
+    // Offline the account is unknown, not absent: the button says Account and its page says why.
+    if (!shownAccount) setAccount(null);
   }
 
   // The clip square: the GL view behind the UI shows only inside it while a clip plays.

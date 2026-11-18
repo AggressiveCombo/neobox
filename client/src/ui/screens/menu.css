@@ -389,7 +389,12 @@ button.home-privacy {
 
   .home-top {
     order: 0;
+    flex-wrap: wrap;
     padding-top: calc(8px + env(safe-area-inset-top));
+  }
+
+  .home-offline:not([hidden]) {
+    flex-basis: 100%;
   }
 
   .home-copy {
