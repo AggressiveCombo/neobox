@@ -580,7 +580,7 @@ async function runFixture(browser, fixture) {
 const FOCUS_CROPS = ["focus-invisible-1-focused.png", "focus-invisible-1-blurred.png"];
 
 const covered = new Set(FIXTURES.flatMap((f) => f.keys));
-const missing = Object.keys(THRESHOLDS).filter((key) => !covered.has(key));
+const missing = Object.keys(THRESHOLDS).filter((key) => !THRESHOLDS[key].runner && !covered.has(key));
 let bad = missing.map((key) => `no fixture for threshold ${key}`);
 let checks = 0;
 

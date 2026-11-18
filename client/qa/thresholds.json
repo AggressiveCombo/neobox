@@ -38,5 +38,13 @@
   "console.errors": { "max": 0 },
   "console.warnings": { "max": 0 },
   "page.errors": { "max": 0 },
-  "net.failed": { "max": 0 }
+  "net.failed": { "max": 0 },
+  "motion.jitter.count": { "max": 0, "runner": true },
+  "motion.fullFlash.count": { "max": 0, "runner": true },
+  "camera.static.drift.px": { "max": 2, "runner": true },
+  "layout.navShift.px": { "max": 1, "runner": true },
+  "scroll.target.offset": { "max": 8, "runner": true },
+  "transition.present": { "min": 3, "runner": true },
+  "font.pref.metricDelta": { "max": 6, "runner": true },
+  "copy.claims.unsourced": { "max": 0, "runner": true }
 }

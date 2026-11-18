@@ -207,3 +207,11 @@ Layout-only width sweep: CSS widths 280 to 3840 in steps of 20 at heights 480, 8
 
 - Command: `cd client && bun qa/width-sweep.mjs --dist <build dir> [--engines chromium] [--themes light] [--states menu-anon,room-host] [--jobs 16] [--out DIR]`
 - Default out: `neobox-scratch/qa/width-sweep`. Chromium only by default; 540 sizes per state and theme, so narrow `--states` for quick runs.
+
+## temporal.mjs and escapes.mjs (escape detectors)
+
+Detectors for the escape classes that need a time series or a frame sequence: E01 replay camera jitter, E02 idle camera drift, E03 full-screen flash on replay close, E05 readable-font metric change, E07 unsourced copy claims (no browser), E08 missing transition, E09 settings scroll target, E10 nav layout shift. E04, E06, E11 and E12 have no detector yet.
+
+- `temporal.mjs` exports `DETECTORS` and `runOne`. Keys are in `thresholds.json` with `"runner": true`; `validate.mjs` does not require fixtures for them.
+- `escapes.mjs --dist <build dir> [--src <src dir>]` runs every detector twice per engine and writes `escapes/escapes.md` and `escapes/escapes.json` (one row per escape: run1, run2, stable, verdict). The subfolder keeps `writeIndex` from reading the table. Default out: `QA_OUT`.
+- Commands: `cd client && QA_ENGINES=chromium QA_OUT=<dir> node qa/escapes.mjs --dist <dist>`; `node qa/temporal.mjs --dist <dist>` runs each detector once.
