@@ -120,12 +120,18 @@ export function computeCamera(scene: Scene, local?: PlayerRec): Camera {
     }
   }
   const w0 = scene.viewWidth;
-  // The narrowest view that keeps the group inside the insets: width for the sides, height for top and bottom.
-  const need = Math.max((maxX - minX) / (1 - 2 * SAFE_SIDE), ((maxY - minY) * VIEW_ASPECT) / (1 - SAFE_TOP - SAFE_BOTTOM));
-  const w = Math.min(Math.max(need, w0), w0 * MAX_ZOOM_OUT);
+  const h0 = w0 / VIEW_ASPECT;
+  // An axis the arena fits inside at the base view is fixed: centred on the arena and not part of the zoom need,
+  // so a map that fits both axes has a fixed camera (no follow, no zoom pumping).
+  const fitsX = scene.arenaW <= w0;
+  const fitsY = scene.arenaH <= h0;
+  // The narrowest view that keeps the group inside the insets, on the axes that move.
+  const needX = fitsX ? 0 : (maxX - minX) / (1 - 2 * SAFE_SIDE);
+  const needY = fitsY ? 0 : ((maxY - minY) * VIEW_ASPECT) / (1 - SAFE_TOP - SAFE_BOTTOM);
+  const w = Math.min(Math.max(needX, needY, w0), w0 * MAX_ZOOM_OUT);
   const h = w / VIEW_ASPECT;
-  const cx = axisCentre(sx, minX, maxX, w, w * SAFE_SIDE, w * SAFE_SIDE, scene.arenaW);
-  const cy = axisCentre(sy, minY, maxY, h, h * SAFE_TOP, h * SAFE_BOTTOM, scene.arenaH);
+  const cx = fitsX ? scene.arenaW / 2 : axisCentre(sx, minX, maxX, w, w * SAFE_SIDE, w * SAFE_SIDE, scene.arenaW);
+  const cy = fitsY ? scene.arenaH / 2 : axisCentre(sy, minY, maxY, h, h * SAFE_TOP, h * SAFE_BOTTOM, scene.arenaH);
   const away: number[] = [];
   for (const p of live) {
     if (p === local) continue;
