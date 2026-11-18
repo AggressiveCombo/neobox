@@ -1140,7 +1140,7 @@ table.data .r {
 #toasts {
   position: fixed;
   left: 50%;
-  bottom: calc(24px + env(safe-area-inset-bottom));
+  bottom: calc(var(--toast-clear, 0px) + 24px + env(safe-area-inset-bottom));
   z-index: 6;
   transform: translateX(-50%);
   display: flex;
@@ -1164,11 +1164,6 @@ table.data .r {
 .toast-error {
   background: var(--danger);
   color: var(--danger-ink);
-}
-
-/* While a toast shows, the page stops above the stack (toast.ts publishes its height) instead of under it. */
-body.has-toasts #ui {
-  bottom: calc(var(--toast-stack, 0px) + 36px + env(safe-area-inset-bottom));
 }
 
 /* Modal dialogs (<dialog>): the ground colour, a scrim behind, a shadow because they float. */

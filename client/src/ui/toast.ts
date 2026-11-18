@@ -1,13 +1,16 @@
 // Short transient messages stacked in a host element. Each toast removes itself
 // after TOAST_MS; evicting the oldest one clears its timer so none are left behind.
-// While any toast shows, body.has-toasts lifts the page (#ui) above the stack
-// (style.css), so a toast never covers content or controls.
+// Toasts float over the page and never resize it. While any shows, the bottom bars
+// and controls in CLEAR_SELECTOR are measured and the stack is raised above them
+// (--toast-clear, style.css), so a toast does not cover them.
 
 import { h } from "./dom";
 
 const MAX_TOASTS = 4;
 const TOAST_MS = 3500;
 const LEAVE_MS = 160;
+/** Bottom bars and controls a toast must sit above: editor hint row and tools, room and replay docks, Practice's Start footer, the match's touch controls. */
+const CLEAR_SELECTOR = ".editor-foot, .editor-float, .room-dock, .replay-dock, .practice-actions, .hud-stick, .hud-actions";
 
 const timers = new WeakMap<HTMLElement, number>();
 
@@ -52,9 +55,30 @@ function dismiss(host: HTMLElement, el: HTMLElement): void {
   sync(host);
 }
 
-/** Publishes the stack's height and whether any toast is shown; style.css reserves that space. */
+/** Publishes the bottom clearance while toasts show. Measured every frame for the few toast seconds so a bar that changes is followed. */
 function sync(host: HTMLElement): void {
-  const root = host.ownerDocument;
-  root.documentElement.style.setProperty("--toast-stack", `${host.offsetHeight}px`);
-  root.body.classList.toggle("has-toasts", host.childElementCount > 0);
+  cancelAnimationFrame(tracking);
+  tracking = 0;
+  const doc = host.ownerDocument;
+  if (host.childElementCount > 0) track(doc);
+  else doc.documentElement.style.removeProperty("--toast-clear");
+}
+
+let tracking = 0;
+
+function track(doc: Document): void {
+  doc.documentElement.style.setProperty("--toast-clear", `${clearance(doc)}px`);
+  tracking = requestAnimationFrame(() => track(doc));
+}
+
+/** Height from the bottom of the viewport to the top of the highest bottom-anchored bar or control. */
+function clearance(doc: Document): number {
+  const bottom = window.innerHeight * 0.75;
+  let px = 0;
+  for (const el of doc.querySelectorAll<HTMLElement>(CLEAR_SELECTOR)) {
+    const r = el.getBoundingClientRect();
+    if (r.height === 0 || r.bottom < bottom || getComputedStyle(el).visibility === "hidden") continue;
+    px = Math.max(px, Math.ceil(window.innerHeight - r.top));
+  }
+  return px;
 }
