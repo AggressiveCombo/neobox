@@ -126,7 +126,7 @@ async function accountCreateAndSignOut(s) {
   for (const t of ["Level 1", "Joined", "Top maps", "Security", "Sign out", "0 friends"]) {
     await page.getByText(t, { exact: false }).first().waitFor();
   }
-  await page.getByText(/^0 of \d+ XP to level 2$/).first().waitFor();
+  await page.getByText("100 xp to level 2", { exact: true }).waitFor();
   await button(page, "Sign out").click();
   await page.getByText("Signed out.", { exact: true }).waitFor();
   return `created ${name}, account page, signed out`;
@@ -743,8 +743,8 @@ async function platform(s) {
     touch: navigator.maxTouchPoints,
     css: matchMedia("(pointer: coarse)").matches,
   }));
-  // Firefox does not expose maxTouchPoints even under hasTouch; the pointer and hover queries above apply everywhere.
-  const reportsTouch = s.env.browser.browserType().name() !== "firefox";
+  // Only Chromium exposes maxTouchPoints under hasTouch; Firefox and WebKit do not. The pointer and hover queries above apply everywhere.
+  const reportsTouch = s.env.browser.browserType().name() === "chromium";
   check(coarse.coarse && coarse.hover && (!reportsTouch || coarse.touch >= 1), `touch capable ${JSON.stringify(coarse)}`);
 
   const desk = await s.open("desk");
