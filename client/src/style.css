@@ -1395,3 +1395,22 @@ dialog.modal:focus {
     --control: 48px;
   }
 }
+
+/* Sound captions (audio.ts): one line at the bottom centre, above the game, never taking clicks. */
+.sound-captions {
+  position: fixed;
+  left: 50%;
+  bottom: 12px;
+  transform: translateX(-50%);
+  z-index: 60;
+  max-width: min(90vw, 36rem);
+  padding: 4px 12px;
+  border-radius: 6px;
+  background: rgb(0 0 0 / 0.72);
+  color: #fff;
+  font-size: 0.95rem;
+  pointer-events: none;
+}
+.sound-captions[hidden] {
+  display: none;
+}

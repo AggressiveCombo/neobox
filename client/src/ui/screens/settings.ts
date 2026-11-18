@@ -215,6 +215,9 @@ export const settingsScreen: ScreenFactory = (ctx) => {
   const readable = switchField("Readable font", "A typeface made for dyslexic readers, with wider spacing.", (on) =>
     prefs.set({ readableFont: on }),
   );
+  const captions = switchField("Sound captions", "Shows a text line for game sounds such as jumps, impacts and deaths.", (on) =>
+    prefs.set({ captions: on }),
+  );
 
   const colorSwatch = h("span", { class: "swatch", "aria-hidden": "true" });
   const colorNote = h("p", { class: "field-hint" });
@@ -518,6 +521,7 @@ export const settingsScreen: ScreenFactory = (ctx) => {
     motionSeg.set(p.motion);
     textSeg.set(String(p.textScale));
     readable.set(p.readableFont);
+    captions.set(p.captions);
     touchSize.set(Math.round(p.touchScale * 100));
     leftHanded.set(p.touchLeftHanded);
     touchPreview.style.setProperty("--touch-scale", String(p.touchScale));
@@ -622,6 +626,7 @@ export const settingsScreen: ScreenFactory = (ctx) => {
           h("div", { class: "settings-group" }, h("span", { class: "field-label" }, "Text size"), textSeg.el),
           h("p", { class: "field-hint" }, "Scales the text in the menus."),
           readable.el,
+          captions.el,
           paletteGroup,
         ),
         section("chat", "Chat", null, filterProfanity.el),

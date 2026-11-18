@@ -46,6 +46,29 @@ const CLIPS: Partial<Record<Key, readonly string[]>> = {
   chat: ["drop_002", "drop_004"],
 };
 
+/** Caption text for each engine sound kind, shown when captions are on (the sound's visual twin for players who cannot hear it). */
+const CAPTIONS: Partial<Record<number, string>> = {
+  1: "Jump",
+  2: "Air jump",
+  3: "Push hit",
+  4: "Push",
+  6: "Impact",
+  7: "Impact (no jump)",
+  8: "Freeze",
+  9: "Spawn",
+  10: "Tick",
+  11: "Death",
+  12: "Body impact",
+  13: "Bat swing",
+  14: "Bat hit",
+  15: "Rocket charging",
+  16: "Rocket fired",
+  17: "Explosion",
+  18: "Parachute",
+  19: "Ghost",
+  20: "Fanfare",
+};
+
 /** Every distinct file, loaded once on the first gesture. */
 const FILES = [...new Set(Object.values(CLIPS).flatMap((clips) => clips ?? []))];
 
@@ -55,6 +78,8 @@ const UI_LEVEL = 0.5;
 const HOVER_LEVEL = 0.4;
 /** A repeat of one key sooner than this is dropped (a burst of ticks reads as noise). */
 const MIN_GAP_MS = 35;
+/** On-screen captions for game sounds: how long a caption line stays up. */
+const CAPTION_MS = 1600;
 /** Random playback-rate spread around 1, so repeats never sound identical. */
 const RATE_SPREAD = 0.03;
 /** Sound files fetched at once: one request per file would exhaust the browser's connections under host load. */
@@ -158,7 +183,26 @@ export class Sfx {
       gain.connect(ctx.destination);
     }
     src.start();
+    if (typeof key === "number" && prefs.value.captions) showCaption(CAPTIONS[key] ?? "");
   }
+}
+
+/** Captions line: one at a time, replaced by the next sound. aria-hidden, because screen readers get the game's own text messages. */
+let captionEl: HTMLElement | null = null;
+let captionTimer = 0;
+function showCaption(text: string): void {
+  if (captionEl === null) {
+    captionEl = document.createElement("div");
+    captionEl.className = "sound-captions";
+    captionEl.setAttribute("aria-hidden", "true");
+    document.body.append(captionEl);
+  }
+  captionEl.textContent = text;
+  captionEl.hidden = false;
+  clearTimeout(captionTimer);
+  captionTimer = window.setTimeout(() => {
+    if (captionEl) captionEl.hidden = true;
+  }, CAPTION_MS);
 }
 
 function clamp01(v: number): number {

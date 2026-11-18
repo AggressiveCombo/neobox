@@ -110,6 +110,8 @@ export interface Prefs {
   textScale: number;
   /** Dyslexia-friendly typeface and wider spacing in the menus. */
   readableFont: boolean;
+  /** Text captions for game sounds (jumps, impacts, spawns, deaths) shown on screen, for players who cannot hear them. */
+  captions: boolean;
 }
 
 export const DEFAULT_PREFS: Prefs = {
@@ -135,6 +137,7 @@ export const DEFAULT_PREFS: Prefs = {
   motion: "system",
   textScale: 1,
   readableFont: false,
+  captions: false,
 };
 
 type PrefsListener = (next: Prefs, prev: Prefs) => void;
@@ -191,6 +194,7 @@ export function sanitizePrefs(raw: unknown): Prefs {
     motion: MOTIONS.includes(o.motion as Motion) ? (o.motion as Motion) : DEFAULT_PREFS.motion,
     textScale: clamp(o.textScale, 1, 1.5, DEFAULT_PREFS.textScale),
     readableFont: typeof o.readableFont === "boolean" ? o.readableFont : DEFAULT_PREFS.readableFont,
+    captions: typeof o.captions === "boolean" ? o.captions : DEFAULT_PREFS.captions,
   };
 }
 
