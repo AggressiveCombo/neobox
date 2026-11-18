@@ -31,7 +31,7 @@ export function sortRooms(rooms: readonly RoomInfo[]): RoomInfo[] {
 
 /** Flag image of an ISO country code (flag-icons 4x3 SVGs in public/flags). */
 export function flagUrl(country: string): string {
-  return `flags/${country.toLowerCase()}.svg`;
+  return `/flags/${country.toLowerCase()}.svg`;
 }
 
 /** English name of an ISO country code; the code itself when the platform does not know it. */

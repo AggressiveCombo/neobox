@@ -42,7 +42,7 @@ test("friends first, then nearest, unknown last, ties keep the server's order", 
 });
 
 test("flag path and country names", () => {
-  expect(flagUrl("DE")).toBe("flags/de.svg");
+  expect(flagUrl("DE")).toBe("/flags/de.svg");
   expect(countryName("DE")).toBe("Germany");
   expect(countryName("GB")).toBe("United Kingdom");
 });

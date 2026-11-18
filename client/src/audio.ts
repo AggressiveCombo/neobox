@@ -136,7 +136,7 @@ export class Sfx {
     const loadOne = async (name: string): Promise<void> => {
       for (let attempt = 1; ; attempt++) {
         try {
-          const res = await fetchPrecached(`sfx/${name}.mp3`);
+          const res = await fetchPrecached(`/sfx/${name}.mp3`);
           if (!res.ok) throw new HttpError(res.status);
           this.buffers.set(name, await ctx.decodeAudioData(await res.arrayBuffer()));
           return;

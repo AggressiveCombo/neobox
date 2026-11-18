@@ -10,7 +10,7 @@ import { prefs } from "./prefs";
 export type MusicScene = "menu" | "match" | null;
 
 interface ChannelOptions {
-  /** Relative to the page, like logo.svg; the files live in client/public/music. */
+  /** Root-absolute: a relative path would resolve under a deep link (/a/b/c) and 404; the files live in client/public/music. */
   tracks: readonly string[];
   /** Repeat the single track forever; otherwise the tracks play in turn. */
   loop: boolean;
@@ -18,8 +18,8 @@ interface ChannelOptions {
   level: number;
 }
 
-const MENU: ChannelOptions = { tracks: ["music/menu.mp3"], loop: true, level: 0.7 };
-const MATCH: ChannelOptions = { tracks: ["music/match-1.mp3", "music/match-2.mp3"], loop: false, level: 0.5 };
+const MENU: ChannelOptions = { tracks: ["/music/menu.mp3"], loop: true, level: 0.7 };
+const MATCH: ChannelOptions = { tracks: ["/music/match-1.mp3", "/music/match-2.mp3"], loop: false, level: 0.5 };
 const FADE_MS = 2000;
 const FADE_TICK_MS = 50;
 

@@ -295,10 +295,10 @@ export interface ReplayInfo {
 const EMPTY = new Uint8Array(0);
 
 /**
- * Load the production module from `neobox.wasm` next to the page. `onProgress` gets the bytes
+ * Load the production module from `neobox.wasm` at the site root. `onProgress` gets the bytes
  * received so far and the total (0 when unknown: compressed responses carry no usable length).
  */
-export async function loadWasmEngine(url = "./neobox.wasm", onProgress?: (loaded: number, total: number) => void): Promise<RawEngine> {
+export async function loadWasmEngine(url = "/neobox.wasm", onProgress?: (loaded: number, total: number) => void): Promise<RawEngine> {
   const imports: WebAssembly.Imports = {};
   const { instance } = await WebAssembly.instantiate(await readWasm(url, onProgress), imports);
   // The export set is the ABI of docs/CLIENT-API.md; the memory check above guards the
