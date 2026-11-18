@@ -35,3 +35,19 @@
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
+
+/* Pages share one cell, so the body is as tall as the longest page and the modal does not jump when paging. */
+.news-page {
+  grid-area: 1 / 1;
+  display: grid;
+  gap: var(--gap);
+  align-content: start;
+  visibility: hidden;
+  opacity: 0;
+  transition: opacity var(--fast) var(--ease), visibility var(--fast) var(--ease);
+}
+
+.news-page.is-active {
+  visibility: visible;
+  opacity: 1;
+}

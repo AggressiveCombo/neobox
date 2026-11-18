@@ -19,25 +19,23 @@ const NEWS: NewsEntry[] = [
   {
     date: "2026-11-16",
     items: [
-      "The blue logo is back, and blue is the accent colour again. Buttons and menus have icons, and screens slide into each other.",
+      "The blue logo is back, and blue is the accent colour again. Buttons and menus have icons, and screens fade into each other.",
       "The main menu is simpler and fills the screen: your name, Quick play, Browse rooms and a grid of buttons on one side, the match replay on the other.",
-      "The game view keeps the original's 16:10 shape on every screen, with black bars around it instead of a stretched or cropped view.",
+      "The game view keeps the original's shape: 16:10 on computers, 2:1 on phones, with black bars around it instead of a stretched or cropped view.",
       "New menu and match music, real sound effects for jumps, hits and deaths, and soft interface sounds for hovers and clicks that you can turn off (Settings, Sound).",
       "Profiles: open a player from the room or your friends list to see their level, games, wins, kills, deaths, time played and maps.",
       "In lives mode, a bar at the top shows how many lives you have left.",
       "Phones: Settings, Touch has a Control size slider and a Left-handed layout.",
-      "Bullets, the rocket launcher, the egg aim and the bat swing now move smoothly between game ticks instead of in steps.",
-      "Fixed: a map could slowly turn into a different map during long matches.",
     ],
   },
   {
     date: "2026-11-15",
     items: [
-      "A new look everywhere: clearer screens, bigger type, and a light and a dark theme (Settings, Display; it follows your system by default).",
+      "A new look everywhere: clearer screens, and a light and a dark theme (Settings, Display; it follows your system by default).",
       "The main menu plays a match inside the big square. Press Quick play straight away: you get a guest name you can change.",
-      "Rooms: the players are front and centre, the host's settings fold away under All settings, and on phones the lobby has Players, Match and Chat tabs with Start always at the bottom.",
+      "Rooms: the players are front and centre, the host's settings fold away under More settings, and on phones the lobby has Players, Match and Chat tabs with Start always at the bottom.",
       "Phones: play in landscape with a separate Jump button; in portrait the game asks you to turn your phone, and can switch to full screen.",
-      "The match HUD shows your connection: ping, and whether it runs over UDP or the slower fallback.",
+      "The match HUD shows your connection: ping, and whether it runs over UDP or WebSocket.",
       "Report a player from the room, or a map from the library. Reports go to the moderators.",
       "Map library: maps show as a grid; open one for its details, votes, Fastest Times and Report.",
       "Room links now show the room's name, map and player count when you paste them in chat apps.",
@@ -48,14 +46,13 @@ const NEWS: NewsEntry[] = [
   {
     date: "2026-11-15",
     items: [
-      "Quick play works like hitbox.io's: Sweaty Bois (up to 4 players, last one standing, win a map twice) and Team Madness (8 players in teams with a shared pool of 50 lives), each with its map rotation and the week's best-rated library maps. Browse a mode's maps with the arrows on its card.",
-      "Quick play skips rooms you have already been in, and tells you while it is still matching you with other players.",
-      "New custom rooms start in lives mode with 5 lives on Simple Arena 1.",
+      "Quick play has two modes: Sweaty Bois (up to 4 players, last one standing, win a map twice) and Team Madness (8 players in teams with a shared pool of 50 lives), each with its map rotation and the week's best-rated library maps. Browse a mode's maps with the arrows on its card.",
+      "New custom rooms start in lives mode with 5 lives.",
       "Checkpoint races are back: touch numbered checkpoints in order, return to your last checkpoint when you die, and reach the highest one to finish. Map makers set them in the editor (Race checkpoint, Race object).",
       "Fastest Times: with /set recordMode true, finishing a library map saves your best time. See the board with the Fastest Times button in the room.",
       "Vote on the room's map from its vote counts.",
       "Bodies that become dynamic when damaged now do so.",
-      "In matches: damage bars on breakable bodies, a flashing square where you will respawn, grab lines, the bat and the rocket launcher with their charge, movement trails, and a highlight on your player when you press an action key during the countdown.",
+      "In matches: damage bars on breakable bodies, a flashing square where you will respawn, grab lines, the bat swing with its windup, and the rocket launcher with its charge, movement trails, and a highlight on your player when you press an action key during the countdown.",
     ],
   },
   {
@@ -63,7 +60,7 @@ const NEWS: NewsEntry[] = [
     items: [
       "Experience and levels: finish games to earn XP. The game-over panel shows your placement, the XP you gained and your progress to the next level.",
       "Guests can reach level 1. Sign in to keep earning levels.",
-      "Quick play: pick Free for all, Team rounds or Lives. Quick rooms have no host and rotate through maps.",
+      "Quick play: pick Sweaty Bois or Team Madness. Quick rooms have no host and rotate through maps.",
       "Menu music, with a mute switch on the menu and in Settings.",
       "Jukebox: the room host can play YouTube videos for everyone, then pause, resume or stop them. Players can suggest a video by pasting its link in chat.",
       "Training hall: a new practice screen from the menu.",
@@ -84,8 +81,8 @@ const NEWS: NewsEntry[] = [
       "Friends: send and accept friend requests, and see which room your friends are in.",
       "Map library: publish your maps, browse new, hot, top and most-played maps, vote, pick favourites and read map descriptions.",
       "Replays: record finished matches and watch them back.",
-      "Practice: play offline against your own settings.",
-      "Host tools: lock the room, kick or ban players, move players between teams and hand over host.",
+      "Practice: play offline on a built-in or pasted map, with Free play or Movement only rules.",
+      "Host tools: lock teams, kick or ban players, move players between teams and hand over host.",
       "Reconnect: if your connection drops during a game, you rejoin the same seat.",
     ],
   },
@@ -93,8 +90,8 @@ const NEWS: NewsEntry[] = [
     date: "2026-11-13",
     items: [
       "neobox launched: a free, open-source browser game inspired by Hitbox.io.",
-      "Deterministic physics: the same inputs give the same result on every device, so online matches stay in step.",
-      "Rollback netcode keeps online play smooth on slower connections.",
+      "Deterministic physics: the same inputs give the same result in your browser and on the server, so online matches stay in step.",
+      "Rollback netcode: your moves are predicted on your device and corrected when the server disagrees.",
       "Rendering uses WebGPU where it is available, with WebGL2 as the fallback.",
       "Keyboard controls and touch controls for phones and tablets.",
       "Built-in maps to play and learn on.",
@@ -129,18 +126,30 @@ export function openNews(): () => void {
   writeSeen(NEWS.length);
   let index = 0;
   const list = h("div", { class: "news-body", role: "region", tabindex: "0", "aria-label": "Update news" });
+  const pages = NEWS.map((entry) =>
+    h(
+      "div",
+      { class: "news-page" },
+      h("time", { class: "news-date", datetime: entry.date }, entry.date),
+      h("ul", { class: "news-list boxed-list" }, entry.items.map((text) => h("li", null, text))),
+    ),
+  );
+  list.replaceChildren(...pages);
   const counter = h("span", { class: "news-count", "aria-live": "polite" });
   const prev = h("button", { type: "button", onclick: () => show(index - 1) }, icon("arrow-left", 18), "Previous");
   const next = h("button", { type: "button", class: "primary", onclick: () => show(index + 1) }, "Next", icon("arrow-right", 18));
   const done = h("button", { type: "button", onclick: () => close() }, "Close");
 
+  // Every page sits in one grid cell; only the current one is visible. The body is as tall as the
+  // tallest page, so the modal (and its buttons) keeps its place as the player pages through.
   function show(i: number): void {
     index = Math.min(NEWS.length - 1, Math.max(0, i));
-    const entry = NEWS[index];
-    list.replaceChildren(
-      h("time", { class: "news-date", datetime: entry.date }, entry.date),
-      h("ul", { class: "news-list boxed-list" }, entry.items.map((text) => h("li", null, text))),
-    );
+    pages.forEach((page, n) => {
+      const current = n === index;
+      page.classList.toggle("is-active", current);
+      page.setAttribute("aria-hidden", String(!current));
+    });
+    list.scrollTop = 0;
     counter.textContent = `${index + 1} of ${NEWS.length}`;
     prev.disabled = index === 0;
     next.disabled = index === NEWS.length - 1;
