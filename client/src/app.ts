@@ -313,16 +313,21 @@ export function start(): Store<AppState> {
       return mapsP;
     },
     reserveTop: (bar) => {
+      bar.classList.add("playfield-clear");
       const update = (): void => {
         overlay.topInset = bar.getBoundingClientRect().bottom;
       };
-      const ro = new ResizeObserver(update);
+      const ro = new ResizeObserver(() => {
+        update();
+        scheduleResize();
+      });
       ro.observe(bar);
       window.addEventListener("resize", update);
       update();
       const releaseBar = overlay.reserve(bar);
       return () => {
         releaseBar();
+        bar.classList.remove("playfield-clear");
         ro.disconnect();
         window.removeEventListener("resize", update);
         overlay.topInset = 0;
@@ -357,6 +362,9 @@ export function start(): Store<AppState> {
 
   /** Mount a screen factory's output, replacing whatever is shown. */
   function mount(screen: Screen): void {
+    // Hide the game view before the leaving screen clears its clip mask (the menu's destroy) and the new screen mounts:
+    // an unmasked frame (the GL view and its letterbox shadow) would show for a moment. present shows it again on the next frame.
+    if (screen !== "menu") setViewShown(false);
     current?.destroy();
     hud = null;
     offlineShown = needsServer(screen) && !navigator.onLine;
@@ -377,9 +385,6 @@ export function start(): Store<AppState> {
     backdrop = screen === "menu";
     if (backdrop !== wasBackdrop) resizeAll();
     uiRoot.replaceChildren(handle.el);
-    // Pages never draw the game view: hide it now, not after the idle timeout, so the
-    // last frame does not show through the page sliding in.
-    if (!GAME_SCREENS[screen] && screen !== "menu") setViewShown(false);
     if (from !== null) playScreenTransition(uiRoot, leaving, handle.el, scrollTop);
     // The controls of a new screen (and the transition's motion) set the band the game view fits between.
     scheduleResize();
@@ -517,7 +522,7 @@ export function start(): Store<AppState> {
     if (store.state.inMatch) ensureRenderer(true);
   }
 
-  /** The game view rect. Landscape touch controls sit at the arena's two ends, so there the view is the largest rect between the two clusters (the arena then stays clear of them at any Control size); elsewhere it is the largest rect of the window. */
+  /** The game view rect. Landscape touch controls sit at the arena's two ends, so there the view is the largest rect between the two clusters (the arena then stays clear of them at any Control size). Elsewhere the view is the largest rect between the `.playfield-clear` bars and panels that cross the window's centre line (a top bar, the replay scoreboard and dock), or the largest rect of the window when none. */
   function gameView(): ViewRect {
     const winW = window.innerWidth;
     const winH = window.innerHeight;
@@ -532,6 +537,20 @@ export function start(): Store<AppState> {
         else right = Math.min(right, r.left);
       }
       if (right > left && right - left < winW) return fitViewBetween(winH, left, right);
+    }
+    // Bars and panels over the arena (.playfield-clear) bound the vertical band the view fits in: nothing covers the arena.
+    let top = 0;
+    let bottom = winH;
+    for (const el of document.querySelectorAll<HTMLElement>(".playfield-clear")) {
+      const r = el.getBoundingClientRect();
+      if (r.height === 0 || r.left > winW / 2 || r.right < winW / 2) continue;
+      if (r.top + r.height / 2 < winH / 2) top = Math.max(top, r.bottom);
+      else bottom = Math.min(bottom, r.top);
+    }
+    // A band under 40% of the window is too small to play in (short phone landscape): the arena keeps the whole window and the bars sit over it, as before.
+    if (bottom - top >= winH * 0.4 && (top > 0 || bottom < winH)) {
+      const v = fitView(winW, bottom - top);
+      return { x: v.x, y: top + v.y, w: v.w, h: v.h };
     }
     return fitView(winW, winH);
   }
@@ -559,9 +578,9 @@ export function start(): Store<AppState> {
     }
   }
 
-  // Practice, training and the test play build their touch controls after their screen mounts: resize when a layer enters or leaves.
+  // Practice, training, the test play and the replay build their controls after their screen mounts: resize when a layer or a bar or panel over the arena enters or leaves.
   new MutationObserver((records) => {
-    if (records.some((r) => [...r.addedNodes, ...r.removedNodes].some((n) => n instanceof Element && (n.matches(".hud-touch-layer") || n.querySelector(".hud-touch-layer"))))) scheduleResize();
+    if (records.some((r) => [...r.addedNodes, ...r.removedNodes].some((n) => n instanceof Element && (n.matches(".hud-touch-layer, .playfield-clear") || n.querySelector(".hud-touch-layer, .playfield-clear"))))) scheduleResize();
   }).observe(uiRoot, { childList: true, subtree: true });
 
   /** This tab's seat, kept in sessionStorage so a page reload rejoins the same slot on the same server. */

@@ -358,11 +358,11 @@ export const replayScreen: ScreenFactory = (ctx) => {
         "div",
         { class: "replay-head" },
         bar,
-        h("aside", { class: "replay-board", "aria-label": "Scoreboard and kill log" }, board.el, board.events),
+        h("aside", { class: "replay-board playfield-clear", "aria-label": "Scoreboard and kill log" }, board.el, board.events),
       ),
       h(
         "main",
-        { class: "offline-dock offline-overlay replay-dock" },
+        { class: "offline-dock offline-overlay replay-dock playfield-clear" },
         h("div", { class: "replay-transport" }, playBtn, seekEl, timeEl),
         h(
           "div",
