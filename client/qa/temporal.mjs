@@ -3,45 +3,54 @@
 // keyed as in thresholds.json (keys with "runner": true). validateRecord decides the verdict.
 //
 // Detectors (escape id, threshold key):
-//   E01 motion.jitter.count       replay view: camera direction reversals and jumps in the first second
+//   E01 motion.jitter.count       menu clip start and replay start: camera reversals/jumps and tick jumps in the first second
 //   E02 camera.static.drift.px    practice run, 10 s: camera drift in screen px while nothing moves
-//   E03 motion.fullFlash.count    replay Close: one-frame full-screen flashes in a screenshot sequence
+//   E03 motion.fullFlash.count    replay Close: unmasked, game-less runs of the GL view that last <= 150 ms (rAF sampler)
+//   E04 overlay.hud.overlap       replay and practice: opaque panels drawn over the game arena (count)
 //   E05 font.pref.metricDelta     About page: readable-font pref changes text metrics (%)
 //   E07 copy.claims.unsourced     copy claims with no source (no browser; copy-claims.mjs)
-//   E08 transition.present        settings/training transitions that run an animation at 60 ms
+//   E08 transition.present        settings sections and training Next: share of changes that animate (rAF sampler, ratio)
 //   E09 scroll.target.offset      settings nav: section lands at the scroll target (px)
 //   E10 layout.navShift.px        news dialog Next and training Next move between pages (px)
-// Not built here: E04 (HUD overlap), E06 (render order), E11 (promptedInput), E12 (editor.perf).
+//   E11 interaction.promptedInput.reacts  training: share of prompts whose named key lights its .key within 150 ms
+//   E12 editor.perf.dragP95ms     editor: p95 rAF interval while a shape is dragged (ms)
+// Not built here: E06 (render order): no draw-list hook exists in the overlay or renderer to check layer order.
 //
-// Trace: an init script on each context records the camera (globalThis.__qaCam, camera.ts) per
-// animation frame and a mark when the replay view appears. The trace is installed through s.open, so
-// every state prepared by states.mjs gets it from its first navigation.
+// Trace: an init script on each context records the camera (globalThis.__qaCam, camera.ts) and the
+// engine tick (globalThis.__qaTick, game.ts) per animation frame, and marks when the replay view or the
+// menu clip starts. The trace is installed through s.open, so every state prepared by states.mjs gets it.
 //
 // Usage:  cd client && QA_OUT=<dir> node qa/temporal.mjs --dist <dist>   (QA_ENGINES narrows engines)
 
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { PNG } from "pngjs";
-import { Results, QA_DIR, launchEngine, median, runCleanups, selectedEngines, sleep, startServer, writeIndex } from "./lib-qa.mjs";
+import { Results, QA_DIR, launchEngine, median, percentile, runCleanups, selectedEngines, sleep, startServer, writeIndex } from "./lib-qa.mjs";
 import { stateById } from "./states.mjs";
 import { runCopyClaims, loadRegister } from "./copy-claims.mjs";
 import { validateRecord } from "./thresholds.mjs";
 
 const KEYS = ["ArrowLeft", "ArrowRight", "ArrowUp", "KeyX", "KeyZ", "KeyC", "KeyV"];
 const PREFS_KEY = "neobox.prefs"; // src/storage-keys.ts
+/** First default key per action (prefs.ts DEFAULT_KEYS). */
+const FIRST_KEY = { left: "ArrowLeft", right: "ArrowRight", up: "ArrowUp", down: "ArrowDown", push: "KeyX", rocket: "KeyZ", bat: "KeyC", grab: "KeyV" };
 
-/** Init script: per-frame camera trace and the replay-view mark. Runs in the page before any app code. */
+/** Init script: per-frame camera and tick trace, and the marks for the replay view and the menu clip. */
 const TRACE = () => {
   const trace = { frames: [], marks: {} };
   window.__qaTrace = trace;
   const frame = () => {
     const c = window.__qaCam;
-    if (c && c.w > 0 && trace.frames.length < 6000) trace.frames.push({ t: performance.now(), cx: c.cx, cy: c.cy, w: c.w, h: c.h });
+    const tick = window.__qaTick ? window.__qaTick.tick : -1;
+    const cam = c && c.w > 0;
+    if ((cam || tick >= 0) && trace.frames.length < 6000) {
+      trace.frames.push({ t: performance.now(), cx: cam ? c.cx : undefined, w: cam ? c.w : undefined, tick });
+    }
     requestAnimationFrame(frame);
   };
   requestAnimationFrame(frame);
   const watch = () => {
     if (trace.marks.replay === undefined && document.querySelector(".offline.playing.replay-view")) trace.marks.replay = performance.now();
+    if (trace.marks.clip === undefined && document.querySelector(".menu-square.is-live")) trace.marks.clip = performance.now();
   };
   new MutationObserver(watch).observe(document, { subtree: true, childList: true, attributes: true });
 };
@@ -63,7 +72,7 @@ function traced(s) {
  * 4x the median moving step.
  */
 export function cameraJitter(frames, from, to) {
-  const win = frames.filter((f) => f.t >= from && f.t <= to);
+  const win = frames.filter((f) => f.w > 0 && f.t >= from && f.t <= to);
   if (win.length < 3) return { count: 0, reversals: 0, jumps: 0, n: win.length };
   const eps = 0.001 * (win[0].w || 1);
   const steps = [];
@@ -83,70 +92,213 @@ export function cameraJitter(frames, from, to) {
   return { count: reversals + jumps, reversals, jumps, n: win.length };
 }
 
-/** Fraction of sampled pixels whose channel-sum delta is above 24 (image.mjs differingPixels rule). */
-function diffFrac(A, B) {
-  if (A.width !== B.width || A.height !== B.height) return 1;
-  let changed = 0;
-  let total = 0;
-  for (let p = 0; p < A.data.length; p += 16) {
-    const d = Math.abs(A.data[p] - B.data[p]) + Math.abs(A.data[p + 1] - B.data[p + 1]) + Math.abs(A.data[p + 2] - B.data[p + 2]);
-    total++;
-    if (d > 24) changed++;
+/**
+ * Engine tick jumps in [from, to]: a frame that advances the tick by more than max(3, 4x the median
+ * positive step). A long frame step (a stalled frame advanced by the full time gap) shows as a jump.
+ */
+export function tickJumps(frames, from, to) {
+  const win = frames.filter((f) => f.tick >= 0 && f.t >= from && f.t <= to);
+  const steps = [];
+  for (let i = 1; i < win.length; i++) steps.push(win[i].tick - win[i - 1].tick);
+  const pos = steps.filter((d) => d > 0);
+  if (!pos.length) return 0;
+  const limit = Math.max(3, 4 * median(pos));
+  return steps.filter((d) => d > limit).length;
+}
+
+/**
+ * Lit runs of the GL view: a sample is lit when the view is shown, unmasked, and no game screen is on.
+ * A flash is a lit run that ends (a masked or game sample follows) within 150 ms.
+ */
+export function litFlashes(samples) {
+  const runs = [];
+  let start = null;
+  for (let i = 0; i < samples.length; i++) {
+    if (samples[i].lit && start === null) start = samples[i].t;
+    if (!samples[i].lit && start !== null) {
+      runs.push(samples[i].t - start);
+      start = null;
+    }
   }
-  return changed / total;
+  return { flashes: runs.filter((d) => d <= 150).length, runs: runs.map((d) => Math.round(d)) };
 }
 
-/** One-frame flashes: frame i differs from both neighbours while the neighbours match each other. */
-export function countFlashes(buffers) {
-  const imgs = buffers.map((b) => PNG.sync.read(b));
-  let n = 0;
-  for (let i = 1; i + 1 < imgs.length; i++) {
-    if (diffFrac(imgs[i - 1], imgs[i]) > 0.4 && diffFrac(imgs[i], imgs[i + 1]) > 0.4 && diffFrac(imgs[i - 1], imgs[i + 1]) < 0.1) n++;
+/** Page side of E03: samples the GL view every frame for `ms`, starting when called. */
+const sampleGl = (ms) =>
+  new Promise((resolve) => {
+    const gl = document.getElementById("gl-host");
+    const t0 = performance.now();
+    const out = [];
+    const step = () => {
+      const t = performance.now();
+      const shown = Boolean(gl) && gl.style.visibility !== "hidden";
+      const clip = gl ? gl.style.clipPath : "";
+      const unmasked = !clip || clip === "none";
+      const game = Boolean(document.querySelector(".offline.playing"));
+      out.push({ t, lit: shown && unmasked && !game });
+      if (t - t0 < ms) requestAnimationFrame(step);
+      else resolve(out);
+    };
+    requestAnimationFrame(step);
+  });
+
+/** Page side of E04: opaque fixed/absolute panels over the game arena (outermost only). */
+const overlapPanels = () => {
+  const gl = document.getElementById("gl-host");
+  if (!gl) return { n: -1, names: [] };
+  const a = gl.getBoundingClientRect();
+  if (a.width < 1) return { n: 0, names: [] };
+  const alpha = (c) => {
+    const m = /rgba?\(([^)]+)\)/.exec(c);
+    if (!m) return 0;
+    const p = m[1].split(/[\s,/]+/).filter(Boolean).map(Number);
+    return p.length > 3 ? p[3] : 1;
+  };
+  const cands = new Set();
+  for (const root of document.querySelectorAll(".offline.playing, .hud")) {
+    for (const el of root.querySelectorAll("*")) {
+      const cs = getComputedStyle(el);
+      if ((cs.position !== "fixed" && cs.position !== "absolute") || cs.display === "none" || cs.visibility === "hidden") continue;
+      if (alpha(cs.backgroundColor) < 0.5) continue;
+      const b = el.getBoundingClientRect();
+      if (b.width < 120 || b.height < 60) continue;
+      if (b.left <= a.left + 2 && b.right >= a.right - 2 && b.top <= a.top + 2 && b.bottom >= a.bottom - 2) continue; // a backdrop behind the whole arena
+      const ox = Math.min(a.right, b.right) - Math.max(a.left, b.left);
+      const oy = Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top);
+      if (ox > 2 && oy > 2) cands.add(el);
+    }
   }
-  return n;
+  const outer = [...cands].filter((el) => {
+    for (let p = el.parentElement; p; p = p.parentElement) if (cands.has(p)) return false;
+    return true;
+  });
+  return { n: outer.length, names: outer.slice(0, 5).map((el) => `${el.tagName.toLowerCase()}.${String(el.className).split(" ").slice(0, 2).join(".")}`) };
+};
+
+/**
+ * Page side of E08: samples a signature per frame for `ms`. mode "scroll": the settings scroller's scrollTop;
+ * mode "training": the lesson text's opacity, transform and top. Returns the sampled signatures.
+ */
+const sampleSignature = ({ ms, mode }) =>
+  new Promise((resolve) => {
+    const scrollerOf = (el) => {
+      let sc = el?.parentElement ?? null;
+      while (sc && !["auto", "scroll"].includes(getComputedStyle(sc).overflowY)) sc = sc.parentElement;
+      return sc;
+    };
+    const sigOf = () => {
+      if (mode === "scroll") {
+        const sc = scrollerOf(document.querySelector("section.settings-section"));
+        return sc ? String(Math.round(sc.scrollTop * 10)) : "none";
+      }
+      const el = document.querySelector(".training-text");
+      if (!el) return "none";
+      // The lesson animates on its child spans (training-lesson-in), so the signature reads the text and its spans.
+      return [el, ...el.querySelectorAll(":scope > span")]
+        .map((n) => {
+          const cs = getComputedStyle(n);
+          return `${cs.opacity}|${cs.transform}|${Math.round(n.getBoundingClientRect().top)}`;
+        })
+        .join("#");
+    };
+    const t0 = performance.now();
+    const out = [];
+    const step = () => {
+      out.push(sigOf());
+      if (performance.now() - t0 < ms) requestAnimationFrame(step);
+      else resolve(out);
+    };
+    requestAnimationFrame(step);
+  });
+
+/** Page side of E09 and the settle wait: resolves once the settings scroller stops moving (or after 2 s). */
+const settleScroll = () =>
+  new Promise((resolve) => {
+    const sc = (() => {
+      let p = document.querySelector("section.settings-section")?.parentElement ?? null;
+      while (p && !["auto", "scroll"].includes(getComputedStyle(p).overflowY)) p = p.parentElement;
+      return p;
+    })();
+    let last = -1;
+    let stable = 0;
+    let frames = 0;
+    const step = () => {
+      const v = sc ? sc.scrollTop : 0;
+      stable = v === last ? stable + 1 : 0;
+      last = v;
+      frames++;
+      if (stable >= 6 || frames > 120) resolve();
+      else requestAnimationFrame(step);
+    };
+    requestAnimationFrame(step);
+  });
+
+/** Two-run window of camera and tick jumps after `mark`, for E01. */
+async function windowJitter(page, mark) {
+  const tr = await page.evaluate(() => window.__qaTrace);
+  const at = tr.marks[mark];
+  if (at === undefined) return { count: 0, text: `${mark}: no mark` };
+  const cam = cameraJitter(tr.frames, at, at + 1000);
+  const ticks = tickJumps(tr.frames, at, at + 1000);
+  return { count: cam.count + ticks, text: `${mark} reversals=${cam.reversals} camJumps=${cam.jumps} tickJumps=${ticks} frames=${cam.n}` };
 }
 
-/** Screenshots before and during a trigger: the first is the reference frame, then `n` samples `gap` ms apart. */
-async function burst(page, trigger, n, gap) {
-  const shots = [await page.screenshot({ type: "png" })];
-  const clicking = trigger();
-  for (let i = 0; i < n; i++) {
-    shots.push(await page.screenshot({ type: "png" }));
-    await sleep(gap);
-  }
-  await clicking;
-  return shots;
+/** E01: the menu clip's first second, then the replay's first second (camera and tick steps). */
+// Menu clip: menu-clips.ts publishes no camera or tick, so the trace measures only the replay half. The clip
+// must still start, else the case fails.
+async function jitterMotion(s) {
+  const menu = await stateById("menu-anon").prepare(traced(s));
+  const clipUp = await menu.page
+    .waitForFunction(() => window.__qaTrace?.marks?.clip !== undefined, null, { timeout: 10000 })
+    .then(() => true, () => false);
+  if (!clipUp) return { pass: false, detail: "menu clip never started" };
+  await sleep(1200);
+  const clip = await windowJitter(menu.page, "clip");
+  const rp = await stateById("replay-loaded").prepare(traced(s));
+  await sleep(1200);
+  const replay = await windowJitter(rp.page, "replay");
+  return { metrics: { "motion.jitter.count": clip.count + replay.count }, detail: `${clip.text}; ${replay.text}` };
 }
 
-async function jitterReplay(s) {
-  const h = await stateById("replay-loaded").prepare(traced(s));
-  await sleep(1500);
-  const tr = await h.page.evaluate(() => window.__qaTrace);
-  const mark = tr?.marks?.replay;
-  if (mark === undefined) return { pass: false, detail: "no replay mark" };
-  const j = cameraJitter(tr.frames, mark, mark + 1000);
-  return { metrics: { "motion.jitter.count": j.count }, detail: `reversals=${j.reversals} jumps=${j.jumps} frames=${j.n}` };
-}
-
+/** E03: Close on the replay while the GL view is sampled per frame. */
 async function fullFlash(s) {
   const h = await stateById("replay-loaded").prepare(traced(s));
   await sleep(800);
   const close = h.page.locator(".offline-top").getByRole("button", { name: "Close" }).first();
-  const shots = await burst(h.page, () => close.click(), 10, 40);
-  return { metrics: { "motion.fullFlash.count": countFlashes(shots) }, detail: `frames=${shots.length}` };
+  const sampling = h.page.evaluate(sampleGl, 1500);
+  await close.click();
+  const samples = await sampling;
+  const r = litFlashes(samples);
+  return { metrics: { "motion.fullFlash.count": r.flashes }, detail: `lit runs ms=${r.runs.join(",") || "none"}` };
 }
 
+/** E02: a 10 s practice run; the camera must not move while the map fits. */
 async function cameraDrift(s) {
   const h = await stateById("practice-running").prepare(traced(s));
   await sleep(10000);
   const tr = await h.page.evaluate(() => ({ frames: window.__qaTrace.frames, css: document.querySelector("canvas")?.getBoundingClientRect().width ?? 0 }));
-  const f = tr.frames;
+  const f = tr.frames.filter((x) => x.w > 0 && Number.isFinite(x.cx) && Number.isFinite(x.cy));
   if (f.length < 2) return { pass: false, detail: "no camera frames" };
   const scale = tr.css / (f[0].w || 1); // css px per world unit
   let units = 0;
   for (const x of f) units = Math.max(units, Math.abs(x.cx - f[0].cx), Math.abs(x.cy - f[0].cy));
   const px = Number((units * scale).toFixed(2));
   return { metrics: { "camera.static.drift.px": px }, detail: `frames=${f.length} units=${units.toFixed(2)} scale=${scale.toFixed(3)}` };
+}
+
+/** E04: the replay and the practice run, each with the panels that cover the game arena. */
+async function hudOverlap(s) {
+  const parts = [];
+  let total = 0;
+  for (const id of ["replay-loaded", "practice-running"]) {
+    const h = await stateById(id).prepare(traced(s));
+    await sleep(600);
+    const r = await h.page.evaluate(overlapPanels);
+    if (r.n < 0) return { pass: false, detail: `${id}: no game view` };
+    total += r.n;
+    parts.push(`${id}=${r.n}${r.names.length ? ` [${r.names.join(" ")}]` : ""}`);
+  }
+  return { metrics: { "overlay.hud.overlap": total }, detail: parts.join("; ") };
 }
 
 async function fontPref(s) {
@@ -187,31 +339,35 @@ async function fontPref(s) {
   return { metrics: { "font.pref.metricDelta": delta }, detail: `height ${a.height.toFixed(1)}->${b.height.toFixed(1)} xh ${a.xh}->${b.xh}` };
 }
 
-/** Probe: click nav item `idx` and count running animations (120-400 ms) 60 ms later. */
-const transitionProbe = (page, sel, idx) =>
-  page.evaluate(
-    async ({ sel, idx }) => {
-      const el = document.querySelectorAll(sel)[idx];
-      if (!el) return -1;
-      el.click();
-      await new Promise((r) => setTimeout(r, 60));
-      return document.getAnimations().filter((a) => {
-        const d = a.effect?.getComputedTiming().duration;
-        return a.playState === "running" && typeof d === "number" && d >= 120 && d <= 400;
-      }).length;
-    },
-    { sel, idx },
-  );
-
-async function transitionPresent(s) {
+/**
+ * E08: four listed changes (settings sections 1-3 from the nav, and training Next). A change animates when
+ * its sampled signature takes at least 4 distinct values (start, end and 2 in between). The metric is the
+ * share of the four that animate.
+ */
+async function transitions(s) {
+  const parts = [];
+  let animated = 0;
+  const changes = 4;
+  const judge = (label, sigs) => {
+    const distinct = new Set(sigs).size;
+    const ok = distinct >= 4;
+    if (ok) animated++;
+    parts.push(`${label}=${distinct}${ok ? "" : "(no anim)"}`);
+  };
   const st = await stateById("settings").prepare(traced(s));
-  const probes = [await transitionProbe(st.page, ".settings-nav-item", 1), await transitionProbe(st.page, ".settings-nav-item", 2)];
+  for (const i of [1, 2, 3]) {
+    const sampling = st.page.evaluate(sampleSignature, { ms: 700, mode: "scroll" });
+    await st.page.locator(".settings-nav-item").nth(i).click();
+    judge(`settings${i}`, await sampling);
+  }
   const tr = await stateById("training").prepare(traced(s));
-  probes.push(await transitionProbe(tr.page, ".training-next", 0));
-  const present = probes.filter((n) => n > 0).length;
-  return { metrics: { "transition.present": present }, detail: `probes=${probes.join(",")}` };
+  const sampling = tr.page.evaluate(sampleSignature, { ms: 700, mode: "training" });
+  await tr.page.locator(".training-next").first().click();
+  judge("training", await sampling);
+  return { metrics: { "transition.present": Number((animated / changes).toFixed(2)) }, detail: parts.join(" ") };
 }
 
+/** E09: each settings nav item lands its section at the scroller top (the first section at the top). */
 async function scrollTarget(s) {
   const h = await stateById("settings").prepare(traced(s));
   const page = h.page;
@@ -220,7 +376,7 @@ async function scrollTarget(s) {
   const rows = [];
   for (let i = 0; i < items; i++) {
     await page.locator(".settings-nav-item").nth(i).click();
-    await sleep(400);
+    await page.evaluate(settleScroll);
     const off = await page.evaluate((i) => {
       const sec = document.querySelectorAll("section.settings-section")[i];
       if (!sec) return null;
@@ -228,8 +384,14 @@ async function scrollTarget(s) {
       while (sc && !["auto", "scroll"].includes(getComputedStyle(sc).overflowY)) sc = sc.parentElement;
       if (!sc) return null;
       if (i === 0) return sc.scrollTop; // first section: the scroller must be at the top
-      if (sc.scrollTop >= sc.scrollHeight - sc.clientHeight - 1) return 0; // clamped at the bottom: target not reachable
-      const actual = sec.getBoundingClientRect().top - sc.getBoundingClientRect().top;
+      const r = sec.getBoundingClientRect();
+      const box = sc.getBoundingClientRect();
+      if (sc.scrollTop >= sc.scrollHeight - sc.clientHeight - 1) {
+        // Clamped at the bottom: a section that fits must be fully in view; a taller one cannot reach the top.
+        if (sec.offsetHeight > sc.clientHeight) return 0;
+        return Math.max(0, r.bottom - box.bottom, box.top - r.top);
+      }
+      const actual = r.top - box.top;
       const pad = parseFloat(getComputedStyle(sc).scrollPaddingTop) || 0;
       const margin = parseFloat(getComputedStyle(sec).scrollMarginTop) || 0;
       return Math.abs(actual - pad - margin);
@@ -269,6 +431,77 @@ async function navShift(s) {
   return { metrics: { "layout.navShift.px": px }, detail: `news=${newsPos.length} training=${trPos.length}` };
 }
 
+/**
+ * E11: each training lesson that names keys. Holding each named key must light its .key box
+ * (.is-hit) within 150 ms. The metric is the share of prompts that react on every named key.
+ */
+async function promptedInput(s) {
+  const h = await stateById("training").prepare(traced(s));
+  const page = h.page;
+  let prompts = 0;
+  let reacting = 0;
+  const parts = [];
+  for (let l = 0; l < 12; l++) {
+    const actions = await page.evaluate(() => [...new Set([...document.querySelectorAll(".training-text .key[data-action]")].map((e) => e.dataset.action))]);
+    if (actions.length) {
+      prompts++;
+      let ok = true;
+      for (const a of actions) {
+        const code = FIRST_KEY[a];
+        if (!code) {
+          ok = false;
+          continue;
+        }
+        await page.keyboard.down(code);
+        const hit = await page
+          .waitForFunction((act) => Boolean(document.querySelector(`.training-text .key[data-action="${act}"].is-hit`)), a, { timeout: 150, polling: "raf" })
+          .then(() => true, () => false);
+        await page.keyboard.up(code);
+        ok = ok && hit;
+        await sleep(120);
+      }
+      if (ok) reacting++;
+      parts.push(`${l + 1}:${actions.join("+")}=${ok ? "ok" : "NO"}`);
+    }
+    const next = page.locator(".training-next").first();
+    if (await next.isDisabled().catch(() => true)) break;
+    await next.click({ timeout: 1500 }).catch(() => {});
+    await sleep(250);
+  }
+  const reacts = prompts ? Number((reacting / prompts).toFixed(2)) : 0;
+  return { metrics: { "interaction.promptedInput.reacts": reacts }, detail: parts.join(" ") };
+}
+
+/** E12: the editor with two shapes; one is dragged across the canvas. p95 of the rAF interval during the drag. */
+async function editorDrag(s) {
+  const h = await stateById("editor-shapes").prepare(traced(s));
+  const page = h.page;
+  const box = await page.locator("canvas.editor-canvas").boundingBox();
+  const cx = box.x + box.width / 2;
+  const cy = box.y + box.height / 2;
+  await page.mouse.move(cx, cy);
+  const sampling = page.evaluate(
+    () =>
+      new Promise((resolve) => {
+        const d = [];
+        let last = performance.now();
+        const step = (t) => {
+          d.push(t - last);
+          last = t;
+          if (d.length < 150) requestAnimationFrame(step);
+          else resolve(d);
+        };
+        requestAnimationFrame(step);
+      }),
+  );
+  await page.mouse.down();
+  for (let i = 1; i <= 60; i++) await page.mouse.move(cx + i * 2, cy + i);
+  await page.mouse.up();
+  const frames = (await sampling).slice(2);
+  const p95 = Number(percentile(frames, 95).toFixed(2));
+  return { metrics: { "editor.perf.dragP95ms": p95 }, detail: `frames=${frames.length} max=${Math.max(...frames).toFixed(1)}` };
+}
+
 /** Copy claims need no browser: the source strings and the register decide. */
 async function copyClaims(ctx) {
   const register = loadRegister(path.join(QA_DIR, "copy-claims.json"));
@@ -278,14 +511,17 @@ async function copyClaims(ctx) {
 
 /** E-id, threshold key, the detector. `browser: false` runs without a browser. */
 export const DETECTORS = [
-  { escape: "E01", key: "motion.jitter.count", run: jitterReplay },
+  { escape: "E01", key: "motion.jitter.count", run: jitterMotion },
   { escape: "E02", key: "camera.static.drift.px", run: cameraDrift },
   { escape: "E03", key: "motion.fullFlash.count", run: fullFlash },
+  { escape: "E04", key: "overlay.hud.overlap", run: hudOverlap },
   { escape: "E05", key: "font.pref.metricDelta", run: fontPref },
   { escape: "E07", key: "copy.claims.unsourced", run: copyClaims, browser: false },
-  { escape: "E08", key: "transition.present", run: transitionPresent },
+  { escape: "E08", key: "transition.present", run: transitions },
   { escape: "E09", key: "scroll.target.offset", run: scrollTarget },
   { escape: "E10", key: "layout.navShift.px", run: navShift },
+  { escape: "E11", key: "interaction.promptedInput.reacts", run: promptedInput },
+  { escape: "E12", key: "editor.perf.dragP95ms", run: editorDrag },
 ];
 
 /**
@@ -297,7 +533,7 @@ export async function runOne(det, { browser, base, results, src } = {}) {
   const judge = (out) => {
     const metrics = out?.metrics ?? {};
     const failures = validateRecord({ metrics, fit: false });
-    if (metrics[det.key] === undefined) failures.push("no metric");
+    if (!Number.isFinite(metrics[det.key])) failures.push("no finite metric");
     return { metrics, failures, detail: [out?.detail, ...failures].filter(Boolean).join("; ") || undefined };
   };
   if (det.browser === false) {
@@ -306,11 +542,15 @@ export async function runOne(det, { browser, base, results, src } = {}) {
     return { id: `${det.escape}-${det.key}`, verdict: j.failures.length ? "fail" : "pass", metrics: j.metrics, detail: j.detail };
   }
   const id = `${det.escape}-${det.key}`;
-  const rec = await results.case(id, async (s) => {
-    const out = (await det.run(s, ctx)) ?? {};
-    const j = judge(out);
-    return { pass: out.pass !== false && j.failures.length === 0, metrics: j.metrics, detail: j.detail };
-  }, { browser, base });
+  const rec = await results.case(
+    id,
+    async (s) => {
+      const out = (await det.run(s, ctx)) ?? {};
+      const j = judge(out);
+      return { pass: out.pass !== false && j.failures.length === 0, metrics: j.metrics, detail: j.detail };
+    },
+    { browser, base },
+  );
   return rec;
 }
 

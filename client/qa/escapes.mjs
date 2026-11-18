@@ -15,15 +15,15 @@ const ESCAPES = [
   ["E01", "replay camera jitter", "motion.jitter.count"],
   ["E02", "camera drift when idle", "camera.static.drift.px"],
   ["E03", "full-screen flash on replay close", "motion.fullFlash.count"],
-  ["E04", "HUD overlap", null],
+  ["E04", "HUD overlap over the game arena", "overlay.hud.overlap"],
   ["E05", "readable-font pref changes text metrics", "font.pref.metricDelta"],
-  ["E06", "render order", null],
+  ["E06", "render order (no draw-list hook; not built)", null],
   ["E07", "unsourced copy claims", "copy.claims.unsourced"],
   ["E08", "transition missing", "transition.present"],
   ["E09", "scroll target offset in settings", "scroll.target.offset"],
   ["E10", "layout shift on nav Next", "layout.navShift.px"],
-  ["E11", "prompted input does not react", null],
-  ["E12", "editor performance", null],
+  ["E11", "prompted input does not react", "interaction.promptedInput.reacts"],
+  ["E12", "editor drag performance", "editor.perf.dragP95ms"],
 ];
 
 const argv = process.argv.slice(2);

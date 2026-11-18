@@ -44,7 +44,10 @@
   "camera.static.drift.px": { "max": 2, "runner": true },
   "layout.navShift.px": { "max": 1, "runner": true },
   "scroll.target.offset": { "max": 8, "runner": true },
-  "transition.present": { "min": 3, "runner": true },
+  "transition.present": { "min": 1, "runner": true },
   "font.pref.metricDelta": { "max": 6, "runner": true },
-  "copy.claims.unsourced": { "max": 0, "runner": true }
+  "copy.claims.unsourced": { "max": 0, "runner": true },
+  "overlay.hud.overlap": { "max": 0, "runner": true },
+  "interaction.promptedInput.reacts": { "min": 1, "runner": true },
+  "editor.perf.dragP95ms": { "max": 16.7, "runner": true }
 }
