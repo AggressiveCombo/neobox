@@ -5,6 +5,7 @@
 import type { BuiltinMap } from "../../api";
 import type { ScreenFactory, ScreenHandle } from "../../ctx";
 import type { Engine } from "../../engine";
+import { HttpError } from "../../http-error";
 import { FrameLoop } from "../../local-loop";
 import { bundledMaps } from "../../offline-maps";
 import type { GameSettings, MatchStart } from "../../protocol";
@@ -67,7 +68,7 @@ export const practiceScreen: ScreenFactory = (ctx) => {
   let destroyed = false;
 
   let maps: BuiltinMap[] | null = null;
-  let mapsError = "";
+  let mapsError: { copy: string; detail: string } | null = null;
   let choice: Choice | null = null;
   let preset = PRESETS[0];
   let setup: SetupUi | null = null;
@@ -157,7 +158,7 @@ export const practiceScreen: ScreenFactory = (ctx) => {
       "div",
       { class: "offline-top offline-overlay" },
       h("button", { type: "button", onclick: () => showSetup() }, icon("arrow-left", 18), "Leave"),
-      h("span", { class: "offline-title" }, mapName),
+      h("h1", { class: "offline-title" }, mapName),
       h("button", { type: "button", onclick: restart }, icon("rotate-ccw", 18), "Restart"),
     );
     root.replaceChildren(h("main", { class: "offline-play" }, touch.el, bar), rotate.el);
@@ -175,12 +176,13 @@ export const practiceScreen: ScreenFactory = (ctx) => {
         h(
           "div",
           { class: "offline-error", role: "alert" },
-          h("p", null, "Could not load maps. Check your connection, then try again."),
-          h("details", null, h("summary", null, "Details"), h("p", null, mapsError)),
+          h("p", null, mapsError.copy),
+          h("details", null, h("summary", null, "Details"), h("p", null, mapsError.detail)),
         ),
       );
       items.push(h("button", { type: "button", class: "quiet", onclick: retryMaps }, icon("rotate-ccw", 18), "Try again"));
     }
+    if (maps?.length === 0) items.push(h("p", { class: "offline-status" }, "This server has no built-in maps. Paste a map code to play."));
     for (const m of maps ?? []) {
       const selected = choice?.code === m.code;
       items.push(
@@ -346,7 +348,7 @@ export const practiceScreen: ScreenFactory = (ctx) => {
       // Start is one tap away: the first built-in map is picked until the player chooses another.
       choice ??= maps[0] ? { name: maps[0].name, code: maps[0].code } : null;
     } catch (err) {
-      mapsError = errText(err);
+      mapsError = { copy: err instanceof HttpError ? "The server could not list its maps. Try again." : "Could not load maps. Check your connection, then try again.", detail: errText(err) };
     }
     if (destroyed) return;
     renderMaps();
@@ -354,7 +356,7 @@ export const practiceScreen: ScreenFactory = (ctx) => {
 
   /** Load the maps again after a failure (the server first, then the bundled maps). */
   function retryMaps(): void {
-    mapsError = "";
+    mapsError = null;
     renderMaps();
     void loadMaps();
   }

@@ -371,7 +371,7 @@ export const STATES = [
     await h.page.goto(s.base);
     await menuName(h.page).waitFor();
     await navTo(h.page, "Practice");
-    await h.page.locator(".offline-error").getByText("Could not load maps", { exact: false }).waitFor();
+    await h.page.locator(".offline-error").getByText("could not list its maps", { exact: false }).waitFor();
     return h;
   }),
 
