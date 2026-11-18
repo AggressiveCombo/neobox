@@ -17,6 +17,8 @@ export const DRAFT_KEY = "neobox.editor.draft";
 export const PHONE_SPLASH_SEEN_KEY = "neobox.phoneSplashSeen";
 /** The first-visit "Start here" badge on Training was dismissed. */
 export const TRAINING_SEEN_KEY = "neobox.hintSeen";
+/** The account id whose settings changed on this device and were not saved yet: a reload before the save lands keeps this copy. */
+export const PREFS_PENDING_KEY = "neobox.prefsPending";
 
 export interface StorageKey {
   key: string;
@@ -31,6 +33,7 @@ export const STORAGE_KEYS: readonly StorageKey[] = [
   { key: NAME_STORAGE_KEY, scope: "local", purpose: "the guest name you last played under" },
   { key: ACCOUNT_NAME_KEY, scope: "local", purpose: "the account name you last signed in with, shown while you are offline" },
   { key: PREFS_KEY, scope: "local", purpose: "your settings while you are a guest" },
+  { key: PREFS_PENDING_KEY, scope: "local", purpose: "a settings change on this device that has not reached your account yet" },
   { key: GUEST_XP_KEY, scope: "local", purpose: "XP you earned as a guest" },
   { key: NEWS_SEEN_KEY, scope: "local", purpose: "the news items you have read" },
   { key: DRAFT_KEY, scope: "local", purpose: "an unsaved map draft from the editor" },

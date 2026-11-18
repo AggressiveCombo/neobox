@@ -5,7 +5,7 @@
 import type { AppCtx } from "./ctx";
 import { NAME_RE } from "./protocol";
 import { prefs, sanitizePrefs } from "./prefs";
-import { ACCOUNT_NAME_KEY, NAME_STORAGE_KEY, REMEMBER_KEY } from "./storage-keys";
+import { ACCOUNT_NAME_KEY, NAME_STORAGE_KEY, PREFS_PENDING_KEY, REMEMBER_KEY } from "./storage-keys";
 import { local } from "./storage";
 import { type Account, type AppState, type Screen } from "./state";
 import { HttpError } from "./http-error";
@@ -256,6 +256,7 @@ let applying = false;
 
 function queuePush(ctx: AppCtx): void {
   if (ctx.store.state.account === null) return;
+  local.setItem(PREFS_PENDING_KEY, String(ctx.store.state.account.id));
   clearTimeout(pushTimer);
   pushTimer = setTimeout(() => {
     pushTimer = undefined;
@@ -270,6 +271,7 @@ async function pushPrefs(ctx: AppCtx, keepalive: boolean): Promise<void> {
   if (ctx.store.state.account?.id !== accountId) return;
   try {
     await request<void>("PUT", "/api/account/prefs", prefs.value, keepalive);
+    if (pushTimer === undefined) local.removeItem(PREFS_PENDING_KEY);
   } catch (err) {
     ctx.toast(`settings not saved to your account: ${errorText(err)}`, "error");
   }
@@ -285,8 +287,14 @@ async function pullPrefs(ctx: AppCtx, accountId: number): Promise<void> {
       if (!(err instanceof ApiError && err.status === 404)) throw err;
     }
     if (ctx.store.state.account?.id !== accountId) return;
+    // A change made here that never reached the server (the page went away first) is newer than the server's copy.
+    if (local.getItem(PREFS_PENDING_KEY) === String(accountId)) {
+      queuePush(ctx);
+      return;
+    }
     const stored = typeof remote === "object" && remote !== null && Object.keys(remote).length > 0;
     if (stored) {
+      local.removeItem(PREFS_PENDING_KEY);
       applying = true;
       try {
         prefs.set(sanitizePrefs(remote));
