@@ -182,6 +182,7 @@ export function mountMenuClips(ctx: AppCtx, host: HTMLElement, onPlaying?: (on: 
       pauseBtn.textContent = paused ? "Play clip" : "Pause clip";
     }
     if (paused) {
+      ctx.holdView();
       if (frozenFor !== p) {
         frozenFor = p;
         eng.replayFrame(p.tick, p.follow);

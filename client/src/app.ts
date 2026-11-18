@@ -253,6 +253,11 @@ export function start(): Store<AppState> {
     return scene;
   };
 
+  /** Marks the game view as in use without drawing it; the held frame then stays on screen. */
+  const holdView = (): void => {
+    lastPresent = performance.now();
+  };
+
   /** The menu clip's window in CSS px: the bounding box of the turned square (ui/screens/menu.ts), else the whole window. */
   function menuBox(): { cx: number; cy: number; side: number } {
     const r = document.querySelector(".menu-square")?.getBoundingClientRect();
@@ -282,6 +287,7 @@ export function start(): Store<AppState> {
     wasm,
     engine: () => engineLoader.get(),
     present,
+    holdView,
     send: (msg) => {
       if (msg.t === "join_room") joinAttempt = msg.room;
       net.send(msg);

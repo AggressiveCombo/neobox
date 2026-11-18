@@ -34,6 +34,8 @@ export interface AppCtx {
   engine(): Promise<Engine>;
   /** Draw whatever frame the engine built last. Screens with a game view call it every animation frame. */
   readonly present: Present;
+  /** Keep the game view shown while the last frame is held without drawing (a paused menu clip). Without it the view hides after VIEW_IDLE_MS and the clip blanks. */
+  readonly holdView: () => void;
   /** Send a JSON control message (dropped silently when disconnected). */
   send(msg: ClientMsg): void;
   /** Short message at the bottom of the screen. */
