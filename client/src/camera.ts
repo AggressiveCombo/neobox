@@ -174,10 +174,12 @@ function axisCentre(l: number, lo: number, hi: number, len: number, a: number, b
     c0 = l - len / 2 + a;
     c1 = l + len / 2 - b;
   }
-  // The group's range is the last word: a player may stand past the arena box (a blast zone) and must stay in view,
-  // so the arena clamp only moves the centre while the group stays inside.
-  const c = clampAxis(Math.min(Math.max(pref, c0), c1), len, arena);
-  return Math.min(Math.max(c, c0), c1);
+  // The group's range is the last word: a player may stand past the arena box (a blast zone) and must stay in view.
+  // The arena clamp moves the centre only while the whole group stays inside the view, so an edge group shows with
+  // the view ending at the arena's edge (no VOID past it); otherwise the centre keeps the group inside its insets.
+  const p = Math.min(Math.max(pref, c0), c1);
+  const q = clampAxis(p, len, arena);
+  return q >= hi - len / 2 && q <= lo + len / 2 ? q : p;
 }
 
 /**
