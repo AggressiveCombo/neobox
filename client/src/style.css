@@ -338,13 +338,18 @@ button,
 }
 
 @media (max-width: 600px) {
-  /* Back and title share row 1 at the same place on every page; actions head the column (kit.ts placeActions), so the head never changes height. */
+  /* Back and title share row 1 at the same place on every page; actions head the column (kit.ts placeActions).
+     A title too wide for row 1 (wide readable spacing at large text) moves to its own row instead of breaking mid-word. */
   .page-head {
     position: static;
-    display: grid;
-    grid-template-columns: auto minmax(0, 1fr);
+    display: flex;
+    flex-wrap: wrap;
     align-items: center;
     column-gap: 12px;
+  }
+
+  .page-head h1 {
+    flex: 1 1 auto;
   }
 }
 

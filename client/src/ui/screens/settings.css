@@ -13,13 +13,6 @@
   position: static;
 }
 
-/* At large text sizes the page title takes a row of its own on phones instead of breaking mid-word. */
-@media (max-width: 600px) {
-  .settings-page .page-head h1 {
-    flex-basis: 100%;
-  }
-}
-
 .settings-nav {
   display: flex;
   flex-wrap: wrap;
