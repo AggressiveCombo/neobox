@@ -5,7 +5,7 @@
 A free and open-source spiritual successor to
 [Hitbox.io](https://hitbox.io), the physics platform-fighter by **Chaz**
 (also the creator of Bonk.io). neobox recreates Hitbox.io's gameplay
-number-for-number, loads Hitbox.io maps, and is built to be fast,
+loads Hitbox.io maps, and is built to be fast,
 scalable (rooms of up to 32 players) and maintainable, with first-class
 mobile support.
 

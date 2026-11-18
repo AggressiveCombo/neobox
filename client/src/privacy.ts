@@ -32,7 +32,7 @@ export const PRIVACY_SECTIONS: { heading: string; paragraphs: string[] }[] = [
   {
     heading: "Sessions and cookies",
     paragraphs: [
-      "Signing in sets a session cookie, nb_session. It is HttpOnly and SameSite=Lax and is used only to keep you signed in. With Stay signed in ticked it lasts 30 days, renewed each time you use the site; otherwise it ends when you close the browser.",
+      "Signing in sets a session cookie, nb_session. It is HttpOnly and SameSite=Lax and is used only to keep you signed in. With Stay signed in ticked it lasts 30 days; otherwise it ends when you close the browser. It renews when less than half its lifetime is left.",
       "The server stores only a SHA-256 digest of each session token and keeps at most 20 sessions per account. Operators who use the admin page get a separate admin cookie, neobox_admin, which is HttpOnly, SameSite=Strict and limited to the /admin path. No other cookies are set.",
     ],
   },
@@ -54,7 +54,7 @@ export const PRIVACY_SECTIONS: { heading: string; paragraphs: string[] }[] = [
   {
     heading: "Chat and reports",
     paragraphs: [
-      "Chat messages are kept only in memory, for the room they were sent in. They are not written to logs or to the database.",
+      "Chat messages are kept only in memory, for the room they were sent in. They are not written to logs or to the database, except the lines copied into a player report (below).",
       "A player report stores the account name and account id, and the IP address, of both the reporter and the reported player, together with up to 30 recent chat lines from that room as evidence. Reports are used only to review abuse and are kept until an operator removes them.",
     ],
   },

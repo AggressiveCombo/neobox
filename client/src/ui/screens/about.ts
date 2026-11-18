@@ -118,7 +118,6 @@ export const aboutScreen: ScreenFactory = (ctx) => {
         { class: "info-main" },
         h("p", { class: "info-lead" }, "neobox is a free game of square fighters batting each other off floating maps. It runs in the browser: no install, and guests can play."),
         h("p", null, CREDIT_LINE),
-        h("p", null, "The game is original work. No Hitbox.io assets, images, sounds, fonts or texts are used."),
         h("p", null, "neobox is free software licensed under the GNU Affero General Public License, version 3 or later (AGPL-3.0-or-later)."),
         h(
           "ul",

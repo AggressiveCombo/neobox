@@ -33,7 +33,7 @@ const PRESETS: Preset[] = [
   { id: "free", label: "Free play", hint: "Every ability, endless respawns", settings: { game_mode: ENDLESS } },
   {
     id: "movement",
-    label: "Movement only",
+    label: "Fewer abilities",
     hint: "No bat or egg",
     settings: { game_mode: ENDLESS, bat_enabled: false, egg_enabled: false },
   },

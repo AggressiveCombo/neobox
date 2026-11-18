@@ -26,9 +26,9 @@ const SQUARE_ANGLE = -18;
 
 /** The destinations, in index order. The description is the button's tooltip. */
 const DESTINATIONS: { label: string; screen: Screen; icon: IconName; desc: string }[] = [
-  { label: "Training", screen: "training", icon: "dumbbell", desc: "Learn the moves against a dummy that cannot hurt you." },
-  { label: "Practice", screen: "practice", icon: "swords", desc: "Play against bots on any map, offline." },
-  { label: "Library", screen: "library", icon: "library-big", desc: "Maps you saved for later." },
+  { label: "Training", screen: "training", icon: "dumbbell", desc: "Learn the moves against dummies that never attack." },
+  { label: "Practice", screen: "practice", icon: "swords", desc: "Play alone on a built-in or pasted map, offline." },
+  { label: "Library", screen: "library", icon: "library-big", desc: "Browse maps, your own maps and your favourites." },
   { label: "Friends", screen: "friends", icon: "users", desc: "Your friends and friend requests." },
   { label: "Replay", screen: "replay", icon: "film", desc: "Watch saved matches again." },
   { label: "Map editor", screen: "editor", icon: "pencil-ruler", desc: "Draw your own floating maps and try them." },
