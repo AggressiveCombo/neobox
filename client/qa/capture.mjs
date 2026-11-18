@@ -27,7 +27,7 @@ export const THEMES = {
  * Settings axes (rubric Tier A). reduce / forced / more are emulated media; palette-* sets the
  * Palette pref. "none" is the plain capture.
  */
-export const AXES = ["none", "reduce", "forced", "more", "palette-deuteranopia", "palette-protanopia", "palette-tritanopia"];
+export const AXES = ["none", "reduce", "forced", "more", "palette-deuteranopia", "palette-protanopia", "palette-tritanopia", "readable"];
 
 /** Renderers for canvas screens. webgl2 hides navigator.gpu before the app boots; webgpu is chromium only. */
 export const RENDERERS = ["webgpu", "webgl2"];
@@ -81,6 +81,7 @@ function initArgs({ name, theme, axis, renderer, row }) {
   const prefs = {};
   if (THEMES[theme].pref) prefs.theme = THEMES[theme].pref;
   if (axis.startsWith("palette-")) prefs.palette = axis.slice("palette-".length);
+  if (axis === "readable") prefs.readableFont = true;
   return {
     guest: name ?? null,
     prefs: Object.keys(prefs).length ? prefs : null,
