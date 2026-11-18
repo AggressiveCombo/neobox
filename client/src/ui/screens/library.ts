@@ -261,10 +261,23 @@ export const libraryScreen: ScreenFactory = (ctx) => {
     return q === "" ? "No maps yet. Maps show here once an admin approves them." : `No maps match "${q}".`;
   }
 
+  /** Cards by map, kept while the map's content and tab are unchanged, so a repaint keeps their drawn previews. */
+  const cards = new Map<number, { key: string; el: HTMLElement }>();
+
   /** Paint the cards. `fresh` (a new list, not a refresh) lets the cards rise in once. */
   function paintList(fresh = false): void {
     grid.classList.toggle("enter", fresh);
-    grid.replaceChildren(...maps.map((m) => mapCard(ctx, m, () => openDetail(m), tab === "mine")));
+    const els = maps.map((m) => {
+      const key = `${tab}|${JSON.stringify(m)}`;
+      const cached = cards.get(m.id);
+      if (cached?.key === key) return cached.el;
+      const el = mapCard(ctx, m, () => openDetail(m), tab === "mine");
+      cards.set(m.id, { key, el });
+      return el;
+    });
+    const shown = new Set(maps.map((m) => m.id));
+    for (const id of cards.keys()) if (!shown.has(id)) cards.delete(id);
+    grid.replaceChildren(...els);
     status.textContent = "";
     const empty = maps.length === 0;
     emptyBox.replaceChildren(...(empty ? [h("p", null, emptyText())] : []));
