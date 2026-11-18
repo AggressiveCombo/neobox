@@ -309,7 +309,7 @@ export const STATES = [
     await h.page.reload();
     await menuName(h.page).waitFor();
     await navTo(h.page, "Library");
-    await h.page.getByRole("heading", { name: "You are offline", exact: true }).waitFor();
+    await h.page.getByRole("heading", { name: "Library unavailable offline", exact: true }).waitFor();
     return h;
   }),
   state("create-room", { dialog: true }, async (s) => {
