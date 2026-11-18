@@ -70,7 +70,11 @@ const AWAY_SWATCH = 6;
 interface AwayChip { id: number; x: number; y: number; w: number; h: number }
 /** Name labels: px gap between stacked labels, and the most upward shifts tried before a label stays overlapped. */
 const NAME_GAP = 2;
+/** Height of the world marker (the jump emblem) above a body's centre, in body sizes: geometry's marker top. Labels clear it. */
+const MARKER_RISE = 0.89;
 const NAME_STACK_MAX = 4;
+/** The strip above a label that the leader's crown (drawCrown, 9 px above its anchor) occupies. */
+const CROWN_RISE = 16;
 /** A name label for this frame: anchor (baseline centre), measured box and draw data (CSS px). */
 interface NameLabel {
   player: Scene["players"][number];
@@ -234,7 +238,7 @@ export class Overlay {
         player: p,
         name,
         x,
-        y: centreY - bodyHalf - 4,
+        y: centreY - p.size * MARKER_RISE * pxPerUnit - 4,
         centreY,
         bodyHalf,
         local,
@@ -245,11 +249,13 @@ export class Overlay {
       });
     }
     // The local player's label keeps its place and is drawn last, on top. Others stack upward off it and off each other.
+    // The leader's crown sits above its label, so its box includes that strip; no label is stacked over a crown.
     const placed: Box[] = [];
     for (const l of [...labels].sort((a, b) => Number(b.local) - Number(a.local))) {
+      const crown = !l.local && l.player.id === leader ? CROWN_RISE : 0;
       if (!l.local) {
         for (let step = 0; step < NAME_STACK_MAX; step++) {
-          const hit = placed.some((b) => b.left < l.x + l.w / 2 && l.x - l.w / 2 < b.right && b.top < l.y && l.y - l.h < b.bottom);
+          const hit = placed.some((b) => b.left < l.x + l.w / 2 && l.x - l.w / 2 < b.right && b.top < l.y && l.y - l.h - crown < b.bottom);
           if (!hit) break;
           l.y -= l.h + NAME_GAP;
         }
@@ -264,7 +270,7 @@ export class Overlay {
       ctx.fillStyle = l.colour;
       ctx.fillText(l.name, l.x, l.y);
       // The local player reads its own status from the stamina bar and kill line instead.
-      if (l.player.id === leader && !l.local) this.drawCrown(l.x, l.y - 18);
+      if (l.player.id === leader && !l.local) this.drawCrown(l.x, l.y - l.h - 6);
       if (l.local && scene.maxStamina > 0) {
         this.drawStamina(l.player.stamina / scene.maxStamina, l.x, l.centreY + l.bodyHalf + 4);
       }

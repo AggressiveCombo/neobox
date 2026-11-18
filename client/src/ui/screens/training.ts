@@ -5,7 +5,7 @@
 import type { ScreenFactory, ScreenHandle } from "../../ctx";
 import type { Engine, LocalStart } from "../../engine";
 import { GAMEPAD_LABELS, inputProfile, keyLabel, onInputProfile, padButton } from "../../input";
-import { type Action, prefs } from "../../prefs";
+import { ACTIONS, type Action, prefs } from "../../prefs";
 import { FrameLoop } from "../../local-loop";
 import type { Screen } from "../../state";
 import { type Child, h } from "../dom";
@@ -47,7 +47,7 @@ function touchLabel(action: Action): string {
 
 /** A control named in a lesson: a `.key` box with its label for the current profile. */
 function control(action: Action): Child {
-  return h("span", { class: "key" }, controlLabel(action));
+  return h("span", { class: "key", "data-action": action }, controlLabel(action));
 }
 
 /** Lesson texts, one per step, worded with the player's current bindings (keys are `.key` boxes). */
@@ -61,9 +61,9 @@ function lessons(): Child[][] {
   const grab = control("grab");
   return [
     ["Run with ", left, " and ", right, ". Jump with ", jump, ", and press it again in the air for a second jump. Jump off walls too."],
-    ["Keep holding ", jump, " after a jump to rise higher. Your marker turns yellow while the second jump is ready."],
-    ["Landing on top of a dummy takes it out. Try it on the dummy that stands still."],
-    ["Hold ", push, " to push hard: a dummy shoved into a wall or off the edge is out."],
+    ["Press ", jump, " in the air to use the second jump. Your marker turns yellow while it is ready; touching the ground or a wall recharges it."],
+    ["Land on a dummy from above to knock it out. Your attacks damage it."],
+    ["Hold ", push, " to push hard: a dummy pushed off the bottom of the arena is out."],
     [
       "Hold ",
       bat,
@@ -75,10 +75,24 @@ function lessons(): Child[][] {
       right,
       " to aim a rocket.",
     ],
-    ["The bar above each name is stamina: abilities spend it and everyone can see it. Hold ", grab, " next to a moving object to hang on."],
+    ["Your stamina is the bar under your body: abilities spend it, and only you can see it. Hold ", grab, " next to a moving object to hang on."],
     ["Abilities combine, and objects move too. Mix them until you can hit the dummies at will, then Finish."],
   ];
 }
+
+/** The controls each lesson names. Pressing each one in its step completes it; Next stays for every step. */
+const STEP_ACTIONS: readonly (readonly Action[])[] = [
+  ["left", "right", "up"],
+  ["up"],
+  [],
+  ["push"],
+  ["bat", "rocket", "left", "right"],
+  ["grab"],
+  [],
+];
+const ACTION_BITS = Object.fromEntries(ACTIONS.map((a) => [a.action, a.bit])) as Record<Action, number>;
+/** How long a completed step shows its check before the next one opens. */
+const ADVANCE_MS = 450;
 
 function errText(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
@@ -112,6 +126,14 @@ export const trainingScreen: ScreenFactory = (ctx) => {
   let engineUi: EngineStatus | null = null;
   let startHeld = false;
   let unsubProfile: (() => void) | null = null;
+  /** Controls the current lesson names that the player has pressed in it. */
+  const hit = new Set<Action>();
+  let prevMask = 0;
+  /** Time left before a completed step moves on; null while the step is open. */
+  let advanceIn: number | null = null;
+  /** Presses made while a completed step shows its check; they count toward the next step. */
+  const carried = new Set<Action>();
+  let cardEl: HTMLElement | null = null;
 
   const loop = new FrameLoop(
     (dt) => frame(dt),
@@ -157,8 +179,38 @@ export const trainingScreen: ScreenFactory = (ctx) => {
       next();
       return;
     }
-    eng.localFrame(dt, ctx.input.mask());
+    const mask = ctx.input.mask();
+    detectPresses(mask, dt);
+    prevMask = mask;
+    eng.localFrame(dt, mask);
     ctx.present(names, TICK_HZ);
+  }
+
+  /** Marks each control the lesson names once it is pressed; when all are, the card flashes and the step moves on. */
+  function detectPresses(mask: number, dt: number): void {
+    const fresh = mask & ~prevMask;
+    if (advanceIn !== null) {
+      // A press during the check counts toward the next step, so a quick press is not lost.
+      for (const action of Object.keys(ACTION_BITS) as Action[]) if (fresh & ACTION_BITS[action]) carried.add(action);
+      advanceIn -= dt;
+      if (advanceIn <= 0) next();
+      return;
+    }
+    const need = STEP_ACTIONS[lesson] ?? [];
+    if (need.length === 0) return;
+    for (const action of need) if (fresh & ACTION_BITS[action]) hit.add(action);
+    markHits();
+    if (need.every((action) => hit.has(action))) {
+      advanceIn = ADVANCE_MS;
+      cardEl?.classList.add("is-complete");
+    }
+  }
+
+  /** Shows which named controls are pressed so far in this step. */
+  function markHits(): void {
+    lessonEl?.querySelectorAll<HTMLElement>(".key[data-action]").forEach((el) => {
+      el.classList.toggle("is-hit", hit.has(el.dataset.action as Action));
+    });
   }
 
   /** Start the training match from its first tick. */
@@ -220,6 +272,7 @@ export const trainingScreen: ScreenFactory = (ctx) => {
     lessonEl.replaceChildren(h("span", null, ...texts[lesson]));
     // The lesson box is a scroll region only when the text overflows; a keyboard user can focus it then, and only then.
     lessonEl.tabIndex = lessonEl.scrollHeight > lessonEl.clientHeight ? 0 : -1;
+    markHits();
   }
 
   function syncStart(): void {
@@ -228,6 +281,11 @@ export const trainingScreen: ScreenFactory = (ctx) => {
 
   function renderLesson(): void {
     if (!lessonEl || !nextBtn || !countEl || !startKey) return;
+    hit.clear();
+    for (const action of carried) hit.add(action);
+    carried.clear();
+    advanceIn = null;
+    cardEl?.classList.remove("is-complete");
     const texts = lessons();
     const last = lesson === texts.length - 1;
     renderText();
@@ -289,6 +347,7 @@ export const trainingScreen: ScreenFactory = (ctx) => {
       lessonEl,
       nextBtn,
     );
+    cardEl = card;
     engineUi?.destroy();
     engineUi = null;
     root.replaceChildren(h("main", { class: "offline-play" }, touch.el, bar, card), rotate.el);

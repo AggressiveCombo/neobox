@@ -81,6 +81,14 @@
   line-height: 1.45;
 }
 
+/* Next sat at a different height per lesson: the card follows the text. The minimum holds the longest lesson's
+   lines (step 5) on every step; landscape phones are too short for it and keep the content height. */
+@media (min-height: 501px) {
+  .training-text {
+    min-height: 5lh;
+  }
+}
+
 @media (max-width: 600px) {
   .training-text {
     font-size: var(--step-body);
@@ -117,4 +125,22 @@
 
 .training-bar button {
   min-height: 48px;
+}
+
+/* A named control turns solid once pressed; a step whose controls are all pressed flashes green before it moves on. */
+.training-lesson .key {
+  transition: background-color var(--fast) var(--ease), color var(--fast) var(--ease);
+}
+
+.training-lesson .key.is-hit {
+  background: var(--ink);
+  color: var(--ground);
+}
+
+.training-lesson {
+  transition: box-shadow var(--fast) var(--ease);
+}
+
+.training-lesson.is-complete {
+  box-shadow: inset 0 0 0 3px var(--good);
 }
