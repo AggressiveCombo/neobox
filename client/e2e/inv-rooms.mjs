@@ -352,7 +352,10 @@ async function roomMode(s) {
   await modePanel.getByRole("button", { name: "Change mode", exact: true }).click();
   const dialog = page.getByRole("dialog", { name: "Game mode", exact: true });
   await dialog.waitFor({ state: "visible" });
-  const names = (await dialog.locator(".room-mode-option-name").allTextContents()).map((t) => t.trim());
+  // One textContent per option: Playwright's scoped allTextContents() on a role-located dialog kills the Firefox content process.
+  const optionNames = dialog.locator(".room-mode-option-name");
+  const names = [];
+  for (let i = 0; i < (await optionNames.count()); i++) names.push((await optionNames.nth(i).textContent())?.trim() ?? "");
   check(names.join("|") === "Kills|Lives|Rounds|Team rounds|Endless teams|Lives teams|Endless", `the Game mode dialog lists ${names.join(", ")}`);
   await dialog.getByRole("button", { name: /^Team rounds\b/ }).click();
   await dialog.waitFor({ state: "hidden" });
