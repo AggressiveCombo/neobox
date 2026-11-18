@@ -334,9 +334,10 @@ export const hudScreen: HudFactory = (ctx) => {
   const xpGain = h("div", { class: "hud-xp-gain" });
   const xpLimit = h("div", { class: "hud-xp-limit" });
   const xpEl = h("div", { class: "hud-xp", hidden: true, role: "status" }, xpGain, xpLimit);
-  // Start countdown announcement (polite, once per countdown); visually hidden like the kill log.
+  // Start countdown announcement (polite): each second, then "Go"; visually hidden like the kill log.
   const countdownLive = h("div", { class: "hud-events", role: "status", "aria-live": "polite" });
-  let countdownAnnounced = false;
+  /** Whole seconds last announced; -1 outside a countdown. */
+  let countdownSecs = -1;
 
   const leaveBtn = h(
     "button",
@@ -723,11 +724,14 @@ export const hudScreen: HudFactory = (ctx) => {
       latestScene = scene;
       board.record(scene, roomNames);
       updateSpectate(scene);
-      // The start countdown is announced once, when it begins; its digits are drawn on the canvas only.
-      if (scene.intro < 0) countdownAnnounced = false;
-      else if (!countdownAnnounced) {
-        countdownAnnounced = true;
-        countdownLive.textContent = `Match starting in ${Math.ceil(scene.intro / ctx.store.state.tickHz)} seconds`;
+      // The start countdown is announced each second ("Match starting in 3 seconds", then 2, 1) and then "Go"; its digits are also drawn on the canvas.
+      const secs = Math.ceil(scene.intro / ctx.store.state.tickHz);
+      if (scene.intro < 0) {
+        if (countdownSecs > 0) countdownLive.textContent = "Go";
+        countdownSecs = -1;
+      } else if (secs > 0 && secs !== countdownSecs) {
+        countdownSecs = secs;
+        countdownLive.textContent = `Match starting in ${secs} ${secs === 1 ? "second" : "seconds"}`;
       }
       if (!ctx.store.state.showScores) return;
       if (performance.now() - lastScoresAt < SCORE_INTERVAL_MS) return;
