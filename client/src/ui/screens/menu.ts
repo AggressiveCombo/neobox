@@ -417,7 +417,7 @@ export const menuScreen: ScreenFactory = (ctx) => {
         "p",
         { class: "home-links" },
         "Fan-made successor to Hitbox.io · ",
-        h("a", { href: REPO_URL, target: "_blank", rel: "noopener" }, "Source"),
+        h("a", { href: REPO_URL, target: "_blank", rel: "noopener", tabindex: "0" }, "Source"),
         " · ",
         h("button", { type: "button", class: "quiet home-privacy", onclick: () => store.set({ screen: "privacy" }) }, "Privacy"),
       ),
