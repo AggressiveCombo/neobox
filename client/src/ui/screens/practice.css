@@ -130,20 +130,8 @@
   min-height: var(--control);
 }
 
-@media (max-width: 600px) {
-  .practice-grid {
-    grid-template-columns: minmax(0, 1fr);
-    gap: 24px;
-  }
-
-  .practice-maps,
-  .practice-side,
-  .practice-actions {
-    grid-column: 1;
-    grid-row: auto;
-  }
-
-  /* Phones: the page is the viewport's height. The setup scrolls in .page-inner; Start is a footer below it, so it covers nothing. */
+/* Phones, and short landscape screens (844x390): the page is the viewport's height. The setup scrolls in .page-inner; Start is a footer below it, so it stays on screen and covers nothing. */
+@media (max-width: 600px), (max-height: 500px) and (orientation: landscape) {
   .practice-page {
     height: 100%;
     gap: 0;
@@ -166,6 +154,20 @@
     margin: 0 calc(-1 * var(--margin));
     padding: 12px var(--margin) calc(16px + env(safe-area-inset-bottom));
     background: var(--ground);
+  }
+}
+
+@media (max-width: 600px) {
+  .practice-grid {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 24px;
+  }
+
+  .practice-maps,
+  .practice-side,
+  .practice-actions {
+    grid-column: 1;
+    grid-row: auto;
   }
 
   .practice-page .offline-choice {

@@ -73,8 +73,8 @@ export const practiceScreen: ScreenFactory = (ctx) => {
   let preset = PRESETS[0];
   let setup: SetupUi | null = null;
   let engineUi: EngineStatus | null = null;
-  // Phones: Start is a footer under the scrolling setup, not over it (practice.css). Desktop keeps it in the rules column.
-  const phoneQuery = window.matchMedia("(max-width: 600px)");
+  // Phones and short landscape phones: Start is a footer under the scrolling setup, not over it (practice.css). Desktop keeps it in the rules column.
+  const phoneQuery = window.matchMedia("(max-width: 600px), (max-height: 500px) and (orientation: landscape)");
   function placeStart(): void {
     const bar = root.querySelector<HTMLElement>(".practice-actions");
     const grid = root.querySelector<HTMLElement>(".practice-grid");
