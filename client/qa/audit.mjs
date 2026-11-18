@@ -14,7 +14,8 @@
 //   persist.accountSync          signed-in prefs (theme, textScale) pulled by a second context (info)
 //
 // Pass rules: coverage and copy pass at 0; tokens pass when every role/property has one value
-// and body font sizes are <= 6; dead controls pass at 0; persist passes at 1.0.
+// and body font sizes are <= 6; dead controls and controls only reachable behind a modal pass at 0;
+// persist passes at 1.0.
 //
 // Run: cd client && QA_OUT=C:/Users/aggressivecombo/neobox-scratch/qa/round0-extra node qa/audit.mjs
 //      QA_ENGINES=chromium limits engines; QA_ONLY=copy,tokens limits cases (keys: copy, coverage,
@@ -86,6 +87,13 @@ const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 const mentionsName = (name) => new RegExp(`(?<![a-z0-9])${escapeRe(name.toLowerCase())}(?![a-z0-9])`).test(inventoryLower);
 const firstLine = (err) => String(err?.message ?? err).split("\n")[0];
 const sameControls = (a, b) => a.length === b.length && a.every((c, i) => c.name === b[i].name);
+const offSite = (href, base) => {
+  try {
+    return new URL(href).origin !== new URL(base).origin;
+  } catch {
+    return false; // not a URL: the control is clicked like any other
+  }
+};
 
 // In-page probes. Each returns plain data; nothing here changes the page except the data-qa-i tags.
 const HARVEST = () => {
@@ -414,6 +422,12 @@ async function deadCase(s) {
   const skipped = [];
   const unclickable = [];
   const worked = []; // controls whose click produced an effect, with the effect kinds (the per-control verification)
+  const external = []; // off-origin hrefs with a valid URL: a route effect, counted without a click
+  const selectedNoop = []; // already-selected controls: activating one changed nothing and raised no error
+  const unreachable = []; // controls only ever covered by a modal
+  const coveredElsewhere = []; // behind a modal in one state, uncovered in a no-modal state
+  const reachable = new Set(); // names some no-modal state shows uncovered
+  const behindModal = []; // covered controls, resolved after every state is scanned
   let clicked = 0;
   for (const id of DEAD_SCREENS) {
     let cur = null;
@@ -428,36 +442,42 @@ async function deadCase(s) {
       const h = track(await stateById(id).prepare(s));
       await inject(h.page);
       const controls = await settledHarvest(h.page);
+      // A state with no modal shows the base controls; only those count as reachable behind a modal.
+      if (!stateById(id).dialog) for (const c of controls) if (!c.covered) reachable.add(c.name);
       await h.page.evaluate(INSTALL_MUTATION);
-      cur = { h, controls, dirty: false, from };
+      // Errors raised by a click: a selected control must activate without any.
+      const errors = [];
+      h.page.on("pageerror", (err) => errors.push(err.message));
+      h.page.on("console", (msg) => {
+        if (msg.type() === "error") errors.push(msg.text());
+      });
+      cur = { h, controls, dirty: false, from, errors };
     };
     await open();
     console.error(`dead ${id}: ${cur.controls.length} controls, ${new Date().toISOString().slice(11, 19)}`);
     for (const c of cur.controls) {
       const label = `${id} "${c.name}"`;
       if (c.disabled) {
-        skipped.push(`${label} (disabled)`);
+        skipped.push(`${label} (disabled: not operable)`);
         continue;
       }
       if (FIXTURE_NAME.test(c.name)) {
-        skipped.push(`${label} (fixture data)`);
-        continue;
-      }
-      if (c.selected) {
-        skipped.push(`${label} (already selected)`);
+        skipped.push(`${label} (fixture data: harness-generated name)`);
         continue;
       }
       if (DEAD_SKIP.test(c.name)) {
-        skipped.push(`${label} (destructive)`);
+        skipped.push(`${label} (destructive: leaves the fixture)`);
         continue;
       }
-      if (c.href && new URL(c.href).origin !== new URL(s.base).origin) {
-        skipped.push(`${label} (external link)`);
+      // An off-origin href with a valid URL navigates the app away: a route effect, counted without clicking.
+      if (c.href && offSite(c.href, s.base)) {
+        external.push(label);
+        worked.push(`${label}: route (external href ${new URL(c.href).origin}, not clicked)`);
         continue;
       }
-      // Behind the state's modal: the screen's own controls are scanned in its base state, and closing the modal here would drop the picker's own controls.
+      // Behind the state's modal: resolved after every state, once it is known whether a no-modal state shows the control.
       if (c.covered) {
-        skipped.push(`${label} (behind modal)`);
+        behindModal.push({ label, name: c.name });
         continue;
       }
       if (cur.dirty) {
@@ -484,6 +504,7 @@ async function deadCase(s) {
       await page.evaluate(() => document.querySelectorAll("*").forEach((e) => { if (e.scrollTop) e.scrollTop = 0; if (e.scrollLeft) e.scrollLeft = 0; }));
       const before = await page.evaluate(EFFECT_STATE);
       h.reqs = 0;
+      cur.errors.length = 0;
       clicked += 1;
       let k = c.i;
       try {
@@ -514,10 +535,16 @@ async function deadCase(s) {
           moved = page.url() !== url;
           changed = (await page.evaluate(EFFECT_STATE)) !== before;
         }
-        if (mut === 0 && h.reqs === 0 && !moved && !changed) dead.push(label);
-        // Reopen only when the click navigated or changed the control list; a toggle keeps the page (reopening after each one made the scan too slow).
-        else {
+        const noop = mut === 0 && h.reqs === 0 && !moved && !changed;
+        if (c.selected && cur.errors.length) {
+          dead.push(`${label} (error on activation: ${cur.errors[0]})`);
+          cur.dirty = true;
+        } else if (noop) {
+          if (c.selected) selectedNoop.push(label);
+          else dead.push(label);
+        } else {
           worked.push(`${label}: ${[mut && "DOM", h.reqs && "request", moved && "route", changed && "state"].filter(Boolean).join(", ")}`);
+          // Reopen only when the click navigated or changed the control list; a toggle keeps the page (reopening after each one made the scan too slow).
           cur.dirty = moved || !sameControls(cur.controls, await settledHarvest(page));
         }
       } catch (err) {
@@ -538,7 +565,12 @@ async function deadCase(s) {
     await release();
   }
   pruneInduced(s);
-  const file = writeEvidence("dead-controls", { dead, skipped, unclickable, worked });
+  // A control under a modal is covered elsewhere when a state with no modal shows it uncovered; otherwise it is only reachable behind a modal.
+  for (const b of behindModal) {
+    if (reachable.has(b.name)) coveredElsewhere.push(b.label);
+    else unreachable.push(`${b.label}: only reachable behind a modal`);
+  }
+  const file = writeEvidence("dead-controls", { dead, skipped, unclickable, unreachable, worked, selectedNoop, external, coveredElsewhere });
   // Skip classes (the reason in each "(...)" suffix), so a skip count is never read without its reason.
   const byReason = {};
   for (const s of skipped) {
@@ -546,14 +578,18 @@ async function deadCase(s) {
     byReason[reason] = (byReason[reason] ?? 0) + 1;
   }
   return {
-    pass: dead.length === 0,
-    detail: `${dead.length} dead controls of ${clicked} clicked (${dead.slice(0, 10).join("; ") || "none"}); ${skipped.length} skipped (${Object.entries(byReason).map(([k, v]) => `${k} ${v}`).join(", ") || "none"}); ${unclickable.length} not clickable`,
+    pass: dead.length === 0 && unreachable.length === 0,
+    detail: `${dead.length} dead controls of ${clicked} clicked (${dead.slice(0, 10).join("; ") || "none"}); ${selectedNoop.length} already selected, no-op; ${external.length} external links counted as route effects; ${coveredElsewhere.length} behind a modal and scanned uncovered in a no-modal state; ${unreachable.length} only reachable behind a modal; ${skipped.length} skipped (${Object.entries(byReason).map(([k, v]) => `${k} ${v}`).join(", ") || "none"}); ${unclickable.length} not clickable`,
     metrics: {
       "deadControl.count": dead.length,
       "deadControl.clicked": clicked,
       "deadControl.skipped": skipped.length,
       "deadControl.unclickable": unclickable.length,
       "deadControl.worked": worked.length,
+      "deadControl.selectedNoop": selectedNoop.length,
+      "deadControl.external": external.length,
+      "deadControl.coveredElsewhere": coveredElsewhere.length,
+      "deadControl.onlyBehindModal": unreachable.length,
     },
     evidence: [rel(file)],
   };
