@@ -718,7 +718,7 @@ export const roomScreen: ScreenFactory = (ctx: AppCtx) => {
     ctx.send({ t: "editing", open: true });
   }
 
-  /** Share the invite link: the system share sheet when there is one, else copy to the clipboard. */
+  /** Share the invite link: the system share sheet when there is one, else copy it, else show it to copy by hand. */
   async function shareInvite(): Promise<void> {
     const room = st.room;
     if (room === null) return;
@@ -731,13 +731,78 @@ export const roomScreen: ScreenFactory = (ctx: AppCtx) => {
         if (err instanceof DOMException && err.name === "AbortError") return;
       }
     }
-    try {
-      await navigator.clipboard.writeText(url);
+    if (await copyText(url)) {
       flashInviteCopied();
       ctx.toast("Invite link copied.");
-    } catch {
-      ctx.toast(url);
+      return;
     }
+    showInviteLink(url);
+  }
+
+  /**
+   * Copies text. Without a secure context there is no async clipboard, so a hidden textarea is selected and copied
+   * with execCommand, which still works on plain http.
+   */
+  async function copyText(text: string): Promise<boolean> {
+    try {
+      if (navigator.clipboard) {
+        await navigator.clipboard.writeText(text);
+        return true;
+      }
+    } catch {
+      // fall through to the textarea copy
+    }
+    return copyWithTextarea(text);
+  }
+
+  function copyWithTextarea(text: string): boolean {
+    const box = document.createElement("textarea");
+    box.value = text;
+    box.setAttribute("readonly", "");
+    box.style.position = "fixed";
+    box.style.opacity = "0";
+    document.body.append(box);
+    box.select();
+    box.setSelectionRange(0, text.length);
+    let ok = false;
+    try {
+      ok = document.execCommand("copy");
+    } catch {
+      ok = false;
+    }
+    box.remove();
+    return ok;
+  }
+
+  /** Last resort when the browser will not copy: the link in a selectable field, with a button to try again. */
+  function showInviteLink(url: string): void {
+    const box = h("input", { type: "text", readonly: true, "aria-label": "Invite link", class: "invite-link-box" });
+    box.value = url;
+    const copy = h(
+      "button",
+      {
+        type: "button",
+        class: "primary",
+        onclick: async () => {
+          box.select();
+          if (await copyText(url)) {
+            ctx.toast("Invite link copied.");
+            close();
+          } else {
+            ctx.toast("Copy did not work: select the link and copy it with Ctrl+C.", "error");
+          }
+        },
+      },
+      icon("link", 16),
+      "Copy this link",
+    );
+    const done = h("button", { type: "button", class: "quiet", onclick: () => close() }, "Close");
+    const { close } = openModal({
+      title: "Copy the invite link",
+      body: [h("p", null, "This connection is not secure, so the browser cannot copy for you. Select the link and copy it."), box],
+      actions: [copy, done],
+    });
+    box.select();
   }
 
   /** Shows a check and "Link copied" on the invite button for a moment, so the copy reads as done. */
