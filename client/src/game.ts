@@ -10,6 +10,10 @@ import type { Net } from "./net";
 import type { MatchStart } from "./protocol";
 import type { AppState, Store } from "./state";
 
+/** QA hook (like __qaCam): the engine tick of the last frame shown, so instruments can time inputs to ticks. */
+const qaTick = { tick: -1 };
+Object.assign(globalThis, { __qaTick: qaTick });
+
 /** Ping frame period, ms. */
 const PING_MS = 1000;
 /** Stats publish period, ms. */
@@ -125,6 +129,7 @@ export class MatchLoop {
 
     const scene = this.d.present(this.d.names(), this.d.store.state.tickHz);
     if (scene) {
+      qaTick.tick = scene.tick;
       this.lastScene = scene;
       this.d.hud()?.onFrame(scene);
     }
