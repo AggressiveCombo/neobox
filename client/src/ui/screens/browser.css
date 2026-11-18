@@ -298,6 +298,15 @@ button.room-row {
   min-height: calc(100dvh - 280px);
 }
 
+/* Wide screens: the list is framed and fills the space below the tools, so a few rooms do not leave the lower screen blank. */
+@media (min-width: 901px) {
+  .room-browser {
+    min-height: calc(100dvh - 280px);
+    padding: 16px 24px 24px;
+    border: 1px solid var(--line);
+  }
+}
+
 @media (max-width: 900px) {
   .room-tools .field {
     flex-basis: 100%;
