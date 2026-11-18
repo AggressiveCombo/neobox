@@ -44,6 +44,10 @@ let gateSockets = false;
 const MODE = selfTestMode();
 // Failed websocket and offline requests are expected while the instrument cuts the network.
 const CONSOLE_OFFLINE = /WebSocket|websocket|establish a connection|ERR_INTERNET_DISCONNECTED|ERR_NAME|NetworkError|Failed to fetch|NS_ERROR|Failed to load resource/i;
+/** WebKit reports a fetch the network refused as an error of its own, even when the caller catches the rejection. */
+const OFFLINE_FETCH_NOISE = /Fetch API cannot load \S+ due to access control checks/;
+/** Runs only the cases whose id contains this text (ROBUST_ONLY=offline.warm); every case when unset. */
+const ONLY = process.env.ROBUST_ONLY ?? "";
 const RECONNECT_CYCLES = 3;
 const BANNER_BUDGET_MS = 10000;
 const RECOVER_BUDGET_MS = 30000;
@@ -127,6 +131,7 @@ function withBudget(work) {
  * one built from its problems and failed requests, so the console line says what broke.
  */
 async function runCase(results, id, fn, opts) {
+  if (!id.includes(ONLY)) return null;
   let scenario = null;
   const rec = await results.case(
     id,
@@ -392,6 +397,65 @@ async function networkOffCase(s, cdp) {
       : cut === 0
         ? "not exercised: no open socket to cut"
         : `banner after ${shownAt ?? "never"} ms, recovered: ${gone}; timeline ${JSON.stringify(timeline)}`,
+  };
+}
+
+/** The Retry inside one screen's offline section; the menu's own Retry buttons are outside it. */
+function sectionRetry(page, title) {
+  return page.locator("section.offline-state").filter({ has: page.getByRole("heading", { name: `${title} unavailable offline` }) }).getByRole("button", { name: "Retry", exact: true });
+}
+
+/**
+ * The page loads online, then the network goes away and every server-backed screen is opened from the cache.
+ * Each one has to say it is unavailable offline with a Retry. Retry while offline says it is still offline, and
+ * once the network is back the browser's online event reopens the screen.
+ */
+async function offlineWarmCase(s, base, cdp, engine) {
+  prepare(s);
+  const host = await s.open("offline", { name: uniqueName("off") });
+  host.page.setDefaultTimeout(LOAD_TIMEOUT_MS);
+  await host.page.goto(base);
+  await menuName(host.page).waitFor();
+  await host.page.evaluate(() => navigator.serviceWorker?.ready.then(() => 1));
+  // A returning visit: the service worker controls the page before the network goes away.
+  await host.page.reload();
+  await menuName(host.page).waitFor();
+  await host.page.waitForFunction(() => navigator.serviceWorker?.controller !== null);
+  const session = cdp ? await host.context.newCDPSession(host.page) : null;
+  offline = true;
+  await setNetworkOff(host, session, true);
+  // A navigation, not a reload: Firefox refuses a reload of the controlled page while offline; goto is served by the worker.
+  await host.page.goto(base);
+  await menuName(host.page).waitFor();
+  // Firefox's setOffline does not stop page fetches to loopback, so the stats request is refused by route once the page is up.
+  await host.context.route("**/api/stats", (route) => route.abort("internetdisconnected"));
+  const failed = [];
+  for (const title of ["Browse rooms", "Quick play", "Library", "Friends"]) {
+    const open = title === "Browse rooms" || title === "Quick play" ? button(host.page, title) : null;
+    await (open ? open.click() : navTo(host.page, title));
+    const shown = await host.page.getByRole("heading", { name: `${title} unavailable offline` }).waitFor({ timeout: 5000 }).then(() => true, () => false);
+    const retry = await sectionRetry(host.page, title).isVisible();
+    if (!shown || !retry) failed.push(title);
+    await host.page.goBack();
+    await menuName(host.page).waitFor();
+  }
+  await button(host.page, "Browse rooms").click();
+  await sectionRetry(host.page, "Browse rooms").click();
+  const stillNoted = await host.page.getByText("Still offline. Retry when the connection is back.").waitFor({ timeout: 5000 }).then(() => true, () => false);
+  await host.context.unroute("**/api/stats");
+  // The network comes back. Playwright's Firefox never sends `online` to a document that was loaded while offline
+  // (navigator.onLine turns true but the event is not dispatched), so the page is given the event after a real restore.
+  await host.page.evaluate(() => { window.__onlineSeen = false; window.addEventListener("online", () => { window.__onlineSeen = true; }, { once: true }); });
+  await setNetworkOff(host, session, false);
+  offline = false;
+  const eventShimmed = await host.page.waitForFunction(() => window.__onlineSeen === true, null, { timeout: 2000 }).then(() => false, () => true);
+  if (eventShimmed && engine === "firefox") await host.page.evaluate(() => window.dispatchEvent(new Event("online")));
+  const recovered = await host.page.getByRole("heading", { name: "Browse rooms unavailable offline" }).waitFor({ state: "detached", timeout: RECOVER_BUDGET_MS }).then(() => true, () => false);
+  const pass = failed.length === 0 && stillNoted && recovered && (!eventShimmed || engine === "firefox");
+  return {
+    pass,
+    metrics: { "offline.sectionsChecked": 4, "offline.sectionsFailed": failed.length, "offline.retryStillOffline": stillNoted, "offline.onlineReopens": recovered, "offline.onlineEventShimmed": eventShimmed },
+    detail: pass ? undefined : `failed: ${failed.join(", ") || "none"}; still-offline note ${stillNoted}; reopened online ${recovered}; online event shimmed ${eventShimmed}`,
   };
 }
 
@@ -797,6 +861,7 @@ for (const engine of engines) {
   await runCase(results, "net.offline20s.match", (s) => networkOffCase(s, cdp), noisy);
   await runCase(results, "net.blip4s.room", (s) => blipCase(s, cdp), noisy);
   await runCase(results, "net.giveUp60s.room", (s) => giveUpCase(s, cdp), noisy);
+  await runCase(results, "offline.warm.j", (s) => offlineWarmCase(s, base, cdp, engine), { ...noisy, ignore: [CONSOLE_OFFLINE, OFFLINE_FETCH_NOISE] });
   const dying = await startServer();
   await runCase(results, "reconnect.givenUp.server", (s) => serverStopCase(s, dying), { ...noisy, base: dying.base });
   await runCase(results, "kicked.room", (s) => kickedCase(s), opts);
