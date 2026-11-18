@@ -4,9 +4,11 @@
 
 import { type Pt, bbox } from "./geom";
 import {
+  type BodyGeo,
   type Kind,
   type Ref,
   bodyBounds,
+  bodyGeo,
   bodyXf,
   getList,
   isCircle,
@@ -14,7 +16,7 @@ import {
   shapeWorld,
   toWorld,
 } from "./model";
-import { type Obj, asObj, list, num, shapeColor } from "./schema";
+import { type Obj, asObj, list, num } from "./schema";
 
 /** `scale` is screen pixels per map unit; (x, y) is the map point at the canvas centre. */
 export interface View {
@@ -117,8 +119,16 @@ export function drawMap(canvas: HTMLCanvasElement, doc: Obj, view: View, scene: 
   const S = (p: Pt): Pt => screenAt(view, w, h, p);
   drawGrid(c, view, w, h);
   drawFrame(c, doc, S);
+  const k = view.scale;
+  const ox = w / 2 - view.x * k;
+  const oy = h / 2 - view.y * k;
   const scope = scene.scope;
-  getList(doc, "body").forEach((b, i) => drawBody(c, b, S, view.scale, scope && i !== scope.bi ? 0.3 : 1));
+  getList(doc, "body").forEach((b, i) => {
+    const geo = bodyGeo(b);
+    const bb = geo.bounds;
+    if (!bb || bb.maxX * k + ox < 0 || bb.minX * k + ox > w || bb.maxY * k + oy < 0 || bb.minY * k + oy > h) return;
+    drawBody(c, geo, b["50"] === true, ox, oy, k, scope && i !== scope.bi ? 0.3 : 1);
+  });
   c.globalAlpha = scope ? 0.3 : 1;
   for (const j of getList(doc, "joint")) drawJoint(c, doc, j, S);
   for (const kind of MARKER_KINDS) {
@@ -197,24 +207,20 @@ function clampAxis(c: number, view: number, arena: number): number {
   return Math.min(Math.max(c, view / 2), arena - view / 2);
 }
 
-function drawBody(c: CanvasRenderingContext2D, body: Obj, S: (p: Pt) => Pt, scale: number, alpha: number): void {
-  const invisible = body["50"] === true;
-  const xf = bodyXf(body);
-  for (const s of list(body, "s")) {
-    const shape = asObj(s);
+function drawBody(c: CanvasRenderingContext2D, geo: BodyGeo, invisible: boolean, ox: number, oy: number, k: number, alpha: number): void {
+  for (const s of geo.shapes) {
     c.beginPath();
     c.globalAlpha = alpha;
-    if (isCircle(shape)) {
-      const centre = S(toWorld(xf, { x: num(shape, "2", 0), y: num(shape, "3", 0) }));
-      c.arc(centre.x, centre.y, num(shape, "9", 0) * scale, 0, TAU);
+    if (s.circle) {
+      c.arc(ox + s.x * k, oy + s.y * k, s.r * k, 0, TAU);
     } else {
-      const pts = shapeWorld(body, shape);
+      const pts = s.pts;
       if (pts.length < 3) continue;
-      pts.forEach((q, i) => {
-        const p = S(q);
-        if (i === 0) c.moveTo(p.x, p.y);
-        else c.lineTo(p.x, p.y);
-      });
+      for (let i = 0; i < pts.length; i++) {
+        const p = pts[i]!;
+        if (i === 0) c.moveTo(ox + p.x * k, oy + p.y * k);
+        else c.lineTo(ox + p.x * k, oy + p.y * k);
+      }
       c.closePath();
     }
     c.lineWidth = 1;
@@ -225,7 +231,7 @@ function drawBody(c: CanvasRenderingContext2D, body: Obj, S: (p: Pt) => Pt, scal
       c.setLineDash([]);
     } else {
       c.globalAlpha = 0.85 * alpha;
-      c.fillStyle = shapeColor(shape);
+      c.fillStyle = s.colour;
       c.fill();
       c.globalAlpha = alpha;
       c.stroke();

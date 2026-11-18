@@ -19,6 +19,7 @@ import {
   hexColor,
   list,
   num,
+  shapeColor,
   withField,
 } from "./schema";
 
@@ -148,25 +149,62 @@ export function shapeWorld(body: Obj, shape: Obj): Pt[] {
   return shapeLocal(shape).map((p) => toWorld(xf, p));
 }
 
-/** World-space centre of a circle shape. */
-function circleWorld(body: Obj, shape: Obj): Pt {
-  return toWorld(bodyXf(body), { x: num(shape, "2", 0), y: num(shape, "3", 0) });
+export interface Bounds {
+  minX: number;
+  minY: number;
+  maxX: number;
+  maxY: number;
+}
+
+/** One shape in world space: a circle's centre and radius, or a polygon's points. */
+export interface ShapeGeo {
+  circle: boolean;
+  x: number;
+  y: number;
+  r: number;
+  pts: Pt[];
+  colour: string;
+}
+
+export interface BodyGeo {
+  bounds: Bounds | null;
+  shapes: ShapeGeo[];
+}
+
+const geoCache = new WeakMap<Obj, BodyGeo>();
+
+/**
+ * World-space geometry of a body, cached per body object. Edits never mutate a
+ * body; they build a new object, so an entry stays valid for the object it was made for.
+ */
+export function bodyGeo(body: Obj): BodyGeo {
+  const cached = geoCache.get(body);
+  if (cached) return cached;
+  const xf = bodyXf(body);
+  const shapes: ShapeGeo[] = [];
+  const all: Pt[] = [];
+  for (const s of list(body, "s")) {
+    const shape = asObj(s);
+    const colour = shapeColor(shape);
+    if (isCircle(shape)) {
+      const c = toWorld(xf, { x: num(shape, "2", 0), y: num(shape, "3", 0) });
+      const r = num(shape, "9", 0);
+      shapes.push({ circle: true, x: c.x, y: c.y, r, pts: [], colour });
+      all.push({ x: c.x - r, y: c.y - r }, { x: c.x + r, y: c.y + r });
+    } else {
+      const pts = shapeLocal(shape).map((p) => toWorld(xf, p));
+      shapes.push({ circle: false, x: 0, y: 0, r: 0, pts, colour });
+      all.push(...pts);
+    }
+  }
+  const geo: BodyGeo = { bounds: all.length ? bbox(all) : null, shapes };
+  geoCache.set(body, geo);
+  return geo;
 }
 
 /** World-space bounds of a body's shapes, or null when it has none. */
-export function bodyBounds(body: Obj): { minX: number; minY: number; maxX: number; maxY: number } | null {
-  const pts: Pt[] = [];
-  for (const s of list(body, "s")) {
-    const shape = asObj(s);
-    if (isCircle(shape)) {
-      const c = circleWorld(body, shape);
-      const r = num(shape, "9", 0);
-      pts.push({ x: c.x - r, y: c.y - r }, { x: c.x + r, y: c.y + r });
-    } else {
-      pts.push(...shapeWorld(body, shape));
-    }
-  }
-  return pts.length ? bbox(pts) : null;
+export function bodyBounds(body: Obj): Bounds | null {
+  return bodyGeo(body).bounds;
 }
 
 /** Centre used for selection outlines and nudges. */
@@ -192,8 +230,21 @@ export function jointAnchors(doc: Obj, j: Obj): [Pt, Pt] {
   ];
 }
 
+const bodyIndexes = new WeakMap<Obj[], Map<number, Obj>>();
+
+/** The first body with map id `id`. Index per body array; arrays are never mutated in place, so an index stays valid. */
 export function bodyById(doc: Obj, id: number): Obj | null {
-  return getList(doc, "body").find((b) => num(b, "1", -1) === id) ?? null;
+  const bodies = getList(doc, "body");
+  let index = bodyIndexes.get(bodies);
+  if (!index) {
+    index = new Map();
+    for (const b of bodies) {
+      const bid = num(b, "1", -1);
+      if (!index.has(bid)) index.set(bid, b);
+    }
+    bodyIndexes.set(bodies, index);
+  }
+  return index.get(id) ?? null;
 }
 
 function anchorWorld(doc: Obj, id: number, p: Pt): Pt {
@@ -226,14 +277,15 @@ export function hitTest(doc: Obj, w: Pt, tol: number): Ref | null {
 }
 
 function bodyHit(body: Obj, w: Pt, tol: number): boolean {
-  for (const s of list(body, "s")) {
-    const shape = asObj(s);
-    if (isCircle(shape)) {
-      const c = circleWorld(body, shape);
-      if (Math.hypot(w.x - c.x, w.y - c.y) <= num(shape, "9", 0) + tol) return true;
+  const geo = bodyGeo(body);
+  const b = geo.bounds;
+  if (!b || w.x < b.minX - tol || w.x > b.maxX + tol || w.y < b.minY - tol || w.y > b.maxY + tol) return false;
+  for (const s of geo.shapes) {
+    if (s.circle) {
+      if (Math.hypot(w.x - s.x, w.y - s.y) <= s.r + tol) return true;
       continue;
     }
-    const pts = shapeWorld(body, shape);
+    const pts = s.pts;
     if (pts.length < 3) continue;
     if (pointInPoly(w, pts)) return true;
     for (let i = 0; i < pts.length; i++) {
