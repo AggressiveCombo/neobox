@@ -121,17 +121,18 @@ export function computeCamera(scene: Scene, local?: PlayerRec): Camera {
   }
   const w0 = scene.viewWidth;
   const h0 = w0 / VIEW_ASPECT;
-  // An axis the arena fits inside at the base view is fixed: centred on the arena and not part of the zoom need,
+  // An axis the playable bounds fit inside at the base view is fixed: centred on them and not part of the zoom need,
   // so a map that fits both axes has a fixed camera (no follow, no zoom pumping).
-  const fitsX = scene.arenaW <= w0;
-  const fitsY = scene.arenaH <= h0;
+  const bounds = playBounds(scene);
+  const fitsX = bounds.x1 - bounds.x0 <= w0;
+  const fitsY = bounds.y1 - bounds.y0 <= h0;
   // The narrowest view that keeps the group inside the insets, on the axes that move.
   const needX = fitsX ? 0 : (maxX - minX) / (1 - 2 * SAFE_SIDE);
   const needY = fitsY ? 0 : ((maxY - minY) * VIEW_ASPECT) / (1 - SAFE_TOP - SAFE_BOTTOM);
   const w = Math.min(Math.max(needX, needY, w0), w0 * MAX_ZOOM_OUT);
   const h = w / VIEW_ASPECT;
-  const cx = fitsX ? scene.arenaW / 2 : axisCentre(sx, minX, maxX, w, w * SAFE_SIDE, w * SAFE_SIDE, scene.arenaW);
-  const cy = fitsY ? scene.arenaH / 2 : axisCentre(sy, minY, maxY, h, h * SAFE_TOP, h * SAFE_BOTTOM, scene.arenaH);
+  const cx = fitsX ? (bounds.x0 + bounds.x1) / 2 : axisCentre(sx, minX, maxX, w, w * SAFE_SIDE, w * SAFE_SIDE, bounds.x0, bounds.x1);
+  const cy = fitsY ? (bounds.y0 + bounds.y1) / 2 : axisCentre(sy, minY, maxY, h, h * SAFE_TOP, h * SAFE_BOTTOM, bounds.y0, bounds.y1);
   const away: number[] = [];
   for (const p of live) {
     if (p === local) continue;
@@ -160,9 +161,9 @@ function liveSprites(scene: Scene): PlayerRec[] {
 /**
  * Centre on one axis for the view length `len`, with the group [lo, hi] inside the view (insets `a` on the
  * low side and `b` on the high side when they fit, else without insets, else the subject `l` alone), the
- * centre weighted halfway to the subject, and the view kept inside the arena unless the subject is outside it.
+ * centre weighted halfway to the subject, and the view kept inside the playable bounds [blo, bhi] unless the subject is outside it.
  */
-function axisCentre(l: number, lo: number, hi: number, len: number, a: number, b: number, arena: number): number {
+function axisCentre(l: number, lo: number, hi: number, len: number, a: number, b: number, blo: number, bhi: number): number {
   const pref = (l + (lo + hi) / 2) / 2;
   let c0 = hi - len / 2 + b;
   let c1 = lo + len / 2 - a;
@@ -174,11 +175,11 @@ function axisCentre(l: number, lo: number, hi: number, len: number, a: number, b
     c0 = l - len / 2 + a;
     c1 = l + len / 2 - b;
   }
-  // The group's range is the last word: a player may stand past the arena box (a blast zone) and must stay in view.
-  // The arena clamp moves the centre only while the whole group stays inside the view, so an edge group shows with
-  // the view ending at the arena's edge (no VOID past it); otherwise the centre keeps the group inside its insets.
+  // The group's range is the last word: a player may stand past the bounds (a blast zone) and must stay in view.
+  // The bounds clamp moves the centre only while the whole group stays inside the view, so an edge group shows with
+  // the view ending at the bounds' edge (no VOID past it); otherwise the centre keeps the group inside its insets.
   const p = Math.min(Math.max(pref, c0), c1);
-  const q = clampAxis(p, len, arena);
+  const q = clampAxis(p, len, blo, bhi);
   return q >= hi - len / 2 && q <= lo + len / 2 ? q : p;
 }
 
@@ -199,9 +200,36 @@ export function backdropCamera(scene: Scene, box: { cx: number; cy: number; side
   };
 }
 
-function clampAxis(c: number, view: number, arena: number): number {
-  if (arena < view) return arena / 2;
-  return Math.min(Math.max(c, view / 2), arena - view / 2);
+function clampAxis(c: number, view: number, lo: number, hi: number): number {
+  if (hi - lo < view) return (lo + hi) / 2;
+  return Math.min(Math.max(c, lo + view / 2), hi - view / 2);
+}
+
+/**
+ * The playable bounds: the arena united with the map's geometry (world vertices, x f32 and y f32 per 3-word vertex,
+ * as geometry.ts copies them). Ground past the arena edge is framed and backed, so no legal spot shows VOID.
+ */
+export interface Bounds {
+  x0: number;
+  y0: number;
+  x1: number;
+  y1: number;
+}
+export function playBounds(scene: Scene): Bounds {
+  const b: Bounds = { x0: 0, y0: 0, x1: Math.max(0, scene.arenaW), y1: Math.max(0, scene.arenaH) };
+  const f = scene.view.f32;
+  const available = Math.floor((f.length - scene.worldOffset) / 3);
+  const count = Math.max(0, Math.min(scene.worldCount, available));
+  for (let i = 0; i < count; i++) {
+    const at = scene.worldOffset + 3 * i;
+    const x = f[at];
+    const y = f[at + 1];
+    if (x < b.x0) b.x0 = x;
+    if (x > b.x1) b.x1 = x;
+    if (y < b.y0) b.y0 = y;
+    if (y > b.y1) b.y1 = y;
+  }
+  return b;
 }
 
 /** Clip-space transform (sx, sy, ox, oy): clip = (x*sx + ox, y*sy + oy). */

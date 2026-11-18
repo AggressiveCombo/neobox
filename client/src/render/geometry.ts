@@ -5,7 +5,7 @@
 
 import type { PlayerRec, Scene } from "../frame";
 import { FLAG_AIR_JUMP, FLAG_BAT, FLAG_DASH, FLAG_FROZEN, FLAG_GHOST, FLAG_LOCAL, FLAG_PUSHING, FLAG_TELEPORT } from "../frame";
-import { findLocal } from "../camera";
+import { findLocal, playBounds } from "../camera";
 import { TEAM_BLUE, TEAM_FFA, TEAM_RED, TEAM_SPECTATOR } from "../protocol";
 import { prefs, type Palette } from "../prefs";
 import { BIT } from "../input";
@@ -16,7 +16,7 @@ export const VERTEX_BYTES = 12;
 export const VOID_RGB = [10 / 255, 10 / 255, 10 / 255, 1] as const;
 const WORDS_PER_VERTEX = 3;
 const INITIAL_CAPACITY = 1024;
-const BACKGROUND_VERTICES = 6;
+const BACKGROUND_VERTICES = 18;
 /** Body (6), launcher (90), egg (6), highlight ring (24), marker fill and outline (21). The trail reserves its own. */
 const PLAYER_MAX_VERTICES = 147;
 
@@ -230,21 +230,28 @@ export class Geometry {
     this.putPlayers(scene);
   }
 
-  /** The map backdrop covers the arena only (world 0..arenaW, 0..arenaH, top edge at y 0); outside it is VOID. */
+  /** The backdrop covers the playable bounds (arena united with the map geometry): gradient over the arena's height, edge colours beyond it. */
   private putBackground(scene: Scene): void {
     this.reserve(BACKGROUND_VERTICES);
     const top = packRgba(scene.bgTop, 1);
     const bottom = packRgba(scene.bgBottom, 1);
-    const w = Math.max(0, scene.arenaW);
+    const b = playBounds(scene);
     const h = Math.max(0, scene.arenaH);
     this.background.first = this.used;
-    this.put(0, 0, top);
-    this.put(w, 0, top);
-    this.put(w, h, bottom);
-    this.put(0, 0, top);
-    this.put(w, h, bottom);
-    this.put(0, h, bottom);
+    this.putBand(b.x0, b.y0, b.x1, 0, top, top);
+    this.putBand(b.x0, 0, b.x1, h, top, bottom);
+    this.putBand(b.x0, h, b.x1, b.y1, bottom, bottom);
     this.background.count = BACKGROUND_VERTICES;
+  }
+
+  /** Quad over x0..x1 and y0..y1: colour c0 along the y0 edge, c1 along the y1 edge. */
+  private putBand(x0: number, y0: number, x1: number, y1: number, c0: number, c1: number): void {
+    this.put(x0, y0, c0);
+    this.put(x1, y0, c0);
+    this.put(x1, y1, c1);
+    this.put(x0, y0, c0);
+    this.put(x1, y1, c1);
+    this.put(x0, y1, c1);
   }
 
   /** Bitwise copy of the engine's world vertices (x f32, y f32, colour u32). */
