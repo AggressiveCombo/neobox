@@ -48,7 +48,10 @@ export function mountMenuClips(ctx: AppCtx, host: HTMLElement, onPlaying?: (on: 
   let atEnd = false;
   let cursor = 0;
   let playing: Playing | null = null;
-  /** The clip last held still under reduced motion; it is drawn once, not every frame. */
+  /** Held on one frame by the pause button; starts held under reduced motion. The clip does not advance while true. */
+  let paused = reducedMotion();
+  let lastReduce = paused;
+  /** The clip last drawn still while paused: it is drawn once, not every frame. */
   let frozenFor: Playing | null = null;
   let loading = false;
   let rafId = 0;
@@ -61,9 +64,19 @@ export function mountMenuClips(ctx: AppCtx, host: HTMLElement, onPlaying?: (on: 
   window.addEventListener("beforeunload", abortLoads);
   window.addEventListener("pagehide", abortLoads);
 
+  // The clip's caption and its pause control. The bar is hidden until a clip plays; the button is the only part that takes clicks.
   const credit = h("p", { class: "menu-clip-credit" });
-  credit.hidden = true;
-  host.append(credit);
+  const pauseBtn = h("button", {
+    type: "button",
+    class: "menu-clip-pause",
+    onclick: () => {
+      paused = !paused;
+      pauseBtn.textContent = paused ? "Play clip" : "Pause clip";
+    },
+  }, paused ? "Play clip" : "Pause clip");
+  const bar = h("div", { class: "menu-clip-bar" }, credit, pauseBtn);
+  bar.hidden = true;
+  host.append(bar);
 
   const soundWasMuted = ctx.sfx.sceneMuted;
   ctx.sfx.sceneMuted = true;
@@ -124,7 +137,7 @@ export function mountMenuClips(ctx: AppCtx, host: HTMLElement, onPlaying?: (on: 
     playing = next;
     onPlaying?.(true);
     credit.textContent = `${next.clip.map_name} · recorded by ${next.clip.recorder}`;
-    credit.hidden = false;
+    bar.hidden = false;
   }
 
   function startNext(): void {
@@ -161,8 +174,14 @@ export function mountMenuClips(ctx: AppCtx, host: HTMLElement, onPlaying?: (on: 
     last = now;
     if (!playing || !eng || document.hidden) return;
     const p = playing;
-    if (reducedMotion()) {
-      // Reduced motion holds the clip on one frame: draw it once, then stop advancing until the setting is off.
+    // The system's reduce-motion choice can change while the menu is open: follow it, then the button shows the state.
+    const reduce = reducedMotion();
+    if (reduce !== lastReduce) {
+      lastReduce = reduce;
+      paused = reduce;
+      pauseBtn.textContent = paused ? "Play clip" : "Pause clip";
+    }
+    if (paused) {
       if (frozenFor !== p) {
         frozenFor = p;
         eng.replayFrame(p.tick, p.follow);
@@ -174,7 +193,7 @@ export function mountMenuClips(ctx: AppCtx, host: HTMLElement, onPlaying?: (on: 
     p.tick += (dt / 1000) * p.info.hz;
     if (p.tick >= p.info.end) {
       playing = null;
-      credit.hidden = true;
+      bar.hidden = true;
       onPlaying?.(false);
       startNext();
       return;
@@ -197,7 +216,7 @@ export function mountMenuClips(ctx: AppCtx, host: HTMLElement, onPlaying?: (on: 
     window.clearTimeout(retryTimer);
     playing = null;
     eng?.replayClose();
-    credit.remove();
+    bar.remove();
     ctx.sfx.sceneMuted = soundWasMuted;
   };
 }

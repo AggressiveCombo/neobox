@@ -1,5 +1,5 @@
-/* Caption for the clip playing behind the home screen (ui/menu-clips.ts). Sits in the
-   .menu-credit slot over the clip; clicks pass through. */
+/* Caption and pause control for the clip playing behind the home screen (ui/menu-clips.ts).
+   They sit in the .menu-credit slot over the clip; only the button takes clicks. */
 .menu-clip-credit {
   margin: 0;
   padding: 4px 8px;
@@ -10,6 +10,32 @@
   pointer-events: none;
 }
 
-.menu-clip-credit[hidden] {
+.menu-clip-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.menu-clip-bar[hidden] {
   display: none;
+}
+
+/* The one control over the clip: a real button, so keyboard and screen readers reach it. */
+.menu-clip-pause {
+  flex: none;
+  margin: 0;
+  padding: 4px 8px;
+  border: 0;
+  background: var(--hud);
+  color: var(--hud-ink);
+  font: inherit;
+  font-size: var(--step-small);
+  line-height: 1.3;
+  cursor: pointer;
+  pointer-events: auto;
+}
+
+.menu-clip-pause:focus-visible {
+  outline: 2px solid var(--hud-ink);
+  outline-offset: 2px;
 }
