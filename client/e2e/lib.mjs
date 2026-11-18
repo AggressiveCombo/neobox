@@ -354,6 +354,16 @@ export async function adminRoom(base, code) {
   return room;
 }
 
+/** POSTs an admin API action with the admin session. Returns the status and body text. */
+export async function adminPost(base, path, body) {
+  const res = await fetch(`${base}${path}`, {
+    method: "POST",
+    headers: { "content-type": "application/json", cookie: await adminCookie(base) },
+    body: JSON.stringify(body),
+  });
+  return { status: res.status, text: await res.text() };
+}
+
 // ---------------------------------------------------------------- scenarios
 
 /** A scenario: its browser contexts/pages, recorded page and console errors, and cleanup. */
@@ -373,7 +383,7 @@ export class Scenario {
    * (localStorage "neobox.name", only when unset). Native dialogs (alert, confirm, prompt) fail the scenario;
    * the app's own confirms are DOM dialogs and are driven like any other control.
    */
-  async open(label, { phone = false, viewport, name, clipboard = false, ip: forcedIp } = {}) {
+  async open(label, { phone = false, viewport, name, clipboard = false, ip: forcedIp, serviceWorkers } = {}) {
     // `ip` is the client address the browser sends as X-Forwarded-For (picks its GeoIP location).
     const ip = forcedIp ?? nextClientIp();
     const context = await this.env.browser.newContext({
@@ -381,6 +391,7 @@ export class Scenario {
       ...(viewport && { viewport }),
       acceptDownloads: true,
       extraHTTPHeaders: { "X-Forwarded-For": ip },
+      ...(serviceWorkers && { serviceWorkers }),
     });
     if (clipboard) {
       await context.grantPermissions(["clipboard-read", "clipboard-write"], { origin: this.base });

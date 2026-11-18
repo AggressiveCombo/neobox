@@ -323,7 +323,8 @@ async function friendsFlow(s) {
 }
 
 async function profileStates(s) {
-  const a = await signedIn(s, "pfa");
+  // The service worker passes /api through, and WebKit does not route those fetches for a controlled page: block it here so the routes below see them.
+  const a = await signedIn(s, "pfa", undefined, { serviceWorkers: "block" });
   const b = await signedIn(s, "pfb");
   const ap = a.page;
   // B asks A to be friends; A accepts, which gives the list row its profile button
@@ -681,7 +682,8 @@ async function storageAndSync(s) {
   check(priv.includes("the phone welcome") && priv.includes("Training badge"), "privacy notice does not list phoneSplashSeen/hintSeen");
 
   // signed-in sync
-  const a = await signedIn(s, "sync");
+  // The service worker passes /api through, and WebKit does not route those fetches for a controlled page: block it here so the route below sees the PUT.
+  const a = await signedIn(s, "sync", undefined, { serviceWorkers: "block" });
   const ap = a.page;
   await openSettings(ap, s.base);
   let put = ap.waitForResponse((r) => r.url().endsWith("/api/account/prefs") && r.request().method() === "PUT");
