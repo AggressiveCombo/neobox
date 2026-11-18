@@ -180,13 +180,6 @@
   max-height: calc(100dvh - 2 * var(--margin));
 }
 
-/* Desktop: the chat panel fills the height of the three columns (its log grows) instead of ending short beside the middle column. */
-@media (min-width: 1100px) {
-  .room-main {
-    align-items: stretch;
-  }
-}
-
 .room-panel {
   display: flex;
   flex-direction: column;
