@@ -363,7 +363,8 @@ pub extern "C" fn nb_rtt() -> f64 {
 pub extern "C" fn nb_frame(now_ms: f64, mask: u32) -> u32 {
     with(|a| {
         let mask = mask as u8;
-        let dt = ((now_ms - a.last_now) / 1000.0).max(0.0);
+        // the raw gap: a negative or huge one is a clock step, which the clock resyncs on
+        let dt = (now_ms - a.last_now) / 1000.0;
         a.last_now = now_ms;
         let pressed = mask & !a.last_mask;
         a.last_mask = mask;
@@ -372,13 +373,13 @@ pub extern "C" fn nb_frame(now_ms: f64, mask: u32) -> u32 {
             return 0;
         };
         if let Some(w) = a.warm_ms.as_mut() {
-            *w += dt * 1000.0;
+            *w += dt.max(0.0) * 1000.0;
             if *w >= DEPTH_WARMUP_MS {
                 a.warm_ms = None;
                 s.reset_depth_stats();
             }
         }
-        let tick_f = clock.update(dt);
+        let tick_f = clock.update(dt, s.known as f64);
         let target = tick_f.floor().max(0.0) as u32;
         // The input applies to the tick in progress (`target`), whose result
         // (state target+1) is predicted right away and is what the frame

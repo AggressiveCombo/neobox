@@ -13,6 +13,11 @@ use std::collections::{BTreeMap, VecDeque};
 
 /// Longest client prediction ahead of the last confirmed tick (ticks).
 pub const MAX_PREDICTION: u32 = 45;
+
+/// Most ticks predicted past the server's confirmed tick. A feed stall stops
+/// prediction here, so a rollback after it is at most this deep.
+pub const PREDICTION_CAP: u32 = 20;
+
 /// Ticks between server state checksums.
 pub const CHECKSUM_INTERVAL: u32 = 30;
 
@@ -824,7 +829,7 @@ impl ClientSession {
     /// Predict forward to `target` (bounded by the prediction window).
     pub fn advance_to(&mut self, target: u32) {
         self.resimulate();
-        let limit = self.known + MAX_PREDICTION;
+        let limit = self.known + PREDICTION_CAP;
         while self.head() < target.min(limit) {
             self.step_one();
         }
@@ -878,8 +883,20 @@ impl TickClock {
         }
     }
 
-    /// Advance by `dt` seconds; returns the current fractional tick.
-    pub fn update(&mut self, dt: f64) -> f64 {
+    /// Longest believable gap between two frames, in seconds.
+    const MAX_GAP_S: f64 = 0.5;
+
+    /// Advance by `dt` seconds; returns the current fractional tick. A gap that
+    /// cannot be a frame (negative, or longer than `MAX_GAP_S`) means the local
+    /// clock stepped: the clock resyncs at once to the server's `confirmed` tick
+    /// plus the target lead, instead of running ahead or behind for seconds.
+    pub fn update(&mut self, dt: f64, confirmed: f64) -> f64 {
+        if !(0.0..=Self::MAX_GAP_S).contains(&dt) {
+            self.tick = confirmed + self.target_margin;
+            self.margin = self.target_margin;
+            self.have_margin = false;
+            return self.tick;
+        }
         let err = if self.have_margin { self.target_margin - self.margin } else { 0.0 };
         let rate = 1.0 + (err * 0.02).clamp(-0.06, 0.06);
         self.tick += dt.clamp(0.0, 0.25) * self.hz * rate;
@@ -1006,21 +1023,21 @@ mod tests {
         // predicts player 0 idle; the server holds it left from tick 0
         let mut c = ClientSession::new(start(), Some(0)).unwrap();
         c.attach_feed();
-        c.advance_to(30);
+        c.advance_to(20);
         let mut predicted = Vec::new();
         c.drain_predicted(|_, _, cur| predicted.push(checksum(cur)));
         c.on_ticks(&ticks);
         assert!(c.rollbacks > 0);
         let mut got = Vec::new();
         c.drain_confirmed(|_, _, cur| got.push(checksum(cur)));
-        // the rollback rewinds the predicted feed to its first tick: all 30 ticks come round again,
+        // the rollback rewinds the predicted feed to its first tick: all 20 ticks come round again,
         // while the confirmed feed has nothing left
         let mut refed = 0;
         c.drain_predicted(|_, _, _| refed += 1);
         let mut again = 0;
         c.drain_confirmed(|_, _, _| again += 1);
-        assert_eq!(predicted.len(), 30);
-        assert_eq!(refed, 30);
+        assert_eq!(predicted.len(), 20);
+        assert_eq!(refed, ticks.len());
         assert_ne!(predicted, want);
         assert_eq!(got, want);
         assert_eq!(again, 0);
@@ -1131,7 +1148,7 @@ mod tests {
         if p.typing && next_rand(&mut p.rng) % 30 == 0 {
             p.mask = (next_rand(&mut p.rng) % 8) as u8;
         }
-        let target = p.clock.update(dt).floor().max(0.0) as u32;
+        let target = p.clock.update(dt, p.session.known as f64).floor().max(0.0) as u32;
         p.session.local_input(target, p.mask);
         p.session.advance_to(target + 1);
         let newest = p.session.last_input_seq();
@@ -1299,6 +1316,25 @@ mod tests {
             c.on_margin(2.0);
         }
         assert_eq!(c.target_margin, 1.0);
+    }
+
+    /// A local clock step, forward or back, resyncs to the server's tick at the target lead in one update.
+    #[test]
+    fn clock_step_resyncs_in_one_update() {
+        for step in [3.0, -3.0] {
+            let mut c = TickClock::new(HZ, 0.0, 0.0);
+            c.on_margin(2.0);
+            let t = c.update(step, 100.0);
+            assert_eq!(t, 100.0 + c.target_margin);
+        }
+    }
+
+    /// Ordinary frames still advance the clock.
+    #[test]
+    fn ordinary_frames_advance_clock() {
+        let mut c = TickClock::new(HZ, 100.0, 0.0);
+        let t = c.update(0.1, 100.0);
+        assert!((t - (100.0 + 0.1 * HZ)).abs() < 1e-9);
     }
 
     /// Margins alternating between 0 and 2 ticks (spread 2) ask for 1 + 2 * 2 = 5 ticks of lead.
