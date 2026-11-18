@@ -37,6 +37,12 @@ export function fitView(winW: number, winH: number): ViewRect {
   return { x: Math.floor((winW - w) / 2), y: Math.floor((winH - h) / 2), w, h };
 }
 
+/** The largest view rect of the aspect inside the window's column [freeLeft, freeRight) (full height): landscape touch controls sit beside it. */
+export function fitViewBetween(winH: number, freeLeft: number, freeRight: number): ViewRect {
+  const v = fitView(freeRight - freeLeft, winH);
+  return { x: freeLeft + v.x, y: v.y, w: v.w, h: v.h };
+}
+
 /** Publish the view rect as `--view-x/-y/-w/-h` (px) on the root element; the game canvases are placed by them. */
 export function publishView(view: ViewRect): void {
   const style = document.documentElement.style;

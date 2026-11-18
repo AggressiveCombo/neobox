@@ -3,7 +3,7 @@
 
 import { fetchBuiltinMaps, fetchTicket, wsUrl, wsUrlFor, type BuiltinMap } from "./api";
 import { sfx } from "./audio";
-import { computeCamera, coverCamera, fitView, findLocal, publishView } from "./camera";
+import { computeCamera, coverCamera, fitView, fitViewBetween, findLocal, publishView, type ViewRect } from "./camera";
 import type { AppCtx, HudHandle, Present, ScreenFactory, ScreenHandle, WasmTools } from "./ctx";
 import type { Engine } from "./engine";
 import { engineLoader } from "./engine-loader";
@@ -344,6 +344,9 @@ export function start(): Store<AppState> {
       net.send({ t: "set_color", color: next.color });
     }
   });
+  prefs.subscribe((next, prev) => {
+    if (next.touchScale !== prev.touchScale || next.touchLeftHanded !== prev.touchLeftHanded) scheduleResize();
+  });
 
   /** The offline page's Try again once the server answers: Browse needs its socket (welcome mounts the list); the rest mount. */
   function reopen(screen: Screen): void {
@@ -378,6 +381,9 @@ export function start(): Store<AppState> {
     // last frame does not show through the page sliding in.
     if (!GAME_SCREENS[screen] && screen !== "menu") setViewShown(false);
     if (from !== null) playScreenTransition(uiRoot, leaving, handle.el, scrollTop);
+    // The controls of a new screen (and the transition's motion) set the band the game view fits between.
+    scheduleResize();
+    handle.el.addEventListener("animationend", scheduleResize);
   }
 
   store.subscribe((state, prev) => {
@@ -511,9 +517,28 @@ export function start(): Store<AppState> {
     if (store.state.inMatch) ensureRenderer(true);
   }
 
+  /** The game view rect. Landscape touch controls sit at the arena's two ends, so there the view is the largest rect between the two clusters (the arena then stays clear of them at any Control size); elsewhere it is the largest rect of the window. */
+  function gameView(): ViewRect {
+    const winW = window.innerWidth;
+    const winH = window.innerHeight;
+    if (backdrop) return { x: 0, y: 0, w: winW, h: winH };
+    if (winW > winH) {
+      let left = 0;
+      let right = winW;
+      for (const el of document.querySelectorAll<HTMLElement>(".hud-touch-layer .hud-stick, .hud-touch-layer .hud-actions")) {
+        const r = el.getBoundingClientRect();
+        if (r.width === 0) continue;
+        if (r.left + r.width / 2 < winW / 2) left = Math.max(left, r.right);
+        else right = Math.min(right, r.left);
+      }
+      if (right > left && right - left < winW) return fitViewBetween(winH, left, right);
+    }
+    return fitView(winW, winH);
+  }
+
   /** Size the game canvases to the view rect (the original's aspect, centred in the window) and publish it. */
   function resizeAll(): void {
-    const view = backdrop ? { x: 0, y: 0, w: window.innerWidth, h: window.innerHeight } : fitView(window.innerWidth, window.innerHeight);
+    const view = gameView();
     publishView(view);
     overlay.setView(view);
     const dpr = window.devicePixelRatio || 1;
@@ -522,6 +547,22 @@ export function start(): Store<AppState> {
     renderer?.resize(w, hPx);
     overlay.resize(w, hPx);
   }
+
+  /** resizeAll once this frame's layout is applied: prefs and a freshly mounted screen change the controls' rects. */
+  let resizePending = 0;
+  function scheduleResize(): void {
+    if (resizePending === 0) {
+      resizePending = requestAnimationFrame(() => {
+        resizePending = 0;
+        resizeAll();
+      });
+    }
+  }
+
+  // Practice, training and the test play build their touch controls after their screen mounts: resize when a layer enters or leaves.
+  new MutationObserver((records) => {
+    if (records.some((r) => [...r.addedNodes, ...r.removedNodes].some((n) => n instanceof Element && (n.matches(".hud-touch-layer") || n.querySelector(".hud-touch-layer"))))) scheduleResize();
+  }).observe(uiRoot, { childList: true, subtree: true });
 
   /** This tab's seat, kept in sessionStorage so a page reload rejoins the same slot on the same server. */
   function saveSeat(): void {

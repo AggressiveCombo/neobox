@@ -154,7 +154,10 @@ damage threshold, at the body's interpolated position.
 The original shows a view `W` = header word 9 world units wide and `W / A` high,
 where `A` = 1.6, or 2 for its mobile user agents (`VIEW_ASPECT` in `camera.ts`,
 the same user-agent test). The game view is that rect, as large as the window
-allows and centred: `fitView(winW, winH)` returns it, and `publishView` sets
+allows and centred: `fitView(winW, winH)` returns it. On a landscape window with touch
+controls, it is instead the largest such rect between the two control clusters
+(`fitViewBetween`, the band the clusters leave free), so the arena stays clear of them.
+`publishView` sets
 `--view-x/-y/-w/-h` (px) on `documentElement`. The game canvases and the overlay
 sit on that rect; the window around it is letterbox, painted by `#gl-host`. The
 renderers and overlay draw only inside it. Centre on the local player (or the
