@@ -1401,6 +1401,12 @@ dialog.modal:focus {
   :root {
     --control: 48px;
   }
+  /* The visible track stays 24px; the 44px box around it is the touch target. */
+  input[type="checkbox"][role="switch"] {
+    height: 44px;
+    padding: 10px 2px;
+    background-clip: content-box;
+  }
 }
 
 /* Sound captions (audio.ts): one line at the bottom centre, above the game, never taking clicks. */
