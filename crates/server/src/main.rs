@@ -18,6 +18,7 @@ mod hub;
 mod logbuf;
 mod maps;
 mod origin;
+mod qa_events;
 mod room;
 mod rotation;
 mod rtc;

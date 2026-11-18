@@ -2,7 +2,7 @@
 //! match runs, the authoritative input timeline ticking at the room's rate.
 
 use crate::hub::{close, AccountRef, ConnInfo, Hub, Out, RoomHandle};
-use crate::{award, emoji, youtube};
+use crate::{award, emoji, qa_events, youtube};
 use base64::Engine;
 use neobox_net::*;
 use neobox_sim::start::Outcome;
@@ -271,6 +271,8 @@ struct Game {
     slow_us: f64,
     /// per-player numbers of this game, for the signed-in players' stats
     tallies: award::Tallies,
+    /// the server's own record of the match, when NEOBOX_QA_EVENTS is set
+    qa: Option<qa_events::EventLog>,
 }
 
 /// A match whose steps stay slower than real time this long is stopped.
@@ -1518,13 +1520,15 @@ impl Room {
             step_max_us: 0.0,
             slow_us: 0.0,
             tallies: award::Tallies::default(),
+            qa: qa_events::EventLog::open(self.players.iter().filter(|p| p.team != TEAM_SPECTATOR).map(|p| (p.id, p.name.clone())).collect()),
         });
         self.broadcast_room();
     }
 
     fn end_match(&mut self, reason: &str) {
-        if self.game.take().is_none() {
-            return;
+        let Some(mut game) = self.game.take() else { return };
+        if let Some(log) = game.qa.as_mut() {
+            log.finish(&game.m.state, reason);
         }
         info!(room = %self.code, reason, "match end");
         // the end waits for in-flight awards, so each player hears its experience before the match ends
@@ -1770,7 +1774,11 @@ impl Room {
                 break;
             }
             let t0 = Instant::now();
+            let before = g.qa.is_some().then(|| g.m.state.clone());
             let data = g.m.step();
+            if let (Some(log), Some(prev)) = (g.qa.as_mut(), before) {
+                log.record(g.m.tick, &prev, &g.m.state);
+            }
             g.tallies.observe(&g.m.state.round, period.as_secs_f64());
             let us = t0.elapsed().as_secs_f64() * 1e6;
             g.step_total_us += us;
