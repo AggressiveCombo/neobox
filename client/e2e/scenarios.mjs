@@ -37,6 +37,7 @@ import {
 } from "./lib.mjs";
 import { livenessScenarios } from "./liveness.mjs";
 import { matchInvScenarios } from "./inv-match.mjs";
+import { accountsInvScenarios } from "./inv-accounts.mjs";
 import { roomsInvScenarios } from "./inv-rooms.mjs";
 import { writeFileSync, mkdtempSync } from "node:fs";
 import os from "node:os";
@@ -1359,9 +1360,7 @@ export const scenarios = [
   { name: "resync keeps map", run: resyncKeepsMap, topology: rtcServer, webrtc: true },
   { name: "sounds", run: sounds },
   ...matchInvScenarios,
+  ...accountsInvScenarios,
   ...roomsInvScenarios,
   ...livenessScenarios,
 ];
-
-import { accountsInvScenarios } from "./inv-accounts.mjs";
-  ...accountsInvScenarios,
