@@ -2,7 +2,8 @@
 // controls, the room chat and its commands and notices, and the links into rooms. Each scenario names the rows it proves
 // in `inv`; every check asserts a row's "shows" column, with role/name locators where they exist.
 
-import { PASSWORD, adminRoom, button, createRoom, dismissPhoneSplash, ipIn, joinByInvite, matchWithGuest, menuName, playFromMenu, regionServers, roomCode, roomTitle, signedIn, sleep, uniqueName } from "./lib.mjs";
+import { deflateSync } from "node:zlib";
+import { ADMIN_PASSWORD, PASSWORD, adminRoom, button, createRoom, dismissPhoneSplash, ipIn, joinByInvite, matchWithGuest, menuName, navTo, playFromMenu, regionServers, roomCode, roomTitle, signedIn, sleep, startMatch, uniqueName } from "./lib.mjs";
 
 const check = (ok, message) => {
   if (!ok) throw new Error(message);
@@ -814,10 +815,167 @@ async function mapCommands(s) {
   return `guest /upvote -> "Sign in to vote for maps and keep favourites"; signed-in host /upvote, /downvote, /fav, /unfav, /fave, /unfave -> "This map is not in the map library"`;
 }
 
-// NOT PROVEN in this file (inventory rows left UNVERIFIED): room-fastest-modal needs a signed-in library map (the Fastest
-// Times window is opened by scenarios.mjs, not by a row here); sys-pb needs a timed finish that beats the saved best and
-// the harness has no scripted timed run; sys-too-complex needs a map that trips the simulator's complexity limit, and no
-// map code here does. sys-no-map is NOT-REACHABLE (see chatTeams).
+// ---------------------------------------------------------------- group 8: library maps, Fastest Times, race records, complexity
+
+/** A map code as the room reads it: zlib-deflated JSON, base64, encodeURIComponent (sim map.rs decode_code). */
+const mapCode = (map) => encodeURIComponent(deflateSync(Buffer.from(JSON.stringify(map))).toString("base64"));
+
+const SETTINGS = { 3: 40, 15: 40, 16: 25 };
+const FLOOR = { 1: 0, 2: 20, 3: 21, s: [{ p: [-20, -0.5, 20, -0.5, 20, 0.5, -20, 0.5] }] };
+/** The race platform: a 12-unit ledge (fixture of client/qa/gameplay.mjs), its top at y 20.5. */
+const RACE_PLATFORM = { 1: 0, 2: 20, 3: 21, s: [{ 7: 3754574, p: [-6, -0.5, 6, -0.5, 6, 0.5, -6, 0.5] }] };
+
+/** A race: the spawn stands 4.5 units left of the finish, a solid checkpoint (31:1) the player walks into, which ends the run. */
+const RACE_MAP = {
+  b: [RACE_PLATFORM, { 1: 1, 2: 20, 3: 19.5, 31: 1, s: [{ p: [-0.5, -1, 0.5, -1, 0.5, 1, -0.5, 1] }] }],
+  j: [],
+  s: [{ 1: 15, 2: 19.5 }],
+  p: [],
+  tu: [],
+  tc: [],
+  gp: [],
+  c: [],
+  set: SETTINGS,
+};
+
+/** 1100 overlapping dynamic boxes: about 600k contact pairs, past MAX_CONTACTS (2^19), so the simulator stops the match (room.rs "too complex"). */
+const COMPLEX_MAP = {
+  b: [FLOOR, ...Array.from({ length: 1100 }, (_, i) => ({ 1: i + 1, 2: 20, 3: 10, 14: 2, s: [{ p: [-0.5, -0.5, 0.5, -0.5, 0.5, 0.5, -0.5, 0.5] }] }))],
+  j: [],
+  s: [{ 1: 15, 2: 19.5 }],
+  p: [],
+  tu: [],
+  tc: [],
+  gp: [],
+  c: [],
+  set: SETTINGS,
+};
+
+/** Uploads `code` as a public map `name` from Library > Mine, then approves it as admin. Leaves the user on Library. */
+async function uploadApprovedMap(s, user, code, name) {
+  const { page } = user;
+  await navTo(page, "Library");
+  await page.getByRole("tab", { name: "Mine", exact: true }).or(button(page, "Mine")).first().click();
+  await button(page, "Upload a map").click();
+  await page.getByPlaceholder("Map name", { exact: true }).fill(name);
+  await page.getByLabel("map code", { exact: true }).fill(code);
+  await page.getByRole("radiogroup", { name: "Visibility", exact: true }).getByRole("radio", { name: "Public", exact: true }).click();
+  await button(page, "Upload map").click();
+  await page.locator("ul[aria-label=maps] li").filter({ hasText: name }).waitFor();
+  const admin = await s.open("admin");
+  await admin.page.goto(`${s.base}/admin`);
+  await admin.page.locator("#pw").fill(ADMIN_PASSWORD);
+  await button(admin.page, "Log in").click();
+  await admin.page.getByRole("heading", { name: "Map approvals" }).waitFor();
+  await admin.page.locator("table#maps tbody tr").filter({ hasText: name }).getByRole("button", { name: "Approve", exact: true }).click();
+  await admin.page.getByText(`Approved ${name}.`, { exact: false }).waitFor();
+}
+
+/** The room host picks an approved library map (Change map > Library): it becomes the room map, a library map with an id. */
+async function pickLibraryMap(page, name) {
+  await button(page, "Change map").click();
+  await button(page, "Library").click();
+  const picker = page.getByRole("dialog", { name: "Pick a map", exact: true });
+  await picker.waitFor();
+  await picker.locator(".map-card").filter({ hasText: name }).first().click();
+  await page.locator(".room-map-name").filter({ hasText: name }).waitFor();
+}
+
+/** The engine tick the page presents (game.ts publishes __qaTick), and a wait for a tick. */
+const tickOf = (page) => page.evaluate(() => globalThis.__qaTick?.tick ?? -1);
+async function waitTick(page, tick) {
+  try {
+    await page.waitForFunction((t) => (globalThis.__qaTick?.tick ?? -1) >= t, tick, { timeout: 120000, polling: 10 });
+  } catch (err) {
+    throw new Error(`engine tick never reached ${tick} (last presented: ${await tickOf(page)}): ${err.message}`);
+  }
+}
+
+/** One run from the started match: holds ArrowRight from `delayTicks` after the HUD appears for 8 s (the finish is a few units away), then ends the match and returns to the room. */
+async function raceRun(page, delayTicks) {
+  await page.bringToFront();
+  const t0 = await tickOf(page);
+  await waitTick(page, t0 + delayTicks);
+  await page.keyboard.down("ArrowRight");
+  await sleep(6800);
+  await page.keyboard.up("ArrowRight");
+  const end = page.locator(".hud-end");
+  if (await end.isVisible()) {
+    await end.click();
+    const confirm = page.getByRole("alertdialog", { name: "End the match?", exact: true });
+    await confirm.getByRole("button", { name: "End match", exact: true }).click();
+  }
+  await roomTitle(page).waitFor({ state: "visible", timeout: 60000 });
+}
+
+/** The seconds of the room's personal-best line that comes after the `before` lines already in the log. */
+async function personalBestSeconds(page, before) {
+  const lines = page.locator("div.room-chat-log .room-chat-line").filter({ hasText: "personal best" });
+  await lines.nth(before).waitFor({ state: "visible", timeout: 30000 });
+  const text = (await lines.nth(before).textContent()) ?? "";
+  const m = /set a personal best: (\d+\.\d+)s/.exec(text);
+  if (!m) throw new Error(`personal best line "${text}" has no time`);
+  return Number(m[1]);
+}
+
+/** sys-pb: a signed-in host races a library map with /set recordMode true. The first run (started 240 ticks after the HUD, past the countdown) and a second run held from the start: the faster one is a new personal best and is announced. */
+async function racePersonalBest(s) {
+  const user = await signedIn(s, "pbhost");
+  const name = uniqueName("pb");
+  await uploadApprovedMap(s, user, mapCode(RACE_MAP), name);
+  const { page } = user;
+  await createRoom(user, s.base, uniqueName("room"), { isPublic: true });
+  await pickLibraryMap(page, name);
+  await sendChat(page, "/set recordMode true");
+  await chatLine(page, "recordMode: true").waitFor({ state: "visible" });
+  const seconds = [];
+  for (const delay of [240, 0]) {
+    const before = await page.locator("div.room-chat-log .room-chat-line").filter({ hasText: "personal best" }).count();
+    await startMatch(user, []);
+    await raceRun(page, delay);
+    seconds.push(await personalBestSeconds(page, before));
+  }
+  check(seconds[1] < seconds[0], `the faster run was not faster: ${seconds[0]}s then ${seconds[1]}s`);
+  return `library map "${name}", /set recordMode true; personal best ${seconds[0]}s, then ${seconds[1]}s (faster, announced again)`;
+}
+
+/** room-fastest-modal: the built-in map's Fastest Times button is disabled; on an approved library map it opens "NAME by AUTHOR" with "No Records". */
+async function fastestModal(s) {
+  const user = await signedIn(s, "fastest");
+  const name = uniqueName("fast");
+  await uploadApprovedMap(s, user, mapCode(RACE_MAP), name);
+  const { page } = user;
+  await createRoom(user, s.base, uniqueName("room"), { isPublic: true });
+  const fastest = button(page, "Fastest Times");
+  await fastest.waitFor({ state: "visible" });
+  check(await fastest.isDisabled(), "Fastest Times is enabled on a built-in map");
+  await pickLibraryMap(page, name);
+  check(await fastest.isEnabled(), "Fastest Times is disabled on a library map");
+  await fastest.click();
+  const times = page.getByRole("dialog", { name: "Fastest Times", exact: true });
+  await times.getByText(`${name} by ${user.userName}`, { exact: true }).waitFor();
+  await times.getByText("No Records", { exact: true }).waitFor();
+  await page.keyboard.press("Escape");
+  await times.waitFor({ state: "detached" });
+  return `built-in map: Fastest Times disabled; library "${name}": "${name} by ${user.userName}", "No Records"`;
+}
+
+/** sys-too-complex: a host pastes a map of 1100 overlapping dynamic boxes; the match stops with the complexity notice. */
+async function tooComplex(s) {
+  const { h } = await openHostRoomNamed(s);
+  const { page } = h;
+  await button(page, "Change map").click();
+  const dialog = page.getByRole("dialog", { name: "Choose a map", exact: true });
+  await dialog.waitFor({ state: "visible" });
+  await dialog.getByLabel("Map code or JSON", { exact: true }).fill(mapCode(COMPLEX_MAP));
+  await dialog.getByRole("button", { name: "Use code", exact: true }).click();
+  await dialog.waitFor({ state: "hidden" });
+  await button(page, "Start").click();
+  await chatLine(page, "This map is too complex to simulate, so the match was stopped.").waitFor({ state: "visible", timeout: 90000 });
+  return `1100 overlapping dynamic boxes -> "This map is too complex to simulate, so the match was stopped."`;
+}
+
+// sys-no-map is NOT-REACHABLE (see chatTeams).
 export const roomsInvScenarios = [
   { name: "inv rooms menu home", inv: ["menu-home", "menu-news-btn", "menu-mute-btn", "menu-fullscreen-btn"], run: menuHome },
   { name: "inv rooms quick empty", inv: ["quick-empty"], run: quickEmpty },
@@ -852,4 +1010,7 @@ export const roomsInvScenarios = [
   { name: "inv rooms match record end", inv: ["cmd-record", "cmd-end"], run: matchRecordEnd },
   { name: "inv rooms replay save", inv: ["room-replay-save"], run: replaySave },
   { name: "inv rooms map commands", inv: ["notice-map-cmd", "cmd-upvote", "cmd-downvote", "cmd-fav", "cmd-unfav", "cmd-fave", "cmd-unfave"], run: mapCommands },
+  { name: "inv rooms fastest modal", inv: ["room-fastest-modal"], run: fastestModal },
+  { name: "inv rooms race pb", inv: ["sys-pb"], run: racePersonalBest },
+  { name: "inv rooms too complex", inv: ["sys-too-complex"], run: tooComplex },
 ];
