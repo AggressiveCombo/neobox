@@ -8,6 +8,7 @@ import { worldXf } from "../camera";
 import type { Scene } from "../frame";
 import { FLAG_LOCAL, HIT_KIND_PLAYER } from "../frame";
 import { TEAM_BLUE, TEAM_RED, TEAM_SPECTATOR, isTeamMode } from "../protocol";
+import { reducedMotion } from "../ui/a11y";
 import { AWAY_RING_BELOW_LUM, cssHex, playerRgb, relLuminance } from "./geometry";
 
 const NAME_FONT = "500 12px system-ui, sans-serif";
@@ -197,7 +198,9 @@ export class Overlay {
     for (const f of this.hitFlashes) {
       const p = scene.players.find((q) => q.id === f.id);
       if (!p) continue;
-      const t = (now - f.at) / HIT_FLASH_MS;
+      // Reduced motion: the same ring, held at full strength for the flash's lifetime, without growing or fading.
+      const still = reducedMotion();
+      const t = still ? 0 : (now - f.at) / HIT_FLASH_MS;
       const x = ((p.x * sx + ox) + 1) * cssW / 2;
       const y = (1 - (p.y * sy + oy)) * cssH / 2;
       ctx.globalAlpha = 1 - t;
