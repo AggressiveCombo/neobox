@@ -444,8 +444,10 @@ export const menuScreen: ScreenFactory = (ctx) => {
       accountLine,
       status,
     ),
-    art,
     h("nav", { class: "home-index", "aria-label": "more" }, ...rows),
+    // After the index: the art's clip control is the last stop before the footer, as it is visually on phones (order 3)
+    // and in reading order on wide screens (right column). Grid areas and flex order place it, not the DOM.
+    art,
     h(
       "footer",
       { class: "home-foot" },
