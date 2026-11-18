@@ -9,6 +9,7 @@
   "edges.touching8": { "max": 0 },
   "edges.bottomGap": { "min": 16, "skipFit": true },
   "edges.coveredByFixed": { "max": 0 },
+  "orientation.locked": { "max": 0 },
   "axe.critical": { "max": 0 },
   "axe.serious": { "max": 0 },
   "axe.moderate": { "max": 0 },
