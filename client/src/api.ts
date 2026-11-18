@@ -2,6 +2,7 @@
 
 import { request } from "./account";
 import { HttpError } from "./http-error";
+import { pageFetch } from "./page-leave";
 
 export interface BuiltinMap {
   name: string;
@@ -9,7 +10,7 @@ export interface BuiltinMap {
 }
 
 export async function fetchBuiltinMaps(signal?: AbortSignal): Promise<BuiltinMap[]> {
-  const res = await fetch("/api/maps", { signal, headers: { accept: "application/json" } });
+  const res = await pageFetch("/api/maps", { signal, headers: { accept: "application/json" } });
   if (!res.ok) throw new HttpError(res.status);
   const data: unknown = await res.json();
   if (!Array.isArray(data)) throw new Error("The server sent an unexpected reply. Try again in a moment.");
@@ -41,7 +42,7 @@ export interface ServerStats {
 }
 
 export async function fetchStats(signal?: AbortSignal): Promise<ServerStats> {
-  const res = await fetch("/api/stats", { signal, headers: { accept: "application/json" } });
+  const res = await pageFetch("/api/stats", { signal, headers: { accept: "application/json" } });
   if (!res.ok) throw new HttpError(res.status);
   return (await res.json()) as ServerStats;
 }
@@ -62,7 +63,7 @@ interface RotationJson {
 
 /** GET /api/rotation (the original's maps2.json format): modes `qp_1`..`qp_10` in order. */
 export async function fetchQuickModes(signal?: AbortSignal): Promise<QuickMode[]> {
-  const res = await fetch("/api/rotation", { signal, headers: { accept: "application/json" } });
+  const res = await pageFetch("/api/rotation", { signal, headers: { accept: "application/json" } });
   if (!res.ok) throw new HttpError(res.status);
   const data = (await res.json()) as RotationJson;
   const modes: QuickMode[] = [];
@@ -92,7 +93,7 @@ export async function fetchQuickModes(signal?: AbortSignal): Promise<QuickMode[]
  */
 export async function fetchTicket(): Promise<string | null> {
   try {
-    const res = await fetch("/api/ticket", { cache: "no-store", headers: { accept: "application/json" } });
+    const res = await pageFetch("/api/ticket", { cache: "no-store", headers: { accept: "application/json" } });
     if (!res.ok) return null;
     const data: unknown = await res.json();
     return typeof data === "object" && data !== null && "ticket" in data && typeof data.ticket === "string"

@@ -4,6 +4,7 @@
 // The reload never interrupts a match, room, editor or replay: it happens at once only on the
 // menu. Anywhere else a small prompt waits, and the reload runs on the next visit to the menu.
 
+import { pageLeaving } from "./page-leave";
 import type { AppState, Store } from "./state";
 
 export function watchServiceWorker(store: Store<AppState>): void {
@@ -16,16 +17,6 @@ export function watchServiceWorker(store: Store<AppState>): void {
   store.subscribe((state, prev) => {
     if (pending && state.screen === "menu" && !state.inMatch && prev.screen !== "menu") location.reload();
   });
-  // A check still in flight when the page goes away (a navigation or reload) is aborted by the browser, which
-  // reports the abort as an error of its own. Skip checks once the page is leaving and keep those rejections quiet.
-  // pageshow clears the flag when the page comes back from the back-forward cache.
-  let leaving = false;
-  window.addEventListener("pagehide", () => {
-    leaving = true;
-  });
-  window.addEventListener("pageshow", () => {
-    leaving = false;
-  });
 
   window.addEventListener("load", () => {
     sw.register("/sw.js", { updateViaCache: "none" })
@@ -33,11 +24,11 @@ export function watchServiceWorker(store: Store<AppState>): void {
         // Engines that block service workers (automation, some privacy modes) resolve no registration: nothing to update.
         if (!reg) return;
         const check = async (): Promise<void> => {
-          if (leaving) return;
+          if (pageLeaving()) return;
           try {
             await reg.update();
           } catch (err: unknown) {
-            if (!leaving) console.warn("service worker update:", err);
+            if (!pageLeaving()) console.warn("service worker update:", err);
           }
         };
         void check();
@@ -46,7 +37,7 @@ export function watchServiceWorker(store: Store<AppState>): void {
         });
       })
       .catch((err: unknown) => {
-        if (!leaving) console.warn("service worker:", err);
+        if (!pageLeaving()) console.warn("service worker:", err);
       });
   });
 

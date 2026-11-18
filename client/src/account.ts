@@ -9,6 +9,7 @@ import { ACCOUNT_NAME_KEY, NAME_STORAGE_KEY, PREFS_PENDING_KEY, REMEMBER_KEY } f
 import { local } from "./storage";
 import { type Account, type AppState, type Screen } from "./state";
 import { HttpError } from "./http-error";
+import { pageFetch, pageLeaving } from "./page-leave";
 
 export class ApiError extends Error {
   constructor(
@@ -48,7 +49,7 @@ export async function request<T>(method: string, path: string, body?: unknown, k
   }
   let res: Response;
   try {
-    res = await fetch(path, { method, headers, body: payload, keepalive, credentials: "same-origin" });
+    res = await pageFetch(path, { method, headers, body: payload, keepalive, credentials: "same-origin" });
   } catch {
     throw new ApiError("can't reach the server", 0);
   }
@@ -269,6 +270,12 @@ async function pushPrefs(ctx: AppCtx, keepalive: boolean): Promise<void> {
   if (accountId === undefined) return;
   if (!keepalive) await pulling;
   if (ctx.store.state.account?.id !== accountId) return;
+  // The page is leaving: a save started now would be cancelled by the navigation. Keep it queued (the pending mark
+  // stays), so it runs again if the page is still here, or on the next sign-in if it is not.
+  if (!keepalive && pageLeaving()) {
+    queuePush(ctx);
+    return;
+  }
   try {
     await request<void>("PUT", "/api/account/prefs", prefs.value, keepalive);
     if (pushTimer === undefined) local.removeItem(PREFS_PENDING_KEY);

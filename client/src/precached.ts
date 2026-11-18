@@ -2,10 +2,12 @@
 // network cannot answer, the page reads its copy from the same cache. The worker itself never answers these requests:
 // Firefox logs an error for each intercepted request the page cancels.
 
+import { pageFetch } from "./page-leave";
+
 /** fetch(url), or the precached copy when the network is unreachable. An HTTP error response is returned as is. */
 export async function fetchPrecached(url: string, init?: RequestInit): Promise<Response> {
   try {
-    return await fetch(url, init);
+    return await pageFetch(url, init);
   } catch (err) {
     if (init?.signal?.aborted) throw err;
     const cached = await globalThis.caches?.match(url, { ignoreSearch: true });
