@@ -35,6 +35,8 @@
   grid-template-columns: minmax(0, 1fr);
   gap: 24px;
   min-width: 0;
+  /* Room below the last section, so the nav can scroll any section to the top. */
+  padding-bottom: 80vh;
 }
 
 .settings-section {
@@ -56,6 +58,7 @@
   min-height: 1.5em;
   margin: 0;
   color: var(--muted);
+  transition: color var(--fast) var(--ease);
 }
 
 .settings-notice.is-error {
@@ -284,10 +287,12 @@
 .touch-stick {
   left: 16px;
   box-shadow: inset 0 0 0 2px var(--ink);
+  transition: left var(--fast) var(--ease);
 }
 
 .touch-buttons {
-  right: 16px;
+  left: calc(100% - 16px - 150px * var(--touch-scale));
+  transition: left var(--fast) var(--ease);
   display: grid;
   grid-template-columns: repeat(3, 1fr);
   grid-template-rows: repeat(2, 1fr);
@@ -334,12 +339,10 @@
 }
 
 .touch-preview.is-left .touch-stick {
-  left: auto;
-  right: 16px;
+  left: calc(100% - 16px - 56px * var(--touch-scale));
 }
 
 .touch-preview.is-left .touch-buttons {
-  right: auto;
   left: 16px;
 }
 

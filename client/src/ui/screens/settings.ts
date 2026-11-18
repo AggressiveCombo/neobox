@@ -27,6 +27,7 @@ import { PALETTES, cssHex } from "../../render/geometry";
 import type { Screen } from "../../state";
 import { openColorPicker } from "../color-picker";
 import { TOUCH_BUTTONS } from "./hud";
+import { reducedMotion } from "../a11y";
 import { h, type Child } from "../dom";
 import { icon, type IconName } from "../icons";
 import { iconButton, openModal, page, pageHead, seg, toggle } from "../kit";
@@ -589,7 +590,8 @@ export const settingsScreen: ScreenFactory = (ctx) => {
         {
           type: "button",
           class: "quiet settings-nav-item",
-          onclick: () => bodies.get(id)?.scrollIntoView({ block: "start" }),
+          // The first section's top would stop short of the page top (its scroll margin); the page itself goes there.
+          onclick: () => (i === 0 ? el : bodies.get(id))?.scrollIntoView({ block: "start", behavior: reducedMotion() ? "auto" : "smooth" }),
         },
         icon(name, 18),
         label,

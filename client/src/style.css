@@ -363,7 +363,9 @@ button,
   .friends-page .page-back,
   .privacy .page-back,
   .settings-page .page-back {
-    margin-inline-start: -18px;
+    /* Back's 18px padding would put its box inside the 16px edge gutter at 200% zoom; the icon sits on the edge instead. */
+    margin-inline-start: 0;
+    padding-inline-start: 0;
   }
 }
 
