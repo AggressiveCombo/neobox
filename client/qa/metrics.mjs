@@ -10,7 +10,7 @@ export const AXE_PATH = path.join(CLIENT_DIR, "node_modules", "axe-core", "axe.m
 
 /**
  * Layout, overflow, edges, overlap, obscuring, targets, SR names and balance.
- * Returns { metrics, details, texts, controls, info }; `texts` and `controls` feed image.mjs.
+ * Returns { metrics, details, texts, controls, surfaces, info }; `texts`, `controls` and `surfaces` feed image.mjs.
  */
 export function domMeasure(opts) {
   const W = innerWidth;
@@ -322,7 +322,6 @@ export function domMeasure(opts) {
   const coveredNow = () => {
     let n = 0;
     for (const el of content) {
-      if (isFixed(el)) continue;
       const r = el.getBoundingClientRect();
       const cx = r.left + r.width / 2;
       const cy = r.top + r.height / 2;
@@ -338,21 +337,24 @@ export function domMeasure(opts) {
     }
     return n;
   };
-  const scrollBefore = window.scrollY;
+  // The page scrolls inside its nearest overflow-y ancestor (the app shell #ui is fixed, so the window never scrolls).
+  // Bottom gap and bottom coverage are read there at its end: the lowest rendered content, fixed controls included,
+  // to the viewport bottom. Content inside a fixed shell is not "fixed" for this, only a bar laid over content is.
+  const bottomScroller = scrollerOf(document.querySelector("main.page") ?? document.body);
+  const scrollAt = (y) => { if (bottomScroller === doc) window.scrollTo(0, y); else bottomScroller.scrollTop = y; };
+  const scrollBefore = bottomScroller === doc ? window.scrollY : bottomScroller.scrollTop;
+  const maxScroll = Math.max(0, bottomScroller === doc ? docScrollH - H : bottomScroller.scrollHeight - bottomScroller.clientHeight);
   const coveredTop = coveredNow();
-  window.scrollTo(0, docScrollH);
-  const sy = window.scrollY;
-  const docHBottom = doc.scrollHeight;
+  scrollAt(maxScroll);
   let lastBottom = null;
   for (const el of content) {
-    if (isFixed(el)) continue;
-    const r = el.getBoundingClientRect();
-    const bottom = r.bottom + sy;
+    if (!shownRect(el.getBoundingClientRect(), el)) continue;
+    const bottom = el.getBoundingClientRect().bottom;
     if (lastBottom === null || bottom > lastBottom) lastBottom = bottom;
   }
-  const bottomGap = lastBottom === null ? null : Math.round(docHBottom - lastBottom);
+  const bottomGap = lastBottom === null ? null : Math.round(H - lastBottom);
   const coveredBottom = coveredNow();
-  window.scrollTo(0, scrollBefore);
+  scrollAt(scrollBefore);
 
   // targets.small
   let small = 0;
@@ -648,6 +650,7 @@ export function domMeasure(opts) {
     details,
     texts,
     controls,
+    surfaces: mediaRects,
     info: { interactive: interactive.length, content: content.length, dialog: modal ? describe(modal) : null, scrollH: docScrollH, viewport: [W, H] },
   };
 }

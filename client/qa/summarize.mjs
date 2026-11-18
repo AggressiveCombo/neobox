@@ -23,7 +23,7 @@ function* records(root) {
 }
 
 /** Metric key a failure string names, e.g. "overflow.docX=736 (max 0)" -> "overflow.docX". */
-const keyOf = (failure) => (failure.startsWith("error:") ? "error" : failure.split("=")[0]);
+const keyOf = (failure) => (failure.startsWith("error:") ? "error" : failure.startsWith("infra:") ? "infra" : failure.split("=")[0]);
 const valueOf = (failure) => {
   const m = /=(-?[\d.]+)/.exec(failure);
   return m ? Number(m[1]) : null;
@@ -45,7 +45,8 @@ export function writeSummary(outRoot, label = path.basename(outRoot), note = "")
   }
 
   const failing = all.filter((c) => c.failures.length > 0);
-  const errors = all.filter((c) => c.record.error);
+  const errors = all.filter((c) => c.record.error && !c.record.infra);
+  const infra = all.filter((c) => c.record.infra);
   const byMetric = new Map();
   for (const capture of failing) {
     for (const failure of capture.failures) {
@@ -60,7 +61,7 @@ export function writeSummary(outRoot, label = path.basename(outRoot), note = "")
 
   const lines = [];
   lines.push(`# ${label}`, "");
-  lines.push(`Captures: ${all.length}. Passing: ${all.length - failing.length}. Failing: ${failing.length}. Capture errors: ${errors.length}.`, "");
+  lines.push(`Captures: ${all.length}. Passing: ${all.length - failing.length}. Failing: ${failing.length}. Capture errors: ${errors.length}. Infra errors: ${infra.length}.`, "");
   if (note) lines.push(note, "");
   lines.push("## Failing metrics", "");
   lines.push("| metric | captures failing | worst value | example |", "| --- | ---: | ---: | --- |");
@@ -92,10 +93,11 @@ export function writeSummary(outRoot, label = path.basename(outRoot), note = "")
     lines.push("");
   }
 
-  if (errors.length) {
-    lines.push("## Capture errors", "");
+  for (const [title, list] of [["## Capture errors", errors], ["## Infra errors (rig lost its server or browser; retried once)", infra]]) {
+    if (list.length === 0) continue;
+    lines.push(title, "");
     const byState = new Map();
-    for (const c of errors) tally(byState, `${c.record.state}: ${c.record.error}`);
+    for (const c of list) tally(byState, `${c.record.state}: ${c.record.error}`);
     for (const [k, n] of sortedTop(byState, 50)) lines.push(`- ${n} x ${k}`);
     lines.push("");
   }

@@ -58,17 +58,21 @@ export async function runSweep({ cells, jobs = 3, outRoot, resume = false }) {
         const file = path.join(captureDir(outRoot, { engine, theme, row, axis, renderer }), `${state}.json`);
         let record = resume && existsSync(file) ? JSON.parse(readFileSync(file, "utf8")) : null;
         if (!record || record.error) {
-          record = await captureOne({
-            base: server.base,
-            browser: browsers.get(engine),
-            engine,
-            theme,
-            row,
-            state: stateById(state),
-            outRoot,
-            axis,
-            renderer,
-          });
+          const capture = () =>
+            captureOne({
+              base: server.base,
+              browser: browsers.get(engine),
+              engine,
+              theme,
+              row,
+              state: stateById(state),
+              outRoot,
+              axis,
+              renderer,
+            });
+          record = await capture();
+          // A lost connection is the rig, not the page: retry once; a second loss stays on the record as infra.
+          if (record.infra) record = await capture();
         }
         const failures = validateRecord(record);
         const label = [tiers.join("+"), engine, theme, row.id, axis !== "none" ? axis : null, renderer, state]

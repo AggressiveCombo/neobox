@@ -300,7 +300,7 @@ export async function measureState(page, { row, fit = false, dialog = false, han
   const dom = await page.evaluate(domMeasure, opts);
   const png = await page.screenshot({ animations: "disabled", caret: "hide" });
   assertScreenshotSize(png, row);
-  const pixels = analyseScreenshot(png, { W: row.W, H: row.H, texts: dom.texts, controls: dom.controls });
+  const pixels = analyseScreenshot(png, { W: row.W, H: row.H, texts: dom.texts, controls: dom.controls, surfaces: dom.surfaces });
   const metrics = { ...dom.metrics, ...pixels.metrics };
   const details = { ...dom.details, ...pixels.details };
   lap("dom+pixels");
@@ -425,6 +425,9 @@ export function captureDir(outRoot, { engine, theme, row, axis = "none", rendere
   return path.join(outRoot, engine, theme, name);
 }
 
+/** Errors that mean the rig lost its server or browser, not that the page is wrong: retried once by the sweep, then reported as infra. */
+export const INFRA_ERROR = /ERR_CONNECTION|ECONNREFUSED|ECONNRESET|socket hang up|fetch failed|Target (page, context or browser )?(has been )?closed|Browser closed/;
+
 /**
  * Captures one state. Never throws: a failure is written into the record as `error`, so one
  * broken state does not stop a sweep. Returns the record.
@@ -478,6 +481,7 @@ export async function captureOne({ base, browser, engine, theme, row, state, out
     record.info = { ...(h.info ?? {}), ...m.info };
   } catch (err) {
     record.error = err instanceof Error ? err.message.split("\n")[0] : String(err);
+    if (INFRA_ERROR.test(record.error)) record.infra = true;
     // The page as the state left it, while a page is still open: the first thing to look at for a failed state.
     const page = [h?.page, ...s.handles.map((x) => x.page)].find((p) => p && !p.isClosed());
     const shot = page ? await page.screenshot({ animations: "disabled", caret: "hide", timeout: 5_000 }).catch(() => null) : null;

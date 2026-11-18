@@ -42,7 +42,7 @@ function maxRectCells(grid, rows, cols) {
   return best;
 }
 
-export function analyseScreenshot(buf, { W, H, texts = [], controls = [] }) {
+export function analyseScreenshot(buf, { W, H, texts = [], controls = [], surfaces = [] }) {
   const png = PNG.sync.read(buf);
   const sx = png.width / W;
   const sy = png.height / H;
@@ -60,7 +60,8 @@ export function analyseScreenshot(buf, { W, H, texts = [], controls = [] }) {
     return out;
   };
 
-  // void: 32 CSS px cells whose device pixels are all within a few levels of each other
+  // void: 32 CSS px cells whose device pixels are all within a few levels of each other. A cell a surface covers
+  // (canvas, image, video, svg, background image) is content, whatever its pixels show.
   const cell = VOID_CELL_CSS;
   const cols = Math.max(1, Math.floor(W / cell));
   const rows = Math.max(1, Math.floor(H / cell));
@@ -68,6 +69,9 @@ export function analyseScreenshot(buf, { W, H, texts = [], controls = [] }) {
   let uniform = 0;
   for (let r = 0; r < rows; r++) {
     for (let c = 0; c < cols; c++) {
+      const cx = c * cell;
+      const cy = r * cell;
+      if (surfaces.some((m) => m.l < cx + cell && m.r > cx && m.t < cy + cell && m.b > cy)) continue;
       const samples = pixelsIn(c * cell, r * cell, (c + 1) * cell, (r + 1) * cell, 2);
       const lo = [255, 255, 255];
       const hi = [0, 0, 0];
