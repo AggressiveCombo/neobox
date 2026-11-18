@@ -400,14 +400,14 @@ async function networkOffCase(s, cdp) {
   };
 }
 
-/** The Retry inside one screen's offline section; the menu's own Retry buttons are outside it. */
+/** The Try again inside one screen's offline section; the menu's own Try again buttons are outside it. */
 function sectionRetry(page, title) {
-  return page.locator("section.offline-state").filter({ has: page.getByRole("heading", { name: `${title} unavailable offline` }) }).getByRole("button", { name: "Retry", exact: true });
+  return page.locator("section.offline-state").filter({ has: page.getByRole("heading", { name: `${title} unavailable offline` }) }).getByRole("button", { name: "Try again", exact: true });
 }
 
 /**
  * The page loads online, then the network goes away and every server-backed screen is opened from the cache.
- * Each one has to say it is unavailable offline with a Retry. Retry while offline says it is still offline, and
+ * Each one has to say it is unavailable offline with a Try again. Try again while offline says it is still offline, and
  * once the network is back the browser's online event reopens the screen.
  */
 async function offlineWarmCase(s, base, cdp, engine) {
@@ -441,7 +441,7 @@ async function offlineWarmCase(s, base, cdp, engine) {
   }
   await button(host.page, "Browse rooms").click();
   await sectionRetry(host.page, "Browse rooms").click();
-  const stillNoted = await host.page.getByText("Still offline. Retry when the connection is back.").waitFor({ timeout: 5000 }).then(() => true, () => false);
+  const stillNoted = await host.page.getByText("Still offline. Try again when the connection is back.").waitFor({ timeout: 5000 }).then(() => true, () => false);
   await host.context.unroute("**/api/stats");
   // The network comes back. Playwright's Firefox never sends `online` to a document that was loaded while offline
   // (navigator.onLine turns true but the event is not dispatched), so the page is given the event after a real restore.

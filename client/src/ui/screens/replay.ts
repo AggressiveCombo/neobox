@@ -204,7 +204,7 @@ export const replayScreen: ScreenFactory = (ctx) => {
     try {
       eng = await ctx.engine();
     } catch {
-      // The engine status line on the picker shows the failure with Retry; this replay resumes on recovery.
+      // The engine status line on the picker shows the failure with Try again; this replay resumes on recovery.
       if (!destroyed) {
         resumeOnReady = { name, text };
         showPicker();

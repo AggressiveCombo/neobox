@@ -201,7 +201,7 @@ export const trainingScreen: ScreenFactory = (ctx) => {
   /** A plain page (loading, errors) with the hall's head and Back. */
   function showPage(...content: Child[]): void {
     engineUi?.destroy();
-    // Waiting for the engine shows its progress; a failed load shows the error and Retry at once.
+    // Waiting for the engine shows its progress; a failed load shows the error and Try again at once.
     const status = engineStatus(() => void start());
     engineUi = status;
     root.className = "offline";

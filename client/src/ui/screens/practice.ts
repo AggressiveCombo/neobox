@@ -227,7 +227,7 @@ export const practiceScreen: ScreenFactory = (ctx) => {
     try {
       await ctx.engine();
     } catch {
-      // The engine status on this screen reports the failure and offers Retry.
+      // The engine status on this screen reports the failure and offers Try again.
       return;
     }
     try {
@@ -254,7 +254,7 @@ export const practiceScreen: ScreenFactory = (ctx) => {
     try {
       engine = await ctx.engine();
     } catch {
-      // The engine status on this screen reports the failure and offers Retry.
+      // The engine status on this screen reports the failure and offers Try again.
       if (!destroyed && setup) setup.status.textContent = "";
       return;
     }

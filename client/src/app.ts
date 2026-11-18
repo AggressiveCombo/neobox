@@ -215,7 +215,7 @@ export function start(): Store<AppState> {
     startMatch(pending.match, pending.you, pending.snap);
     for (const frame of pending.frames) loop?.onServer(frame.bytes, frame.at);
   });
-  // Screens that need the engine show its failure inline with Retry, so the background load reports nothing itself.
+  // Screens that need the engine show its failure inline with Try again, so the background load reports nothing itself.
   engineLoader.get().catch(() => {});
 
   /** When the game view was last drawn; the view hides once nothing has drawn it for a moment. */
@@ -345,7 +345,7 @@ export function start(): Store<AppState> {
     }
   });
 
-  /** The offline page's Retry once the server answers: Browse needs its socket (welcome mounts the list); the rest mount. */
+  /** The offline page's Try again once the server answers: Browse needs its socket (welcome mounts the list); the rest mount. */
   function reopen(screen: Screen): void {
     if (screen !== "browse") mount(screen);
     else if (store.state.name === "") store.set({ screen: "menu" });
@@ -422,7 +422,7 @@ export function start(): Store<AppState> {
     "div",
     { class: "reconnect-banner", role: "status", "aria-live": "polite" },
     h("span", null, "Connection lost. Reconnecting…"),
-    h("button", { type: "button", onclick: () => retryNow() }, "Retry now"),
+    h("button", { type: "button", onclick: () => retryNow() }, "Try again now"),
     h("button", { type: "button", onclick: () => disconnect() }, "Leave"),
   );
   banner.hidden = true;

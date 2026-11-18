@@ -131,11 +131,11 @@ export const menuScreen: ScreenFactory = (ctx) => {
 
   const status = h("p", { class: "status", role: "status", "aria-live": "polite" });
   const nameError = h("p", { class: "field-error", role: "alert", hidden: true });
-  // Server lines with no data say so and offer a retry; the chip in the top bar says the connection is down.
+  // Server lines with no data say so and offer Try again; the chip in the top bar says the connection is down.
   const onlineText = h("span");
-  const statsRetry = h("button", { type: "button", class: "quiet menu-retry", hidden: true, "aria-label": "Retry players online", onclick: () => retryConnection() }, "Retry");
+  const statsRetry = h("button", { type: "button", class: "quiet menu-retry", hidden: true, "aria-label": "Try again: players online", onclick: () => retryConnection() }, "Try again");
   const onlineLine = h("p", { class: "menu-online" }, onlineText, statsRetry);
-  const accountRetry = h("button", { type: "button", class: "quiet menu-retry", "aria-label": "Retry account", onclick: () => retryConnection() }, "Retry");
+  const accountRetry = h("button", { type: "button", class: "quiet menu-retry", "aria-label": "Try again: account", onclick: () => retryConnection() }, "Try again");
   const accountLine = h("p", { class: "menu-account-line", hidden: true }, h("span", null, "Account unavailable offline"), accountRetry);
   const offlineChip = h("p", { class: "home-offline", role: "status", hidden: true }, "Offline: online play, accounts and the library need a connection");
   const makersLine = h("p", { class: "menu-makers", hidden: true });

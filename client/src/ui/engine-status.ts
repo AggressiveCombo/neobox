@@ -1,5 +1,5 @@
 // The wasm engine's state on a screen that needs it: a progress bar while the module
-// downloads, the failure with a Retry button, and nothing once the engine is ready.
+// downloads, the failure with a Try again button, and nothing once the engine is ready.
 
 import { type EngineState, engineLoader } from "../engine-loader";
 import { h } from "./dom";
@@ -15,7 +15,7 @@ export interface EngineStatus {
 export function engineStatus(onReady?: () => void): EngineStatus {
   const label = h("span", { class: "engine-status-text" });
   const bar = h("progress", { class: "engine-status-bar" });
-  const retry = h("button", { type: "button", class: "engine-status-retry", onclick: () => engineLoader.retry() }, "Retry");
+  const retry = h("button", { type: "button", class: "engine-status-retry", onclick: () => engineLoader.retry() }, "Try again");
   const el = h("div", { class: "engine-status", role: "status" }, label, bar, retry);
 
   const render = (state: EngineState): void => {

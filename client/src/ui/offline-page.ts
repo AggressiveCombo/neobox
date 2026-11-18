@@ -1,5 +1,5 @@
-// What a server-only screen shows while the browser is offline: that it is unavailable, a Retry, and the
-// modes that still work without a connection. app.ts mounts it in place of the screen. Retry, or the
+// What a server-only screen shows while the browser is offline: that it is unavailable, a Try again, and the
+// modes that still work without a connection. app.ts mounts it in place of the screen. Try again, or the
 // browser's online event, checks the server and then hands back to app.ts through `reopen`.
 
 import { fetchStats } from "../api";
@@ -25,7 +25,7 @@ export function needsServer(screen: Screen): boolean {
 export function offlinePage(ctx: AppCtx, screen: Screen, reopen: () => void): ScreenHandle {
   const title = ONLINE_TITLES[screen] ?? "This screen";
   const note = h("p", { class: "offline-state-note", role: "status" });
-  const retry = h("button", { type: "button", class: "primary", onclick: () => void attempt() }, icon("refresh-cw", 18), "Retry");
+  const retry = h("button", { type: "button", class: "primary", onclick: () => void attempt() }, icon("refresh-cw", 18), "Try again");
   let checking = false;
 
   /** Ask the server; if it answers, the screen opens. Otherwise the page says it is still offline. */
@@ -38,7 +38,7 @@ export function offlinePage(ctx: AppCtx, screen: Screen, reopen: () => void): Sc
       await fetchStats();
       if (el.isConnected) reopen();
     } catch {
-      if (el.isConnected) note.textContent = "Still offline. Retry when the connection is back.";
+      if (el.isConnected) note.textContent = "Still offline. Try again when the connection is back.";
     } finally {
       checking = false;
       retry.disabled = false;

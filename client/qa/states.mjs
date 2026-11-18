@@ -483,7 +483,7 @@ export const STATES = [
   }),
   state("match-disconnected", {}, async (s) => {
     // Playwright cannot send a 1006 close from page script, so the socket is dropped as robust.mjs does;
-    // then the network stays down so the reconnect cannot finish. "Retry now" cannot connect while offline; Leave is the exit.
+    // then the network stays down so the reconnect cannot finish. "Try again now" cannot connect while offline; Leave is the exit.
     trackSockets(s);
     const { host } = await inMatch(s);
     await dropAndGoOffline(host, 10_000);

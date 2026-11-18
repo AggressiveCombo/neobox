@@ -45,13 +45,13 @@ function failure(name: string, err: unknown, retry: () => void): HTMLElement {
     return status(`No profile for ${name}. Only signed-in players have one.`);
   }
   if (err instanceof ApiError && err.status === 429) return status(errorText(err));
-  const again = h("button", { type: "button", onclick: retry }, icon("refresh-cw", 18), "Retry");
+  const again = h("button", { type: "button", onclick: retry }, icon("refresh-cw", 18), "Try again");
   if (!navigator.onLine) {
     // Offline there is nothing to fetch: the card loads again once the connection is back.
     window.addEventListener("online", retry, { once: true });
     return status(`${name}'s profile is unavailable offline.`, again);
   }
-  return status(`Couldn't load ${name}'s profile. Check the connection, then retry.`, again);
+  return status(`Couldn't load ${name}'s profile. Check the connection, then try again.`, again);
 }
 
 function card(p: PlayerProfile): HTMLElement {
