@@ -441,12 +441,39 @@ button.home-privacy {
   }
 }
 
-/* Short landscape phones: the page scrolls past the fold, so the art is anchored near the top and sized
-   to the height (it stays on screen at 844x390 rather than below it). */
+/* Short landscape phones (844x390, 667x375): the destination index and the title are compacted so
+   the two ways in and the whole index sit above the fold; the art is anchored near the top and sized
+   to the height. */
 @media (max-height: 500px) and (orientation: landscape) {
   .menu-art {
     align-self: start;
     margin-top: 56px;
     width: min(50vh, 40vw);
+  }
+
+  .page.home {
+    row-gap: 12px;
+  }
+
+  .home-top {
+    padding-top: calc(8px + env(safe-area-inset-top));
+  }
+
+  .home-copy {
+    gap: 10px;
+  }
+
+  .home-title {
+    font-size: clamp(2rem, 12vh, 3rem);
+  }
+
+  .home-index {
+    --tile-gap: 6px;
+  }
+
+  button.home-row-btn {
+    min-height: 0;
+    gap: 2px;
+    padding: calc(0.9625rem + 4px) 4px 4px;
   }
 }
