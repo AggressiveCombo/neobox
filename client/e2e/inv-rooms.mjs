@@ -482,14 +482,15 @@ async function sendChat(page, text) {
   let at = Date.now();
   let tokens = held(at, state);
   if (tokens < 1) {
-    await sleep((1 - tokens) * CHAT_REFILL_MS + 100);
+    await sleep((1 - tokens) * CHAT_REFILL_MS + 250);
     at = Date.now();
     tokens = held(at, state);
   }
-  chatBudget.set(page, { tokens: tokens - 1, from: at });
   const input = page.getByLabel("Chat message", { exact: true });
   await input.fill(text);
   await input.press("Enter");
+  // stamped after the send: the server's refill clock starts when it receives the line, not when the test starts typing
+  chatBudget.set(page, { tokens: tokens - 1, from: Date.now() });
 }
 
 /** A chat log line (a player's line or a system line) that contains `text`. */
@@ -666,6 +667,9 @@ async function roomTabs(s) {
   const guest = await s.open("guest", { name: uniqueName("guest"), phone: true });
   await guest.page.goto(`${s.base}/${code}`);
   await dismissPhoneSplash(guest.page);
+  // Firefox's non-mobile phone context keeps the window size past the splash (see phoneSoloMatch in inv-match.mjs).
+  await guest.page.setViewportSize({ width: 390, height: 844 });
+  await guest.page.waitForFunction(() => innerWidth === 390);
   await roomTitle(guest.page, roomName).waitFor();
   const tabs = guest.page.getByRole("tablist", { name: "Room sections", exact: true });
   for (const name of ["Players", "Match", "Chat"]) {
@@ -680,6 +684,9 @@ async function roomTabs(s) {
   const tiny = await s.open("tiny", { name: uniqueName("tiny"), phone: true, viewport: { width: 320, height: 256 } });
   await tiny.page.goto(`${s.base}/${code}`);
   await dismissPhoneSplash(tiny.page);
+  // Firefox's non-mobile phone context keeps the window size past the splash (as for the guest above).
+  await tiny.page.setViewportSize({ width: 320, height: 256 });
+  await tiny.page.waitForFunction(() => innerWidth === 320);
   await roomTitle(tiny.page, roomName).waitFor();
   const bar = tiny.page.getByRole("tablist", { name: "Room sections", exact: true });
   const box = await bar.boundingBox();

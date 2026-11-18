@@ -819,7 +819,7 @@ async function aboutAndPrivacy(s) {
   check(await page.getByText("GNU Affero General Public License", { exact: false }).isVisible(), "AGPL text missing");
   check(await page.getByRole("link", { name: "Source code", exact: true }).first().isVisible(), "source link missing");
   check(await page.getByText("Electronic music / chiptune 3", { exact: false }).first().isVisible(), "chiptune credit missing");
-  check(await page.getByRole("link", { name: "Source page", exact: true }).evaluateAll((as) => as.some((a) => a.href.includes("opengameart.org"))), "OpenGameArt source link missing");
+  check(await page.getByRole("link", { name: /^Source page for /u }).evaluateAll((as) => as.some((a) => a.href.includes("opengameart.org"))), "OpenGameArt source link missing");
   check(await page.getByText("CC0", { exact: false }).first().isVisible(), "CC0 licence missing");
   await button(page, "News").click();
   const news = page.getByRole("dialog", { name: "Update news", exact: false });
