@@ -194,6 +194,7 @@ export const friendsScreen: ScreenFactory = (ctx) => {
     if (outgoing.length > 0) group("Sent", "send", rows(outgoing, requestRow), "");
     group("Friends", "users", rows(mine, friendRow), "No friends yet. Add one by name.");
     order(groups, shown);
+    el.classList.toggle("is-empty", friends.length === 0);
     for (const key of built.keys()) if (!seen.has(key)) built.delete(key);
   }
 

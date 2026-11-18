@@ -164,6 +164,16 @@
   gap: 8px;
 }
 
+/* The friends screen reads as one narrow column; with no friends yet, the add form and the empty note centre in the view. */
+.friends-page {
+  --page-column: 44rem;
+}
+
+.friends-page.is-empty .page-inner {
+  flex: 1 0 auto;
+  justify-content: center;
+}
+
 .friend-accept {
   background: var(--accent);
   color: var(--accent-ink);

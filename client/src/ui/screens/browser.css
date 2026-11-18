@@ -289,6 +289,13 @@ button.room-row {
 
 .room-browser > .empty {
   padding: 24px 0;
+  margin-block: auto;
+  text-align: center;
+}
+
+/* No rows yet: the empty line sits in the middle of the space below the tools, not in a strip at the top. */
+.room-browser:has(> .empty:not([hidden])) {
+  min-height: calc(100dvh - 280px);
 }
 
 @media (max-width: 900px) {
