@@ -63,6 +63,9 @@ const BAT_HOLD_MS = 600; // KeyC held this long fires the bat
 const BAT_GAP_MS = 1500; // after release the bat cycle resets
 const CONTRAST_MIN = 3;
 const FEEDBACK_MAX = 2;
+// Judged hit events needed for feedback.hit.frames (fewer is a failed measurement, not a pass); the collection stops at this count or the time cap.
+const FEEDBACK_MIN_EVENTS = 10;
+const FEEDBACK_CAP_MS = 240000;
 // Engine sound kinds of a hit (src/audio.ts): 3 push hit, 6 impact, 12 body impact, 14 bat hit.
 const HIT_SOUNDS = [3, 6, 12, 14];
 // Ticks at the end of a log whose feedback window has not closed yet; those events are not judged.
@@ -484,24 +487,23 @@ export function feedbackMetric(log) {
   return { events: closed.length, missing, max: frames.length ? Math.max(...frames) : null };
 }
 
-/** Synthetic log for the feedback self-test: one hit on player 1 at tick 10, health drop and hit sound `delay` ticks later. */
-export function syntheticLog(delay) {
+/** Synthetic log for the feedback self-test: `hits` hits on player 1 (every 10 ticks from tick 10); each one's health drop and hit sound come `delay` ticks later. */
+export function syntheticLog(delay, hits = 1) {
+  const hitTicks = Array.from({ length: hits }, (_, k) => 10 + 10 * k);
   const log = [];
-  for (let t = 0; t <= 80; t++) {
-    const hit = t === 10 ? 1 : 0;
-    log.push({ tick: t, hits: hit, bodyHits: 0, victims: hit ? [1] : [], bars: 0, sounds: t === 10 + delay ? [6] : [], hp: { 1: t >= 10 + delay ? 90 : 100 } });
+  for (let t = 0; t <= hitTicks[hits - 1] + 80; t++) {
+    const landed = hitTicks.filter((h) => t >= h + delay).length;
+    log.push({ tick: t, hits: hitTicks.includes(t) ? 1 : 0, bodyHits: 0, victims: hitTicks.includes(t) ? [1] : [], bars: 0, sounds: hitTicks.includes(t - delay) ? [6] : [], hp: { 1: 100 - 5 * landed } });
   }
   return log;
 }
 
 function feedbackVerdict(log) {
   const m = feedbackMetric(log);
-  const info = m.events === 0;
-  const pass = !info && m.missing === 0 && m.max <= FEEDBACK_MAX;
-  const detail = info
-    ? "no hit events in the run (no judged feedback)"
-    : `${m.events} hit events, max ${m.max} frames, ${m.missing} without feedback (threshold ${FEEDBACK_MAX})`;
-  return { info, pass, metrics: { "feedback.hit.frames": m.max, "feedback.hit.events": m.events, "feedback.hit.missing": m.missing }, detail };
+  const enough = m.events >= FEEDBACK_MIN_EVENTS;
+  const pass = enough && m.missing === 0 && m.max <= FEEDBACK_MAX;
+  const detail = `${m.events} hit events (${enough ? "enough" : `need ${FEEDBACK_MIN_EVENTS}`}), max ${m.max} frames, ${m.missing} without feedback (threshold ${FEEDBACK_MAX})`;
+  return { pass, metrics: { "feedback.hit.frames": m.max, "feedback.hit.events": m.events, "feedback.hit.missing": m.missing }, detail };
 }
 
 /** Opens a page in a context sized and touch-emulated for `row` (its own context; the match is a fresh room). */
@@ -754,6 +756,11 @@ async function chipContrastCase(results) {
   });
 }
 
+/** Pure: camera.inView (rubric D16) from the frame counts; 1 only when every live player is inside the view on every frame. */
+export function cameraInView(frames, outFrames) {
+  return frames > 0 && outFrames === 0 ? 1 : 0;
+}
+
 /** Camera (rubric camera.inView): both clients play one map; every live player's centre must be in view on every published frame. `forced`: nobody moves, so on a wide map the spawns leave an opponent off-screen and its edge chip must show. */
 async function cameraCase(results, browser, engine, base, map, selfTest, forced = false) {
   const mapOpt = typeof map === "string" ? { mapName: map } : { mapJson: map.json };
@@ -771,8 +778,8 @@ async function cameraCase(results, browser, engine, base, map, selfTest, forced 
       const outFrames = per.reduce((n, p) => n + p.out, 0);
       const localOut = per.reduce((n, p) => n + p.localOut, 0);
       const unind = per.reduce((n, p) => n + p.unind, 0);
-      // Pass (R1-60): the local player is in view on every frame and every off-screen opponent has an edge indicator.
-      const inView = frames > 0 && localOut === 0 && unind === 0 ? 1 : 0;
+      // Rubric D16 (camera.inView): 1 only when every live player, the local one and every opponent, is inside the view on every published frame.
+      const inView = cameraInView(frames, outFrames);
       const allInView = frames > 0 ? (frames - outFrames) / frames : 0;
       // Edge chips (overlay.ts drawAway) while someone is off-screen: each has a chip; none covers the local sprite or a HUD box.
       const chipAway = chipPer.reduce((n, c) => n + c.awayFrames, 0);
@@ -781,12 +788,14 @@ async function cameraCase(results, browser, engine, base, map, selfTest, forced 
       const chipHud = chipPer.reduce((n, c) => n + c.overHud, 0);
       const chipNames = chipPer.flatMap((c) => c.names).slice(0, 8);
       const chipOk = chipMissing === 0 && chipLocal === 0 && chipHud === 0;
+      // Forced-away run: an opponent is off-screen by design, so the pass is each off-screen opponent having its edge chip (and the local player in view).
+      const indicated = frames > 0 && localOut === 0 && unind === 0 && chipAway > 0 ? 1 : 0;
       const file = path.join(results.evidenceDir, `${id}.png`);
       const saved = await shot(host.page, file);
       return {
-        pass: inView === 1 && chipOk && (!forced || chipAway > 0),
+        pass: forced ? indicated === 1 && chipOk : inView === 1 && chipOk,
         detail: `camera.inView=${inView}: local out on ${localOut} frames, opponents out without indicator on ${unind}; all live in view on ${(allInView * 100).toFixed(1)}% of ${frames} frames (host ${per[0].out}/${per[0].frames} out, guest ${per[1].out}/${per[1].frames} out); chips over ${chipAway} away frames: missing ${chipMissing}, over local sprite ${chipLocal}, over HUD ${chipHud}${chipNames.length ? ` (${chipNames.join("; ")})` : ""}`,
-        metrics: { "camera.inView": inView, "camera.localOutFrames": localOut, "camera.indicatorMissFrames": unind, "camera.allInView": Math.round(allInView * 1000) / 1000, "camera.outFrames": outFrames, "camera.frames": frames, "camera.detail": per.flatMap((p) => p.detail).slice(0, 10), "camera.localDetail": per.flatMap((p) => p.localDetail).slice(0, 12), "chip.awayFrames": chipAway, "chip.missing": chipMissing, "chip.overLocalFrames": chipLocal, "chip.overHud": chipHud, "chip.names": chipNames },
+        metrics: { ...(forced ? { "camera.indicatedAway": indicated } : { "camera.inView": inView }), "camera.localOutFrames": localOut, "camera.indicatorMissFrames": unind, "camera.allInView": Math.round(allInView * 1000) / 1000, "camera.outFrames": outFrames, "camera.frames": frames, "camera.detail": per.flatMap((p) => p.detail).slice(0, 10), "camera.localDetail": per.flatMap((p) => p.localDetail).slice(0, 12), "chip.awayFrames": chipAway, "chip.missing": chipMissing, "chip.overLocalFrames": chipLocal, "chip.overHud": chipHud, "chip.names": chipNames },
         evidence: saved ? [rel(saved)] : [],
       };
     },
@@ -806,19 +815,25 @@ async function feedbackCase(results, browser, engine, base) {
       const fixture = { base, open: (label, o) => openPage(s, browser, engine, rowOf("T1-M"), { label, renderer, palette: "default", name: o.name, selfTest: null }, opened) };
       const { host, guest } = await fixtureMatch(fixture, 99);
       await sleep(3000); // spawn grace before a bat can hit (sim SPAWN_GRACE)
-      await Promise.all([host.page, guest.page].map(async (page) => {
-        for (let i = 0; i < FEEDBACK_SWINGS; i++) {
-          await page.keyboard.down("KeyC");
-          await sleep(BAT_HOLD_MS); // the bat fires at tick 13 (bat_fire_on)
-          await page.keyboard.up("KeyC");
-          await sleep(BAT_GAP_MS); // the bat cycle resets at tick 35 (bat_reset_on)
-        }
-      }));
       await host.page.evaluate(() => {
         window.__qaPF.log.length = 0;
       });
-      await drive([host.page, guest.page], PLAY_MS);
-      const log = await host.page.evaluate(() => window.__qaPF.log.slice());
+      // Rounds of point-blank bat swings, then random play, until FEEDBACK_MIN_EVENTS judged hit events exist or the time cap is reached.
+      const started = Date.now();
+      let log = [];
+      for (;;) {
+        await Promise.all([host.page, guest.page].map(async (page) => {
+          for (let i = 0; i < FEEDBACK_SWINGS; i++) {
+            await page.keyboard.down("KeyC");
+            await sleep(BAT_HOLD_MS); // the bat fires at tick 13 (bat_fire_on)
+            await page.keyboard.up("KeyC");
+            await sleep(BAT_GAP_MS); // the bat cycle resets at tick 35 (bat_reset_on)
+          }
+        }));
+        await drive([host.page, guest.page], PLAY_MS);
+        log = await host.page.evaluate(() => window.__qaPF.log.slice());
+        if (feedbackMetric(log).events >= FEEDBACK_MIN_EVENTS || Date.now() - started >= FEEDBACK_CAP_MS) break;
+      }
       const hud = await host.page.evaluate(() => document.querySelectorAll(".hud-events li.hud-event-hit").length);
       await writeFile(path.join(results.evidenceDir, "feedback-events.json"), JSON.stringify({ logLength: log.length, logHits: log.reduce((n, f) => n + f.hits, 0), hudHitEvents: hud, events: feedbackEvents(log) }, null, 1));
       const verdict = feedbackVerdict(log);
@@ -840,7 +855,16 @@ const wantCase = (name) => CASES.length === 0 || CASES.includes(name);
 if (mode === "feedback") {
   // Pure self-test: no browser, no server.
   const results = new Results("playfield", "pure");
-  await results.case("feedback.selfTest", async () => feedbackVerdict(syntheticLog(5)));
+  await results.case("feedback.selfTest", async () => feedbackVerdict(syntheticLog(5, FEEDBACK_MIN_EVENTS)));
+  results.save();
+  writeIndex();
+} else if (mode === "camera-pure") {
+  // Pure self-test: no browser, no server. A frame where the live players are all out of view must not read as in view (the same check as the forced-away run).
+  const results = new Results("playfield", "pure");
+  await results.case("camera.selfTest", async () => {
+    const allOut = cameraInView(100, 100);
+    return { pass: allOut === 1, detail: `every frame out of view reads as camera.inView=${allOut} (a working instrument gives 0); all in view reads ${cameraInView(100, 0)}; no frames read ${cameraInView(0, 0)}` };
+  });
   results.save();
   writeIndex();
 } else {
