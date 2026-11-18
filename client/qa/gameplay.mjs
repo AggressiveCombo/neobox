@@ -6,17 +6,20 @@
 // them last gets the KO (sim player.rs post_step: attacker_timer credit). Nothing here depends on random walking.
 //
 // Metrics:
-// - gameplay.hitbox.agree (per cell, 1 = pass): two clients, no relay. Both players stand point-blank on the
-//   platform and swing the bat HITBOX_SWINGS times (KeyC held SWING_HOLD_MS, then SWING_GAP_MS). Pass: no resync
-//   on either client; the hit log (.hud-events li.hud-event-hit, as data-tick|text) is non-empty and equal on both
-//   clients (same tick, same swinger and victim); the scoreboards agree; at least 5 checksum frames arrived.
-//   Hits are often one-way: the swings land a few ms apart, and a hit knocks the other player out of reach before
-//   its own bat fires (sim rule, crates/net/tests/bat_hits.rs). The two directions are reported, not passed.
+// - gameplay.hitbox.agree (per cell, 1 = pass): two clients and the server. The swings are tick-timed: HITBOX_SWINGS
+//   rounds, one swing per round, alternating swingers. Round i presses KeyC at engine tick base + i * ROUND_TICKS
+//   (read from the swinger's own client) and holds it HOLD_TICKS ticks, so each round lands one hit and the
+//   press stagger between clients cannot change the count (crates/net/tests/bat_rounds.rs checks the schedule).
+//   Pass: no resync on either client; the hit log (.hud-events li.hud-event-hit) and the KO log (li.hud-event-ko),
+//   as data-tick|text, are equal on both clients and equal to the server's own record of the match (NEOBOX_QA_EVENTS,
+//   crates/server/src/qa_events.rs); the hit count is HITBOX_SWINGS; the scoreboards agree; at least 5 checksum
+//   frames arrived. Hits are often one-way (sim rule, crates/net/tests/bat_hits.rs); the direction is reported.
 // - replay.fidelity (per match, 1 = pass): the match is recorded with objectiveLimit 2 (kills mode: it ends at
 //   the second KO), both players keep swinging until "Back to room" (or PLAY_MS, then End match). The replay is
-//   played to the end without seeking; its KO order (.hud-events li " KO "), scoreboard (.hud-scores rows) equal
-//   the live host's; the live host and guest also agree; and at least one KO happened (a match without KOs
-//   proves nothing). Per cell, `replay.<renderer>.summary` reports replay.fidelity = 1 only when every match passed.
+//   played to the end without seeking. Pass: its KO order (.hud-events li " KO ") equals the server's KO order,
+//   its scoreboard kills equal the server's final kills per player, the replay board equals the live board, the
+//   live host and guest agree, and at least one KO happened. Per cell, `replay.<renderer>.summary` reports
+//   replay.fidelity = 1 only when every match passed.
 // - replay.log.match (per match, reported): the full ordered event log (kills and hits) equals live.
 //
 // Cells (RUBRIC D23): chromium webgpu and webgl2, firefox webgl2, webkit webgl2. QA_ENGINES and
@@ -29,6 +32,7 @@
 // Output: <QA_OUT>/gameplay-<engine>.{json,md}; evidence under <QA_OUT>/evidence/gameplay-<engine>/.
 
 import path from "node:path";
+import { readFileSync, rmSync } from "node:fs";
 import {
   Results,
   button,
@@ -53,9 +57,12 @@ import {
 } from "./lib-qa.mjs";
 
 const SELF = selfTestMode();
-const HITBOX_SWINGS = 10; // hitbox: point-blank swings per player
-const SWING_HOLD_MS = 600; // KeyC held this long: the bat fires at tick 13 (sim settings bat_fire_on)
-const SWING_GAP_MS = 1500; // after release: the bat cycle resets at tick 35 (settings bat_reset_on)
+const HITBOX_SWINGS = 10; // hitbox: rounds, one swing each; every round lands one hit
+const ROUND_TICKS = 120; // hitbox: engine ticks from one round's press to the next (bat_rounds.rs: 100..=150 pass)
+const FIRST_SWING_TICKS = 60; // hitbox: the first press, engine ticks after the read (spawn grace is past by then)
+const HOLD_TICKS = 18; // hitbox: KeyC held this many engine ticks; the bat fires 13 ticks after the press (sim bat_fire_on)
+const SWING_HOLD_MS = 600; // replay: KeyC held this long: the bat fires at tick 13 (sim settings bat_fire_on)
+const SWING_GAP_MS = 1500; // replay: after release: the bat cycle resets at tick 35 (settings bat_reset_on)
 const KO_LIMIT = 2; // replay: kills mode ends the match at this many KOs
 const MATCHES = Number(process.env.QA_REPLAY_MATCHES ?? 3);
 const PLAY_MS = Number(process.env.QA_REPLAY_MS ?? 60000);
@@ -101,6 +108,13 @@ const HITS_JS = () =>
   [...document.querySelectorAll(".hud-events li.hud-event-hit")]
     .map((li) => `${li.dataset.tick}|${li.textContent.trim()}`)
     .sort();
+
+/** KO log as tick|text, sorted: the server's record of the match is compared to this. */
+const KOS_JS = () =>
+  [...document.querySelectorAll(".hud-events li.hud-event-ko")]
+    .map((li) => `${li.dataset.tick}|${li.textContent.trim()}`)
+    .sort();
+
 const RENDERER_JS = () => document.documentElement.dataset.renderer ?? null;
 
 /** Reads a scoreboard with Tab held (the HUD shows the board while Tab is down). */
@@ -154,6 +168,37 @@ async function swing(page) {
   await sleep(SWING_GAP_MS);
 }
 
+/** The engine tick the page presents (client game.ts publishes it as __qaTick). */
+const tickOf = (page) => page.evaluate(() => globalThis.__qaTick?.tick ?? -1);
+
+/** Resolves once the page presents engine tick `tick` or later. */
+async function waitTick(page, tick) {
+  await page.waitForFunction((t) => (globalThis.__qaTick?.tick ?? -1) >= t, tick, { timeout: 120000, polling: 10 });
+}
+
+/** A swing timed to engine ticks: KeyC down at tick `tick`, up `hold` ticks later (hold 0: self-test). */
+async function swingAt(page, tick, hold) {
+  await waitTick(page, tick);
+  await page.keyboard.down("KeyC");
+  await waitTick(page, tick + hold);
+  await page.keyboard.up("KeyC");
+}
+
+const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+
+/**
+ * The server's own record of a match (NEOBOX_QA_EVENTS, crates/server/src/qa_events.rs), worded as the clients word
+ * it: hits and KOs as text with their ticks; `end` is the final record (null if the match did not end).
+ */
+function readServerLog(file) {
+  const lines = readFileSync(file, "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l));
+  return {
+    hits: lines.filter((l) => l.ev === "hit").map((l) => ({ tick: l.tick, text: `${l.by} hit ${l.victim}` })),
+    kos: lines.filter((l) => l.ev === "ko").map((l) => ({ tick: l.tick, text: `${l.by} KO ${l.victim}` })),
+    end: lines.findLast((l) => l.ev === "end") ?? null,
+  };
+}
+
 /**
  * Host and guest in a fresh public room on FIXTURE_MAP, kills mode with objectiveLimit `killLimit`, match started.
  * The map is pasted as code (Change map > Map code or JSON > Use code), the way e2e's voidMap is.
@@ -181,8 +226,13 @@ async function fixtureMatch(s, killLimit) {
   return { host, guest, code, hostName, guestName };
 }
 
-/** Hitbox case: two clients on the fixture map; both players swing point-blank HITBOX_SWINGS times. */
-async function hitboxCase(s, renderer, out) {
+/**
+ * Hitbox case: two clients on the fixture map, HITBOX_SWINGS rounds with one swing each, the swinger alternating.
+ * Presses are keyed to engine ticks read from the swinger's own client (see the header). Pass: no resync, both
+ * clients' hit and KO logs are equal and equal the server's own record of the match, the server recorded
+ * HITBOX_SWINGS hits, and the scoreboards agree.
+ */
+async function hitboxCase(s, renderer, out, logFile) {
   const { host, guest, code, hostName, guestName } = await fixtureMatch(s, 99);
   await checkRenderer(host.page, renderer);
   await checkRenderer(guest.page, renderer);
@@ -190,25 +240,35 @@ async function hitboxCase(s, renderer, out) {
   await ensureProbe(guest.page);
   await waitForPixels(host, "host canvas");
   await waitForPixels(guest, "guest canvas");
+  await waitTick(host.page, 0);
   await sleep(3000); // spawn grace (sim SPAWN_GRACE) before a bat can hit
   const n0 = { host: { ...host.n }, guest: { ...guest.n } };
   const px0 = { host: await probeChanges(host.page), guest: await probeChanges(guest.page) };
   const boardBefore = await readBoard(host.page);
 
-  // Each round both players swing; the player whose key lands first hits the other (the victim is knocked
-  // out of reach before its own bat fires, bat_hits.rs). A fixed press order would credit one direction
-  // only, so the first presser alternates by round. Same total window as before: 10 rounds of one swing.
+  const base = (await tickOf(host.page)) + FIRST_SWING_TICKS;
+  const hold = SELF === "hitbox" ? 0 : HOLD_TICKS;
   for (let i = 0; i < HITBOX_SWINGS; i++) {
-    const pages = i % 2 === 0 ? [host.page, guest.page] : [guest.page, host.page];
-    await Promise.all(pages.map((page) => swing(page)));
+    await swingAt(i % 2 === 0 ? host.page : guest.page, base + i * ROUND_TICKS, hold);
   }
-  await sleep(1500);
+  // one more round, so the last victim's fall (and its KO) is in both logs before they are read
+  const end = base + (HITBOX_SWINGS + 1) * ROUND_TICKS;
+  await waitTick(host.page, end);
+  await waitTick(guest.page, end);
 
   const hitsHost = await host.page.evaluate(HITS_JS);
   const hitsGuest = await guest.page.evaluate(HITS_JS);
-  const hitsAgree = hitsHost.length > 0 && JSON.stringify(hitsHost) === JSON.stringify(hitsGuest);
-  const toGuest = hitsHost.filter((h) => h.includes(`${hostName} hit ${guestName}`)).length;
-  const toHost = hitsHost.filter((h) => h.includes(`${guestName} hit ${hostName}`)).length;
+  const kosHost = await host.page.evaluate(KOS_JS);
+  const kosGuest = await guest.page.evaluate(KOS_JS);
+  const truth = readServerLog(logFile);
+  const hitsServer = truth.hits.map((h) => `${h.tick}|${h.text}`).sort();
+  const kosServer = truth.kos.map((k) => `${k.tick}|${k.text}`).sort();
+  const hitsAgree = hitsHost.length > 0 && same(hitsHost, hitsGuest);
+  const kosAgree = same(kosHost, kosGuest);
+  const hitsMatchServer = same(hitsHost, hitsServer) && same(hitsGuest, hitsServer);
+  const kosMatchServer = same(kosHost, kosServer) && same(kosGuest, kosServer);
+  const toGuest = truth.hits.filter((h) => h.text === `${hostName} hit ${guestName}`).length;
+  const toHost = truth.hits.filter((h) => h.text === `${guestName} hit ${hostName}`).length;
   const m = {
     "gameplay.hitbox.swings": HITBOX_SWINGS,
     "gameplay.hitbox.resyncs.host": host.n.resync - n0.host.resync,
@@ -219,22 +279,31 @@ async function hitboxCase(s, renderer, out) {
     "gameplay.hitbox.canvasChanges.guest": (await probeChanges(guest.page)) - px0.guest,
     "gameplay.hitbox.hits.host": hitsHost.length,
     "gameplay.hitbox.hits.guest": hitsGuest.length,
+    "gameplay.hitbox.hits.server": hitsServer.length,
     "gameplay.hitbox.hits.hostToGuest": toGuest,
     "gameplay.hitbox.hits.guestToHost": toHost,
+    "gameplay.hitbox.kos.server": kosServer.length,
   };
   const boardHost = await readBoard(host.page);
   const boardGuest = await readBoard(guest.page);
-  const boardAgree = JSON.stringify(boardHost) === JSON.stringify(boardGuest);
+  const boardAgree = same(boardHost, boardGuest);
   const agree =
     m["gameplay.hitbox.resyncs.host"] === 0 &&
     m["gameplay.hitbox.resyncs.guest"] === 0 &&
     boardAgree &&
     hitsAgree &&
+    kosAgree &&
+    hitsMatchServer &&
+    kosMatchServer &&
+    hitsServer.length === HITBOX_SWINGS &&
     m["gameplay.hitbox.checksumFrames.host"] >= 5;
   m["gameplay.hitbox.agree"] = agree ? 1 : 0;
-  m["gameplay.hitbox.boardChanged"] = JSON.stringify(boardHost) !== JSON.stringify(boardBefore) ? 1 : 0;
+  m["gameplay.hitbox.boardChanged"] = same(boardHost, boardBefore) ? 0 : 1;
   m["gameplay.hitbox.boardAgree"] = boardAgree ? 1 : 0;
   m["gameplay.hitbox.hitsAgree"] = hitsAgree ? 1 : 0;
+  m["gameplay.hitbox.kosAgree"] = kosAgree ? 1 : 0;
+  m["gameplay.hitbox.hitsMatchServer"] = hitsMatchServer ? 1 : 0;
+  m["gameplay.hitbox.kosMatchServer"] = kosMatchServer ? 1 : 0;
   const shots = [];
   for (const [who, h] of [
     ["host", host],
@@ -246,13 +315,13 @@ async function hitboxCase(s, renderer, out) {
   return {
     pass: agree,
     metrics: m,
-    detail: `code ${code}; hits host ${hitsHost.length} guest ${hitsGuest.length} (${hitsAgree ? "same" : "differ"}), host->guest ${toGuest} guest->host ${toHost}: ${JSON.stringify(hitsHost)} vs ${JSON.stringify(hitsGuest)}; resyncs ${m["gameplay.hitbox.resyncs.host"]}/${m["gameplay.hitbox.resyncs.guest"]}; board ${boardAgree ? "agrees" : `differs: host ${JSON.stringify(boardHost)} guest ${JSON.stringify(boardGuest)}`}`,
+    detail: `code ${code}; server hits ${hitsServer.length} (host ${hitsHost.length}, guest ${hitsGuest.length}, ${hitsMatchServer ? "match" : "differ"}); server KOs ${kosServer.length} (host ${kosHost.length}, guest ${kosGuest.length}, ${kosMatchServer ? "match" : "differ"}); host->guest ${toGuest} guest->host ${toHost}; resyncs ${m["gameplay.hitbox.resyncs.host"]}/${m["gameplay.hitbox.resyncs.guest"]}; board ${boardAgree ? "agrees" : `differs: host ${JSON.stringify(boardHost)} guest ${JSON.stringify(boardGuest)}`}; hits host ${JSON.stringify(hitsHost)} guest ${JSON.stringify(hitsGuest)} server ${JSON.stringify(hitsServer)}`,
     evidence: shots,
   };
 }
 
 /** Replay case: one live match to KO_LIMIT kills, its saved replay played to the end, both read from the DOM. */
-async function replayCase(s, renderer, n, out) {
+async function replayCase(s, renderer, n, out, logFile) {
   const { host, guest, code } = await fixtureMatch(s, KO_LIMIT);
   await checkRenderer(host.page, renderer);
   await waitForPixels(host, "host canvas");
@@ -337,27 +406,35 @@ async function replayCase(s, renderer, n, out) {
 
   const koLive = live.events.filter((t) => t.includes(" KO "));
   const koReplay = replay.events.filter((t) => t.includes(" KO "));
-  const koMatch = JSON.stringify(koLive) === JSON.stringify(koReplay);
-  const boardMatch = JSON.stringify(live.board) === JSON.stringify(replay.board);
-  const logMatch = JSON.stringify(live.events) === JSON.stringify(replay.events);
-  const liveAgree =
-    JSON.stringify(live.board) === JSON.stringify(live.guestBoard) &&
-    JSON.stringify(live.events) === JSON.stringify(live.guestEvents);
+  const truth = readServerLog(logFile);
+  const koServer = truth.kos.map((k) => k.text);
+  const koMatch = same(koLive, koReplay);
+  const koServerMatch = same(koReplay, koServer);
+  // kills per player, from the replay's board and from the server's final record
+  const killsOf = (rows) => rows.map((r) => r.split("|")).map((c) => `${c[0]}|${c[2]}`).sort();
+  const killsServer = (truth.end?.players ?? []).map((p) => `${p.name}|${p.kills}`).sort();
+  const scoreMatch = same(killsOf(replay.board), killsServer);
+  const boardMatch = same(live.board, replay.board);
+  const logMatch = same(live.events, replay.events);
+  const liveAgree = same(live.board, live.guestBoard) && same(live.events, live.guestEvents);
   // A match with no KO proves nothing about KO order, so it cannot pass.
-  const fidelity = koLive.length > 0 && koMatch && boardMatch && liveAgree;
+  const fidelity = koServer.length > 0 && koServerMatch && scoreMatch && boardMatch && liveAgree && truth.end !== null;
   return {
     pass: fidelity,
     metrics: {
       "replay.fidelity": fidelity ? 1 : 0,
       "replay.log.match": logMatch ? 1 : 0,
       "replay.koMatch": koMatch ? 1 : 0,
+      "replay.koServerMatch": koServerMatch ? 1 : 0,
+      "replay.scoreMatch": scoreMatch ? 1 : 0,
       "replay.boardMatch": boardMatch ? 1 : 0,
       "replay.liveAgree": liveAgree ? 1 : 0,
-      "replay.kos": koLive.length,
-      "replay.hits": live.events.filter((t) => t.includes(" hit ")).length,
+      "replay.kos": koServer.length,
+      "replay.kosLive": koLive.length,
+      "replay.hits": truth.hits.length,
       "replay.logLength": live.events.length,
     },
-    detail: `code ${code}; KOs live ${koLive.length} replay ${koReplay.length}; board ${boardMatch ? "same" : `differs (live ${JSON.stringify(live.board)} replay ${JSON.stringify(replay.board)})`}; log ${logMatch ? "same" : "differs"}; live host/guest ${liveAgree ? "agree" : "differ"}`,
+    detail: `code ${code}; KOs server ${koServer.length} live ${koLive.length} replay ${koReplay.length}; replay order ${koServerMatch ? "matches" : "differs from"} server; kills ${scoreMatch ? "match" : `differ: replay ${JSON.stringify(killsOf(replay.board))} server ${JSON.stringify(killsServer)}`}; board ${boardMatch ? "same" : "differs"}; log ${logMatch ? "same" : "differs"}; live host/guest ${liveAgree ? "agree" : "differ"}`,
     evidence: [shot],
   };
 }
@@ -368,16 +445,19 @@ async function main() {
     if (cells.length === 0) continue;
     const results = new Results("gameplay", engine);
     const browser = await launchEngine(engine);
-    // Runs one case on its own server; closes the case's browser contexts once it is recorded.
+    // Runs one case on its own server, which records its match to a log the case reads as the server's truth;
+    // closes the case's browser contexts once it is recorded.
     const runCase = async (id, body) => {
-      const server = await startServer();
+      const logFile = path.join(results.evidenceDir, `server-${id}.jsonl`);
+      rmSync(logFile, { force: true });
+      const server = await startServer({ extraEnv: { NEOBOX_QA_EVENTS: logFile } });
       let scenario = null;
       try {
         await results.case(
           id,
           async (s) => {
             scenario = s;
-            return body(s);
+            return body(s, logFile);
           },
           { browser, base: server.base },
         );
@@ -390,17 +470,17 @@ async function main() {
       for (const { renderer } of cells) {
         const out = { evidenceDir: results.evidenceDir };
         if (SELF === "hitbox" || (SELF === null && ONLY !== "replay")) {
-          await runCase(`hitbox.${renderer}`, (s) => {
+          await runCase(`hitbox.${renderer}`, (s, logFile) => {
             instrument(s, renderer);
-            return hitboxCase(s, renderer, out);
+            return hitboxCase(s, renderer, out, logFile);
           });
         }
         if (SELF === "replay" || (SELF === null && ONLY !== "hitbox")) {
           const count = SELF === "replay" ? 1 : MATCHES;
           for (let n = 1; n <= count; n++) {
-            await runCase(`replay.${renderer}.${n}`, (s) => {
+            await runCase(`replay.${renderer}.${n}`, (s, logFile) => {
               instrument(s, renderer);
-              return replayCase(s, renderer, n, out);
+              return replayCase(s, renderer, n, out, logFile);
             });
           }
           if (SELF === null && ONLY === null) {
