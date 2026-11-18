@@ -128,7 +128,8 @@ export function showPostGame(ctx: AppCtx, award: XpAward, map: MapMeta | null): 
     const next = Math.min(award.gained, Math.max(0, Math.floor((now - start) / STEP_MS)));
     if (next !== steps) {
       steps = next;
-      const value = before + steps;
+      // The meter stops at the credited total: a guest's award past the guest cap is earned but not kept (see guestNote).
+      const value = Math.min(total, before + steps);
       gainEl.textContent = `+${steps} xp`;
       paint(value);
       if (levelOf(value) > shownLevel) flashLevel(levelOf(value));

@@ -523,6 +523,19 @@ async function levels(s) {
   await panel.getByText(/\+\d+ xp/).waitFor();
   const guestPanel = guest.page.getByRole("dialog", { name: "Game over" });
   await guestPanel.waitFor({ timeout: 20_000 });
+  // A guest's meter stops at the guest cap (level 1, 99 of 100 xp) however large the award: no "Level 2!", no count past it.
+  const guestRange = guestPanel.locator(".postgame-level-range");
+  let last = "";
+  for (let i = 0; i < 40; i++) {
+    await sleep(250);
+    const now = `${await guestPanel.locator(".postgame-gain").textContent()}|${await guestRange.textContent()}`;
+    if (now === last) break;
+    last = now;
+  }
+  const range = ((await guestRange.textContent()) ?? "").trim();
+  const kept = /^(\d+) \/ (\d+) xp$/.exec(range);
+  check(kept !== null && Number(kept[2]) === 100 && Number(kept[1]) <= 99, `guest meter reads "${range}", not at most 99 / 100 xp`);
+  check(!(await guestPanel.locator(".postgame-levelup").isVisible()), "a guest's post-game panel announces a level past the guest cap");
   await page.keyboard.press("Escape");
   await panel.waitFor({ state: "detached" });
   await page.locator("span.room-level").filter({ hasText: /^Lv \d+$/ }).first().waitFor();
