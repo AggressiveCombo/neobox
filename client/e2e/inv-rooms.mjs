@@ -2,7 +2,7 @@
 // controls, the room chat and its commands and notices, and the links into rooms. Each scenario names the rows it proves
 // in `inv`; every check asserts a row's "shows" column, with role/name locators where they exist.
 
-import { PASSWORD, button, createRoom, joinByInvite, menuName, playFromMenu, roomCode, roomTitle, sleep, uniqueName } from "./lib.mjs";
+import { PASSWORD, adminRoom, button, createRoom, dismissPhoneSplash, ipIn, joinByInvite, matchWithGuest, menuName, playFromMenu, regionServers, roomCode, roomTitle, signedIn, sleep, uniqueName } from "./lib.mjs";
 
 const check = (ok, message) => {
   if (!ok) throw new Error(message);
@@ -466,16 +466,368 @@ async function roomDock(s) {
   return `dock: "1 player ready" alone; with a guest "2 players ready"; Start -> "Match starting" + Abort start; Abort returns to "2 players ready"; guest dock "Waiting for host to start"`;
 }
 
+// ---------------------------------------------------------------- group 4: room chat, commands and their notices
+
+/** The server's chat budget per player: 3 lines at once, then one line every 3 s (room.rs CHAT_BURST, CHAT_REFILL_SECS). */
+const CHAT_BURST = 3;
+const CHAT_REFILL_MS = 3000;
+/** Each page's budget as the last send left it: tokens, and the time of that send. */
+const chatBudget = new WeakMap();
+
+/** Sends one line through the room chat input (Enter). Waits for the budget to refill first, so a command is never rate-limited. */
+async function sendChat(page, text) {
+  const held = (at, { tokens, from }) => Math.min(CHAT_BURST, tokens + (at - from) / CHAT_REFILL_MS);
+  const state = chatBudget.get(page) ?? { tokens: CHAT_BURST, from: Date.now() };
+  let at = Date.now();
+  let tokens = held(at, state);
+  if (tokens < 1) {
+    await sleep((1 - tokens) * CHAT_REFILL_MS + 100);
+    at = Date.now();
+    tokens = held(at, state);
+  }
+  chatBudget.set(page, { tokens: tokens - 1, from: at });
+  const input = page.getByLabel("Chat message", { exact: true });
+  await input.fill(text);
+  await input.press("Enter");
+}
+
+/** A chat log line (a player's line or a system line) that contains `text`. */
+const chatLine = (page, text) => page.locator("div.room-chat-log .room-chat-line").filter({ hasText: text }).first();
+
+/** A roster group under its heading (Red (n), Blue (n), Spectating (n)); its rows are li.room-player. */
+const rosterGroup = (page, heading) => page.locator("section.room-roster-group").filter({ has: page.getByRole("heading", { name: heading }) });
+
+/** room-chat, cmd-help, notice-help, notice-unknown, notice-usage, notice-no-player, notice-record: chat is echoed to the room; each command answers in the chat log. */
+async function chatNotices(s) {
+  const { h, name } = await openHostRoomNamed(s);
+  const { page } = h;
+  await sendChat(page, "hello from host");
+  await chatLine(page, `${name}: hello from host`).waitFor({ state: "visible" });
+  await sendChat(page, "/help");
+  await chatLine(page, "Commands: /set <key> <value>, /settings, /reset, /mode <n>, /start, /end, /lock, /unlock, /kick <name>, /ban <name>, /unban <name>, /mute <name>, /unmute <name>, /host <name>, /team <name> <ffa|red|blue|spec>, /join <ffa|red|blue|spec>, /upvote, /downvote, /fav, /unfav, /record").waitFor({ state: "visible" });
+  await sendChat(page, "/nosuch");
+  await chatLine(page, "Unknown command, try /help").waitFor({ state: "visible" });
+  await sendChat(page, "/set");
+  await chatLine(page, "Usage: /set <key> <value>").waitFor({ state: "visible" });
+  await sendChat(page, "/kick nobody");
+  await chatLine(page, "No player with that name").waitFor({ state: "visible" });
+  await sendChat(page, "/record");
+  await chatLine(page, "Type /record in a running match to send its last 15 seconds to the main menu").waitFor({ state: "visible" });
+  return `chat echoes "${name}: hello from host"; /help, /nosuch, /set, /kick nobody, /record answer with their notices in the room chat`;
+}
+
+/** cmd-settings, cmd-set, sys-settings, cmd-reset, cmd-mode, sys-map: /settings lists the settings, /set echoes the one it changed, /reset restores the defaults, /mode 3 picks Team rounds, Change map announces the new map. */
+async function chatSettings(s) {
+  const { h } = await openHostRoomNamed(s);
+  const { page } = h;
+  const settingsLine = (i) => page.locator("div.room-chat-log .room-chat-system").filter({ hasText: "timeScale: " }).nth(i);
+  await sendChat(page, "/settings");
+  await settingsLine(0).waitFor({ state: "visible" });
+  const defaultLimit = /objectiveLimit: ([^,]+)/.exec((await settingsLine(0).textContent()) ?? "")?.[1];
+  check(defaultLimit !== undefined, "the /settings line has no objectiveLimit");
+  const other = defaultLimit === "1" ? "2" : "1";
+  await sendChat(page, `/set objectiveLimit ${other}`);
+  await page.locator("div.room-chat-log .room-chat-system").filter({ hasText: new RegExp(`^objectiveLimit: ${other}$`) }).waitFor({ state: "visible" });
+  await sendChat(page, "/reset");
+  await chatLine(page, "Settings reset").waitFor({ state: "visible" });
+  await sendChat(page, "/settings");
+  await settingsLine(1).waitFor({ state: "visible" });
+  const afterReset = /objectiveLimit: ([^,]+)/.exec((await settingsLine(1).textContent()) ?? "")?.[1];
+  check(afterReset === defaultLimit, `objectiveLimit after /reset is ${afterReset}, not the default ${defaultLimit}`);
+  await sendChat(page, "/mode 3");
+  await panel(page, "room-mode-panel").getByText("Team rounds", { exact: true }).waitFor({ state: "visible" });
+  await panel(page, "room-map-panel").getByRole("button", { name: "Change map", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "Choose a map", exact: true });
+  await dialog.waitFor({ state: "visible" });
+  await dialog.locator(".room-map-list button").first().click();
+  await dialog.waitFor({ state: "hidden" });
+  await chatLine(page, "Map changed to ").waitFor({ state: "visible" });
+  return `/settings echoes the list (objectiveLimit ${defaultLimit}); /set objectiveLimit ${other} echoes "objectiveLimit: ${other}"; /reset -> "Settings reset" and the default again; /mode 3 -> Team rounds; Change map -> "Map changed to ..."`;
+}
+
+/** cmd-lock, sys-teams-lock, cmd-unlock, cmd-team, cmd-join, sys-nobody, sys-nobody-spec-guest, sys-nobody-start, restore-team-host, restore-team-guest, sys-countdown, cmd-start: team moves by host and guest, the lock toggle, the nobody-to-play start, then a start with two teams. sys-no-map: a new room always has a map name, so /start never reaches "No map selected" (NOT-REACHABLE; the precondition is checked here, the row is not claimed). */
+async function chatTeams(s) {
+  const { h, name: hostName, code, roomName } = await openHostRoomNamed(s);
+  const { page } = h;
+  await page.locator(".room-map-name").filter({ hasText: /\S/ }).waitFor({ state: "visible" });
+  const { g, name: guestName } = await joinGuest(s, code, roomName);
+  await rosterRows(page).filter({ hasText: guestName }).waitFor({ state: "visible" });
+  await sendChat(page, "/mode 3");
+  await panel(page, "room-mode-panel").getByText("Team rounds", { exact: true }).waitFor({ state: "visible" });
+  await sendChat(page, `/team ${guestName} red`);
+  await rosterGroup(page, /^Red \(/).locator("li.room-player").filter({ hasText: guestName }).waitFor({ state: "visible" });
+  await sendChat(page, "/lock");
+  await chatLine(page, "Teams are locked").waitFor({ state: "visible" });
+  await sendChat(page, "/unlock");
+  await chatLine(page, "Teams are unlocked").waitFor({ state: "visible" });
+  await sendChat(g.page, "/join blue");
+  await rosterGroup(page, /^Blue \(/).locator("li.room-player").filter({ hasText: guestName }).waitFor({ state: "visible" });
+  await sendChat(page, `/team ${hostName} spec`);
+  await rosterGroup(page, /^Spectating \(/).locator("li.room-player").filter({ hasText: hostName }).waitFor({ state: "visible" });
+  await sendChat(page, `/team ${guestName} spec`);
+  await rosterGroup(page, /^Spectating \(/).locator("li.room-player").filter({ hasText: guestName }).waitFor({ state: "visible" });
+  await sendChat(page, "/start");
+  await chatLine(page, "Nobody to play: everyone is spectating").waitFor({ state: "visible" });
+  await sendChat(page, `/team ${hostName} red`);
+  await rosterGroup(page, /^Red \(/).locator("li.room-player").filter({ hasText: hostName }).waitFor({ state: "visible" });
+  await sendChat(page, `/team ${guestName} blue`);
+  await rosterGroup(page, /^Blue \(/).locator("li.room-player").filter({ hasText: guestName }).waitFor({ state: "visible" });
+  await sendChat(page, "/start");
+  await chatLine(page, "Game starting!").waitFor({ state: "visible" });
+  await page.locator(".hud-leave").waitFor({ state: "visible" });
+  await g.page.locator(".hud-leave").waitFor({ state: "visible" });
+  return `/mode 3; /team guest red; /lock -> "Teams are locked"; /unlock -> "Teams are unlocked"; guest /join blue; /team host spec and guest spec; /start -> "Nobody to play: everyone is spectating"; back to red/blue; /start -> "Game starting!" and the HUD on both pages`;
+}
+
+// ---------------------------------------------------------------- group 5: invite links, join notices, room tabs, reports
+
+/** Chat commands and lines share one budget: 3 at once, then one per CHAT_REFILL_SECS (3 s, room.rs). Waits out one refill, then sends. */
+const sayPaced = async (page, text) => {
+  await sleep(3100);
+  await sendChat(page, text);
+};
+
+/** Every chat line with `text`; a command's answer is the one after the lines already in the log. */
+const chatLines = (page, text) => page.locator("div.room-chat-log .room-chat-line").filter({ hasText: text });
+
+/** Sends a command, then waits for its answer `text` as a new line in the log. */
+async function sendAnswered(page, command, text) {
+  const before = await chatLines(page, text).count();
+  await sayPaced(page, command);
+  await chatLines(page, text).nth(before).waitFor({ state: "visible" });
+}
+
+/** app-invite, app-invite-query: /CODE opens the room; ?room= (lower case) opens it and rewrites the address to /CODE; a link naming no room lands on the menu. */
+async function inviteLinks(s) {
+  const roomName = uniqueName("link");
+  const host = await s.open("host", { name: uniqueName("host") });
+  const code = await createRoom(host, s.base, roomName, { isPublic: true });
+
+  const guest = await s.open("guest", { name: uniqueName("guest") });
+  await guest.page.goto(`${s.base}/${code}`);
+  await roomTitle(guest.page, roomName).waitFor();
+  check(new URL(guest.page.url()).pathname === `/${code}`, `address is ${guest.page.url()}, expected /${code}`);
+
+  const query = await s.open("query", { name: uniqueName("q") });
+  await query.page.goto(`${s.base}/?room=${code.toLowerCase()}`);
+  await roomTitle(query.page, roomName).waitFor();
+  check(new URL(query.page.url()).pathname === `/${code}`, `?room= address is ${query.page.url()}, expected /${code}`);
+
+  const bad = await s.open("bad", { name: uniqueName("bad") });
+  await bad.page.goto(`${s.base}/?room=zz!`);
+  await menuName(bad.page).waitFor();
+  check((await roomTitle(bad.page).count()) === 0, "a link with a bad room code opened a room");
+  check(new URL(bad.page.url()).pathname === "/", `a bad code left the address at ${bad.page.url()}`);
+  return `/${code} opens "${roomName}" at /${code}; ?room=${code.toLowerCase()} opens it and rewrites to /${code}; ?room=zz! shows the menu at /`;
+}
+
+/** redirect: a Frankfurt guest opening a room hosted on the New York node has its sockets reach that node. */
+async function regionRedirect(s) {
+  const roomName = uniqueName("region");
+  const host = await s.open("nyhost", { name: uniqueName("nyh"), ip: ipIn("203.0.113") });
+  const code = await createRoom(host, s.base, roomName, { isPublic: true });
+  check((await adminRoom(s.base, code)).region === "New York", "the room is not on the New York node");
+
+  const guest = await s.open("frguest", { name: uniqueName("frg"), ip: ipIn("198.51.100") });
+  const sockets = [];
+  guest.page.on("websocket", (ws) => sockets.push(ws.url()));
+  await guest.page.goto(`${s.base}/${code}`);
+  await roomTitle(guest.page, roomName).waitFor();
+  const nodePort = new URL(s.env.nodeBase).port;
+  check(sockets.some((url) => new URL(url).port === nodePort), `guest sockets ${JSON.stringify(sockets)} never reach the node port ${nodePort}`);
+  return `Frankfurt guest on /${code}: sockets ${JSON.stringify(sockets)} include the New York node port ${nodePort}; room region New York`;
+}
+
+/** sys-joined: a guest who joins by link is announced in the host's chat. */
+async function joinAnnounced(s) {
+  const { h, code, roomName } = await openHostRoomNamed(s);
+  const { name: guestName } = await joinGuest(s, code, roomName);
+  await chatLine(h.page, `${guestName} has joined the game`).waitFor({ state: "visible" });
+  return `host chat: "${guestName} has joined the game"`;
+}
+
+/** room-notice: a player who joins while the match runs sees "match in progress" and is not put in the match. */
+async function lateJoinNotice(s) {
+  const { code, roomName } = await matchWithGuest(s);
+  const late = await s.open("late", { name: uniqueName("late") });
+  await joinByInvite(late, s.base, code, roomName);
+  await late.page.locator("p.room-notice").filter({ hasText: "match in progress" }).waitFor({ state: "visible" });
+  return `late joiner: p.room-notice "match in progress"`;
+}
+
+/** room-tabs, room-tabs-320: on a phone the room sections are tabs (Players, Match, Chat) and a tab selects its section; at 320x256 the tab bar sits inside the viewport. */
+async function roomTabs(s) {
+  const roomName = uniqueName("tabs");
+  const host = await s.open("host", { name: uniqueName("host") });
+  const code = await createRoom(host, s.base, roomName, { isPublic: true });
+  const selected = async (tabs, name) => (await tabs.getByRole("tab", { name, exact: true }).getAttribute("aria-selected")) === "true";
+
+  const guest = await s.open("guest", { name: uniqueName("guest"), phone: true });
+  await guest.page.goto(`${s.base}/${code}`);
+  await dismissPhoneSplash(guest.page);
+  await roomTitle(guest.page, roomName).waitFor();
+  const tabs = guest.page.getByRole("tablist", { name: "Room sections", exact: true });
+  for (const name of ["Players", "Match", "Chat"]) {
+    check(await tabs.getByRole("tab", { name, exact: true }).isVisible(), `no ${name} tab on the phone`);
+  }
+  check(await selected(tabs, "Players"), "Players is not the selected tab at load");
+  await tabs.getByRole("tab", { name: "Match", exact: true }).click();
+  check(await selected(tabs, "Match"), "Match does not select on click");
+  await tabs.getByRole("tab", { name: "Chat", exact: true }).click();
+  check(await selected(tabs, "Chat"), "Chat does not select on click");
+
+  const tiny = await s.open("tiny", { name: uniqueName("tiny"), phone: true, viewport: { width: 320, height: 256 } });
+  await tiny.page.goto(`${s.base}/${code}`);
+  await dismissPhoneSplash(tiny.page);
+  await roomTitle(tiny.page, roomName).waitFor();
+  const bar = tiny.page.getByRole("tablist", { name: "Room sections", exact: true });
+  const box = await bar.boundingBox();
+  check(box !== null && box.x >= 0 && box.y >= 0 && box.x + box.width <= 320 && box.y + box.height <= 256, `tab bar ${JSON.stringify(box)} is not inside 320x256`);
+  await bar.getByRole("tab", { name: "Match", exact: true }).click();
+  check(await selected(bar, "Match"), "Match does not select on click at 320x256");
+  return `phone tabs Players/Match/Chat, Players selected at load, Match and Chat switch; 320x256 tab bar at ${JSON.stringify(box)} and Match switches`;
+}
+
+/** room-row-menu, room-report-modal: a guest's menu on another player has only Report; Report opens "Report NAME" with four reasons; Send report confirms with a toast. */
+async function reportPlayer(s) {
+  const { name: hostName, code, roomName } = await openHostRoomNamed(s);
+  const { g } = await joinGuest(s, code, roomName);
+  const { page } = g;
+  await rosterRows(page).filter({ hasText: hostName }).waitFor({ state: "visible" });
+  await page.getByRole("button", { name: `Actions for ${hostName}`, exact: true }).click();
+  const menu = page.getByRole("menu", { name: `Actions for ${hostName}`, exact: true });
+  await menu.waitFor({ state: "visible" });
+  const items = (await menu.getByRole("menuitem").allTextContents()).map((t) => t.trim());
+  check(items.length === 1 && items[0] === "Report", `row menu items are ${JSON.stringify(items)}, expected ["Report"]`);
+
+  await menu.getByRole("menuitem", { name: "Report", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: `Report ${hostName}`, exact: true });
+  await dialog.waitFor({ state: "visible" });
+  for (const reason of ["Harassment", "Offensive name", "Cheating", "Other"]) {
+    check((await dialog.getByRole("radio", { name: reason, exact: true }).count()) === 1, `the report has no ${reason} reason`);
+  }
+  await dialog.getByRole("radio", { name: "Cheating", exact: true }).click();
+  await dialog.getByRole("button", { name: "Send report", exact: true }).click();
+  await page.getByText(`Thanks. An admin will look at ${hostName}.`, { exact: true }).waitFor({ state: "visible" });
+  await dialog.waitFor({ state: "hidden" });
+  return `row menu: ["Report"]; "Report ${hostName}" with 4 reasons; Send report -> "Thanks. An admin will look at ${hostName}."`;
+}
+
+// ---------------------------------------------------------------- group 6: host, kick, ban, leave
+
+/** cmd-host, sys-host: /host hands the room to a player; both pages announce it, and the crown moves with it. */
+async function chatHost(s) {
+  const { h, name: hostName, code, roomName } = await openHostRoomNamed(s);
+  const { g, name: guestName } = await joinGuest(s, code, roomName);
+  const crown = (page, name) => rosterRows(page).filter({ hasText: name }).getByRole("img", { name: "Room host", exact: true });
+  await sayPaced(h.page, `/host ${guestName}`);
+  for (const page of [h.page, g.page]) await chatLine(page, `${guestName} is now the host`).waitFor({ state: "visible" });
+  await crown(h.page, guestName).waitFor({ state: "visible" });
+  await sayPaced(g.page, `/host ${hostName}`);
+  for (const page of [h.page, g.page]) await chatLine(page, `${hostName} is now the host`).waitFor({ state: "visible" });
+  await crown(g.page, hostName).waitFor({ state: "visible" });
+  return `/host guest -> "${guestName} is now the host" on both pages and the crown moves; guest /host host hands it back`;
+}
+
+/** cmd-kick, sys-kick-ban, cmd-ban, cmd-unban, sys-left: /kick removes a player who can rejoin; /ban keeps them out and the Manage ban list shows them; /unban and the list's Unban lift it; a player who leaves is announced. */
+async function kickBanLeave(s) {
+  const { h, code, roomName } = await openHostRoomNamed(s);
+  const { g, name: guestName } = await joinGuest(s, code, roomName);
+  const manage = panel(h.page, "room-manage");
+  const bans = manage.locator("li.room-ban").filter({ hasText: guestName });
+  const inRoom = () => rosterRows(h.page).filter({ hasText: guestName }).waitFor({ state: "visible" });
+
+  await sayPaced(h.page, `/kick ${guestName}`);
+  await chatLine(h.page, `${guestName} was kicked`).waitFor({ state: "visible" });
+  await rosterRows(h.page).filter({ hasText: guestName }).waitFor({ state: "detached" });
+  await joinByInvite(g, s.base, code, roomName);
+  await inRoom();
+
+  await sayPaced(h.page, `/ban ${guestName}`);
+  await chatLine(h.page, `${guestName} was banned`).waitFor({ state: "visible" });
+  await bans.waitFor({ state: "visible" });
+  await sayPaced(h.page, `/unban ${guestName}`);
+  await chatLine(h.page, `${guestName} was unbanned`).waitFor({ state: "visible" });
+  await manage.getByText("No one is banned.", { exact: true }).waitFor({ state: "visible" });
+  await joinByInvite(g, s.base, code, roomName);
+  await inRoom();
+
+  // the Manage ban list's Unban button lifts a ban like /unban does
+  await sayPaced(h.page, `/ban ${guestName}`);
+  await bans.waitFor({ state: "visible" });
+  const unbanned = await chatLines(h.page, `${guestName} was unbanned`).count();
+  await bans.getByRole("button", { name: "Unban", exact: true }).click();
+  await chatLines(h.page, `${guestName} was unbanned`).nth(unbanned).waitFor({ state: "visible" });
+  await joinByInvite(g, s.base, code, roomName);
+  await inRoom();
+
+  await button(g.page, "Leave").click();
+  await chatLine(h.page, `${guestName} has left the game`).waitFor({ state: "visible" });
+  return `/kick -> "was kicked" and rejoin; /ban -> "was banned" and Manage ban list; /unban -> "was unbanned"; Unban button lifts a ban; guest Leave -> "has left the game"`;
+}
+
+// ---------------------------------------------------------------- group 7: match commands, replay, map commands
+
+/** Sends a line in a match: the HUD chat opens with Enter when it is closed. */
+async function matchChat(page, text) {
+  if (!(await page.getByLabel("Chat message", { exact: true }).isVisible())) await page.keyboard.press("Enter");
+  await sayPaced(page, text);
+}
+
+/** cmd-record, cmd-end: in a match /record saves the last 15 seconds (toast), and /end returns the host to the room. */
+async function matchRecordEnd(s) {
+  const { host } = await matchWithGuest(s);
+  await sleep(6000); // a clip needs 5 s of play (clips.ts MIN_CLIP_SECS)
+  const { page } = host;
+  await matchChat(page, "/record");
+  await page.getByText("Clip saved. It can play on the main menu.", { exact: true }).waitFor({ state: "visible" });
+  await matchChat(page, "/end");
+  await page.locator(".hud-leave").waitFor({ state: "hidden" });
+  await roomTitle(page).waitFor({ state: "visible" });
+  return `/record -> "Clip saved. It can play on the main menu."; /end -> match HUD hidden, room shown`;
+}
+
+/** room-replay-save: End match on the HUD, confirmed, leaves "Save replay" in the room; it downloads a .nbreplay. */
+async function replaySave(s) {
+  const { host } = await matchWithGuest(s);
+  const { page } = host;
+  await page.locator(".hud-end").click();
+  const confirm = page.locator('[role="alertdialog"], [role="dialog"]').filter({ hasText: "End the match?" });
+  await confirm.waitFor({ state: "visible" });
+  await confirm.getByRole("button", { name: "End match", exact: true }).click();
+  await button(page, "Save replay").waitFor({ state: "visible" });
+  const [download] = await Promise.all([page.waitForEvent("download"), button(page, "Save replay").click()]);
+  check(download.suggestedFilename().endsWith(".nbreplay"), `the replay downloads as ${download.suggestedFilename()}`);
+  return `End match confirm -> "Save replay" in the room; downloads ${download.suggestedFilename()}`;
+}
+
+/** notice-map-cmd, cmd-upvote, cmd-downvote, cmd-fav, cmd-unfav, cmd-fave, cmd-unfave: a guest's vote gets the sign-in notice; the host's votes and favourites on a built-in map answer "not in the map library". */
+async function mapCommands(s) {
+  const h = await signedIn(s, "host", uniqueName("acct")); // map commands other than the notice need an account
+  const roomName = uniqueName("room");
+  const code = await createRoom(h, s.base, roomName, { isPublic: true });
+  const { g } = await joinGuest(s, code, roomName);
+  await sendAnswered(g.page, "/upvote", "Sign in to vote for maps and keep favourites");
+  for (const cmd of ["/upvote", "/downvote", "/fav", "/unfav", "/fave", "/unfave"]) {
+    await sendAnswered(h.page, cmd, "This map is not in the map library");
+  }
+  return `guest /upvote -> "Sign in to vote for maps and keep favourites"; signed-in host /upvote, /downvote, /fav, /unfav, /fave, /unfave -> "This map is not in the map library"`;
+}
+
+// NOT PROVEN in this file (inventory rows left UNVERIFIED): room-fastest-modal needs a signed-in library map (the Fastest
+// Times window is opened by scenarios.mjs, not by a row here); sys-pb needs a timed finish that beats the saved best and
+// the harness has no scripted timed run; sys-too-complex needs a map that trips the simulator's complexity limit, and no
+// map code here does. sys-no-map is NOT-REACHABLE (see chatTeams).
 export const roomsInvScenarios = [
   { name: "inv rooms menu home", inv: ["menu-home", "menu-news-btn", "menu-mute-btn", "menu-fullscreen-btn"], run: menuHome },
   { name: "inv rooms quick empty", inv: ["quick-empty"], run: quickEmpty },
   { name: "inv rooms quick error", inv: ["quick-error"], run: quickError },
   { name: "inv rooms quick page", inv: ["quick-page", "quick-mode-card"], run: quickPage },
   { name: "inv rooms quick waiting", inv: ["quick-waiting"], run: quickWaiting },
-  { name: "inv rooms browse empty", inv: ["browse-page", "browse-empty-none", "browse-create-modal"], run: browseEmpty },
+  { name: "inv rooms browse empty", inv: ["browse-page", "browse-empty-none", "browse-create-modal", "NEW-browse-empty-name"], run: browseEmpty },
   {
     name: "inv rooms browse rows",
-    inv: ["browse-page", "browse-row", "browse-locked-row", "browse-password-slot", "browse-empty-filter", "browse-filters"],
+    inv: ["browse-page", "browse-row", "browse-locked-row", "browse-password-slot", "browse-empty-filter", "browse-filters", "NEW-browse-code-uppercase"],
     run: browseRows,
   },
   { name: "inv rooms room header", inv: ["room-header", "room-invite"], run: roomHeader },
@@ -486,4 +838,18 @@ export const roomsInvScenarios = [
   { name: "inv rooms room settings", inv: ["room-settings"], run: roomSettings },
   { name: "inv rooms room appearance", inv: ["room-appearance"], run: roomAppearance },
   { name: "inv rooms room dock", inv: ["room-dock", "room-starting"], run: roomDock },
+  { name: "inv rooms chat notices", inv: ["room-chat", "cmd-help", "notice-help", "notice-unknown", "notice-usage", "notice-no-player", "notice-record"], run: chatNotices },
+  { name: "inv rooms chat settings", inv: ["cmd-settings", "cmd-set", "sys-settings", "cmd-reset", "cmd-mode", "sys-map"], run: chatSettings },
+  { name: "inv rooms chat teams", inv: ["cmd-lock", "sys-teams-lock", "cmd-unlock", "cmd-team", "cmd-join", "sys-nobody", "sys-nobody-spec-guest", "sys-nobody-start", "restore-team-host", "restore-team-guest", "sys-countdown", "cmd-start"], run: chatTeams },
+  { name: "inv rooms invite links", inv: ["app-invite", "app-invite-query"], run: inviteLinks },
+  { name: "inv rooms region redirect", inv: ["redirect"], topology: regionServers, run: regionRedirect },
+  { name: "inv rooms join announced", inv: ["sys-joined"], run: joinAnnounced },
+  { name: "inv rooms late join notice", inv: ["room-notice"], run: lateJoinNotice },
+  { name: "inv rooms phone tabs", inv: ["room-tabs", "room-tabs-320"], run: roomTabs },
+  { name: "inv rooms report player", inv: ["room-row-menu", "room-report-modal"], run: reportPlayer },
+  { name: "inv rooms chat host", inv: ["cmd-host", "sys-host"], run: chatHost },
+  { name: "inv rooms chat kick ban", inv: ["cmd-kick", "sys-kick-ban", "cmd-ban", "cmd-unban", "sys-left"], run: kickBanLeave },
+  { name: "inv rooms match record end", inv: ["cmd-record", "cmd-end"], run: matchRecordEnd },
+  { name: "inv rooms replay save", inv: ["room-replay-save"], run: replaySave },
+  { name: "inv rooms map commands", inv: ["notice-map-cmd", "cmd-upvote", "cmd-downvote", "cmd-fav", "cmd-unfav", "cmd-fave", "cmd-unfave"], run: mapCommands },
 ];
