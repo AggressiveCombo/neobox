@@ -1,7 +1,7 @@
 // Inventory rows for the match HUD, its menu, chat, input, offline, phone and editor screens. Each scenario names
 // the rows it proves in `inv`; every check asserts a row's "shows" column, with role/name locators where they exist.
 
-import { button, createRoom, joinByInvite, matchWithGuest, probeChanges, roomTitle, sleep, startMatch, uniqueName, waitForPixels, waitQuiet } from "./lib.mjs";
+import { button, createRoom, dismissPhoneSplash, joinByInvite, matchWithGuest, menuName, playFromMenu, probeChanges, roomTitle, signedIn, sleep, startMatch, uniqueName, waitForPixels, waitQuiet } from "./lib.mjs";
 
 const check = (ok, message) => {
   if (!ok) throw new Error(message);
@@ -313,9 +313,15 @@ async function matchSpectate(s) {
   const name = spectator.page.locator(".hud-spectate-name");
   const first = await name.textContent();
   check(first.startsWith("Spectating"), `spectator bar reads "${first}", expected "Spectating ..."`);
+  const followed = spectator.page.locator(".hud-spectate-name");
   await spectator.page.keyboard.press("ArrowRight");
-  await spectator.page.locator(".hud-spectate-name").filter({ hasNotText: first }).waitFor({ timeout: 5000 });
-  return `eliminated player sees the spectator bar ("${first}") and ArrowRight moves to another player`;
+  await followed.filter({ hasNotText: first }).waitFor({ timeout: 5000 });
+  const second = await followed.textContent();
+  // chat-spectate-step: ArrowLeft steps back to the first player
+  await spectator.page.keyboard.press("ArrowLeft");
+  await followed.filter({ hasText: first }).waitFor({ timeout: 5000 });
+  check(second !== first, "ArrowRight did not change the followed player");
+  return `eliminated player sees the spectator bar ("${first}"); ArrowRight and ArrowLeft move the followed player`;
 }
 
 /** hud-spectate (b): a player who joins a running match spectates it; the bar shows after Back to game. */
@@ -340,6 +346,208 @@ async function matchSpectateJoin(s) {
   return `mid-match joiner chooses Spectate in the lobby; the spectator bar shows ("${text}")`;
 }
 
+/** Mask-only copy of the qa/input.mjs HOOK: each page records the input mask the engine receives (window.__mask). */
+const MASK_HOOK = () => {
+  window.__mask = { cur: 0, seen: 0, calls: 0 };
+  const record = (mask) => {
+    window.__mask.cur = mask;
+    window.__mask.seen |= mask;
+    window.__mask.calls++;
+  };
+  const wrap = (result) => {
+    const ex = result.instance.exports;
+    const api = { ...ex };
+    const localFrame = ex.nb_local_frame;
+    api.nb_local_frame = (dt, mask) => {
+      record(mask);
+      return localFrame(dt, mask);
+    };
+    const frame = ex.nb_frame;
+    api.nb_frame = (nowMs, mask) => {
+      record(mask);
+      return frame(nowMs, mask);
+    };
+    return { module: result.module, instance: { exports: api } };
+  };
+  const origStreaming = WebAssembly.instantiateStreaming;
+  WebAssembly.instantiateStreaming = async (...a) => wrap(await origStreaming.apply(WebAssembly, a));
+  const origInstantiate = WebAssembly.instantiate;
+  WebAssembly.instantiate = async (...a) => {
+    const r = await origInstantiate.apply(WebAssembly, a);
+    return r.instance ? wrap(r) : r;
+  };
+};
+
+/** Opens each page of `s` with MASK_HOOK installed before its scripts run (every context the scenario opens). */
+function withMaskHook(s) {
+  const open = s.open.bind(s);
+  s.open = async (label, opts) => {
+    const h = await open(label, opts);
+    await h.context.addInitScript(MASK_HOOK);
+    return h;
+  };
+  return s;
+}
+
+/** Standard-mapping pad on the page (getGamepads overridden, as in qa/input.mjs PAD_INIT). */
+async function installPad(page) {
+  await page.evaluate(() => {
+    const pad = {
+      id: "qa-pad (STANDARD GAMEPAD)",
+      index: 0,
+      connected: true,
+      mapping: "standard",
+      buttons: Array.from({ length: 17 }, () => ({ pressed: false, value: 0 })),
+      axes: [0, 0, 0, 0],
+    };
+    window.__e2ePad = pad;
+    Object.defineProperty(navigator, "getGamepads", { value: () => [pad], configurable: true });
+  });
+}
+
+const pressPad = (page, index, down) =>
+  page.evaluate(
+    ([i, d]) => {
+      window.__e2ePad.buttons[i] = { pressed: d, value: d ? 1 : 0 };
+    },
+    [index, down],
+  );
+
+/** gamepad-push, -bat, -rocket, -grab: each standard-mapping button sets its action's mask bit in the engine (input.ts BIT). */
+async function matchPadActions(s) {
+  withMaskHook(s);
+  const { host } = await matchWithGuest(s, { clipboard: true });
+  const { page } = host;
+  await waitForPixels(host, "match canvas");
+  // Frames freeze during the start countdown (see roomMatch in scenarios.mjs); wait it out before pressing the pad.
+  await sleep(4000);
+  await installPad(page);
+  const actions = [
+    { row: "gamepad-push", button: 2, name: "X", bit: 16 },
+    { row: "gamepad-bat", button: 1, name: "B", bit: 64 },
+    { row: "gamepad-rocket", button: 3, name: "Y", bit: 32 },
+    { row: "gamepad-rocket", button: 5, name: "RB", bit: 32 },
+    { row: "gamepad-grab", button: 4, name: "LB", bit: 128 },
+  ];
+  for (const { row, button: index, name, bit } of actions) {
+    await waitQuiet(page);
+    await page.evaluate(() => {
+      window.__mask.seen = 0;
+    });
+    await pressPad(page, index, true);
+    await sleep(500);
+    await pressPad(page, index, false);
+    const seen = await page.evaluate(() => window.__mask.seen);
+    check((seen & bit) !== 0, `${row} (${name}): the engine mask never had bit ${bit} (mask seen ${seen})`);
+  }
+  return "X push, B bat, Y and RB rocket, LB grab each set their mask bit in the engine";
+}
+
+/** kb-blur-clear: a held key reaches the engine; a window blur drops it from the mask while the match loop keeps running. */
+async function matchBlurClear(s) {
+  withMaskHook(s);
+  const { host } = await matchWithGuest(s, { clipboard: true });
+  const { page } = host;
+  await waitForPixels(host, "match canvas");
+  await sleep(4000);
+  await page.keyboard.down("ArrowRight");
+  await sleep(500);
+  const held = await page.evaluate(() => window.__mask.cur);
+  check((held & 2) !== 0, `ArrowRight held but the engine mask is ${held}`);
+  await page.evaluate(() => window.dispatchEvent(new Event("blur")));
+  const calls = await page.evaluate(() => window.__mask.calls);
+  await sleep(500);
+  const after = await page.evaluate(() => ({ cur: window.__mask.cur, calls: window.__mask.calls }));
+  await page.keyboard.up("ArrowRight");
+  check(after.calls > calls, "the match loop stopped after the window blurred");
+  check((after.cur & 2) === 0, `blur left ArrowRight in the engine mask (${after.cur})`);
+  return "ArrowRight reaches the engine while held; after window blur the mask drops it and frames keep running";
+}
+
+/** NEW-chat-record: "/record" in the match chat cuts a clip and the chat log reports it. */
+async function matchChatRecord(s) {
+  const { host } = await matchWithGuest(s, { clipboard: true });
+  const { page } = host;
+  await waitForPixels(host, "match canvas");
+  // the clip is cut from recorded frames: let some play accumulate first
+  await sleep(7000);
+  await page.keyboard.press("Enter");
+  const input = page.getByLabel("Chat message", { exact: true });
+  await input.waitFor({ state: "visible" });
+  await input.fill("/record");
+  await input.press("Enter");
+  await page.locator(".hud-chat-log").getByText(/Clip saved/).waitFor({ state: "visible" });
+  return "/record reports the clip as saved in the match chat log";
+}
+
+/** A phone host alone in a public room; its match runs with the rotate gate up unless `dismissGate` clears it. */
+async function phoneSoloMatch(s, { dismissGate }) {
+  const host = await s.open("phone", { phone: true, name: uniqueName("phone") });
+  const roomName = uniqueName("room");
+  await createRoom(host, s.base, roomName, { isPublic: true });
+  await dismissPhoneSplash(host.page);
+  await startMatch(host, [], { keepRotateGate: !dismissGate });
+  return host;
+}
+
+/** hud-rotate: a portrait phone in a running match shows the turn-sideways dialog with Full screen and Play in portrait anyway. */
+async function matchRotateGate(s) {
+  const { page } = await phoneSoloMatch(s, { dismissGate: false });
+  const gate = page.getByRole("dialog", { name: "Turn your phone sideways", exact: true });
+  await gate.waitFor({ state: "visible" });
+  check(await gate.getByRole("button", { name: "Full screen" }).isVisible(), "rotate gate has no visible Full screen button");
+  check((await gate.getByRole("button", { name: "Play in portrait anyway", exact: true }).count()) === 1, "rotate gate has no Play in portrait anyway button");
+  return 'portrait phone match: the rotate dialog shows Full screen and "Play in portrait anyway"';
+}
+
+/** hud-chat (touch Chat button): on a phone the top-bar Chat button opens the chat form on tap and closes it on a second tap. */
+async function matchPhoneChat(s) {
+  const { page } = await phoneSoloMatch(s, { dismissGate: true });
+  const chatBtn = page.locator(".hud-chat-btn");
+  const form = page.locator(".hud-chat-form");
+  await chatBtn.waitFor({ state: "visible" });
+  await chatBtn.tap();
+  await form.waitFor({ state: "visible" });
+  await chatBtn.tap();
+  await form.waitFor({ state: "hidden" });
+  return "phone Chat button opens the chat form on tap and closes it on a second tap";
+}
+
+/** hud-matching: a quick-play player alone in the match sees the waiting notice (hud.ts matchingEl). */
+async function matchQuickAlone(s) {
+  const solo = await s.open("solo", { name: uniqueName("solo") });
+  await solo.page.goto(s.base);
+  await menuName(solo.page).waitFor();
+  await playFromMenu(solo.page, null, { quick: true });
+  await solo.page.locator(".quick-choose").first().click();
+  const notice = solo.page.locator(".hud-matching");
+  await notice.waitFor({ state: "visible", timeout: 120_000 });
+  const text = ((await notice.textContent()) ?? "").trim();
+  check(text === "Waiting for other players to join this arena...", `quick-play notice reads "${text}"`);
+  return `quick play alone shows "${text}"`;
+}
+
+/** hud-error: the server refuses sign-out; the player stays signed in and an error toast shows (hud.ts signOut). */
+async function matchSignOutError(s) {
+  const host = await signedIn(s, "acct", uniqueName("acct"));
+  await createRoom(host, s.base, uniqueName("room"), { isPublic: true });
+  await startMatch(host, []);
+  const { page } = host;
+  await page.route("**/api/account/logout", (route) =>
+    route.fulfill({ status: 500, contentType: "application/json", body: JSON.stringify({ error: "sign-out refused (e2e)" }) }),
+  );
+  await openMenu(page);
+  await menuItem(page, "Sign out").click();
+  const toast = page.locator(".toast.toast-error").first();
+  await toast.waitFor({ state: "visible" });
+  // The refused request logs the browser's own 500 line; that is the forced failure, so only that one line is dropped.
+  host.problems = host.problems.filter((p) => !(p.includes("status of 500") && p.includes("/api/account/logout")));
+  const text = ((await toast.textContent()) ?? "").trim();
+  check(text.length > 0, "the error toast is empty");
+  check(await menuItem(page, "Sign out").isVisible(), "the player lost the signed-in menu after a refused sign-out");
+  return `refused sign-out shows the error toast ("${text}") and the player stays signed in`;
+}
+
 export const matchInvScenarios = [
   { name: "inv match hud and menu", inv: ["hud-main", "hud-menu", "hud-menu (Volume)", "hud-menu (Mute music)", "hud-menu (Fullscreen)", "hud-menu (Change controls)", "hud-stats", "hud-scores", "hud-end (host End match)"], run: matchHudMenu },
   { name: "inv match menu lobby", inv: ["hud-menu (Show lobby)"], run: matchMenuLobby },
@@ -351,4 +559,11 @@ export const matchInvScenarios = [
   { name: "inv match gamepad", inv: ["gamepad-map"], run: matchPad },
   { name: "inv match spectate", inv: ["hud-spectate", "chat-spectate-step"], run: matchSpectate },
   { name: "inv match spectate join", inv: ["hud-spectate"], run: matchSpectateJoin },
+  { name: "inv match gamepad actions", inv: ["gamepad-push", "gamepad-bat", "gamepad-rocket", "gamepad-grab"], run: matchPadActions },
+  { name: "inv match blur", inv: ["kb-blur-clear"], run: matchBlurClear },
+  { name: "inv match record", inv: ["NEW-chat-record"], run: matchChatRecord },
+  { name: "inv match rotate gate", inv: ["hud-rotate"], run: matchRotateGate },
+  { name: "inv match phone chat", inv: ["hud-chat (touch Chat button)"], run: matchPhoneChat },
+  { name: "inv match matching", inv: ["hud-matching"], run: matchQuickAlone },
+  { name: "inv match sign-out error", inv: ["hud-error"], run: matchSignOutError },
 ];
