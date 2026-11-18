@@ -300,7 +300,7 @@ export const editorScreen: ScreenFactory = (ctx) => {
     mergeBtn.disabled = ctrl.sel.filter((r) => r.kind === "body").length < 2;
     deleteBtn.disabled = ctrl.sel.length === 0;
     const shapes = ctrl.physicsShapes;
-    lagEl.textContent = `${shapes} physics shapes: ${lagVerdict(shapes)}`;
+    lagEl.textContent = `${shapes} physics ${shapes === 1 ? "shape" : "shapes"}: ${lagVerdict(shapes)}`;
     hintEl.textContent = ctrl.message || ctrl.hint;
     if (document.activeElement !== nameInput) nameInput.value = mapName ?? "";
     const sideName = ctrl.sel.length > 0 || scope ? "Selection" : "Map settings";

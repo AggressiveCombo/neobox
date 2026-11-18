@@ -104,13 +104,21 @@ export function physicsShapeCount(doc: Obj): number {
   return n;
 }
 
-/** The lag verdict for a physics shape count, in the editor's wording. */
+/**
+ * Editor wording for a physics shape count. Calibrated from the wasm engine in Chromium (endless mode,
+ * 30 Hz tick, static squares, no contacts; median of 5 runs of 60 ticks; CDP CPU throttle 1x and 4x; see
+ * client/qa/lag-bands.ts). Medians, ms per tick, at 802 / 1602 / 2402 / 3202 / 4802 shapes: 1x 1.6 / 4.5 / 8.3 /
+ * 12.9 / 26.1; 4x 4.9 / 14.2 / 42.6 / 57.6 / 120.6. A 60 Hz frame is 16.7 ms. The 4x run stands for a weak
+ * device, so it must fit a frame with room to spare (about 8 ms gives "no lag" up to 1000 shapes); it passes 16.7 ms
+ * near 1670 shapes ("may lag" to 1500). A typical 1x device passes 16.7 ms near 3660 shapes ("laggy" to 3500).
+ * Contacts and dynamic bodies cost more than this scene; see client/qa/copy-claims.json (physics-lag-no-lag
+ * through physics-lag-unplayable).
+ */
 export function lagVerdict(n: number): string {
-  if (n <= 20) return "no lag";
-  if (n <= 40) return "may be a little laggy";
-  if (n <= 60) return "probably laggy for some players";
-  if (n <= 80) return "laggy for most players";
-  return "probably unplayable";
+  if (n <= 1000) return "no lag expected";
+  if (n <= 1500) return "may lag on the weakest devices";
+  if (n <= 3500) return "laggy on many devices";
+  return "probably unplayable on most devices";
 }
 
 /** Entities whose centre lies inside the box spanned by a and b. */
