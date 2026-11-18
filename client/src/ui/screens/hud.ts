@@ -10,7 +10,7 @@ import type { Scene } from "../../frame";
 import { BIT } from "../../input";
 import { filterProfanity } from "../../profanity";
 import { TOUCH_SLOTS, prefs, type TouchAction, type TouchSlot } from "../../prefs";
-import { MAX_CHAT_LEN, type PlayerInfo, type XpAward } from "../../protocol";
+import { MAX_CHAT_LEN, TEAM_SPECTATOR, type PlayerInfo, type XpAward } from "../../protocol";
 import { cssHex, mixRgb, playerRgb, setPlayerColors } from "../../render/geometry";
 import { CHAT_LIMIT, type AppState, type ChatLine, type Stats } from "../../state";
 import { chatPlaceholder } from "../chat-hint";
@@ -140,6 +140,12 @@ export function isTouchDevice(): boolean {
   return matchMedia("(pointer: coarse)").matches || navigator.maxTouchPoints > 0;
 }
 
+/** Quick play with nobody else playing yet: the HUD's matching notice shows. Room state, not frames, so a slow device still sees it. */
+function aloneInQuickMatch(state: AppState): boolean {
+  const room = state.room;
+  return state.inMatch && room?.quick != null && room.players.filter((p) => p.team !== TEAM_SPECTATOR).length === 1;
+}
+
 /** Full screen, then the landscape lock where the browser allows it (Android Chrome). */
 export async function goLandscape(): Promise<void> {
   if (document.fullscreenElement === null) {
@@ -173,7 +179,7 @@ export function rotateGate(): { el: HTMLElement; destroy(): void } {
   let dismissed = false;
   const sync = (): void => {
     if (!portrait.matches) dismissed = false;
-    el.hidden = !(coarse.matches && portrait.matches && !dismissed);
+    el.hidden = !(isTouchDevice() && portrait.matches && !dismissed);
   };
   const full = h(
     "button",
@@ -684,6 +690,7 @@ export const hudScreen: HudFactory = (ctx) => {
     if (!same("stats")) renderLink(state.stats);
     if (!same("showScores")) scoresEl.hidden = !state.showScores;
     if (state.showScores && (!same("showScores") || !same("room"))) renderScores(state);
+    if (!same("room") || !same("inMatch")) matchingEl.hidden = !aloneInQuickMatch(state);
     if (!same("chat") || !same("room")) renderChat(state.chat);
     if (!same("chat")) {
       const last = state.chat[state.chat.length - 1];
@@ -716,8 +723,6 @@ export const hudScreen: HudFactory = (ctx) => {
       latestScene = scene;
       board.record(scene, roomNames);
       updateSpectate(scene);
-      const alone = ctx.store.state.room?.quick != null && scene.scores.length === 1;
-      if (matchingEl.hidden === alone) matchingEl.hidden = !alone;
       // The start countdown is announced once, when it begins; its digits are drawn on the canvas only.
       if (scene.intro < 0) countdownAnnounced = false;
       else if (!countdownAnnounced) {
