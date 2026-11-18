@@ -583,7 +583,7 @@ export const settingsScreen: ScreenFactory = (ctx) => {
   const sectionNav = h(
     "nav",
     { class: "settings-nav", "aria-label": "Settings sections" },
-    SECTIONS.map(({ id, label, icon: name }) =>
+    SECTIONS.map(({ id, label, icon: name }, i) =>
       h(
         "button",
         {
