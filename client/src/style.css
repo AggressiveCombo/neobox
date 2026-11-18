@@ -237,7 +237,8 @@ a:hover {
  */
 #gl-host,
 #overlay {
-  position: absolute;
+  /* Fixed, not absolute: a surface wider than the window overflows the page, and the browser then zooms out to fit it, so the rotated view reads the wrong window size. */
+  position: fixed;
   left: var(--view-x);
   top: var(--view-y);
   width: var(--view-w);
