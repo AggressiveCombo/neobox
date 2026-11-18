@@ -418,7 +418,7 @@ async function connCap(s) {
   return "9th socket from one address refused at NEOBOX_MAX_CONNS_PER_IP=8; slot reusable";
 }
 
-export const serverInvScenarios = [
+const edgeCases = [
   {
     name: "edge protocol errors",
     run: protocolErrors,
@@ -442,3 +442,6 @@ export const serverInvScenarios = [
   { name: "edge room cap", topology: roomCapTopology, run: roomCap, inv: ["err-server-full-rooms"] },
   { name: "edge connection cap", topology: connCapTopology, run: connCap, inv: ["conn-too-many-ip"] },
 ];
+
+/** None of these opens a page, so the runner runs them on the first engine only (`wire`). */
+export const serverInvScenarios = edgeCases.map((scenario) => ({ ...scenario, wire: true }));

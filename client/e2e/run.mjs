@@ -119,6 +119,8 @@ for (const engine of engines) {
     let reason = null;
     if (scenario.webrtc && !browser.webrtc) reason = `${engine} has no RTCPeerConnection`;
     if (scenario.cdp && engine !== "chromium") reason = "CDP network emulation is chromium-only";
+    // Raw-socket and HTTP checks open no page: the first engine of the run covers them.
+    if (scenario.wire && engine !== engines[0]) reason = `no browser page: ran on ${engines[0]}`;
     if (reason) {
       outcome.status = "skip";
       outcome.line = `skip ${label}: ${reason}`;
