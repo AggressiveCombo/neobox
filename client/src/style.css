@@ -44,6 +44,8 @@
   font-style: normal;
   font-weight: 400;
   font-display: swap;
+  /* Hanken Grotesk's x-height is 50/100 em, OpenDyslexic's 56/100 (measured in Chromium); scaled to match, so the switch keeps the apparent size. */
+  size-adjust: 89%;
   src: url("/fonts/opendyslexic-regular.woff2") format("woff2");
 }
 
@@ -52,6 +54,7 @@
   font-style: normal;
   font-weight: 700;
   font-display: swap;
+  size-adjust: 89%;
   src: url("/fonts/opendyslexic-bold.woff2") format("woff2");
 }
 
