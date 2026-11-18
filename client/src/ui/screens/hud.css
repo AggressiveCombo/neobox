@@ -812,6 +812,14 @@
   }
 }
 
+/* Portrait phones: the arena starts about 40% down, so the chat log stays above it. Its newest lines (such as
+   "Game starting!") would otherwise sit over the top of the playfield. */
+@media (max-width: 600px) and (min-height: 501px) {
+  .hud-chat-log {
+    max-height: 16vh;
+  }
+}
+
 /* Narrow windows (phones, small splits): chips go icon-only so they stay clear of the objective bar,
    which keeps 208px per side. Labels stay in the accessible name. */
 @media (max-width: 960px) {
