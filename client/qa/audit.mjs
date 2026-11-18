@@ -49,7 +49,7 @@ const EXPECT = {
   volume: 0.3, muted: true, renderScale: 0.7, antialias: false, palette: "tritanopia", touchScale: 1.2, touchLeftHanded: true,
   touchLayout: { rocket: "grab", push: "push", jump: "up", bat: "bat", grab: "rocket" },
   showStats: true, color: 0x3366cc, musicMuted: true, matchMusicMuted: true, musicVolume: 0.3, sfxVolume: 0.4, uiSounds: false,
-  filterProfanity: false, jukeboxVolume: 0.2, theme: "dark", motion: "reduce", textScale: 1.3, readableFont: true,
+  filterProfanity: false, jukeboxVolume: 0.2, theme: "dark", motion: "reduce", textScale: 1.3, readableFont: true, captions: true,
 };
 // Destructive or irreversible controls are not clicked by the dead-control scan.
 const DEAD_SKIP = /\b(leave|delete|reset|sign out|log out|remove|kick|ban|forfeit|quit|report|block|unfriend|disband|decline|reject|abandon|revoke)\b/i;
@@ -595,6 +595,7 @@ async function persistCase(s) {
   await pick(page, "Motion", "Reduce");
   await pick(page, "Text size", "130%");
   await sw(page, "Readable font");
+  await sw(page, "Sound captions");
   await sec(page, "Chat");
   await sw(page, "Filter profanity");
   await sleep(300);
