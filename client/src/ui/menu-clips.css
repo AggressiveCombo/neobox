@@ -8,12 +8,18 @@
   font-size: var(--step-small);
   line-height: 1.3;
   pointer-events: none;
+  min-width: 0;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 .menu-clip-bar {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 8px;
+  min-width: 0;
+  max-width: 100%;
 }
 
 .menu-clip-bar[hidden] {

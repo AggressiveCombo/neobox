@@ -269,8 +269,9 @@ button.home-account {
 /* The clip credit, bottom-right of the art, over the clip. */
 .menu-credit {
   position: absolute;
-  right: 12%;
-  bottom: 8%;
+  left: 10%;
+  right: 10%;
+  bottom: 14%;
   transform: rotate(0deg);
   pointer-events: none;
 }
@@ -377,9 +378,10 @@ button.home-privacy {
   background: none;
 }
 
-/* Phone and tablet portrait: one column in flow. Wordmark, name and play, the index, then the
-   square bleeding off the right. */
-@media (max-width: 860px) {
+/* Phone portrait: one column in flow. Wordmark, name and play, the index, then the square centred
+   under them, fully on screen at 390x844. Landscape phones keep the two-column layout (the stack
+   would push the square below the fold). */
+@media (max-width: 860px) and (orientation: portrait) {
   .page.home {
     display: flex;
     flex-direction: column;
@@ -430,17 +432,21 @@ button.home-privacy {
 
   .menu-art {
     order: 3;
-    width: min(70vw, 42vh);
-    align-self: flex-end;
-    margin: 0 calc(var(--margin) * -1.5) 0 0;
-  }
-
-  .menu-credit {
-    right: calc(var(--margin) * 2.5 + 8px);
-    bottom: 6%;
+    width: min(44vw, 22vh);
+    align-self: center;
   }
 
   .home-foot {
     order: 4;
+  }
+}
+
+/* Short landscape phones: the page scrolls past the fold, so the art is anchored near the top and sized
+   to the height (it stays on screen at 844x390 rather than below it). */
+@media (max-height: 500px) and (orientation: landscape) {
+  .menu-art {
+    align-self: start;
+    margin-top: 56px;
+    width: min(50vh, 40vw);
   }
 }
