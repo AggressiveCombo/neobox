@@ -181,15 +181,20 @@ function axisCentre(l: number, lo: number, hi: number, len: number, a: number, b
 }
 
 /**
- * Backdrop camera (the main menu's clip, drawn over the whole window): the largest rectangle of the
- * window's aspect that lies inside the arena, centred on `cam`, so no off-arena colour shows at any
- * window shape. Decorative: it zooms in on portrait windows.
+ * Backdrop camera (the main menu's clip). The view is the whole window at its own scale, placed so the arena's
+ * shorter side spans the menu square's bounding box `box` (window CSS px; the turned square lies inside it) with 4%
+ * to spare. The turned square then shows arena only: no VOID, no page colour. Fixed on the arena's centre with the
+ * box's centre on screen, so the clip holds still from its first frame (no follow, no zoom).
  */
-export function coverCamera(scene: Scene, cam: Camera, aspect: number): Camera {
-  const w = Math.min(scene.arenaW, scene.arenaH * aspect);
-  if (!(w > 0) || !(aspect > 0)) return cam;
-  const h = w / aspect;
-  return { cx: clampAxis(cam.cx, w, scene.arenaW), cy: clampAxis(cam.cy, h, scene.arenaH), w, h, away: [] };
+export function backdropCamera(scene: Scene, box: { cx: number; cy: number; side: number }, winW: number, winH: number): Camera {
+  const k = Math.min(scene.arenaW, scene.arenaH) / (box.side * 1.04);
+  return {
+    cx: scene.arenaW / 2 + (winW / 2 - box.cx) * k,
+    cy: scene.arenaH / 2 + (winH / 2 - box.cy) * k,
+    w: winW * k,
+    h: winH * k,
+    away: [],
+  };
 }
 
 function clampAxis(c: number, view: number, arena: number): number {

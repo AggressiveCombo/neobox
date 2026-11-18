@@ -14,8 +14,8 @@ import { h } from "./dom";
 
 /** Clips per page; matches the server's page size, so a short page means the end. */
 const PAGE_SIZE = 10;
-/** Largest wall-clock step applied per frame, so a stalled tab does not skip the clip. */
-const MAX_FRAME_MS = 250;
+/** Largest wall-clock step applied per frame. A hitch (the first draws of a clip, GC, a stalled tab) freezes the clip for its length instead of jumping it ahead: at 250 ms one hitch moved the clip 5-7 ticks in a single frame. */
+const MAX_FRAME_MS = 50;
 /** Wait before trying the list again after a failed fetch or a full pass of failed loads. */
 const RETRY_MS = 15_000;
 

@@ -3,7 +3,7 @@
 
 import { fetchBuiltinMaps, fetchTicket, wsUrl, wsUrlFor, type BuiltinMap } from "./api";
 import { sfx } from "./audio";
-import { computeCamera, coverCamera, fitView, fitViewBetween, findLocal, publishView, type ViewRect } from "./camera";
+import { backdropCamera, computeCamera, fitView, fitViewBetween, findLocal, publishView, type ViewRect } from "./camera";
 import type { AppCtx, HudHandle, Present, ScreenFactory, ScreenHandle, WasmTools } from "./ctx";
 import type { Engine } from "./engine";
 import { engineLoader } from "./engine-loader";
@@ -244,7 +244,7 @@ export function start(): Store<AppState> {
     const scene = readScene(fb);
     scene.localKeys = input.mask();
     const local = computeCamera(scene, findLocal(scene));
-    const cam = backdrop ? coverCamera(scene, local, window.innerWidth / window.innerHeight) : local;
+    const cam = backdrop ? backdropCamera(scene, menuBox(), window.innerWidth, window.innerHeight) : local;
     renderer?.draw(scene, cam);
     overlay.draw(scene, cam, names, tickHz, chrome);
     lastPresent = performance.now();
@@ -252,6 +252,13 @@ export function start(): Store<AppState> {
     for (const s of scene.sounds) sfx.play(s.kind, s.volume, (s.x - cam.cx) / (cam.w / 2));
     return scene;
   };
+
+  /** The menu clip's window in CSS px: the bounding box of the turned square (ui/screens/menu.ts), else the whole window. */
+  function menuBox(): { cx: number; cy: number; side: number } {
+    const r = document.querySelector(".menu-square")?.getBoundingClientRect();
+    if (r && r.width > 0) return { cx: r.left + r.width / 2, cy: r.top + r.height / 2, side: r.width };
+    return { cx: window.innerWidth / 2, cy: window.innerHeight / 2, side: Math.min(window.innerWidth, window.innerHeight) };
+  }
 
   const wasm: WasmTools = {
     mapPreview: (code) => needEngine().mapPreview(code),
