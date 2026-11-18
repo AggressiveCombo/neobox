@@ -192,7 +192,7 @@ export function start(): Store<AppState> {
   let hud: HudHandle | null = null;
   let loop: MatchLoop | null = null;
   /** A match whose start arrived while the engine still loads (a reload resumes its match during the download). */
-  let pendingMatch: { match: MatchStart; you: number | null; snap: SnapshotBytes | null; frames: Uint8Array[] } | null = null;
+  let pendingMatch: { match: MatchStart; you: number | null; snap: SnapshotBytes | null; frames: { bytes: Uint8Array; at: number }[] } | null = null;
   /** Binary frames kept for a pending match; past this cap the gap they leave makes the engine ask for a resync. */
   const PENDING_FRAMES_MAX = 600;
   let namesRoom: RoomState | null = null;
@@ -213,7 +213,7 @@ export function start(): Store<AppState> {
     if (pending === null) return;
     pendingMatch = null;
     startMatch(pending.match, pending.you, pending.snap);
-    for (const frame of pending.frames) loop?.onServer(frame);
+    for (const frame of pending.frames) loop?.onServer(frame.bytes, frame.at);
   });
   // Screens that need the engine show its failure inline with Retry, so the background load reports nothing itself.
   engineLoader.get().catch(() => {});
@@ -260,9 +260,9 @@ export function start(): Store<AppState> {
 
   const net = new Net({
     onMessage: (msg) => handleServer(msg),
-    onBinary: (bytes) => {
-      if (pendingMatch === null) loop?.onServer(bytes);
-      else if (pendingMatch.frames.length < PENDING_FRAMES_MAX) pendingMatch.frames.push(bytes);
+    onBinary: (bytes, at) => {
+      if (pendingMatch === null) loop?.onServer(bytes, at);
+      else if (pendingMatch.frames.length < PENDING_FRAMES_MAX) pendingMatch.frames.push({ bytes, at });
     },
     onStatus: (status, notice, unexpected) => onStatus(status, notice, unexpected ?? false),
   });

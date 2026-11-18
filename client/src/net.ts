@@ -40,7 +40,8 @@ export function closeNotice(reason: string, wasClean: boolean): CloseNotice {
 
 export interface NetHandlers {
   onMessage(msg: ServerMsg): void;
-  onBinary(data: Uint8Array): void;
+  /** `receivedAt`: the message event's time (on the `performance.now` clock), before any queueing on this thread. */
+  onBinary(data: Uint8Array, receivedAt: number): void;
   /** `unexpected`: the socket closed without close() being called (network drop or server close). */
   onStatus(status: NetStatus, notice?: CloseNotice, unexpected?: boolean): void;
 }
@@ -140,7 +141,7 @@ export class Net {
         }
         this.handlers.onMessage(msg);
       } else if (ev.data instanceof ArrayBuffer) {
-        this.inBinary(new Uint8Array(ev.data));
+        this.inBinary(new Uint8Array(ev.data), ev.timeStamp);
       }
     };
     ws.onclose = (ev: CloseEvent) => {
@@ -202,7 +203,7 @@ export class Net {
       const cur = rtc;
       this.rtc = cur;
       dc.onmessage = (ev: MessageEvent<unknown>) => {
-        if (this.rtc === cur && ev.data instanceof ArrayBuffer) this.inBinary(new Uint8Array(ev.data));
+        if (this.rtc === cur && ev.data instanceof ArrayBuffer) this.inBinary(new Uint8Array(ev.data), ev.timeStamp);
       };
       dc.onclose = () => this.dropRtc();
       dc.onerror = () => this.dropRtc();
@@ -274,7 +275,7 @@ export class Net {
   }
 
   /** A binary frame from the server, over the socket or the data channel. A pong to one of our pings stops here. */
-  private inBinary(data: Uint8Array): void {
+  private inBinary(data: Uint8Array, receivedAt: number): void {
     this.lastInbound = performance.now();
     if (data.byteLength >= 9 && data[0] === S_PONG) {
       const sent = new DataView(data.buffer, data.byteOffset, data.byteLength).getFloat64(1, true);
@@ -284,7 +285,7 @@ export class Net {
         return;
       }
     }
-    this.handlers.onBinary(data);
+    this.handlers.onBinary(data, receivedAt);
   }
 
   /** Give up on a socket gone quiet: its close handshake may never finish, so its handlers go and the reconnect starts now. */

@@ -79,12 +79,12 @@ export class MatchLoop {
     this.raf = requestAnimationFrame(this.tick);
   }
 
-  /** Feed one binary server frame; requests a resync when the engine asks for one. */
-  onServer(bytes: Uint8Array): void {
+  /** Feed one binary server frame, received at `receivedAt` (the message event's time, on the `performance.now` clock); requests a resync when the engine asks for one. */
+  onServer(bytes: Uint8Array, receivedAt: number = performance.now()): void {
     if (!this.running) return;
     try {
+      if (this.d.engine.serverFrame(bytes, receivedAt)) this.d.net.send({ t: "resync" });
       const now = performance.now();
-      if (this.d.engine.serverFrame(bytes, now)) this.d.net.send({ t: "resync" });
       // With no animation frames (hidden page) nothing else acknowledges the
       // server's ticks, and the server would resend a snapshot every few seconds.
       if (now - this.lastStep > STALL_MS) {
@@ -106,11 +106,12 @@ export class MatchLoop {
     this.d.engine.matchEnd();
   }
 
-  private readonly tick = (now: number): void => {
+  private readonly tick = (): void => {
     if (!this.running) return;
     this.raf = requestAnimationFrame(this.tick);
     try {
-      this.step(now);
+      // one clock base for every caller: the frame timestamp is not the `performance.now` clock
+      this.step(performance.now());
     } catch (err) {
       this.fail(err);
     }
