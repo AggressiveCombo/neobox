@@ -2,7 +2,7 @@
 // Room-derived sections rebuild only when the inputs they read change, so settings
 // inputs and draft text survive unrelated room updates.
 
-import { h } from "../dom";
+import { h, labelSwap, showLabel } from "../dom";
 import type { AppCtx, ScreenFactory } from "../../ctx";
 import { sendReport, type BuiltinMap } from "../../api";
 import type { AppState, ChatLine } from "../../state";
@@ -807,12 +807,10 @@ export const roomScreen: ScreenFactory = (ctx: AppCtx) => {
 
   /** Shows a check and "Link copied" on the invite button for a moment, so the copy reads as done. */
   function flashInviteCopied(): void {
-    const btn = header.querySelector<HTMLButtonElement>(".room-invite");
-    if (btn === null) return;
-    btn.replaceChildren(icon("check", 16), "Link copied");
-    setTimeout(() => {
-      btn.replaceChildren(icon("link", 16), "Invite");
-    }, 1600);
+    const swap = header.querySelector<HTMLElement>(".room-invite .label-swap");
+    if (swap === null) return;
+    showLabel(swap, 1);
+    setTimeout(() => showLabel(swap, 0), 1600);
   }
 
   /** Save the last finished match as a .nbreplay download. */
@@ -1314,7 +1312,7 @@ export const roomScreen: ScreenFactory = (ctx: AppCtx) => {
         st.inMatch
           ? h("button", { type: "button", class: "room-btn", "data-focus-key": "back", onclick: () => ctx.store.set({ screen: "match" }) }, icon("arrow-left", 16), "Back to game")
           : null,
-        h("button", { type: "button", class: "room-btn room-invite", "data-focus-key": "invite", title: "Copy invite link", disabled: st.reconnecting, onclick: () => void shareInvite() }, icon("link", 16), "Invite"),
+        h("button", { type: "button", class: "room-btn room-invite", "data-focus-key": "invite", title: "Copy invite link", disabled: st.reconnecting, onclick: () => void shareInvite() }, labelSwap([[icon("link", 16), "Invite"], [icon("check", 16), "Link copied"]])),
         st.replayReady
           ? h(
               "button",

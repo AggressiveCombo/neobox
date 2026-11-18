@@ -10,7 +10,7 @@ import { fetchClipReplay, listClips, type ClipSummary } from "../clips";
 import { fetchPrecached } from "../precached";
 import { HttpError } from "../http-error";
 import { reducedMotion } from "./a11y";
-import { h } from "./dom";
+import { h, labelSwap, showLabel } from "./dom";
 
 /** Clips per page; matches the server's page size, so a short page means the end. */
 const PAGE_SIZE = 10;
@@ -66,14 +66,15 @@ export function mountMenuClips(ctx: AppCtx, host: HTMLElement, onPlaying?: (on: 
 
   // The clip's caption and its pause control. The bar is hidden until a clip plays; the button is the only part that takes clicks.
   const credit = h("p", { class: "menu-clip-credit" });
+  const pauseLabel = labelSwap([["Pause clip"], ["Play clip"]], paused ? 1 : 0);
   const pauseBtn = h("button", {
     type: "button",
     class: "menu-clip-pause",
     onclick: () => {
       paused = !paused;
-      pauseBtn.textContent = paused ? "Play clip" : "Pause clip";
+      showLabel(pauseLabel, paused ? 1 : 0);
     },
-  }, paused ? "Play clip" : "Pause clip");
+  }, pauseLabel);
   const bar = h("div", { class: "menu-clip-bar" }, credit, pauseBtn);
   bar.hidden = true;
   host.append(bar);
@@ -172,14 +173,15 @@ export function mountMenuClips(ctx: AppCtx, host: HTMLElement, onPlaying?: (on: 
     rafId = requestAnimationFrame(tick);
     const dt = Math.min(Math.max(now - last, 0), MAX_FRAME_MS);
     last = now;
-    if (!playing || !eng || document.hidden) return;
+    // The host sits in the clip square, which is display:none in short landscape: nothing is drawn, so the clip holds.
+    if (!playing || !eng || document.hidden || host.getClientRects().length === 0) return;
     const p = playing;
     // The system's reduce-motion choice can change while the menu is open: follow it, then the button shows the state.
     const reduce = reducedMotion();
     if (reduce !== lastReduce) {
       lastReduce = reduce;
       paused = reduce;
-      pauseBtn.textContent = paused ? "Play clip" : "Pause clip";
+      showLabel(pauseLabel, paused ? 1 : 0);
     }
     if (paused) {
       ctx.holdView();

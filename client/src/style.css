@@ -483,6 +483,23 @@ button:disabled {
   cursor: not-allowed;
 }
 
+/* A label that swaps in place (Invite / Link copied): both states share one grid cell, so the control keeps the wider width. */
+.label-swap {
+  display: inline-grid;
+}
+
+.label-swap-state {
+  grid-area: 1 / 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.label-swap-state.label-swap-off {
+  visibility: hidden;
+}
+
 /* Inside a panel (already on --surface), plain buttons step up one tone. */
 .panel button:not(.primary, .danger, .quiet, .ink, .seg-option, .tab),
 .panel .button {

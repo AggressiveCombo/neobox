@@ -52,3 +52,19 @@ function append(el: Node, children: readonly Child[]): void {
 export function clear(el: Element): void {
   el.replaceChildren();
 }
+
+/**
+ * A control's content with labels that swap in place (Invite / Link copied, Pause clip / Play clip). The states share one
+ * grid cell, so the control is as wide as its widest state and nothing beside it moves. The inactive state is hidden with
+ * visibility, so it keeps its space and is out of the accessibility tree. `active` is the state shown first.
+ */
+export function labelSwap(states: readonly (readonly Child[])[], active = 0): HTMLSpanElement {
+  const el = h("span", { class: "label-swap" }, ...states.map((children) => h("span", { class: "label-swap-state" }, ...children)));
+  showLabel(el, active);
+  return el;
+}
+
+/** Shows state `index` of a labelSwap element; the others keep their space. */
+export function showLabel(swap: Element, index: number): void {
+  [...swap.children].forEach((child, i) => child.classList.toggle("label-swap-off", i !== index));
+}
