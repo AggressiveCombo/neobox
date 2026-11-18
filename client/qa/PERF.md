@@ -14,7 +14,9 @@ cd client && QA_OUT=C:/Users/aggressivecombo/neobox-scratch/qa/round1-instrument
 | `QA_SOAK_MS` | 600000 | length of one soak run (10 min per the rubric) |
 | `QA_SOAK_RUNS` | 3 | soak runs per condition |
 | `QA_FPS_MS` | 30000 | frame sample length (30 s steady match for long tasks) |
-| `QA_SELF_TEST` | unset | `jank` or `leak`; the run must fail |
+| `QA_SELF_TEST` | unset | `jank`, `leak` or `action`; the run must fail |
+| `QA_FRAME_RUNS` | 3 | frame windows per fps case; the worst is banded (rubric section 1 rule 8) |
+| `QA_ACTION_N` | 20 | samples per UI action; the rubric needs 20 (smaller values are smoke runs only) |
 
 Outputs: `<QA_OUT>/perf-<engine>.{json,md}` and `<QA_OUT>/evidence/perf-<engine>/` (fps screenshots).
 
@@ -30,12 +32,16 @@ Outputs: `<QA_OUT>/perf-<engine>.{json,md}` and `<QA_OUT>/evidence/perf-<engine>
 | `fps.*.cpu4x` | chromium (CDP) | median fps >= 30 at 4x CPU throttle |
 | `soak.t1m.run{1..3}` | chromium (CDP) | 10 min each, normal CPU |
 | `soak.t3t4x.run{1..3}` | chromium (CDP) | 10 min each, 4x CPU |
+| `load.cpu4x.webgpu` | chromium (CDP) | 4x CPU cold load; CLS banded (T3-T row) |
+| `ui.{room,start,createRoom,openSettings,saveEditorMap}.{t1m,t3t4x}` | chromium (CDP) | `ui.actionMs.p95.<action>` from ACTION_N trigger-to-confirmation samples each |
+| `ui.inp.{t1m,t3t4x}` | chromium (CDP) | `perf.inp.ms`: p75 over 30 keydown interactions (menu name box and room chat) |
+| `ui.ready.{t1m,t3t4x}` | chromium (CDP) | N/A: the product has no ready action (room start is host-only) |
 
 A case that depends on a missing capability records `N/A` with the probe value: no `navigator.gpu` means WebGPU is N/A; no CDP session means throttling, network, heap and soak are N/A.
 
 ## Measurements
 
-- **Interactive / load**: `menuVisibleAt()`: time until the name box is visible (`performance.now()` in the page).
+- **Interactive / load**: the init script sets `menuAt` to `performance.now()` at the first poll that finds the menu's name box visible; `loadMs` is that value. Each sample is a fresh context (cold cache). `load.cpu4x` runs the same load at 4x CPU.
 - **LCP**: a `PerformanceObserver('largest-contentful-paint', { buffered: true })` installed by an init script before app code. The value is the last entry at or before the earlier of the first input (keydown, pointerdown, mousedown, touchstart) and 10 s. Entries are read after the 10 s window (or 5 s after interactive, whichever is later).
 - **CLS (load)**: sum of `layout-shift` values without `hadRecentInput`, up to 5 s after interactive.
 - **Transfer**: navigation + resource `transferSize`, KB.
@@ -43,6 +49,8 @@ A case that depends on a missing capability records `N/A` with the probe value: 
 - **Long tasks**: `longtask` observer, counted over the match sample (chromium only; `null` where unsupported).
 - **Heap soak**: `Performance.getMetrics` after a forced GC every 5 s, while the player walks left and right; no e2e pixel probe runs in the soak. `perf.heapMB.slope` is the least-squares regression of JS heap MB against minutes over the whole soak window. `endMinusStartPct` compares the median of the first 3 samples at or after the warm-up (60 s, or a fifth of the soak if shorter; `perf.heapMB.warmupS`) with the median of the last 3 samples, so JIT warm-up does not count as retention. `perf.heapMB.start`/`end` are those two medians. A soak with fewer samples than the warm-up plus both windows fails.
 - **Renderer**: `document.documentElement.dataset.renderer` for each case; the case fails if it is not the renderer the case asked for.
+- **Actions** (`ui.actionMs.p95.<action>`): `timedClick` runs the click inside the page and reads `performance.now()` before and after it; the time ends when the first visible confirmation (`room-title` for joinRoom and createRoom, `Browse rooms` for leave, `.room-starting` for start, the Settings heading, the save dialog) is visible. p95 over ACTION_N samples per action per cell; every sample is kept in the record. Fewer than 20 samples fails the case.
+- **INP** (`perf.inp.ms`): Event Timing (`durationThreshold` 16) keydown entries, grouped by interaction id (worst duration per interaction). 15 keypresses in the menu name box and 15 in room chat; interactions Event Timing does not report count as 16 ms. The value is the p75 over the 30.
 
 ## Gates (9-level, chromium)
 
@@ -59,6 +67,9 @@ A case that depends on a missing capability records `N/A` with the probe value: 
 | `perf.longTasks` (match, 30 s) | 0 |
 | `perf.heapMB.slope` (soak) | <= 0.5 MB/min |
 | `perf.heapMB.endMinusStartPct` (soak) | <= 15 % (warm-up median to end median) |
+| `perf.cls.load` (4x CPU) | <= 0.1 |
+| `perf.inp.ms` (p75 of 30) | <= 200 |
+| `ui.actionMs.p95.<action>` (n = 20) | < 300 ms |
 
 Firefox and WebKit are measured and reported as info; the rubric bands only `fps.pctDisplay` and `droppedFrames.pct` there. Worst run counts.
 
@@ -66,8 +77,9 @@ Firefox and WebKit are measured and reported as info; the rubric bands only `fps
 
 - `QA_SELF_TEST=jank`: a 120 ms busy loop every 250 ms on the main thread during the fps cases. Must fail the fps and dropped-frame gates.
 - `QA_SELF_TEST=leak`: a 200k-element array retained every 500 ms during each soak. Must fail the soak gates.
+- `QA_SELF_TEST=action`: a 2500 ms busy loop inside every UI action window. Must fail every `ui.*` action case.
 
-The file has no case filter, so a self-test runs every case. Shorten with `QA_SOAK_MS=60000 QA_SOAK_RUNS=1 QA_FPS_MS=6000 QA_ENGINES=chromium` and a separate `QA_OUT`.
+The file has no case filter, so a self-test runs every case. Shorten with `QA_SOAK_MS=60000 QA_SOAK_RUNS=1 QA_FPS_MS=6000 QA_FRAME_RUNS=1 QA_ACTION_N=2 QA_ENGINES=chromium` and a separate `QA_OUT`.
 
 ## Known limits
 

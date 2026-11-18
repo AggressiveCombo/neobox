@@ -6,18 +6,23 @@
 // N/A where the probe finds no navigator.gpu.
 //
 // Run: cd client && QA_OUT=<dir> bun qa/perf.mjs            (QA_ENGINES=chromium to limit engines)
-// Env: QA_SOAK_MS (default 600000 = 10 min), QA_SOAK_RUNS (default 3), QA_FPS_MS (default 30000).
+// Env: QA_SOAK_MS (default 600000 = 10 min), QA_SOAK_RUNS (default 3), QA_FPS_MS (default 30000), QA_FRAME_RUNS (default 3).
 // Output: <QA_OUT>/perf-<engine>.{json,md}, evidence under <QA_OUT>/evidence/perf-<engine>/.
-// Self-test: QA_SELF_TEST=jank (busy main thread) or QA_SELF_TEST=leak (retained heap) must fail.
+// Self-test: QA_SELF_TEST=jank (busy main thread) or QA_SELF_TEST=leak (retained heap) must fail; QA_SELF_TEST=action
+// (2.5 s busy inside every UI action window) must fail the ui.* cases.
 
 import path from "node:path";
 import {
   Results,
+  button,
   cdpOf,
+  createRoom,
   heapSample,
   launchEngine,
   matchWithGuest,
   median,
+  menuName,
+  navTo,
   outDir,
   percentile,
   rel,
@@ -27,10 +32,12 @@ import {
   setCpu,
   setNetwork,
   shot,
+  signUp,
   slope,
   sleep,
   startPractice,
   startServer,
+  uniqueName,
   watchPage,
   writeIndex,
 } from "./lib-qa.mjs";
@@ -49,9 +56,12 @@ const GATE = {
   longTasks: 0,
   heapSlope: 0.5,
   heapEndPct: 15,
+  actionP95: 300,
+  inpMs: 200,
 };
 const RENDERERS = ["webgpu", "webgl2"];
 const FPS_MS = Number(process.env.QA_FPS_MS ?? 30000);
+const FRAME_RUNS = Number(process.env.QA_FRAME_RUNS ?? 3);
 const SOAK_MS = Number(process.env.QA_SOAK_MS ?? 600000);
 const SOAK_RUNS = Number(process.env.QA_SOAK_RUNS ?? 3);
 // Soak baseline and end: medians of SOAK_EDGE samples each, the baseline taken after SOAK_WARM_MS of JIT warm-up.
@@ -73,13 +83,20 @@ const max = (values) => (values.some((v) => v === null) ? null : Math.max(...val
  */
 function perfInit(hideGpu) {
   if (hideGpu) Object.defineProperty(navigator, "gpu", { value: undefined, configurable: true });
-  const q = (window.__qaPerf = { lcp: [], shifts: [], inputAt: null, lcpSupported: false, clsSupported: false });
+  const q = (window.__qaPerf = { lcp: [], shifts: [], events: [], inputAt: null, menuAt: null, lcpSupported: false, clsSupported: false, eventSupported: false });
   for (const type of ["keydown", "pointerdown", "mousedown", "touchstart"]) {
     addEventListener(type, () => { if (q.inputAt === null) q.inputAt = performance.now(); }, { capture: true, passive: true });
   }
-  const observe = (type, onEntries) => {
+  // Home interactive: performance.now() at the first poll that finds the menu's name box visible.
+  const poll = () => {
+    const el = document.querySelector('input[placeholder="name"]');
+    if (el && el.offsetParent !== null) q.menuAt = performance.now();
+    else setTimeout(poll, 10);
+  };
+  poll();
+  const observe = (type, onEntries, extra = {}) => {
     try {
-      new PerformanceObserver((list) => onEntries(list.getEntries())).observe({ type, buffered: true });
+      new PerformanceObserver((list) => onEntries(list.getEntries())).observe({ type, buffered: true, ...extra });
       return true;
     } catch {
       return false;
@@ -87,6 +104,8 @@ function perfInit(hideGpu) {
   };
   q.lcpSupported = observe("largest-contentful-paint", (es) => { for (const e of es) q.lcp.push(e.startTime); });
   q.clsSupported = observe("layout-shift", (es) => { for (const e of es) if (!e.hadRecentInput) q.shifts.push([e.startTime, e.value]); });
+  // Event Timing for INP: keydown interactions. The 16 ms threshold is the lowest the API reports.
+  q.eventSupported = observe("event", (es) => { for (const e of es) if (e.name === "keydown" && e.interactionId > 0) q.events.push({ start: e.startTime, dur: e.duration, id: e.interactionId }); }, { durationThreshold: 16 });
 }
 
 /** Adds the init script to every context the case opens. */
@@ -99,17 +118,6 @@ function prepare(s, renderer) {
     return h;
   };
 }
-
-/** Resolves with performance.now() once the menu's name box is visible (home interactive). */
-const menuVisibleAt = () =>
-  new Promise((resolve) => {
-    const tick = () => {
-      const el = document.querySelector('input[placeholder="name"]');
-      if (el && el.offsetParent !== null) resolve(performance.now());
-      else setTimeout(tick, 10);
-    };
-    tick();
-  });
 
 /** Frame deltas (ms) over `ms` plus long-task count (where PerformanceObserver supports longtask). */
 const frameSample = (page, ms) =>
@@ -174,12 +182,38 @@ function frameMetrics(sample, displayHz) {
   };
 }
 
-/** One page load (cold context): home interactive, LCP, transfer, CLS and the renderer. */
-async function loadOnce(s, base, label, net) {
+/** Worst of several frame runs (rubric section 1 rule 8): lowest fps, highest dropped share and tail times, any long-task count. */
+function worstOf(runs) {
+  const worst = (key, pick) => (runs.some((r) => r[key] === null) ? null : pick(...runs.map((r) => r[key])));
+  return {
+    "perf.displayHz": runs[0]["perf.displayHz"],
+    "perf.fps.median": worst("perf.fps.median", Math.min),
+    "perf.fps.pctDisplay": worst("perf.fps.pctDisplay", Math.min),
+    "perf.droppedFrames.pct": worst("perf.droppedFrames.pct", Math.max),
+    "perf.frame.p95Ms": worst("perf.frame.p95Ms", Math.max),
+    "perf.frame.p99Ms": worst("perf.frame.p99Ms", Math.max),
+    "perf.longTasks": worst("perf.longTasks", Math.max),
+    "perf.fps.runs": runs.map((r) => r["perf.fps.median"]),
+    "perf.droppedFrames.runs": runs.map((r) => r["perf.droppedFrames.pct"]),
+    "perf.longTasks.runs": runs.map((r) => r["perf.longTasks"]),
+    frames: runs.map((r) => r.frames),
+  };
+}
+
+/**
+ * One page load (cold context): home interactive (the init script's menuAt, performance.now() of the page), LCP,
+ * transfer, CLS and the renderer. `net` is a NET_PROFILES key; `cpu` throttles the CPU to CPU_RATE.
+ */
+async function loadOnce(s, base, label, { net, cpu }) {
   const h = await s.open(label);
-  if (net) await setNetwork(await cdpOf(h.page), net);
+  if (net || cpu) {
+    const cdp = await cdpOf(h.page);
+    if (net) await setNetwork(cdp, net);
+    if (cpu) await setCpu(cdp, CPU_RATE);
+  }
   await h.page.goto(base, { waitUntil: "load" });
-  const loadMs = await h.page.evaluate(menuVisibleAt);
+  await h.page.waitForFunction(() => window.__qaPerf.menuAt !== null, null, { timeout: 60000 });
+  const loadMs = await h.page.evaluate(() => window.__qaPerf.menuAt);
   // Wait for the LCP window to close (10 s, or CLS's 5 s after interactive), then read the entries.
   await h.page.evaluate(
     (until) => new Promise((resolve) => setTimeout(resolve, Math.max(0, until - performance.now()))),
@@ -212,16 +246,34 @@ async function loadOnce(s, base, label, net) {
   return { loadMs, ...info };
 }
 
-/** LOAD_RUNS cold loads; the worst run is reported and banded. */
-async function loadCase(s, base, { net, renderer, gated }) {
+/**
+ * LOAD_RUNS cold loads; the worst run is reported and banded. `cpu` runs them at CPU_RATE, where only CLS is banded
+ * (rubric D12 T3-T row).
+ */
+async function loadCase(s, base, { net, renderer, gated, cpu = false }) {
   const runs = [];
-  for (let i = 0; i < LOAD_RUNS; i++) runs.push(await loadOnce(s, base, `load${i}`, net));
+  for (let i = 0; i < LOAD_RUNS; i++) runs.push(await loadOnce(s, base, `load${i}`, { net, cpu }));
   const wrong = runs.find((r) => renderer && r.renderer !== renderer);
   if (wrong) throw new Error(`renderer is ${wrong.renderer}, expected ${renderer}`);
   const loadMs = max(runs.map((r) => r.loadMs));
   const lcpMs = max(runs.map((r) => r.lcpMs));
   const cls = max(runs.map((r) => r.cls));
   const transferKB = max(runs.map((r) => r.transferKB));
+  if (cpu) {
+    const problems = cls === null ? ["CLS not measured"] : cls > GATE.clsLoad ? [`cls.load ${round(cls, 3)} > ${GATE.clsLoad} (4x CPU)`] : [];
+    return {
+      pass: problems.length === 0,
+      metrics: {
+        "load.cpu4x.interactiveMs": round(loadMs, 0),
+        "load.cpu4x.runs": runs.map((r) => round(r.loadMs, 0)),
+        "perf.lcpMs.cpu4x": round(lcpMs, 0),
+        "perf.cls.load.cpu4x": round(cls, 3),
+        "perf.renderer": runs[0].renderer,
+        cpu4x: true,
+      },
+      detail: problems.length ? problems.join("; ") : `9-band: cls.load<=${GATE.clsLoad} (4x CPU)`,
+    };
+  }
   const metrics = {
     [net ? `load.${net}.interactiveMs` : "perf.loadMs"]: round(loadMs, 0),
     [net ? `load.${net}.runs` : "perf.loadMs.runs"]: runs.map((r) => round(r.loadMs, 0)),
@@ -251,7 +303,10 @@ async function loadCase(s, base, { net, renderer, gated }) {
   };
 }
 
-/** One frame-pacing case: a practice run or a live match, normal or 4x CPU. */
+/**
+ * One frame-pacing case: a practice run or a live match, normal or 4x CPU. FRAME_RUNS windows run on one page;
+ * the worst of them is banded (rubric section 1 rule 8).
+ */
 async function frameCase(s, base, ctx, { kind, renderer, cpu }) {
   let page;
   if (kind === "practice") {
@@ -269,15 +324,15 @@ async function frameCase(s, base, ctx, { kind, renderer, cpu }) {
   if (cdp) await setCpu(cdp, CPU_RATE);
   if (selfTestMode() === "jank") await page.evaluate(jankForever);
   await page.keyboard.down("ArrowRight");
-  let sample;
+  const runs = [];
   try {
-    sample = await frameSample(page, FPS_MS);
+    for (let i = 0; i < FRAME_RUNS; i++) runs.push(frameMetrics(await frameSample(page, FPS_MS), displayHz));
   } finally {
     await page.keyboard.up("ArrowRight").catch(() => undefined);
     if (cdp) await setCpu(cdp, 1).catch(() => undefined);
   }
   const file = await shot(page, path.join(outDir(), "evidence", `perf-${ctx.engine}`, `fps-${kind}-${renderer}${cpu ? "-cpu4x" : ""}.png`));
-  const metrics = { ...frameMetrics(sample, displayHz), kind, renderer, cpu4x: cpu, "perf.renderer": renderer };
+  const metrics = { ...worstOf(runs), kind, renderer, cpu4x: cpu, "perf.renderer": renderer };
   const problems = [];
   if (cpu) {
     if (metrics["perf.fps.median"] < GATE.fps4x) problems.push(`fps.median ${metrics["perf.fps.median"]} < ${GATE.fps4x} (4x)`);
@@ -292,7 +347,11 @@ async function frameCase(s, base, ctx, { kind, renderer, cpu }) {
     pass: problems.length === 0,
     metrics,
     evidence: file ? [rel(file)] : [],
-    detail: problems.length ? problems.join("; ") : cpu ? `9-band: fps.median>=${GATE.fps4x} (4x), dropped<=${GATE.droppedPct}%` : `9-band: pctDisplay>=${GATE.fpsPctDisplay}, dropped<=${GATE.droppedPct}%`,
+    detail: problems.length
+      ? problems.join("; ")
+      : cpu
+        ? `9-band: fps.median>=${GATE.fps4x} (4x), dropped<=${GATE.droppedPct}%, worst of ${FRAME_RUNS} runs`
+        : `9-band: pctDisplay>=${GATE.fpsPctDisplay}, dropped<=${GATE.droppedPct}%, worst of ${FRAME_RUNS} runs`,
   };
 }
 
@@ -361,6 +420,213 @@ async function soakCase(s, base, { cpu }) {
   };
 }
 
+/** Samples per UI action (rubric C26: n >= 20 per action per cell). */
+const ACTION_N = Number(process.env.QA_ACTION_N ?? 20);
+/** QA_SELF_TEST=action: busy time injected inside every trigger-to-confirmation window. */
+const BUSY_MS = 2500;
+const roomHeader = (page) => page.locator("h1.room-title");
+const browseHeading = (page) => page.getByRole("heading", { name: "Browse rooms", exact: true });
+
+/**
+ * Trigger-to-confirmation time (ms, page clock). The click runs inside the page, so a busy main thread counts
+ * toward the time; then the first visible confirmation is awaited and the page clock read again.
+ */
+async function timedClick(page, trigger, confirm) {
+  const el = await trigger.elementHandle();
+  const busy = selfTestMode() === "action" ? BUSY_MS : 0;
+  const t0 = await el.evaluate((node, busy) => {
+    const t = performance.now();
+    if (busy) {
+      const end = t + busy;
+      while (performance.now() < end);
+    }
+    node.click();
+    return t;
+  }, busy);
+  await confirm.first().waitFor({ state: "visible", timeout: 30000 });
+  const t1 = await page.evaluate(() => performance.now());
+  await el.dispose();
+  return t1 - t0;
+}
+
+/** ui.actionMs.p95.<action> per action: p95 over ACTION_N samples, every run kept (rubric D12). */
+function actionResult(samples, { cpu }) {
+  const sfx = cpu ? ".cpu4x" : "";
+  const metrics = { cpu4x: cpu };
+  const problems = [];
+  for (const [action, ms] of Object.entries(samples)) {
+    const key = `ui.actionMs.p95.${action}${sfx}`;
+    const p95 = percentile(ms, 95);
+    metrics[key] = round(p95, 0);
+    metrics[`${key}.n`] = ms.length;
+    metrics[`${key}.runs`] = ms.map((v) => round(v, 0));
+    if (ms.length < ACTION_N) problems.push(`${action} n=${ms.length} < ${ACTION_N}`);
+    if (!(p95 < GATE.actionP95)) problems.push(`${key} ${round(p95, 0)} >= ${GATE.actionP95} ms`);
+  }
+  return {
+    pass: problems.length === 0,
+    metrics,
+    detail: problems.length ? problems.join("; ") : `9-band: p95 < ${GATE.actionP95} ms (n=${ACTION_N} each)`,
+  };
+}
+
+/** joinRoom and leave: a guest joins the host's open room from Browse and leaves it, ACTION_N times. */
+async function roomActions(s, base, { cpu }) {
+  const host = await s.open("host", { name: uniqueName("host") });
+  const roomName = uniqueName("room");
+  await createRoom(host, base, roomName, { isPublic: true });
+  const { page } = await s.open("guest", { name: uniqueName("guest") });
+  await page.goto(base);
+  await menuName(page).waitFor();
+  await button(page, "Browse rooms").click();
+  const row = page.locator("button.room-row").filter({ hasText: roomName });
+  if (cpu) await setCpu(await cdpOf(page), CPU_RATE);
+  const join = [];
+  const leave = [];
+  for (let i = 0; i < ACTION_N; i++) {
+    await row.waitFor({ state: "visible" });
+    join.push(await timedClick(page, row, roomHeader(page)));
+    leave.push(await timedClick(page, button(page, "Leave"), browseHeading(page)));
+  }
+  return actionResult({ joinRoom: join, leave }, { cpu });
+}
+
+/** start: a guest joins the host's room (a solo host starts at once, with no countdown), then the host starts and aborts the countdown ACTION_N times. */
+async function startActions(s, base, { cpu }) {
+  const host = await s.open("host", { name: uniqueName("host") });
+  const roomName = uniqueName("room");
+  await createRoom(host, base, roomName, { isPublic: true });
+  const guestName = uniqueName("guest");
+  const guest = (await s.open("guest", { name: guestName })).page;
+  await guest.goto(base);
+  await menuName(guest).waitFor();
+  await button(guest, "Browse rooms").click();
+  await guest.locator("button.room-row").filter({ hasText: roomName }).click();
+  const { page } = host;
+  await page.getByText(guestName, { exact: true }).first().waitFor();
+  const start = button(page, "Start");
+  const notice = page.locator(".room-starting");
+  if (cpu) await setCpu(await cdpOf(page), CPU_RATE);
+  const ms = [];
+  for (let i = 0; i < ACTION_N; i++) {
+    await start.waitFor({ state: "visible" });
+    ms.push(await timedClick(page, start, notice));
+    await button(page, "Abort start").click();
+    await notice.waitFor({ state: "hidden" });
+  }
+  return actionResult({ start: ms }, { cpu });
+}
+
+/** createRoom: the host creates a room from Browse; the leave that follows is untimed (see roomActions). */
+async function createActions(s, base, { cpu }) {
+  const { page } = await s.open("host", { name: uniqueName("host") });
+  await page.goto(base);
+  await menuName(page).waitFor();
+  await button(page, "Browse rooms").click();
+  if (cpu) await setCpu(await cdpOf(page), CPU_RATE);
+  const ms = [];
+  for (let i = 0; i < ACTION_N; i++) {
+    await button(page, "New room").click();
+    await page.getByRole("heading", { name: "Create a room", exact: true }).waitFor();
+    const roomName = uniqueName("room");
+    await page.getByLabel("room name", { exact: true }).fill(roomName);
+    ms.push(await timedClick(page, button(page, "Create room"), roomHeader(page).filter({ hasText: roomName })));
+    await button(page, "Leave").click();
+    await browseHeading(page).waitFor();
+  }
+  return actionResult({ createRoom: ms }, { cpu });
+}
+
+/** openSettings: Settings from the menu's more navigation opens its page; the menu is reloaded (untimed) between samples. */
+async function settingsActions(s, base, { cpu }) {
+  const { page } = await s.open("settings");
+  if (cpu) await setCpu(await cdpOf(page), CPU_RATE);
+  const nav = button(page.getByRole("navigation", { name: "more", exact: true }), "Settings");
+  const heading = page.getByRole("heading", { name: "Settings", exact: true });
+  const ms = [];
+  for (let i = 0; i < ACTION_N; i++) {
+    await page.goto(base);
+    await menuName(page).waitFor();
+    ms.push(await timedClick(page, nav, heading));
+  }
+  return actionResult({ openSettings: ms }, { cpu });
+}
+
+/** saveEditorMap: Save in the map editor (signed in) opens the save dialog; the dialog is cancelled (untimed), ACTION_N times. */
+async function editorActions(s, base, { cpu }) {
+  const h = await s.open("editor");
+  await signUp(h, base, uniqueName("editor"));
+  const { page } = h;
+  await page.goto(base);
+  await menuName(page).waitFor();
+  await navTo(page, "Map editor");
+  if (cpu) await setCpu(await cdpOf(page), CPU_RATE);
+  const save = page.getByRole("button", { name: "Save", exact: true });
+  const modal = page.locator(".modal");
+  const ms = [];
+  for (let i = 0; i < ACTION_N; i++) {
+    ms.push(await timedClick(page, save, modal));
+    await button(modal, "Cancel").click();
+    await modal.waitFor({ state: "hidden" });
+  }
+  return actionResult({ saveEditorMap: ms }, { cpu });
+}
+
+const INP_KEYS = "abcdefghijklmno";
+
+/** Keydown interactions in one control: Event Timing durations (ms), one per keypress, from a burst that starts now. */
+async function keyInteractions(page, control) {
+  await control.click();
+  await page.evaluate(() => {
+    window.__qaPerf.mark = performance.now();
+  });
+  for (const key of INP_KEYS) await page.keyboard.press(key);
+  // Event Timing entries reach the observer asynchronously; give them a few frames.
+  await page.evaluate(() => new Promise((resolve) => setTimeout(resolve, 300)));
+  return page.evaluate(() => {
+    const q = window.__qaPerf;
+    if (!q.eventSupported) throw new Error("Event Timing (event observer) not supported");
+    const worst = new Map();
+    for (const e of q.events) if (e.start >= q.mark) worst.set(e.id, Math.max(e.dur, worst.get(e.id) ?? 0));
+    return [...worst.values()];
+  });
+}
+
+/**
+ * perf.inp.ms: p75 over 30 keydown interactions, 15 in the menu name box and 15 in room chat. Interactions Event
+ * Timing does not report (under the 16 ms threshold) count as 16 ms, so the p75 cannot be flattered.
+ */
+async function inpCase(s, base, { cpu }) {
+  const host = await s.open("host", { name: uniqueName("host") });
+  const roomName = uniqueName("room");
+  await createRoom(host, base, roomName, { isPublic: true });
+  const { page } = await s.open("guest", { name: uniqueName("guest") });
+  await page.goto(base);
+  await menuName(page).waitFor();
+  if (cpu) await setCpu(await cdpOf(page), CPU_RATE);
+  const menu = await keyInteractions(page, menuName(page));
+  await button(page, "Browse rooms").click();
+  await page.locator("button.room-row").filter({ hasText: roomName }).click();
+  await roomHeader(page).waitFor();
+  const chat = await keyInteractions(page, page.getByLabel("Chat message", { exact: true }));
+  const reported = [...menu, ...chat];
+  const missing = 2 * INP_KEYS.length - reported.length;
+  const values = [...reported, ...Array(Math.max(0, missing)).fill(16)];
+  const sfx = cpu ? ".cpu4x" : "";
+  const p75 = percentile(values, 75);
+  const pass = p75 <= GATE.inpMs;
+  return {
+    pass,
+    metrics: {
+      [`perf.inp.ms${sfx}`]: round(p75, 0),
+      [`perf.inp.runs${sfx}`]: values.map((v) => round(v, 0)),
+      [`perf.inp.missing${sfx}`]: missing,
+      cpu4x: cpu,
+    },
+    detail: pass ? `9-band: p75 <= ${GATE.inpMs} ms over ${values.length} interactions` : `perf.inp.ms ${round(p75, 0)} > ${GATE.inpMs}`,
+  };
+}
+
 /** Probe values that decide N/A: navigator.gpu, CDP session, supported entry types. */
 async function probeEngine(s, base) {
   const h = await s.open("probe");
@@ -393,8 +659,9 @@ async function probeEngine(s, base) {
   };
 }
 
-const naGpu = (ctx) => ({ na: `WebGPU path unavailable: probe navigator.gpu=${ctx.gpu} on ${ctx.engine}` });
-const naCdp = (ctx) => ({ na: `CDP-only metric: probe found no CDPSession on ${ctx.engine}` });
+const naFor = (reason) => ({ info: true, detail: `N/A: ${reason}`, metrics: { "na.reason": reason } });
+const naGpu = (ctx) => naFor(`WebGPU path unavailable: probe navigator.gpu=${ctx.gpu} on ${ctx.engine}`);
+const naCdp = (ctx) => naFor(`CDP-only metric: probe found no CDPSession on ${ctx.engine}`);
 
 const engines = selectedEngines();
 const server = await startServer();
@@ -433,6 +700,17 @@ for (const engine of engines) {
   } else {
     await results.case("load.slow3g", async () => naCdp(ctx), { browser, base });
   }
+  // 4x CPU cold load: CLS is banded on T3-T (rubric D12 table).
+  await results.case(
+    "load.cpu4x.webgpu",
+    async (s) => {
+      if (!ctx.cdp) return naCdp(ctx);
+      if (!ctx.gpu) return naGpu(ctx);
+      prepare(s, "webgpu");
+      return loadCase(s, base, { renderer: "webgpu", gated: true, cpu: true });
+    },
+    { browser, base },
+  );
 
   // Frame pacing, practice and match, both renderers; 4x CPU is chromium only.
   for (const cpu of [false, true]) {
@@ -464,6 +742,36 @@ for (const engine of engines) {
           prepare(s, "webgpu");
           return soakCase(s, base, { cpu });
         },
+        { browser, base },
+      );
+    }
+  }
+
+  // UI latency and input latency (CDP cells, normal and 4x CPU): ui.actionMs.p95.<action> and perf.inp.ms.
+  if (ctx.cdp) {
+    for (const cpu of [false, true]) {
+      const tag = cpu ? "t3t4x" : "t1m";
+      const cases = {
+        room: roomActions,
+        start: startActions,
+        createRoom: createActions,
+        openSettings: settingsActions,
+        saveEditorMap: editorActions,
+        inp: inpCase,
+      };
+      for (const [name, fn] of Object.entries(cases)) {
+        await results.case(
+          `ui.${name}.${tag}`,
+          async (s) => {
+            prepare(s, "webgpu");
+            return fn(s, base, { cpu });
+          },
+          { browser, base },
+        );
+      }
+      await results.case(
+        `ui.ready.${tag}`,
+        async () => naFor("no ready action in the product: the room has no player ready toggle, start is host-only"),
         { browser, base },
       );
     }
