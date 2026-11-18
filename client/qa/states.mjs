@@ -454,6 +454,12 @@ export const STATES = [
     return host;
   }),
   state("match-hud", { fit: true }, async (s) => (await inMatch(s)).host),
+  // "Game starting!" is the server's system line; it stays in the HUD chat log (top left) once the match runs. On a portrait phone the log must stay above the arena.
+  state("match-start-chat", { fit: true }, async (s) => {
+    const { host } = await inMatch(s);
+    await host.page.locator(".hud-chat-line", { hasText: "Game starting!" }).waitFor({ state: "visible" });
+    return host;
+  }),
   state("match-menu", { fit: true }, async (s) => {
     const { host } = await inMatch(s);
     await button(host.page, "Menu").click();
