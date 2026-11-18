@@ -416,9 +416,11 @@ export class EditorController {
     });
   }
 
-  /** Show the whole map again (the same view as opening the editor). */
+  /** Show the whole map again (the same view as opening the editor), and say so: a reset that changes nothing visible is otherwise silent. */
   resetZoom(): void {
     this.fit();
+    this.note = "Showing the whole map.";
+    this.notify();
     this.paint();
   }
 
