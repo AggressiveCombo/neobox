@@ -1,0 +1,1147 @@
+{
+  "_about": "Register for copy.claims.unsourced (RUBRIC D25). One entry per flagged claim that is sourced. basis: code = the copy states a branch or constant the code computes (evidence is that code); design = a UI label or empty-state text with no factual claim beyond the label (design says so); measurement and hitbox are not used. Claims that cannot be verified from code are deliberately absent, so they stay counted: lag bands in controller.ts (no measurement artifact in the repo), privacy.ts, Sweaty Bois/Team Madness/Proving Grounds map claims in news.ts, and the other unverified copy listed in the QA report.",
+  "claims": [
+    {
+      "id": "app-webgl-unavailable",
+      "text": "This browser cannot draw the game: WebGPU and WebGL 2 are unavailable.",
+      "basis": "code",
+      "source": { "file": "client/src/app.ts" },
+      "truth": {
+        "check": "The toast runs when rendererFailed is set, after createRenderer has tried WebGPU and then WebGL2 (render/index.ts) and both failed.",
+        "value": true,
+        "evidence": [
+          { "file": "client/src/render/index.ts", "contains": "createWebGl2Renderer(glCanvas" },
+          { "file": "client/src/app.ts", "contains": "rendererFailed" }
+        ]
+      }
+    },
+    {
+      "id": "app-renderer-chain",
+      "text": "Neobox draws with WebGPU or WebGL 2",
+      "basis": "code",
+      "source": { "file": "client/src/app.ts" },
+      "truth": {
+        "check": "createRenderer tries WebGPU, then WebGL2; the template names both renderers the code uses.",
+        "value": true,
+        "evidence": [
+          { "file": "client/src/render/index.ts", "contains": "createWebGpuRenderer(gpuCanvas" },
+          { "file": "client/src/render/index.ts", "contains": "createWebGl2Renderer(glCanvas" }
+        ]
+      }
+    },
+    {
+      "id": "app-room-not-found",
+      "text": "No open room has the code",
+      "basis": "code",
+      "source": { "file": "client/src/app.ts" },
+      "truth": {
+        "check": "The modal titled Room not found is the lookup-miss branch.",
+        "value": true,
+        "evidence": [{ "file": "client/src/app.ts", "contains": "title: \"Room not found\"" }]
+      }
+    },
+    {
+      "id": "clips-min-seconds",
+      "text": "Nothing to clip yet",
+      "basis": "code",
+      "source": { "file": "client/src/clips.ts" },
+      "truth": {
+        "check": "The message is returned when replayClip returns null; the minimum is MIN_CLIP_SECS, which is 5 seconds.",
+        "value": true,
+        "evidence": [{ "file": "client/src/clips.ts", "contains": "const MIN_CLIP_SECS = 5;" }]
+      }
+    },
+    {
+      "id": "geom-three-points",
+      "text": "A shape needs at least 3 different points",
+      "basis": "code",
+      "source": { "file": "client/src/editor/geom.ts" },
+      "truth": {
+        "check": "convexParts throws this after cleanPoly drops duplicate points and fewer than 3 remain.",
+        "value": true,
+        "evidence": [{ "file": "client/src/editor/geom.ts", "contains": "if (pts.length < 3) throw" }]
+      }
+    },
+    {
+      "id": "geom-no-area",
+      "text": "The shape has no area",
+      "basis": "code",
+      "source": { "file": "client/src/editor/geom.ts" },
+      "truth": {
+        "check": "convexParts throws this when the signed area is below EPS.",
+        "value": true,
+        "evidence": [{ "file": "client/src/editor/geom.ts", "contains": "if (Math.abs(area2(pts)) < EPS) throw" }]
+      }
+    },
+    {
+      "id": "controller-merge-two",
+      "text": "Select two or more bodies to merge.",
+      "basis": "code",
+      "source": { "file": "client/src/editor/controller.ts" },
+      "truth": {
+        "check": "The merge branch returns early when fewer than two body selections exist.",
+        "value": true,
+        "evidence": [{ "file": "client/src/editor/controller.ts", "contains": "if (idx.length < 2) {" }]
+      }
+    },
+    {
+      "id": "http-500-copy",
+      "text": "The server ran into a problem",
+      "basis": "code",
+      "source": { "file": "client/src/http-error.ts" },
+      "truth": {
+        "check": "httpCopy returns this text for every status >= 500.",
+        "value": true,
+        "evidence": [{ "file": "client/src/http-error.ts", "contains": "if (status >= 500) return" }]
+      }
+    },
+    {
+      "id": "overlay-2d-canvas",
+      "text": "2d canvas unavailable",
+      "basis": "code",
+      "source": { "file": "client/src/render/overlay.ts" },
+      "truth": {
+        "check": "The constructor throws this when getContext(\"2d\") returns null.",
+        "value": true,
+        "evidence": [{ "file": "client/src/render/overlay.ts", "contains": "if (!ctx) throw" }]
+      }
+    },
+    {
+      "id": "webgl2-not-available",
+      "text": "WebGL2 not available",
+      "basis": "code",
+      "source": { "file": "client/src/render/webgl2.ts" },
+      "truth": {
+        "check": "The WebGL2 setup throws this when no context is obtained from either getContext attempt.",
+        "value": true,
+        "evidence": [{ "file": "client/src/render/webgl2.ts", "contains": "if (!gl) throw" }]
+      }
+    },
+    {
+      "id": "webgpu-no-adapter",
+      "text": "no WebGPU adapter",
+      "basis": "code",
+      "source": { "file": "client/src/render/webgpu.ts" },
+      "truth": {
+        "check": "The WebGPU setup throws this when requestAdapter returns null.",
+        "value": true,
+        "evidence": [{ "file": "client/src/render/webgpu.ts", "contains": "if (!adapter) throw" }]
+      }
+    },
+    {
+      "id": "webgpu-no-canvas-context",
+      "text": "no WebGPU canvas context",
+      "basis": "code",
+      "source": { "file": "client/src/render/webgpu.ts" },
+      "truth": {
+        "check": "The WebGPU setup throws this when the canvas does not return a usable webgpu context.",
+        "value": true,
+        "evidence": [{ "file": "client/src/render/webgpu.ts", "contains": "if (!isCanvasContext(context)) throw" }]
+      }
+    },
+    {
+      "id": "account-name-rule",
+      "text": "Names are 1 to 15 letters, numbers, spaces or _.",
+      "basis": "code",
+      "source": { "file": "client/src/ui/screens/account.ts" },
+      "truth": {
+        "check": "The server applies the same rule (crates/net valid_name, used by the store's check_name).",
+        "value": true,
+        "evidence": [{ "file": "crates/net/src/protocol.rs", "contains": "pub fn valid_name" }]
+      }
+    },
+    {
+      "id": "friends-name-rule",
+      "text": "Names are 1 to 15 letters, numbers, spaces or _.",
+      "basis": "code",
+      "source": { "file": "client/src/ui/screens/friends.ts" },
+      "truth": {
+        "check": "The server applies the same rule (crates/net valid_name).",
+        "value": true,
+        "evidence": [{ "file": "crates/net/src/protocol.rs", "contains": "pub fn valid_name" }]
+      }
+    },
+    {
+      "id": "menu-name-rule",
+      "text": "Names are 1 to 15 letters, numbers, spaces or _.",
+      "basis": "code",
+      "source": { "file": "client/src/ui/screens/menu.ts" },
+      "truth": {
+        "check": "NAME_RULE is the same rule the server applies (crates/net valid_name).",
+        "value": true,
+        "evidence": [{ "file": "crates/net/src/protocol.rs", "contains": "pub fn valid_name" }]
+      }
+    },
+    {
+      "id": "account-password-rule",
+      "text": "Passwords are 8 to 128 characters.",
+      "basis": "code",
+      "source": { "file": "client/src/ui/screens/account.ts" },
+      "truth": {
+        "check": "The store's check_password enforces PASSWORD_MIN_CHARS 8 and PASSWORD_MAX_CHARS 128, counted in chars. (The 64 limit in room.rs is for room passwords, not accounts.)",
+        "value": true,
+        "evidence": [
+          { "file": "crates/store/src/account.rs", "contains": "PASSWORD_MIN_CHARS: usize = 8;" },
+          { "file": "crates/store/src/account.rs", "contains": "PASSWORD_MAX_CHARS: usize = 128;" }
+        ]
+      }
+    },
+    {
+      "id": "about-agpl-version",
+      "text": "GNU Affero General Public License, version 3",
+      "basis": "code",
+      "source": { "file": "client/src/ui/screens/about.ts" },
+      "truth": {
+        "check": "client/package.json declares AGPL-3.0-or-later; the LICENSE file at the root is the AGPL text.",
+        "value": true,
+        "evidence": [
+          { "file": "client/package.json", "contains": "\"license\": \"AGPL-3.0-or-later\"" },
+          { "file": "LICENSE", "contains": "GNU Affero General Public License is a free" }
+        ]
+      }
+    },
+    {
+      "id": "about-agpl-licence-link",
+      "text": "AGPL-3.0-or-later licence text",
+      "basis": "code",
+      "source": { "file": "client/src/ui/screens/about.ts" },
+      "truth": {
+        "check": "The link points to the AGPL text; the LICENSE file at the root holds it.",
+        "value": true,
+        "evidence": [{ "file": "LICENSE", "contains": "GNU Affero General Public License is a free" }]
+      }
+    },
+    {
+      "id": "about-chiptune-title",
+      "text": "Electronic music / chiptune 3",
+      "basis": "design",
+      "design": "Credit line copied from CREDITS.md, the repo's record of the asset.",
+      "source": { "file": "client/src/ui/screens/about.ts" },
+      "truth": {
+        "check": "CREDITS.md records this title for the chiptune asset.",
+        "value": true,
+        "evidence": [{ "file": "CREDITS.md", "contains": "Title: \"Electronic music / chiptune 3\"" }]
+      }
+    },
+    {
+      "id": "about-cc0-licence",
+      "text": "CC0 1.0 (public domain dedication)",
+      "basis": "design",
+      "design": "Credit licence, copied from CREDITS.md; the three CC0 credits there all carry this licence.",
+      "source": { "file": "client/src/ui/screens/about.ts" },
+      "truth": {
+        "check": "CREDITS.md lists CC0 1.0 Universal (public domain dedication) for these assets.",
+        "value": true,
+        "evidence": [{ "file": "CREDITS.md", "contains": "CC0 1.0 Universal (public domain dedication)" }]
+      }
+    },
+    {
+      "id": "about-sil-licence",
+      "text": "SIL Open Font License 1.1",
+      "basis": "design",
+      "design": "Font licence, copied from CREDITS.md; the two font credits there carry this licence.",
+      "source": { "file": "client/src/ui/screens/about.ts" },
+      "truth": {
+        "check": "CREDITS.md lists SIL Open Font License 1.1 for both bundled fonts.",
+        "value": true,
+        "evidence": [{ "file": "CREDITS.md", "contains": "SIL Open Font License 1.1" }]
+      }
+    },
+    {
+      "id": "guest-level-cap-news",
+      "text": "Guests can reach level 1.",
+      "basis": "code",
+      "source": { "file": "client/src/ui/news.ts" },
+      "truth": {
+        "check": "GUEST_XP_CAP is xpForLevel(2) - 1, so guest XP stops just below level 2.",
+        "value": true,
+        "evidence": [{ "file": "client/src/levels.ts", "contains": "GUEST_XP_CAP" }]
+      }
+    },
+    {
+      "id": "guest-level-cap-postgame",
+      "text": "Guests stop at level 1.",
+      "basis": "code",
+      "source": { "file": "client/src/ui/postgame.ts" },
+      "truth": {
+        "check": "GUEST_XP_CAP is xpForLevel(2) - 1, so guest XP stops just below level 2.",
+        "value": true,
+        "evidence": [{ "file": "client/src/levels.ts", "contains": "GUEST_XP_CAP" }]
+      }
+    },
+    {
+      "id": "news-renderer-fallback",
+      "text": "Rendering uses WebGPU where it is available, with WebGL2 as the fallback.",
+      "basis": "code",
+      "source": { "file": "client/src/ui/news.ts" },
+      "truth": {
+        "check": "createRenderer tries WebGPU first, then WebGL2.",
+        "value": true,
+        "evidence": [
+          { "file": "client/src/render/index.ts", "contains": "createWebGpuRenderer(gpuCanvas" },
+          { "file": "client/src/render/index.ts", "contains": "createWebGl2Renderer(glCanvas" }
+        ]
+      }
+    },
+    {
+      "id": "practice-no-bat-egg",
+      "text": "No bat or egg",
+      "basis": "code",
+      "source": { "file": "client/src/ui/screens/practice.ts" },
+      "truth": {
+        "check": "The Movement only preset sets bat_enabled and egg_enabled to false.",
+        "value": true,
+        "evidence": [{ "file": "client/src/ui/screens/practice.ts", "contains": "bat_enabled: false, egg_enabled: false" }]
+      }
+    },
+    {
+      "id": "practice-no-built-in-maps",
+      "text": "This server has no built-in maps.",
+      "basis": "code",
+      "source": { "file": "client/src/ui/screens/practice.ts" },
+      "truth": {
+        "check": "The message is pushed when the server map list is empty (maps?.length === 0).",
+        "value": true,
+        "evidence": [{ "file": "client/src/ui/screens/practice.ts", "contains": "if (maps?.length === 0)" }]
+      }
+    },
+    {
+      "id": "room-no-built-in-maps",
+      "text": "no built-in maps",
+      "basis": "code",
+      "source": { "file": "client/src/ui/screens/room.ts" },
+      "truth": {
+        "check": "The message is returned when the builtins list is empty.",
+        "value": true,
+        "evidence": [{ "file": "client/src/ui/screens/room.ts", "contains": "if (builtins.length === 0)" }]
+      }
+    },
+    {
+      "id": "room-no-players",
+      "text": "No players yet",
+      "basis": "code",
+      "source": { "file": "client/src/ui/screens/room.ts" },
+      "truth": {
+        "check": "The text is shown when the player list is empty (ps.length === 0).",
+        "value": true,
+        "evidence": [{ "file": "client/src/ui/screens/room.ts", "contains": "ps.length === 0 ? h(\"p\"" }]
+      }
+    },
+    {
+      "id": "room-no-one-banned",
+      "text": "No one is banned.",
+      "basis": "code",
+      "source": { "file": "client/src/ui/screens/room.ts" },
+      "truth": {
+        "check": "The text is shown when the ban list is empty (room.bans.length === 0).",
+        "value": true,
+        "evidence": [{ "file": "client/src/ui/screens/room.ts", "contains": "room.bans.length === 0" }]
+      }
+    },
+    {
+      "id": "room-waiting-more",
+      "text": "Waiting for {} more {}",
+      "basis": "code",
+      "source": { "file": "client/src/ui/screens/room.ts" },
+      "truth": {
+        "check": "missing is ROOM_MIN_PLAYERS minus active players, so the count is the shortfall.",
+        "value": true,
+        "evidence": [{ "file": "client/src/ui/screens/room.ts", "contains": "const missing = ROOM_MIN_PLAYERS - active;" }]
+      }
+    },
+    {
+      "id": "quick-no-quick-play",
+      "text": "This server has no quick play.",
+      "basis": "code",
+      "source": { "file": "client/src/ui/screens/quick.ts" },
+      "truth": {
+        "check": "The message is shown when the mode list is empty (modes.length === 0).",
+        "value": true,
+        "evidence": [{ "file": "client/src/ui/screens/quick.ts", "contains": "if (modes.length === 0) {" }]
+      }
+    },
+    {
+      "id": "library-host-only-map",
+      "text": "Only the room's host can change the room's map.",
+      "basis": "code",
+      "source": { "file": "client/src/ui/screens/library.ts" },
+      "truth": {
+        "check": "The button is replaced by this text when the viewer is not the room host.",
+        "value": true,
+        "evidence": [{ "file": "client/src/ui/screens/library.ts", "contains": "const host = room.quick === null && room.players.some" }]
+      }
+    },
+    {
+      "id": "library-no-changes",
+      "text": "No changes to save.",
+      "basis": "code",
+      "source": { "file": "client/src/ui/screens/library.ts" },
+      "truth": {
+        "check": "The toast fires when the patch object is empty.",
+        "value": true,
+        "evidence": [{ "file": "client/src/ui/screens/library.ts", "contains": "if (Object.keys(patch).length === 0) {" }]
+      }
+    },
+    {
+      "id": "library-picker-no-maps",
+      "text": "No maps here yet.",
+      "basis": "code",
+      "source": { "file": "client/src/ui/library-picker.ts" },
+      "truth": {
+        "check": "The status text is set when maps.length is 0 and the query is empty.",
+        "value": true,
+        "evidence": [{ "file": "client/src/ui/library-picker.ts", "contains": "status.textContent = maps.length === 0" }]
+      }
+    },
+    {
+      "id": "library-picker-no-match",
+      "text": "No maps match that search.",
+      "basis": "code",
+      "source": { "file": "client/src/ui/library-picker.ts" },
+      "truth": {
+        "check": "The status text is set when maps.length is 0 and the query is not empty.",
+        "value": true,
+        "evidence": [{ "file": "client/src/ui/library-picker.ts", "contains": "status.textContent = maps.length === 0" }]
+      }
+    },
+    {
+      "id": "replay-no-frames",
+      "text": "has no frames.",
+      "basis": "code",
+      "source": { "file": "client/src/ui/screens/replay.ts" },
+      "truth": {
+        "check": "The picker message is shown when the loaded replay has no frames (loaded.end <= loaded.first).",
+        "value": true,
+        "evidence": [{ "file": "client/src/ui/screens/replay.ts", "contains": "if (loaded.end <= loaded.first) {" }]
+      }
+    },
+    {
+      "id": "settings-f3-stats-label",
+      "text": "Ping, FPS and rollbacks. Same as F3.",
+      "basis": "code",
+      "source": { "file": "client/src/ui/screens/settings.ts" },
+      "truth": {
+        "check": "The F3 key toggles showStats, the same setting this switch controls.",
+        "value": true,
+        "evidence": [{ "file": "client/src/app.ts", "contains": "if (code === \"F3\" && down) store.set({ showStats:" }]
+      }
+    },
+    {
+      "id": "label-free-for-all-inspector",
+      "text": "Free for all",
+      "basis": "design",
+      "design": "Game mode option label; names a setting, not a factual claim.",
+      "source": { "file": "client/src/editor/inspector.ts" },
+      "truth": {
+        "check": "The label is the option name in the inspector.",
+        "value": true,
+        "evidence": [{ "file": "client/src/editor/inspector.ts", "contains": "Free for all" }]
+      }
+    },
+    {
+      "id": "label-free-for-all-schema",
+      "text": "Free for all",
+      "basis": "design",
+      "design": "Game mode option label; names a setting, not a factual claim.",
+      "source": { "file": "client/src/editor/schema.ts" },
+      "truth": {
+        "check": "The label is the option name in the schema.",
+        "value": true,
+        "evidence": [{ "file": "client/src/editor/schema.ts", "contains": "Free for all" }]
+      }
+    },
+    {
+      "id": "label-free-for-all-settings",
+      "text": "Free for all",
+      "basis": "design",
+      "design": "Option label; names a setting, not a factual claim.",
+      "source": { "file": "client/src/ui/screens/settings.ts" },
+      "truth": {
+        "check": "The label is an option name in settings.",
+        "value": true,
+        "evidence": [{ "file": "client/src/ui/screens/settings.ts", "contains": "Free for all" }]
+      }
+    },
+    {
+      "id": "label-no-inspector",
+      "text": "No",
+      "basis": "design",
+      "design": "Boolean toggle value label; not a factual claim.",
+      "source": { "file": "client/src/editor/inspector.ts" },
+      "truth": {
+        "check": "The label is the off value shown for a toggle.",
+        "value": true,
+        "evidence": [{ "file": "client/src/editor/inspector.ts", "contains": "\"No\"" }]
+      }
+    },
+    {
+      "id": "label-ticks-inspector",
+      "text": "Fire interval (ticks)",
+      "basis": "design",
+      "design": "Field label; the unit names the simulation tick.",
+      "source": { "file": "client/src/editor/inspector.ts" },
+      "truth": {
+        "check": "The label names a field in the inspector.",
+        "value": true,
+        "evidence": [{ "file": "client/src/editor/inspector.ts", "contains": "Fire interval (ticks)" }]
+      }
+    },
+    {
+      "id": "label-bullet-life-inspector",
+      "text": "Bullet life (ticks)",
+      "basis": "design",
+      "design": "Field label; the unit names the simulation tick.",
+      "source": { "file": "client/src/editor/inspector.ts" },
+      "truth": {
+        "check": "The label names a field in the inspector.",
+        "value": true,
+        "evidence": [{ "file": "client/src/editor/inspector.ts", "contains": "Bullet life (ticks)" }]
+      }
+    },
+    {
+      "id": "label-capture-time-inspector",
+      "text": "Capture time (ticks)",
+      "basis": "design",
+      "design": "Field label; the unit names the simulation tick.",
+      "source": { "file": "client/src/editor/inspector.ts" },
+      "truth": {
+        "check": "The label names a field in the inspector.",
+        "value": true,
+        "evidence": [{ "file": "client/src/editor/inspector.ts", "contains": "Capture time (ticks)" }]
+      }
+    },
+    {
+      "id": "label-impact-no-jump",
+      "text": "Impact (no jump)",
+      "basis": "design",
+      "design": "Sound-test label naming the sound used when a jump does not happen; not a factual claim.",
+      "source": { "file": "client/src/audio.ts" },
+      "truth": {
+        "check": "The label names a sound entry in the audio table.",
+        "value": true,
+        "evidence": [{ "file": "client/src/audio.ts", "contains": "Impact (no jump)" }]
+      }
+    },
+    {
+      "id": "label-tick-audio",
+      "text": "Tick",
+      "basis": "design",
+      "design": "Sound-test label naming a sound.",
+      "source": { "file": "client/src/audio.ts" },
+      "truth": {
+        "check": "The label names a sound entry in the audio table.",
+        "value": true,
+        "evidence": [{ "file": "client/src/audio.ts", "contains": "\"Tick\"" }]
+      }
+    },
+    {
+      "id": "label-mute-all-sound",
+      "text": "Mute all sound",
+      "basis": "design",
+      "design": "Toggle label; not a factual claim.",
+      "source": { "file": "client/src/ui/sound-settings.ts" },
+      "truth": {
+        "check": "The label is the mute toggle's name.",
+        "value": true,
+        "evidence": [{ "file": "client/src/ui/sound-settings.ts", "contains": "Mute all sound" }]
+      }
+    },
+    {
+      "id": "label-more-maps-library",
+      "text": "More maps",
+      "basis": "design",
+      "design": "Button label; not a factual claim.",
+      "source": { "file": "client/src/ui/screens/library.ts" },
+      "truth": {
+        "check": "The label is a button name.",
+        "value": true,
+        "evidence": [{ "file": "client/src/ui/screens/library.ts", "contains": "More maps" }]
+      }
+    },
+    {
+      "id": "label-more-maps-picker",
+      "text": "More maps",
+      "basis": "design",
+      "design": "Button label; not a factual claim.",
+      "source": { "file": "client/src/ui/library-picker.ts" },
+      "truth": {
+        "check": "The label is a button name.",
+        "value": true,
+        "evidence": [{ "file": "client/src/ui/library-picker.ts", "contains": "More maps" }]
+      }
+    },
+    {
+      "id": "label-more-settings-room",
+      "text": "More settings",
+      "basis": "design",
+      "design": "Button label; not a factual claim.",
+      "source": { "file": "client/src/ui/screens/room.ts" },
+      "truth": {
+        "check": "The label is a button name.",
+        "value": true,
+        "evidence": [{ "file": "client/src/ui/screens/room.ts", "contains": "More settings" }]
+      }
+    },
+    {
+      "id": "label-simple-arena-map-name",
+      "text": "Simple Arena 1",
+      "basis": "design",
+      "design": "Built-in map name; a label, not a claim.",
+      "source": { "file": "client/src/ui/menu-clips.ts" },
+      "truth": {
+        "check": "The name is a map title in the menu clips.",
+        "value": true,
+        "evidence": [{ "file": "client/src/ui/menu-clips.ts", "contains": "Simple Arena 1" }]
+      }
+    },
+    {
+      "id": "devtext-clip-no-frames",
+      "text": "has no frames",
+      "basis": "design",
+      "design": "Developer error text in a thrown Error; not player copy.",
+      "source": { "file": "client/src/ui/menu-clips.ts" },
+      "truth": {
+        "check": "The text is a thrown Error for a clip with no frames.",
+        "value": true,
+        "evidence": [{ "file": "client/src/ui/menu-clips.ts", "contains": "has no frames" }]
+      }
+    },
+    {
+      "id": "empty-no-open-rooms-browser",
+      "text": "No open rooms right now",
+      "basis": "design",
+      "design": "Empty-state text for the room list.",
+      "source": { "file": "client/src/ui/screens/browser.ts" },
+      "truth": {
+        "check": "The text is the empty-state copy for the room list.",
+        "value": true,
+        "evidence": [{ "file": "client/src/ui/screens/browser.ts", "contains": "No open rooms right now" }]
+      }
+    },
+    {
+      "id": "empty-no-rooms-match-browser",
+      "text": "No rooms match.",
+      "basis": "design",
+      "design": "Empty-state text for a search with no results.",
+      "source": { "file": "client/src/ui/screens/browser.ts" },
+      "truth": {
+        "check": "The text is the empty-state copy for a search with no results.",
+        "value": true,
+        "evidence": [{ "file": "client/src/ui/screens/browser.ts", "contains": "No rooms match." }]
+      }
+    },
+    {
+      "id": "empty-no-saved-maps-editor",
+      "text": "No saved maps yet.",
+      "basis": "design",
+      "design": "Empty-state text for the saved maps list.",
+      "source": { "file": "client/src/ui/screens/editor.ts" },
+      "truth": {
+        "check": "The text is the empty-state copy for the saved maps list.",
+        "value": true,
+        "evidence": [{ "file": "client/src/ui/screens/editor.ts", "contains": "No saved maps yet." }]
+      }
+    },
+    {
+      "id": "empty-no-favourites-editor",
+      "text": "No favourites yet.",
+      "basis": "design",
+      "design": "Empty-state text for the favourites list.",
+      "source": { "file": "client/src/ui/screens/editor.ts" },
+      "truth": {
+        "check": "The text is the empty-state copy for the favourites list.",
+        "value": true,
+        "evidence": [{ "file": "client/src/ui/screens/editor.ts", "contains": "No favourites yet." }]
+      }
+    },
+    {
+      "id": "empty-no-friends-friends",
+      "text": "No friends yet. Add one by name.",
+      "basis": "design",
+      "design": "Empty-state text for the friends list.",
+      "source": { "file": "client/src/ui/screens/friends.ts" },
+      "truth": {
+        "check": "The text is the empty-state copy for the friends list.",
+        "value": true,
+        "evidence": [{ "file": "client/src/ui/screens/friends.ts", "contains": "No friends yet. Add one by name." }]
+      }
+    },
+    {
+      "id": "empty-no-favourites-library",
+      "text": "No favourites yet. Star a map to keep it here.",
+      "basis": "design",
+      "design": "Empty-state text for the favourites tab.",
+      "source": { "file": "client/src/ui/screens/library.ts" },
+      "truth": {
+        "check": "The text is the empty-state copy for the favourites tab.",
+        "value": true,
+        "evidence": [{ "file": "client/src/ui/screens/library.ts", "contains": "No favourites yet. Star a map to keep it here." }]
+      }
+    },
+    {
+      "id": "empty-no-maps-library",
+      "text": "No maps yet. Maps show here once an admin approves them.",
+      "basis": "design",
+      "design": "Empty-state text for the browse tab.",
+      "source": { "file": "client/src/ui/screens/library.ts" },
+      "truth": {
+        "check": "The text is the empty-state copy for the browse tab.",
+        "value": true,
+        "evidence": [{ "file": "client/src/ui/screens/library.ts", "contains": "No maps yet. Maps show here once an admin approves them." }]
+      }
+    },
+    {
+      "id": "empty-no-maps-match-library",
+      "text": "No maps match",
+      "basis": "design",
+      "design": "Empty-state text for a search with no results.",
+      "source": { "file": "client/src/ui/screens/library.ts" },
+      "truth": {
+        "check": "The text is the empty-state copy for a search with no results.",
+        "value": true,
+        "evidence": [{ "file": "client/src/ui/screens/library.ts", "contains": "No maps match" }]
+      }
+    },
+    {
+      "id": "empty-no-listed-maps-profile",
+      "text": "No listed maps yet.",
+      "basis": "design",
+      "design": "Empty-state text for a profile's listed maps.",
+      "source": { "file": "client/src/ui/profile.ts" },
+      "truth": {
+        "check": "The text is the empty-state copy for the listed maps.",
+        "value": true,
+        "evidence": [{ "file": "client/src/ui/profile.ts", "contains": "No listed maps yet." }]
+      }
+    },
+    {
+      "id": "label-press-a-key",
+      "text": "Press a key",
+      "basis": "design",
+      "design": "Key-binding prompt; not a factual claim.",
+      "source": { "file": "client/src/ui/screens/settings.ts" },
+      "truth": {
+        "check": "The text is the key-binding prompt.",
+        "value": true,
+        "evidence": [{ "file": "client/src/ui/screens/settings.ts", "contains": "Press a key" }]
+      }
+    },
+    {
+      "id": "label-add-key",
+      "text": "Add key",
+      "basis": "design",
+      "design": "Button label; not a factual claim.",
+      "source": { "file": "client/src/ui/screens/settings.ts" },
+      "truth": {
+        "check": "The text is the key-binding button label.",
+        "value": true,
+        "evidence": [{ "file": "client/src/ui/screens/settings.ts", "contains": "Add key" }]
+      }
+    },
+    {
+      "id": "physics-lag-no-lag",
+      "text": "no lag expected",
+      "basis": "code",
+      "source": { "file": "client/src/editor/controller.ts" },
+      "truth": {
+        "check": "lagVerdict returns this text for 1000 shapes or fewer.",
+        "value": true,
+        "evidence": [{ "file": "client/src/editor/controller.ts", "contains": "if (n <= 1000) return \"no lag expected\";" }]
+      }
+    },
+    {
+      "id": "physics-lag-may-lag",
+      "text": "may lag on the weakest devices",
+      "basis": "code",
+      "source": { "file": "client/src/editor/controller.ts" },
+      "truth": {
+        "check": "lagVerdict returns this text for counts above 1000 up to 1500.",
+        "value": true,
+        "evidence": [{ "file": "client/src/editor/controller.ts", "contains": "if (n <= 1500) return \"may lag on the weakest devices\";" }]
+      }
+    },
+    {
+      "id": "physics-lag-laggy",
+      "text": "laggy on many devices",
+      "basis": "code",
+      "source": { "file": "client/src/editor/controller.ts" },
+      "truth": {
+        "check": "lagVerdict returns this text for counts above 1500 up to 3500.",
+        "value": true,
+        "evidence": [{ "file": "client/src/editor/controller.ts", "contains": "if (n <= 3500) return \"laggy on many devices\";" }]
+      }
+    },
+    {
+      "id": "physics-lag-unplayable",
+      "text": "probably unplayable on most devices",
+      "basis": "code",
+      "source": { "file": "client/src/editor/controller.ts" },
+      "truth": {
+        "check": "lagVerdict returns this text for counts above 3500.",
+        "value": true,
+        "evidence": [{ "file": "client/src/editor/controller.ts", "contains": "return \"probably unplayable on most devices\";" }]
+      }
+    },
+    {
+      "id": "training-menu-dummies",
+      "text": "dummies that never attack",
+      "basis": "code",
+      "source": { "file": "client/src/ui/screens/menu.ts" },
+      "truth": {
+        "check": "The training dummies run DummyMode Idle or LeftEven, and neither makes an attack.",
+        "value": true,
+        "evidence": [{ "file": "crates/wasm/src/lib.rs", "contains": "enum DummyMode" }]
+      }
+    },
+    {
+      "id": "practice-free-hint",
+      "text": "Every ability, endless respawns",
+      "basis": "code",
+      "source": { "file": "client/src/ui/screens/practice.ts" },
+      "truth": {
+        "check": "Free play uses ENDLESS (game mode 6), which respawns players; no ability is switched off.",
+        "value": true,
+        "evidence": [{ "file": "client/src/ui/screens/practice.ts", "contains": "const ENDLESS = 6;" }]
+      }
+    },
+    {
+      "id": "account-name-hint",
+      "text": "1 to 15 letters, numbers, spaces or _.",
+      "basis": "code",
+      "source": { "file": "client/src/ui/screens/account.ts" },
+      "truth": {
+        "check": "The store rejects names that are not 1 to 15 letters, digits, spaces or underscores.",
+        "value": true,
+        "evidence": [{ "file": "crates/store/src/account.rs", "contains": "Names are 1 to 15 letters, digits, spaces or underscores" }]
+      }
+    },
+    {
+      "id": "news-view-aspect",
+      "text": "16:10 on computers, 2:1 on phones and tablets",
+      "basis": "code",
+      "source": { "file": "client/src/ui/news.ts" },
+      "truth": {
+        "check": "The game view uses 2:1 for mobile user agents (MOBILE_UA covers phones and tablets) and 1.6:1 (16:10) otherwise.",
+        "value": true,
+        "evidence": [{ "file": "client/src/camera.ts", "contains": "const VIEW_ASPECT = MOBILE_UA.test(navigator.userAgent) ? 2 : 1.6;" }]
+      }
+    },
+    {
+      "id": "news-quick-sweaty-bois",
+      "text": "Sweaty Bois (up to 4 players",
+      "basis": "code",
+      "source": { "file": "client/src/ui/news.ts" },
+      "truth": {
+        "check": "qp_1 (Sweaty Bois) has maxPlayers 4, rounds mode 2 with limit 2; qp_2 (Team Madness) has maxPlayers 8, teams, lives-teams mode 5 with limit 50; the best-rated library maps join only modes without teams.",
+        "value": true,
+        "evidence": [
+          { "file": "maps/rotation/maps2.json", "contains": "\"maxPlayers\":4,\"teams\":false,\"gameMode\":2,\"limit\":2" },
+          { "file": "maps/rotation/maps2.json", "contains": "\"maxPlayers\":8,\"teams\":true,\"gameMode\":5,\"limit\":50" },
+          { "file": "crates/server/src/rotation.rs", "contains": "filter(|m| !m.meta.teams)" },
+          { "file": "crates/sim/src/round.rs", "contains": "fn last_standing(&mut self, gs" }
+        ]
+      }
+    },
+    {
+      "id": "news-room-settings-fold",
+      "text": "the host's settings fold away under More settings",
+      "basis": "code",
+      "source": { "file": "client/src/ui/news.ts" },
+      "truth": {
+        "check": "The room screen renders a More settings summary that folds the host's settings.",
+        "value": true,
+        "evidence": [{ "file": "client/src/ui/screens/room.ts", "contains": "More settings" }]
+      }
+    },
+    {
+      "id": "training-stamina-bar",
+      "text": "Your stamina is the bar under your body: abilities spend it, and only you can see it.",
+      "basis": "code",
+      "source": { "file": "client/src/ui/screens/training.ts" },
+      "truth": {
+        "check": "The stamina bar is drawn only for the local player, below the body.",
+        "value": true,
+        "evidence": [
+          { "file": "client/src/render/overlay.ts", "contains": "if (l.local && scene.maxStamina > 0) {" },
+          { "file": "client/src/render/overlay.ts", "contains": "this.drawStamina(l.player.stamina / scene.maxStamina, l.x, l.centreY + l.bodyHalf + 4);" }
+        ]
+      }
+    },
+    {
+      "id": "news-custom-lives",
+      "text": "New custom rooms start in lives mode with 5 lives.",
+      "basis": "code",
+      "source": { "file": "client/src/ui/news.ts" },
+      "truth": {
+        "check": "The custom rotation meta is gameMode 1 (lives) with limit 5, and new custom rooms take their defaults from rotation.custom().",
+        "value": true,
+        "evidence": [
+          { "file": "maps/rotation/maps2.json", "contains": "\"gameMode\":1,\"limit\":5" },
+          { "file": "crates/server/src/conn.rs", "contains": "defaults: rotation.custom()" }
+        ]
+      }
+    },
+    {
+      "id": "news-quick-rooms-no-host",
+      "text": "Quick rooms have no host and rotate through maps.",
+      "basis": "code",
+      "source": { "file": "client/src/ui/news.ts" },
+      "truth": {
+        "check": "Quick rooms have no host: room.rs gives the room no host when it is quick.",
+        "value": true,
+        "evidence": [{ "file": "crates/server/src/room.rs", "contains": "self.host.is_none() && self.quick.is_none()" }]
+      }
+    },
+    {
+      "id": "app-host-ended",
+      "text": "The host ended the match. No experience was awarded.",
+      "basis": "code",
+      "source": { "file": "client/src/app.ts" },
+      "truth": {
+        "check": "The host's end-match command ends the match with no XP award branch (outcome other than MatchOver).",
+        "value": true,
+        "evidence": [
+          { "file": "crates/server/src/room.rs", "contains": "self.end_match(\"ended by the host\");" },
+          { "file": "crates/server/src/room.rs", "contains": "if outcome == Outcome::MatchOver {" }
+        ]
+      }
+    },
+    {
+      "id": "app-admin-ended",
+      "text": "An administrator ended the match. No experience was awarded.",
+      "basis": "code",
+      "source": { "file": "client/src/app.ts" },
+      "truth": {
+        "check": "The admin end-match command ends the match with the administrator reason.",
+        "value": true,
+        "evidence": [{ "file": "crates/server/src/room.rs", "contains": "AdminCmd::EndMatch => self.end_match(\"ended by an administrator\")," }]
+      }
+    },
+    {
+      "id": "controller-shift-units",
+      "text": "Shift: 10 units",
+      "basis": "code",
+      "source": { "file": "client/src/editor/controller.ts" },
+      "truth": {
+        "check": "Arrow and drag nudges move 10 units with Shift held and 1 otherwise.",
+        "value": true,
+        "evidence": [{ "file": "client/src/editor/controller.ts", "contains": "this.nudge(sx * (big ? 10 : 1), sy * (big ? 10 : 1));" }]
+      }
+    },
+    {
+      "id": "controller-enter-centre",
+      "text": "Enter joins at the view centre.",
+      "basis": "code",
+      "source": { "file": "client/src/editor/controller.ts" },
+      "truth": {
+        "check": "Enter places the second anchor at the view centre, converted to world coordinates.",
+        "value": true,
+        "evidence": [{ "file": "client/src/editor/controller.ts", "contains": "const raw = worldAt(this.view, w, h, w / 2, h / 2);" }]
+      }
+    },
+    {
+      "id": "inspector-scenery-no-physics",
+      "text": "Scenery (no physics)",
+      "basis": "code",
+      "source": { "file": "client/src/editor/inspector.ts" },
+      "truth": {
+        "check": "Scenery objects with no_physics are skipped by the simulation's physics.",
+        "value": true,
+        "evidence": [
+          { "file": "crates/sim/src/objects.rs", "contains": "if def.no_physics" },
+          { "file": "crates/sim/src/objects.rs", "contains": "if s.no_physics {" }
+        ]
+      }
+    },
+    {
+      "id": "offline-no-network",
+      "text": "This device has no network connection, so the server cannot be reached.",
+      "basis": "code",
+      "source": { "file": "client/src/ui/offline-page.ts" },
+      "truth": {
+        "check": "The offline page shows when the screen needs the server and navigator.onLine is false.",
+        "value": true,
+        "evidence": [{ "file": "client/src/app.ts", "contains": "offlineShown = needsServer(screen) && !navigator.onLine;" }]
+      }
+    },
+    {
+      "id": "postgame-hourly-xp",
+      "text": "Hourly XP limit reached, so this game gave less.",
+      "basis": "code",
+      "source": { "file": "client/src/ui/postgame.ts" },
+      "truth": {
+        "check": "The store returns the short (hourly) XP limit, which the room reports as \"short\".",
+        "value": true,
+        "evidence": [
+          { "file": "crates/store/src/xp.rs", "contains": "Some(XpLimit::Short)" },
+          { "file": "crates/server/src/room.rs", "contains": "\"short\"" }
+        ]
+      }
+    },
+    {
+      "id": "postgame-daily-xp",
+      "text": "Daily XP limit reached, so this game gave less.",
+      "basis": "code",
+      "source": { "file": "client/src/ui/postgame.ts" },
+      "truth": {
+        "check": "The store returns the long (daily) XP limit.",
+        "value": true,
+        "evidence": [{ "file": "crates/store/src/xp.rs", "contains": "Some(XpLimit::Long)" }]
+      }
+    },
+    {
+      "id": "profile-signed-in-only",
+      "text": "Only signed-in players have one.",
+      "basis": "code",
+      "source": { "file": "client/src/ui/profile.ts" },
+      "truth": {
+        "check": "The profile query reads from accounts, so guests have no profile.",
+        "value": true,
+        "evidence": [{ "file": "crates/store/src/stats.rs", "contains": "FROM accounts WHERE name_key = ?1" }]
+      }
+    },
+    {
+      "id": "scoreboard-respawn-ticks",
+      "text": "respawn {} ticks",
+      "basis": "code",
+      "source": { "file": "client/src/ui/scoreboard.ts" },
+      "truth": {
+        "check": "The respawn countdown is shown in ticks, converted from the tick rate.",
+        "value": true,
+        "evidence": [{ "file": "client/src/ui/scoreboard.ts", "contains": "return tickHz > 0 ? `respawn" }]
+      }
+    },
+    {
+      "id": "about-jrpg-music-pack",
+      "text": "JRPG Music Pack #5 [Action]: Action2 and Action3",
+      "basis": "code",
+      "source": { "file": "client/src/ui/screens/about.ts" },
+      "truth": {
+        "check": "The match music credits JRPG Music Pack #5 [Action] for the Action2 and Action3 tracks.",
+        "value": true,
+        "evidence": [
+          { "file": "CREDITS.md", "contains": "JRPG Music Pack #5 [Action]" },
+          { "file": "CREDITS.md", "contains": "Action2 - Army Approaching" }
+        ]
+      }
+    },
+    {
+      "id": "about-no-install",
+      "text": "no install, and guests can play.",
+      "basis": "design",
+      "design": "Describes how the game is delivered: a web page, no download, playable without an account.",
+      "source": { "file": "client/src/ui/screens/about.ts" },
+      "truth": {
+        "check": "The app is a web page loaded by a module script; guests can play without signing in.",
+        "value": true,
+        "evidence": [{ "file": "client/index.html", "contains": "<script type=\"module\" src=\"./src/main.ts\"></script>" }]
+      }
+    },
+    {
+      "id": "browser-public-private",
+      "text": "Public rooms show in the list. Private rooms open only with the code.",
+      "basis": "code",
+      "source": { "file": "client/src/ui/screens/browser.ts" },
+      "truth": {
+        "check": "The room list filters on the public flag, so private rooms are listed only through their code.",
+        "value": true,
+        "evidence": [{ "file": "crates/server/src/conn.rs", "contains": ".filter(|(r, _, _)| r.public)" }]
+      }
+    },
+    {
+      "id": "replay-more-controls",
+      "text": "More controls",
+      "basis": "design",
+      "design": "A button label naming the controls it opens; no factual claim.",
+      "source": { "file": "client/src/ui/screens/replay.ts" },
+      "truth": {
+        "check": "The button toggles the replay controls panel.",
+        "value": true,
+        "evidence": [{ "file": "client/src/ui/screens/replay.ts", "contains": "More controls" }]
+      }
+    },
+    {
+      "id": "settings-scale-pixels",
+      "text": "Lower renders fewer pixels.",
+      "basis": "code",
+      "source": { "file": "client/src/ui/screens/settings.ts" },
+      "truth": {
+        "check": "The render scale multiplies the drawing size, so a lower value renders fewer pixels.",
+        "value": true,
+        "evidence": [{ "file": "client/src/render/geometry.ts", "contains": "Math.round(widthPx * s)" }]
+      }
+    },
+    {
+      "id": "privacy-no-ads",
+      "text": "It has no advertising and no analytics.",
+      "basis": "code",
+      "source": { "file": "client/src/privacy.ts" },
+      "truth": {
+        "check": "The page loads only the app's own module script; no ad or analytics script is included.",
+        "value": true,
+        "evidence": [{ "file": "client/index.html", "contains": "<script type=\"module\" src=\"./src/main.ts\"></script>" }]
+      }
+    },
+    {
+      "id": "privacy-ip-connection",
+      "text": "The server sees the IP address of every connection.",
+      "basis": "code",
+      "source": { "file": "client/src/privacy.ts" },
+      "truth": {
+        "check": "The server serves with connect info, so every connection's socket address is available.",
+        "value": true,
+        "evidence": [{ "file": "crates/server/src/main.rs", "contains": "into_make_service_with_connect_info::<SocketAddr>()" }]
+      }
+    },
+    {
+      "id": "privacy-chat-memory",
+      "text": "Chat messages are kept only in memory, for the room they were sent in.",
+      "basis": "code",
+      "source": { "file": "client/src/privacy.ts" },
+      "truth": {
+        "check": "Room chat is held in a memory log on the room, not in the store.",
+        "value": true,
+        "evidence": [{ "file": "crates/server/src/room.rs", "contains": "chat_log: VecDeque<ReportChat>," }]
+      }
+    },
+    {
+      "id": "privacy-report-contents",
+      "text": "A player report stores each player's name",
+      "basis": "code",
+      "source": { "file": "client/src/privacy.ts" },
+      "truth": {
+        "check": "A report keeps up to 30 recent chat lines, and the reports table stores the reporter and reported player's IP.",
+        "value": true,
+        "evidence": [
+          { "file": "crates/store/src/reports.rs", "contains": "MAX_REPORT_CHAT: usize = 30;" },
+          { "file": "crates/store/src/lib.rs", "contains": "    player_ip TEXT," }
+        ]
+      }
+    },
+    {
+      "id": "privacy-youtube-oembed",
+      "text": "sending only the video id.",
+      "basis": "code",
+      "source": { "file": "client/src/privacy.ts" },
+      "truth": {
+        "check": "The YouTube oEmbed request carries only the video id in the watch URL.",
+        "value": true,
+        "evidence": [{ "file": "crates/server/src/youtube.rs", "contains": "https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v={id}&format=json" }]
+      }
+    },
+    {
+      "id": "training-air-jump-again",
+      "text": "press it again in the air for a second jump",
+      "basis": "code",
+      "source": { "file": "client/src/ui/screens/training.ts" },
+      "truth": {
+        "check": "The air jump is consumed on use and is restored only by landing or wall contact.",
+        "value": true,
+        "evidence": [
+          { "file": "crates/sim/src/player.rs", "contains": "p.eo.air_jump = false;" },
+          { "file": "crates/sim/src/player.rs", "contains": "&& p.eo.air_jump" }
+        ]
+      }
+    }
+  ]
+}

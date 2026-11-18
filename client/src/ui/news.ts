@@ -21,7 +21,7 @@ const NEWS: NewsEntry[] = [
     items: [
       "The blue logo is back, and blue is the accent colour again. Buttons and menus have icons, and screens fade into each other.",
       "The main menu is simpler and fills the screen: your name, Quick play, Browse rooms and a grid of buttons on one side, the match replay on the other.",
-      "The game view keeps the original's shape: 16:10 on computers, 2:1 on phones, with black bars around it instead of a stretched or cropped view.",
+      "The game view keeps the original's shape: 16:10 on computers, 2:1 on phones and tablets, with black bars around it instead of a stretched or cropped view.",
       "New menu and match music, real sound effects for jumps, hits and deaths, and soft interface sounds for hovers and clicks that you can turn off (Settings, Sound).",
       "Profiles: open a player from the room or your friends list to see their level, games, wins, kills, deaths, time played and maps.",
       "In lives mode, a bar at the top shows how many lives you have left.",
@@ -46,7 +46,7 @@ const NEWS: NewsEntry[] = [
   {
     date: "2026-11-15",
     items: [
-      "Quick play has two modes: Sweaty Bois (up to 4 players, last one standing, win a map twice) and Team Madness (8 players in teams with a shared pool of 50 lives), each with its map rotation and the week's best-rated library maps. Browse a mode's maps with the arrows on its card.",
+      "Quick play has two modes: Sweaty Bois (up to 4 players, last one standing each round, first to 2 round wins) and Team Madness (up to 8 players in two teams, each with a shared pool of 50 lives), each with its map rotation. Sweaty Bois also adds the week's best-rated library maps. Browse a mode's maps with the arrows on its card.",
       "New custom rooms start in lives mode with 5 lives.",
       "Checkpoint races are back: touch numbered checkpoints in order, return to your last checkpoint when you die, and reach the highest one to finish. Map makers set them in the editor (Race checkpoint, Race object).",
       "Fastest Times: with /set recordMode true, finishing a library map saves your best time. See the board with the Fastest Times button in the room.",
@@ -81,7 +81,7 @@ const NEWS: NewsEntry[] = [
       "Friends: send and accept friend requests, and see which room your friends are in.",
       "Map library: publish your maps, browse new, hot, top and most-played maps, vote, pick favourites and read map descriptions.",
       "Replays: record finished matches and watch them back.",
-      "Practice: play offline on a built-in or pasted map, with Free play or Movement only rules.",
+      "Practice: play offline on a built-in or pasted map, with Free play or Fewer abilities rules.",
       "Host tools: lock teams, kick or ban players, move players between teams and hand over host.",
       "Reconnect: if your connection drops during a game, you rejoin the same seat.",
     ],

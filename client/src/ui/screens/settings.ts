@@ -638,7 +638,7 @@ export const settingsScreen: ScreenFactory = (ctx) => {
           null,
           h("div", { class: "settings-group" }, h("span", { class: "field-label" }, "Theme"), themeSeg.el),
           scale.el,
-          h("p", { class: "field-hint" }, "Lower is faster on weak devices."),
+          h("p", { class: "field-hint" }, "Lower renders fewer pixels."),
           antialias.el,
           stats.el,
           h("div", { class: "settings-group" }, h("span", { class: "field-label" }, "Your colour"), colorSwatch, chooseColor, autoColor),

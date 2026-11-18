@@ -19,7 +19,7 @@ export const PRIVACY_SECTIONS: { heading: string; paragraphs: string[] }[] = [
   {
     heading: "Who runs neobox",
     paragraphs: [
-      "neobox is a free, fan-made physics platform-fighter. It is run by an operator based in the European Union. It has no advertising and no analytics, and it does not sell personal data.",
+      "neobox is a free, fan-made physics platform-fighter. It has no advertising and no analytics.",
     ],
   },
   {
@@ -32,7 +32,7 @@ export const PRIVACY_SECTIONS: { heading: string; paragraphs: string[] }[] = [
   {
     heading: "Sessions and cookies",
     paragraphs: [
-      "Signing in sets a session cookie, nb_session. It is HttpOnly and SameSite=Lax and is used only to keep you signed in. With Stay signed in ticked it lasts 30 days; otherwise it ends when you close the browser. It renews when less than half its lifetime is left.",
+      "Signing in sets a session cookie, nb_session. It is HttpOnly and SameSite=Lax and is used only to keep you signed in. With Stay signed in ticked it lasts 30 days; otherwise it ends when you close the browser. The server extends a session that you use in its last 15 days, but the cookie is set only at sign-in, so with Stay signed in ticked you sign in again after 30 days.",
       "The server stores only a SHA-256 digest of each session token and keeps at most 20 sessions per account. Operators who use the admin page get a separate admin cookie, neobox_admin, which is HttpOnly, SameSite=Strict and limited to the /admin path. No other cookies are set.",
     ],
   },
@@ -46,23 +46,23 @@ export const PRIVACY_SECTIONS: { heading: string; paragraphs: string[] }[] = [
   {
     heading: "IP addresses, logs and location",
     paragraphs: [
-      "The server sees the IP address of every connection. It uses IP addresses to limit simultaneous connections, to rate-limit sign-in attempts and uploads, and to enforce bans. A ban is recorded against an IP address in the memory of the room it applies to.",
-      "The admin view shows the IP addresses of players in live rooms. Server logs, such as joins and connection-limit or flood events, include IP addresses; they are kept in server memory for the admin log view and written to the server's standard output, which the host may keep.",
-      "To show a country flag and an approximate distance, the server looks up IP addresses in a local copy of the DB-IP City Lite database. The lookup runs on the server and no address is sent to a third party. Room lists show the host's country and your approximate distance from it; your own country is sent to your browser. These values are computed when needed and are not kept per visitor.",
+      "The server sees the IP address of every connection. It uses IP addresses to limit simultaneous connections, to rate-limit sign-in attempts and uploads, and to enforce bans. A ban is recorded, in the memory of the room it applies to, against the IP address and, for a signed-in player, the account.",
+      "The admin view shows the IP addresses of players in live rooms. Server logs, such as joins, admin logins and message-flood disconnects, include IP addresses; they are kept in server memory for the admin log view (the latest 4000 lines) and written to the server's standard output, which the host may keep.",
+      "If the operator provides a local copy of the DB-IP City Lite database, the server looks up IP addresses in it to show a country flag and an approximate distance. The lookup runs on the server and no address is sent to a third party. Room lists show the host's country and your approximate distance from the game server that runs the room; your own country is sent to your browser. Without the database, no country or distance is shown.",
     ],
   },
   {
     heading: "Chat and reports",
     paragraphs: [
       "Chat messages are kept only in memory, for the room they were sent in. They are not written to logs or to the database, except the lines copied into a player report (below).",
-      "A player report stores the account name and account id, and the IP address, of both the reporter and the reported player, together with up to 30 recent chat lines from that room as evidence. Reports are used only to review abuse and are kept until an operator removes them.",
+      "A player report stores each player's name, their account id if they are signed in, and their IP address, for both the reporter and the reported player, together with up to 30 recent chat lines from that room as evidence. Reports are kept until an operator removes them.",
     ],
   },
   {
     heading: "Third parties",
     paragraphs: [
-      "The jukebox plays YouTube videos. Your browser loads the YouTube player only when the jukebox plays, and room lists load video thumbnails from YouTube's image servers. When a YouTube link is posted, the server asks YouTube's oEmbed service for its title, sending only the video id. YouTube's privacy policy applies to those requests.",
-      "Regional game servers run by the operator receive a signed ticket with your account id, name and XP when you join, and they can see your IP address. No other third party receives your data.",
+      "The jukebox plays YouTube videos. Once a room has a jukebox set, your browser loads the YouTube player, even while the video is paused, and room lists load video thumbnails from YouTube's image servers for rooms with a video. YouTube then receives your IP address. When a YouTube link is posted, the server asks YouTube's oEmbed service for the video's title, sending only the video id.",
+      "Regional game servers run by the operator receive a signed ticket with your account id, name and XP when you join, and they can see your IP address. Apart from the YouTube requests above, the game loads nothing from other outside services.",
     ],
   },
   {
