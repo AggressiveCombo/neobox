@@ -73,6 +73,17 @@ export const practiceScreen: ScreenFactory = (ctx) => {
   let preset = PRESETS[0];
   let setup: SetupUi | null = null;
   let engineUi: EngineStatus | null = null;
+  // Phones: Start is a footer under the scrolling setup, not over it (practice.css). Desktop keeps it in the rules column.
+  const phoneQuery = window.matchMedia("(max-width: 600px)");
+  function placeStart(): void {
+    const bar = root.querySelector<HTMLElement>(".practice-actions");
+    const grid = root.querySelector<HTMLElement>(".practice-grid");
+    const pg = root.querySelector<HTMLElement>(".practice-page");
+    if (!bar || !grid || !pg) return;
+    if (phoneQuery.matches) pg.append(bar);
+    else grid.append(bar);
+  }
+  phoneQuery.addEventListener("change", placeStart);
 
   // Live game.
   let eng: Engine | null = null;
@@ -330,6 +341,7 @@ export const practiceScreen: ScreenFactory = (ctx) => {
       ),
     ];
     root.replaceChildren(page("practice-page", pageHead({ title: "Practice", back: exit }), ...content));
+    placeStart();
 
     renderMaps();
     if (maps === null && !mapsError) void loadMaps();
@@ -385,6 +397,7 @@ export const practiceScreen: ScreenFactory = (ctx) => {
       stopGame();
       engineUi?.destroy();
       eng = null;
+      phoneQuery.removeEventListener("change", placeStart);
       root.remove();
     },
   } satisfies ScreenHandle;

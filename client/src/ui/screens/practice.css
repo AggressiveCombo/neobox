@@ -1,6 +1,6 @@
 /* Practice setup (practice.ts). Map rows on the left; the paste field and the
    rules sit in a panel beside them, Start below it. On phones it is one column
-   and Start sticks to the bottom. The in-game bar is styled by offline.css. */
+   and Start is a footer under the scrolling setup. The in-game bar is styled by offline.css. */
 
 /* The page's column box is the same on every screen (style.css .page-inner); this screen's
    content is capped and centred inside it, so the column's edges do not move between screens. */
@@ -143,12 +143,28 @@
     grid-row: auto;
   }
 
+  /* Phones: the page is the viewport's height. The setup scrolls in .page-inner; Start is a footer below it, so it covers nothing. */
+  .practice-page {
+    height: 100%;
+    gap: 0;
+    padding-bottom: 0;
+  }
+
+  .practice-page > .page-head {
+    flex: none;
+  }
+
+  .practice-page > .page-inner {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    padding-bottom: 24px;
+  }
+
   .practice-actions {
-    position: sticky;
-    bottom: 0;
-    z-index: 1;
+    flex: none;
     margin: 0 calc(-1 * var(--margin));
-    padding: 12px var(--margin) calc(12px + env(safe-area-inset-bottom));
+    padding: 12px var(--margin) calc(16px + env(safe-area-inset-bottom));
     background: var(--ground);
   }
 
