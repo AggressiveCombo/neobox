@@ -99,9 +99,12 @@ interface KillEntry {
   at: number;
 }
 
+const METRIC_CACHE_MAX = 512;
+
 export class Overlay {
   private readonly ctx: CanvasRenderingContext2D;
   private readonly cssCache = new Map<number, string>();
+  private readonly metricCache = new Map<string, { w: number; h: number }>();
   private readonly feed: KillEntry[] = [];
   private readonly hitFlashes: { id: number; at: number }[] = [];
   /** CSS px at the top taken by a screen's own controls (AppCtx.reserveTop); the top bars go below. */
@@ -215,6 +218,23 @@ export class Overlay {
     ctx.globalAlpha = 1;
   }
 
+  /**
+   * Width and ink height of `text` in `font`. Both are independent of the text baseline, so one entry serves
+   * every frame; the cache is cleared when it fills (names change with the players in the match).
+   */
+  private textSize(font: string, text: string): { w: number; h: number } {
+    const key = `${font}\u0000${text}`;
+    let m = this.metricCache.get(key);
+    if (m === undefined) {
+      this.ctx.font = font;
+      const t = this.ctx.measureText(text);
+      m = { w: t.width, h: t.actualBoundingBoxAscent + t.actualBoundingBoxDescent };
+      if (this.metricCache.size >= METRIC_CACHE_MAX) this.metricCache.clear();
+      this.metricCache.set(key, m);
+    }
+    return m;
+  }
+
   private drawNames(scene: Scene, cam: Camera, names: ReadonlyMap<number, string>, cssW: number, cssH: number): void {
     const ctx = this.ctx;
     const [sx, sy, ox, oy] = worldXf(cam);
@@ -232,8 +252,8 @@ export class Overlay {
       const centreY = (1 - (p.y * sy + oy)) * cssH / 2;
       const bodyHalf = (p.size / 2) * pxPerUnit;
       const local = (p.flags & FLAG_LOCAL) !== 0;
-      ctx.font = local ? LOCAL_NAME_FONT : NAME_FONT;
-      const m = ctx.measureText(name);
+      const font = local ? LOCAL_NAME_FONT : NAME_FONT;
+      const m = this.textSize(font, name);
       labels.push({
         player: p,
         name,
@@ -242,10 +262,10 @@ export class Overlay {
         centreY,
         bodyHalf,
         local,
-        font: ctx.font,
+        font,
         colour: this.colourCss(playerRgb(p.team, p.id)),
-        w: m.width,
-        h: m.actualBoundingBoxAscent + m.actualBoundingBoxDescent,
+        w: m.w,
+        h: m.h,
       });
     }
     // The local player's label keeps its place and is drawn last, on top. Others stack upward off it and off each other.
