@@ -393,6 +393,15 @@ export class Scenario {
       extraHTTPHeaders: { "X-Forwarded-For": ip },
       ...(serviceWorkers && { serviceWorkers }),
     });
+    // The test-only X-Forwarded-For must not reach third-party origins: their CORS preflight rejects it, and the
+    // embedded YouTube player then fails with an unhandled NetworkError (a pageerror). The server origin keeps it.
+    await context.route("**/*", (route) => {
+      const req = route.request();
+      if (new URL(req.url()).origin === new URL(this.base).origin) return route.fallback();
+      const h = { ...req.headers() };
+      delete h["x-forwarded-for"];
+      return route.continue({ headers: h });
+    });
     if (clipboard) {
       await context.grantPermissions(["clipboard-read", "clipboard-write"], { origin: this.base });
       // A system share sheet would take the invite instead of the clipboard; the suite reads the clipboard.
