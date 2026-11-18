@@ -1362,3 +1362,6 @@ export const scenarios = [
   ...roomsInvScenarios,
   ...livenessScenarios,
 ];
+
+import { accountsInvScenarios } from "./inv-accounts.mjs";
+  ...accountsInvScenarios,
