@@ -277,9 +277,9 @@ export const trainingScreen: ScreenFactory = (ctx) => {
     root.className = "offline playing";
     const bar = h(
       "div",
-      { class: "offline-top offline-overlay" },
+      { class: "offline-top offline-overlay training-bar" },
       h("button", { type: "button", onclick: leave }, icon("arrow-left", 18), "Leave"),
-      h("span", { class: "offline-title" }, "Training hall"),
+      h("h1", { class: "offline-title" }, "Training hall"),
       h("button", { type: "button", onclick: replayTutorial }, icon("rotate-ccw", 18), "Replay tutorial"),
     );
     const card = h(

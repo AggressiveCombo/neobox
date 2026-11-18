@@ -107,3 +107,14 @@
     transform: none;
   }
 }
+
+/* The top bar runs edge to edge: the playfield showed through the margin beside it (grey blocks at the corners).
+   Its controls keep 48px touch targets at every size. */
+.training-bar {
+  margin-inline: calc(-1 * var(--margin));
+  padding-inline: var(--margin);
+}
+
+.training-bar button {
+  min-height: 48px;
+}
