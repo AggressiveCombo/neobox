@@ -441,18 +441,19 @@ button.home-privacy {
   }
 }
 
-/* Short landscape phones (844x390, 667x375): the destination index and the title are compacted so
-   the two ways in and the whole index sit above the fold; the art is anchored near the top and sized
-   to the height. */
+/* Short landscape phones (844x390, 740x360, 667x375): two columns. The title, the name and the two ways in sit on the
+   left; the destination index is a 4x2 grid on the right. The clip square is decorative and does not fit beside them, so
+   it is hidden (its clip holds, see menu-clips.ts). Everything sits above the fold. */
 @media (max-height: 500px) and (orientation: landscape) {
-  .menu-art {
-    align-self: start;
-    margin-top: 56px;
-    width: min(50vh, 40vw);
+  .page.home {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr) auto minmax(0, 1fr) auto;
+    column-gap: 32px;
+    row-gap: 12px;
   }
 
-  .page.home {
-    row-gap: 12px;
+  .menu-art {
+    display: none;
   }
 
   .home-top {
@@ -460,6 +461,9 @@ button.home-privacy {
   }
 
   .home-copy {
+    grid-column: 1;
+    grid-row: 3;
+    align-self: center;
     gap: 10px;
   }
 
@@ -469,11 +473,19 @@ button.home-privacy {
 
   .home-index {
     --tile-gap: 6px;
+    grid-column: 2;
+    grid-row: 3;
+    align-self: center;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .home-foot {
+    grid-row: 5;
   }
 
   button.home-row-btn {
     min-height: 0;
     gap: 2px;
-    padding: calc(0.9625rem + 4px) 4px 4px;
+    padding: calc(0.9625rem + 14px) 4px 4px;
   }
 }
