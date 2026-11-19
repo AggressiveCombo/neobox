@@ -6,14 +6,17 @@
 // N/A where the probe finds no navigator.gpu.
 //
 // Run: cd client && QA_OUT=<dir> bun qa/perf.mjs            (QA_ENGINES=chromium to limit engines)
-// Env: QA_SOAK_MS (default 600000 = 10 min), QA_SOAK_RUNS (default 3), QA_FPS_MS (default 30000), QA_FRAME_RUNS (default 3).
+// Env: QA_SOAK_MS (default 600000 = 10 min), QA_SOAK_RUNS (default 3), QA_FPS_MS (default 30000), QA_FRAME_RUNS (default 3),
+// QA_ACTION_N (default 20), QA_CASES (a regular expression: run only the matching case ids; the engine probe always runs).
 // Output: <QA_OUT>/perf-<engine>.{json,md}, evidence under <QA_OUT>/evidence/perf-<engine>/.
 // Self-test: QA_SELF_TEST=jank (busy main thread) or QA_SELF_TEST=leak (retained heap) must fail; QA_SELF_TEST=action
 // (2.5 s busy inside every UI action window) must fail the ui.* cases.
 
+import { readFileSync } from "node:fs";
 import path from "node:path";
 import {
   Results,
+  builtinMaps,
   button,
   cdpOf,
   createRoom,
@@ -572,6 +575,233 @@ async function editorActions(s, base, { cpu }) {
   return actionResult({ saveEditorMap: ms }, { cpu });
 }
 
+// Heavy surfaces on heavy content (rubric D12 ui.actionMs, rev8b): a surface a player can fill with large content is
+// measured with large content. Fixtures: the 1500-body stress map and a 4-minute two-player replay with both players
+// active (recorded once; qa/fixtures/README.md).
+const FIXTURES = path.join(import.meta.dir, "fixtures");
+const STRESS_MAP = readFileSync(path.join(FIXTURES, "stress-map.json"), "utf8");
+const LONG_REPLAY = path.join(FIXTURES, "active-4min.nbreplay");
+const DRAFT_KEY = "neobox.editor.draft";
+
+/**
+ * Trigger-to-confirmation time (ms, page clock) for actions Playwright drives from outside the page (a file pick, a
+ * pointer press, a navigation click, a slider value). Before the action the page starts a watcher that checks once per
+ * animation frame for the confirmation: the first visible element matching `css` (and `text`, a regular expression on
+ * its text). The time ends in the frame that first shows it, read in the page, so Playwright's polling (which waits on
+ * a busy main thread) is not counted. t0 is read in the page just before the action; the self-test busy time runs there.
+ */
+async function timedSpan(page, act, { css, text = null }) {
+  const busy = selfTestMode() === "action" ? BUSY_MS : 0;
+  const t0 = await page.evaluate(
+    ({ busy, css, text }) => {
+      const t = performance.now();
+      const re = text === null ? null : new RegExp(text);
+      window.__qaSeen = null;
+      const check = () => {
+        const el = [...document.querySelectorAll(css)].find((e) => e.getClientRects().length > 0 && (re === null || re.test(e.textContent ?? "")));
+        if (el) window.__qaSeen = performance.now();
+        else requestAnimationFrame(check);
+      };
+      requestAnimationFrame(check);
+      if (busy) {
+        const end = t + busy;
+        while (performance.now() < end);
+      }
+      return t;
+    },
+    { busy, css, text },
+  );
+  await act();
+  await page.waitForFunction(() => window.__qaSeen !== null, null, { timeout: 60000 });
+  return (await page.evaluate(() => window.__qaSeen)) - t0;
+}
+
+/** Seeded PRNG (LCG), so every run seeks the same points and picks the same bodies. */
+function seeded(seed) {
+  let x = seed >>> 0;
+  return () => ((x = (x * 1664525 + 1013904223) >>> 0) / 2 ** 32);
+}
+
+/** openReplay and seekReplay: open the long replay from the Replay page (to its first frame), then seek to seeded points. */
+async function replayActions(s, base, { cpu }) {
+  const { page } = await s.open("replay");
+  await page.goto(base);
+  await menuName(page).waitFor();
+  if (cpu) await setCpu(await cdpOf(page), CPU_RATE);
+  const view = page.locator(".offline.playing.replay-view");
+  const viewSel = { css: ".offline.playing.replay-view" };
+  const open = [];
+  for (let i = 0; i < ACTION_N; i++) {
+    await navTo(page, "Replay");
+    const input = page.locator('input[type="file"]').first();
+    open.push(await timedSpan(page, () => input.setInputFiles(LONG_REPLAY), viewSel));
+    await button(page.locator(".offline-top"), "Close").click();
+    await view.waitFor({ state: "hidden" });
+    await page.goto(base);
+    await menuName(page).waitFor();
+  }
+  // seekReplay: the seek bar set to a seeded tick; confirmed when the tick readout shows that tick (drawn per frame).
+  await navTo(page, "Replay");
+  await page.locator('input[type="file"]').first().setInputFiles(LONG_REPLAY);
+  await view.waitFor();
+  const playLabel = page.locator(".replay-play-label");
+  if (/Pause/.test((await playLabel.textContent()) ?? "")) await playLabel.click();
+  const seek = page.getByRole("slider", { name: "Seek", exact: true });
+  const maxTick = Number(await seek.getAttribute("max"));
+  const rnd = seeded(41);
+  const seekMs = [];
+  for (let i = 0; i < ACTION_N; i++) {
+    const target = Math.floor(rnd() * maxTick);
+    seekMs.push(await timedSpan(page, () => seek.fill(String(target)), { css: ".replay-tick", text: `tick ${target}$` }));
+  }
+  return actionResult({ openReplay: open, seekReplay: seekMs }, { cpu });
+}
+
+/** Opens the Map editor on the stress map draft; returns the canvas. */
+async function stressEditor(page, base) {
+  await page.goto(base);
+  await page.evaluate(([key, map]) => localStorage.setItem(key, map), [DRAFT_KEY, STRESS_MAP]);
+  await page.reload();
+  await menuName(page).waitFor();
+  await navTo(page, "Map editor");
+  const canvas = page.locator("canvas.editor-canvas");
+  await canvas.waitFor();
+  return canvas;
+}
+
+/** Canvas points that select a body on the stress map (untimed scan), with the inspector title each one shows. */
+async function bodyPoints(page, canvas, want) {
+  const box = await canvas.boundingBox();
+  const title = page.locator("h2.inspector-title");
+  const found = [];
+  const seen = new Set();
+  for (let gy = 1; gy < 10 && found.length < want; gy++) {
+    for (let gx = 1; gx < 14 && found.length < want; gx++) {
+      const x = box.x + (box.width * gx) / 14;
+      const y = box.y + (box.height * gy) / 10;
+      await page.mouse.click(x, y);
+      await page.waitForTimeout(60);
+      const text = ((await title.textContent().catch(() => "")) ?? "").trim();
+      if (/^Body \d+$/.test(text) && !seen.has(text)) {
+        seen.add(text);
+        found.push({ x, y, text });
+      }
+    }
+  }
+  if (found.length < want) throw new Error(`stress map: found ${found.length} selectable bodies, need ${want}`);
+  return found;
+}
+
+/** openEditorMap, editorSelect, editorDrag and testPlayStart on the 1500-body stress map. */
+async function stressEditorActions(s, base, { cpu }) {
+  const { page } = await s.open("stress-editor");
+  const canvas = await stressEditor(page, base);
+  if (cpu) await setCpu(await cdpOf(page), CPU_RATE);
+  // openEditorMap: menu to the drawn stress map, ACTION_N times (the draft stays saved).
+  const openMs = [];
+  for (let i = 0; i < ACTION_N; i++) {
+    await page.goto(base);
+    await menuName(page).waitFor();
+    openMs.push(await timedSpan(page, () => navTo(page, "Map editor"), { css: "canvas.editor-canvas" }));
+  }
+  // editorSelect: alternate between bodies, so every click changes the selection; confirmed by the inspector naming it.
+  const points = await bodyPoints(page, canvas, 4);
+  const select = [];
+  for (let i = 0; i < ACTION_N; i++) {
+    const p = points[i % points.length];
+    select.push(await timedSpan(page, () => page.mouse.click(p.x, p.y), { css: "h2.inspector-title", text: `^${p.text}$` }));
+  }
+  // editorDrag: pointer moves while dragging a body. Chromium delivers moves just before a frame, so the time runs to the end
+  // of the frame that draws the move: a task queued from that frame's rAF runs after the frame's rendering (the editor's draw included).
+  await page.evaluate(() => {
+    const q = (window.__qaDrag = { samples: [] });
+    window.addEventListener(
+      "pointermove",
+      (e) => {
+        if (e.buttons !== 1) return;
+        requestAnimationFrame(() => setTimeout(() => q.samples.push(performance.now() - e.timeStamp), 0));
+      },
+      { capture: true },
+    );
+  });
+  const start = points[0];
+  // The saved draft, compared after the drag: the case fails unless the drag changed it, so the samples are a real drag.
+  const draft = () => page.evaluate((key) => localStorage.getItem(key) ?? "", DRAFT_KEY);
+  // A press near a vertex of the selected body edits that vertex: clear the selection so the press starts a body move,
+  // and wait past the double-click time (a second click on a body opens its shapes).
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(800);
+  const before = await draft();
+  await page.mouse.move(start.x, start.y);
+  await page.mouse.down();
+  if (selfTestMode() === "action") {
+    // Self-test: a busy main thread on every move (a fifth of BUSY_MS: far over the band, and short enough for a drag of ACTION_N moves).
+    await page.evaluate((busy) => {
+      window.addEventListener(
+        "pointermove",
+        () => {
+          const end = performance.now() + busy;
+          while (performance.now() < end);
+        },
+        { capture: true },
+      );
+    }, BUSY_MS / 5);
+  }
+  for (let i = 1; i <= ACTION_N + 5; i++) {
+    await page.mouse.move(start.x + i * 3, start.y + (i % 2) * 2);
+    await page.waitForTimeout(80);
+  }
+  await page.mouse.up();
+  // The first moves start the drag (threshold, history entry); the last ACTION_N are the steady drag.
+  const drag = (await page.evaluate(() => window.__qaDrag.samples)).slice(-ACTION_N);
+  // The draft is saved shortly after an edit.
+  const deadline = Date.now() + 10000;
+  while ((await draft()) === before) {
+    if (Date.now() > deadline) throw new Error(`editorDrag: dragging from ${start.text} moved no body`);
+    await page.waitForTimeout(250);
+  }
+  await page.keyboard.press("Control+z");
+  // testPlayStart: Test play to the first match frame; Edit returns to the editor (untimed).
+  const play = page.getByRole("button", { name: "Test play", exact: true });
+  const testPlay = [];
+  for (let i = 0; i < ACTION_N; i++) {
+    testPlay.push(await timedSpan(page, () => play.click(), { css: ".offline.playing .offline-title", text: "^Test play$" }));
+    await button(page.locator(".offline-top"), "Edit").click();
+    await canvas.waitFor();
+  }
+  return actionResult({ openEditorMap: openMs, editorSelect: select, editorDrag: drag, testPlayStart: testPlay }, { cpu });
+}
+
+/**
+ * libraryMore: More maps in the library to the next page's cards. Pages of 24 entries are served by the instrument, and each
+ * card's detail (fetched for its thumbnail when it scrolls into view) gets a built-in map's code, so the client's cost is what is timed.
+ */
+async function libraryActions(s, base, { cpu }) {
+  const { page } = await s.open("library");
+  const PAGE = 24;
+  const codes = (await builtinMaps(base)).map((m) => m.code);
+  const entry = (id) => ({ id, name: `Stress map ${id}`, author: `maker${id % 97}`, votes: id % 50, plays: id % 300, created: "2026-11-01T12:00:00Z", visibility: "public", status: "approved", description: "A long description that wraps onto a second line in the card, like real maps do.", pick: false });
+  await page.route("**/api/library?**", (route) => {
+    const p = Number(new URL(route.request().url()).searchParams.get("page") ?? 0);
+    const maps = Array.from({ length: PAGE }, (_, i) => entry(100000 + p * PAGE + i));
+    return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(maps) });
+  });
+  await page.route(/\/api\/library\/\d+$/, (route) => {
+    const id = Number(new URL(route.request().url()).pathname.split("/").pop());
+    return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ ...entry(id), code: codes[id % codes.length] }) });
+  });
+  await page.goto(base);
+  await menuName(page).waitFor();
+  await navTo(page, "Library");
+  const cards = page.locator('ul[aria-label="maps"] > li');
+  await cards.nth(PAGE - 1).waitFor();
+  if (cpu) await setCpu(await cdpOf(page), CPU_RATE);
+  const more = page.locator("button.library-more");
+  const ms = [];
+  for (let i = 0; i < ACTION_N; i++) ms.push(await timedClick(page, more, cards.nth((i + 2) * PAGE - 1)));
+  return actionResult({ libraryMore: ms }, { cpu });
+}
+
 const INP_KEYS = "abcdefghijklmno";
 
 /** Keydown interactions in one control: Event Timing durations (ms), one per keypress, from a burst that starts now. */
@@ -670,6 +900,9 @@ const base = server.base;
 for (const engine of engines) {
   const browser = await launchEngine(engine);
   const results = new Results("perf", engine);
+  const only = process.env.QA_CASES ? new RegExp(process.env.QA_CASES) : null;
+  const runCase = results.case.bind(results);
+  results.case = (id, fn, opts) => (id === "probe" || !only || only.test(id) ? runCase(id, fn, opts) : Promise.resolve(undefined));
   const probe = await results.case("probe", (s) => probeEngine(s, base), { browser, base, info: true });
   const ctx = { engine, gpu: probe.metrics["probe.navigatorGpu"] === true, cdp: probe.metrics["probe.cdp"] === true };
   // Banded on chromium (T1-M); firefox and webkit load cases are measured and not banded (rubric D12 table).
@@ -757,6 +990,9 @@ for (const engine of engines) {
         createRoom: createActions,
         openSettings: settingsActions,
         saveEditorMap: editorActions,
+        replay: replayActions,
+        stressEditor: stressEditorActions,
+        libraryMore: libraryActions,
         inp: inpCase,
       };
       for (const [name, fn] of Object.entries(cases)) {

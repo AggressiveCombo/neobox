@@ -18,7 +18,7 @@ Headless browser instruments for the neobox client. Each one drives the built cl
 | `QA_SELF_TEST` | unset | instruments with a self-test: see each section |
 | `QA_ONLY` | all keys | `audit.mjs` |
 | `QA_INVENTORY` | session `local/INVENTORY.md` | `audit.mjs` |
-| `QA_FPS_MS`, `QA_SOAK_MS`, `QA_SOAK_RUNS` | 30000, 600000, 3 | `perf.mjs` |
+| `QA_FPS_MS`, `QA_SOAK_MS`, `QA_SOAK_RUNS`, `QA_ACTION_N`, `QA_CASES` | 30000, 600000, 3, 20, all cases | `perf.mjs` |
 
 ### Output layout
 
@@ -32,10 +32,11 @@ Rubric D12. Load time, LCP, CLS, frame pacing and a heap soak.
 
 - Command: `cd client && QA_OUT=<dir> bun qa/perf.mjs`
 - Engines: all three. Banded (9-level gates) on chromium only; firefox and webkit are measured and reported as info. CDP-only cases are N/A off chromium.
-- Cases: `probe`, `load.none.{webgpu,webgl2}` (3 cold loads each, worst run), `load.fast3g`, `load.slow3g`, `fps.{practice,match}.{webgpu,webgl2}` and the `.cpu4x` variants (chromium), `soak.t1m.run{1..3}` and `soak.t3t4x.run{1..3}` (chromium, default 10 min each).
+- Cases: `probe`, `load.none.{webgpu,webgl2}` (3 cold loads each, worst run), `load.fast3g`, `load.slow3g`, `fps.{practice,match}.{webgpu,webgl2}` and the `.cpu4x` variants (chromium), `soak.t1m.run{1..3}` and `soak.t3t4x.run{1..3}` (chromium, default 10 min each), and the action-latency cases `ui.<name>.{t1m,t3t4x}` (chromium, `ui.actionMs.p95.<action>`, n = `QA_ACTION_N` per action, gate p95 < 300 ms).
+- Heavy surfaces (RUBRIC rev8b): `ui.replay` (openReplay, seekReplay on `fixtures/active-4min.nbreplay`, a 4-minute two-player match with both players active), `ui.stressEditor` (openEditorMap, editorSelect, editorDrag, testPlayStart on `fixtures/stress-map.json`, 1500 bodies, loaded as the editor draft), `ui.libraryMore` (More maps on pages of 24 served by the instrument, so only the client's cost is timed). A surface a player can fill with large content is measured with large content.
 - Soak metric: `perf.heapMB.endMinusStartPct` compares the median of 3 heap samples after a 60 s warm-up with the median of the last 3, so JIT warm-up is not counted as retention; the slope and the 15 % band are unchanged. The soak runs with no e2e pixel probe (`startPractice` `pixels: false`). Details in `PERF.md`.
 - Renderer: `webgl2` hides `navigator.gpu` before the app boots; the case fails if the app reports another renderer. `webgpu` is N/A when the probe finds no `navigator.gpu`.
-- Self-test: `QA_SELF_TEST=jank` (busy main thread during the fps cases; must fail the fps gates) or `QA_SELF_TEST=leak` (retained heap during soak; must fail the soak gates). The file has no case filter, so a self-test runs all cases; to keep it short: `QA_SOAK_MS=60000 QA_SOAK_RUNS=1 QA_FPS_MS=6000 QA_ENGINES=chromium`.
+- Self-test: `QA_SELF_TEST=jank` (busy main thread during the fps cases; must fail the fps gates), `QA_SELF_TEST=leak` (retained heap during soak; must fail the soak gates) or `QA_SELF_TEST=action` (busy time inside every action window; must fail every `ui.*` case). `QA_CASES` limits the run to matching case ids, e.g. `QA_CASES='^ui\.(replay|stressEditor|libraryMore)\.' QA_ENGINES=chromium`.
 - Known limits: LCP and CLS support is read from the probe (`probe.lcpSupported`, `probe.clsSupported`); where an engine does not report the entry the case records the miss rather than inventing a value. Soak uses the practice mode only.
 - Full details and gates: `PERF.md`.
 
