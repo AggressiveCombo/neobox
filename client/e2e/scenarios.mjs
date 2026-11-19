@@ -1270,7 +1270,8 @@ async function trainingSlowEngine(s) {
   await page.getByText("Loading the training hall…", { exact: true }).waitFor();
   release();
   await page.locator(".training-text").waitFor();
-  check((await page.getByText("could not load", { exact: false }).count()) === 0, "the hall reported a load failure");
+  // Visible text only: the app keeps hidden notes mounted (the jukebox's "could not load" note) that are not about the hall.
+  check((await page.getByText("could not load", { exact: false }).filter({ visible: true }).count()) === 0, "the hall reported a load failure");
   await button(page, "Leave").click();
   await menuName(page).waitFor();
   return "training opened before the engine; lesson shown once it loaded";
