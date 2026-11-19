@@ -595,8 +595,7 @@ async function matchQuickXp(s) {
 
 /** hud-error: the server refuses sign-out; the player stays signed in and an error toast shows (hud.ts signOut). */
 async function matchSignOutError(s) {
-  // The service worker passes /api through, and WebKit does not route those fetches for a controlled page: block it here so the route below sees the sign-out.
-  const host = await signedIn(s, "acct", uniqueName("acct"), { serviceWorkers: "block" });
+  const host = await signedIn(s, "acct", uniqueName("acct"));
   await createRoom(host, s.base, uniqueName("room"), { isPublic: true });
   await startMatch(host, []);
   const { page } = host;

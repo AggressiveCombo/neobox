@@ -439,10 +439,6 @@ async function reconnectSlowEngine(s) {
   const gate = new Promise((resolve) => {
     release = resolve;
   });
-  // the worker fetches the engine itself, where a route cannot see it (firefox, webkit): drop it so the reload asks the network
-  await guest.page.evaluate(async () => {
-    for (const registration of await navigator.serviceWorker.getRegistrations()) await registration.unregister();
-  });
   await guest.context.route("**/neobox.wasm*", async (route) => {
     asked();
     await gate;

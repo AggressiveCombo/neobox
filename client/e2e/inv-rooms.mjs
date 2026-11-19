@@ -680,9 +680,6 @@ async function reconnectRoomNotice(s) {
   const gate = new Promise((resolve) => {
     release = resolve;
   });
-  await guest.page.evaluate(async () => {
-    for (const registration of await navigator.serviceWorker.getRegistrations()) await registration.unregister();
-  });
   await guest.context.route("**/neobox.wasm*", async (route) => {
     asked();
     await gate;
