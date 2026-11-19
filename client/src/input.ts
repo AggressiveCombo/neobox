@@ -135,9 +135,23 @@ export function onInputProfile(fn: () => void): () => void {
   };
 }
 
+// Connected pads, counted from the connect events once first asked (one scan seeds pads already exposed),
+// so frames without a pad skip navigator.getGamepads(), which costs ~3% of a match frame in Chromium.
+let padCount = -1;
+
+function padsPresent(): boolean {
+  if (padCount < 0) {
+    // The Gamepad API is absent in insecure contexts (plain http) and some WebKit builds.
+    if (typeof navigator.getGamepads !== "function") return false;
+    padCount = navigator.getGamepads().filter((pad) => pad !== null).length;
+    window.addEventListener("gamepadconnected", () => padCount++);
+    window.addEventListener("gamepaddisconnected", () => (padCount = Math.max(0, padCount - 1)));
+  }
+  return padCount > 0;
+}
+
 function readPad(): number {
-  // The Gamepad API is absent in insecure contexts (plain http) and some WebKit builds.
-  if (typeof navigator.getGamepads !== "function") return 0;
+  if (!padsPresent()) return 0;
   let m = 0;
   for (const pad of navigator.getGamepads()) {
     if (!pad) continue;
@@ -155,7 +169,7 @@ function readPad(): number {
 
 /** Whether `index` (standard mapping) is held on any connected pad; holding it marks the pad profile. */
 export function padButton(index: number): boolean {
-  if (typeof navigator.getGamepads !== "function") return false;
+  if (!padsPresent()) return false;
   let held = false;
   for (const pad of navigator.getGamepads()) if (pad?.buttons[index]?.pressed === true) held = true;
   if (held) setProfile("pad");
