@@ -2,8 +2,9 @@
 // controls, the room chat and its commands and notices, and the links into rooms. Each scenario names the rows it proves
 // in `inv`; every check asserts a row's "shows" column, with role/name locators where they exist.
 
+import os from "node:os";
 import { deflateSync } from "node:zlib";
-import { ADMIN_PASSWORD, PASSWORD, adminRoom, button, createRoom, dismissPhoneSplash, ipIn, joinByInvite, matchWithGuest, menuName, navTo, playFromMenu, regionServers, roomCode, roomTitle, signedIn, sleep, startMatch, uniqueName } from "./lib.mjs";
+import { ADMIN_PASSWORD, PASSWORD, adminRoom, button, createRoom, dismissPhoneSplash, freePort, ipIn, joinByInvite, matchWithGuest, menuName, navTo, playFromMenu, regionServers, roomCode, roomTitle, signedIn, sleep, startMatch, startServer, uniqueName } from "./lib.mjs";
 
 const check = (ok, message) => {
   if (!ok) throw new Error(message);
@@ -136,10 +137,17 @@ async function quickWaiting(s) {
   await button(page, "Quick play").click();
   await page.getByRole("heading", { name: "Quick play", exact: true }).waitFor();
   await quickName(page).fill(uniqueName("quick"));
+  // A lone quick play starts within milliseconds of the join, so the loader can be gone before a poll sees it: record it in the DOM.
+  await page.evaluate(() => {
+    window.__sawMatching = false;
+    new MutationObserver(() => {
+      if (document.body.textContent.includes("Finding a room…")) window.__sawMatching = true;
+    }).observe(document.body, { childList: true, subtree: true, characterData: true });
+  });
   await quickCard(page, "Sweaty Bois").getByRole("button", { name: "Play Sweaty Bois", exact: true }).click();
-  await page.getByText("Finding a room…", { exact: true }).waitFor({ state: "visible" });
   // the match starts by itself: alone in it, the HUD carries the matching notice
   await page.locator(".hud-leave").waitFor({ state: "visible", timeout: 20_000 });
+  check(await page.evaluate(() => window.__sawMatching), "the Finding a room… loader was never shown");
   await page.locator(".hud-matching").getByText("Waiting for other players to join this arena...", { exact: true }).waitFor({ state: "visible" });
   check(await page.getByRole("button", { name: "Cancel", exact: true }).count() === 0, "Cancel is still shown once the match is up");
   return "Finding a room… then the HUD matching notice; no Cancel once matched";
@@ -651,13 +659,43 @@ async function joinAnnounced(s) {
   return `host chat: "${guestName} has joined the game"`;
 }
 
-/** room-notice: a player who joins while the match runs sees "match in progress" and is not put in the match. */
+/** late join: a player who joins while the match runs is taken into it at the current tick (server join), so the HUD opens and the match announces the join. */
 async function lateJoinNotice(s) {
   const { code, roomName } = await matchWithGuest(s);
   const late = await s.open("late", { name: uniqueName("late") });
-  await joinByInvite(late, s.base, code, roomName);
-  await late.page.locator("p.room-notice").filter({ hasText: "match in progress" }).waitFor({ state: "visible" });
-  return `late joiner: p.room-notice "match in progress"`;
+  await late.page.goto(`${s.base}/${code}`);
+  await late.page.locator(".hud-root").waitFor({ state: "visible" });
+  await late.page.getByText("has joined the game").first().waitFor({ state: "visible" });
+  return `late joiner: the match HUD opens with "has joined the game" (room ${roomName})`;
+}
+
+/** room-notice: a player who reloads into a running match sees "match in progress" on the room screen while the engine still loads (the resumed match waits for the engine). */
+async function reconnectRoomNotice(s) {
+  const { guest, guestName, code } = await matchWithGuest(s, { clipboard: false });
+  let asked = () => {};
+  const requested = new Promise((resolve) => {
+    asked = resolve;
+  });
+  let release = () => {};
+  const gate = new Promise((resolve) => {
+    release = resolve;
+  });
+  await guest.page.evaluate(async () => {
+    for (const registration of await navigator.serviceWorker.getRegistrations()) await registration.unregister();
+  });
+  await guest.context.route("**/neobox.wasm*", async (route) => {
+    asked();
+    await gate;
+    await route.continue();
+  });
+  await guest.page.reload();
+  const didAsk = await Promise.race([requested.then(() => true), sleep(10_000).then(() => false)]);
+  check(didAsk, "the reloaded page did not ask for the engine");
+  await guest.page.locator("p.room-notice").filter({ hasText: "match in progress" }).waitFor({ state: "visible" });
+  check((await guest.page.locator(".hud-leave").count()) === 0, "the match opened before the engine loaded");
+  release();
+  await guest.page.locator(".hud-leave").waitFor({ state: "visible", timeout: 20_000 });
+  return `reloaded guest ${guestName} sees p.room-notice "match in progress" in ${code} until the engine loads`;
 }
 
 /** room-tabs, room-tabs-320: on a phone the room sections are tabs (Players, Match, Chat) and a tab selects its section; at 320x256 the tab bar sits inside the viewport. */
@@ -793,9 +831,10 @@ async function matchRecordEnd(s) {
   await matchChat(page, "/record");
   await page.getByText("Clip saved. It can play on the main menu.", { exact: true }).waitFor({ state: "visible" });
   await matchChat(page, "/end");
+  await page.getByText("The host ended the match. No experience was awarded.", { exact: true }).waitFor({ state: "visible" });
   await page.locator(".hud-leave").waitFor({ state: "hidden" });
   await roomTitle(page).waitFor({ state: "visible" });
-  return `/record -> "Clip saved. It can play on the main menu."; /end -> match HUD hidden, room shown`;
+  return `/record -> "Clip saved. It can play on the main menu."; /end -> "The host ended the match. No experience was awarded."; match HUD hidden, room shown`;
 }
 
 /** room-replay-save: End match on the HUD, confirmed, leaves "Save replay" in the room; it downloads a .nbreplay. */
@@ -985,6 +1024,36 @@ async function tooComplex(s) {
   return `1100 overlapping dynamic boxes -> "This map is too complex to simulate, so the match was stopped."`;
 }
 
+/** A server on the LAN address (plain http, not a secure context): Invite either copies the link or shows it to copy by hand, and that link opens the room. */
+async function lanServer() {
+  const ip = Object.values(os.networkInterfaces()).flat().find((i) => i?.family === "IPv4" && !i.internal)?.address;
+  if (!ip) throw new Error("no LAN IPv4 address for the invite scenario");
+  const port = await freePort();
+  const main = await startServer({ port, extraEnv: { NEOBOX_BIND: `0.0.0.0:${port}` } });
+  return { base: `http://${ip}:${port}`, nodeBase: null, output: main.output, stop: main.stop };
+}
+
+async function inviteLan(s) {
+  const roomName = uniqueName("lan");
+  const host = await s.open("host", { name: uniqueName("host") });
+  const code = await createRoom(host, s.base, roomName, { isPublic: true });
+  await button(host.page, "Invite").click();
+  const dialog = host.page.getByRole("dialog", { name: "Copy the invite link", exact: true });
+  const toast = host.page.getByText("Invite link copied.", { exact: true });
+  await dialog.or(toast).first().waitFor({ state: "visible" });
+  let how = "copied";
+  if (await dialog.isVisible()) {
+    how = "shown in the dialog";
+    const value = await dialog.getByLabel("Invite link", { exact: true }).inputValue();
+    check(value === `${s.base}/${code}`, `the invite field reads ${value}, expected ${s.base}/${code}`);
+    const guest = await s.open("guest", { name: uniqueName("guest") });
+    await guest.page.goto(value);
+    await roomTitle(guest.page, roomName).waitFor();
+  }
+  return `Invite on plain http over the LAN: link ${how}`;
+}
+
+
 // sys-no-map is NOT-REACHABLE (see chatTeams).
 export const roomsInvScenarios = [
   { name: "inv rooms menu home", inv: ["menu-home", "menu-news-btn", "menu-mute-btn", "menu-fullscreen-btn"], run: menuHome },
@@ -1012,7 +1081,9 @@ export const roomsInvScenarios = [
   { name: "inv rooms invite links", inv: ["app-invite", "app-invite-query"], run: inviteLinks },
   { name: "inv rooms region redirect", inv: ["redirect"], topology: regionServers, run: regionRedirect },
   { name: "inv rooms join announced", inv: ["sys-joined"], run: joinAnnounced },
-  { name: "inv rooms late join notice", inv: ["room-notice"], run: lateJoinNotice },
+  { name: "inv rooms late join notice", inv: [], run: lateJoinNotice },
+  { name: "inv rooms reconnect room notice", inv: ["room-notice"], run: reconnectRoomNotice },
+  { name: "inv rooms invite lan", inv: ["app-invite-lan"], topology: lanServer, run: inviteLan },
   { name: "inv rooms phone tabs", inv: ["room-tabs", "room-tabs-320"], run: roomTabs },
   { name: "inv rooms report player", inv: ["room-row-menu", "room-report-modal"], run: reportPlayer },
   { name: "inv rooms chat host", inv: ["cmd-host", "sys-host"], run: chatHost },
