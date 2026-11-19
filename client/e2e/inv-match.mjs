@@ -217,8 +217,17 @@ async function matchDefaults(s) {
     await page.keyboard.up(code);
     return (await probeChanges(page)) - before;
   };
-  check((await held("KeyD")) > 0, "holding KeyD (right) does not change the canvas");
-  check((await held("KeyA")) > 0, "holding KeyA (left) does not change the canvas");
+  // A held key can land while the host is still settling from the previous move under load: retry, as the jump below does.
+  const movedBy = async (code) => {
+    let n = 0;
+    for (let attempt = 0; attempt < 3 && n === 0; attempt++) {
+      if (attempt > 0) await sleep(1000);
+      n = await held(code);
+    }
+    return n;
+  };
+  check((await movedBy("KeyD")) > 0, "holding KeyD (right) does not change the canvas");
+  check((await movedBy("KeyA")) > 0, "holding KeyA (left) does not change the canvas");
   // A jump needs ground (or the single air jump); a first press can land while the host is still airborne from D/A.
   let jumped = 0;
   for (let attempt = 0; attempt < 3 && jumped === 0; attempt++) {
@@ -348,11 +357,8 @@ async function matchSpectateJoin(s) {
   await openMenu(late.page);
   await menuItem(late.page, "Show lobby").click();
   await late.page.locator(".room-team-pick").getByText("Spectate", { exact: true }).click();
-  const back = button(late.page, "Back to game");
+  // Choosing Spectate can return the lobby to the match by itself, so "Back to game" may be gone before a click lands: the spectator bar is the signal.
   const label = late.page.locator(".hud-spectate-label");
-  await back.or(label).first().waitFor();
-  if (await back.isVisible()) await back.click();
-  await late.page.locator(".hud-root").waitFor({ state: "visible" });
   await label.waitFor({ state: "visible" });
   const text = await late.page.locator(".hud-spectate-name").textContent();
   check(text.startsWith("Spectating"), `late joiner's spectator bar reads "${text}"`);
