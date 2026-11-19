@@ -1,18 +1,18 @@
-// Test play: the editor's map in the engine's offline game, one player, endless.
+// Test play: the editor's map in the engine's offline game, in the chosen game mode.
 // The caller shows `nodes` in its playing layer (root class "offline playing",
 // see offline.css) and calls `destroy` when it goes back to editing.
 
 import type { AppCtx } from "../ctx";
 import type { Engine } from "../engine";
 import { FrameLoop } from "../local-loop";
-import type { MatchStart } from "../protocol";
+import { TEAM_BLUE, TEAM_FFA, TEAM_RED, isTeamMode, type MatchStart } from "../protocol";
 import { h } from "../ui/dom";
 import { touchControls } from "../ui/screens/hud";
 import type { Obj } from "./schema";
 
 const TICK_HZ = 30;
-/** Solo play never ends a match, so it runs with endless respawns. */
-const ENDLESS = 6;
+/** Solo play never ends a match: the default test play mode, with endless respawns. */
+export const TEST_PLAY_DEFAULT_MODE = 6;
 
 export interface TestPlay {
   /** Children of the playing layer: touch controls and the top bar. */
@@ -25,13 +25,18 @@ function errText(err: unknown): string {
 }
 
 /**
- * Start a one-player game on `doc`. Rejects with the engine's message when the
- * map is invalid. `onLeave` runs when the player taps Edit, or with a message
- * when the game stops on an error.
+ * Start a game on `doc` in `mode`. Endless is the player alone; any other mode adds one idle dummy (on the other
+ * team in team modes), so modes that end when one player is left still play. Rejects with the engine's message
+ * when the map is invalid. `onLeave` runs when the player taps Edit, or with a message when the game stops on an error.
  */
-export async function startTestPlay(ctx: AppCtx, doc: Obj, onLeave: (failure?: string) => void): Promise<TestPlay> {
+export async function startTestPlay(ctx: AppCtx, doc: Obj, mode: number, onLeave: (failure?: string) => void): Promise<TestPlay> {
   const eng: Engine = await ctx.engine();
-  const names: ReadonlyMap<number, string> = new Map([[0, ctx.store.state.name || "You"]]);
+  const solo = mode === TEST_PLAY_DEFAULT_MODE;
+  const team = isTeamMode(mode);
+  const names: ReadonlyMap<number, string> = new Map([
+    [0, ctx.store.state.name || "You"],
+    [1, "Dummy"],
+  ]);
   let running = false;
   let destroyed = false;
 
@@ -45,13 +50,13 @@ export async function startTestPlay(ctx: AppCtx, doc: Obj, onLeave: (failure?: s
       seed: Math.floor(Math.random() * 0x7fffffff),
       start_tick: 0,
       tick_hz: TICK_HZ,
-      players: [[0, 1]],
-      settings: { game_mode: ENDLESS },
+      players: solo ? [[0, TEAM_FFA]] : [[0, team ? TEAM_RED : TEAM_FFA], [1, team ? TEAM_BLUE : TEAM_FFA]],
+      settings: { game_mode: mode },
       maps: [],
       intro: false,
       rotation: false,
     };
-    eng.localStart({ ...match, map: doc }, 0);
+    eng.localStart({ ...match, map: doc, dummies: solo ? [] : [{ id: 1, mode: "idle" }] }, 0);
     running = true;
   };
 

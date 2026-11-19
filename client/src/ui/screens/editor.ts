@@ -10,7 +10,8 @@ import { EditorController, lagVerdict, type Tool } from "../../editor/controller
 import { downloadMap, mapText, parseMap, readMapFile } from "../../editor/io";
 import { renderInspector } from "../../editor/inspector";
 import { emptyDoc, hexColor, type Obj } from "../../editor/schema";
-import { startTestPlay, type TestPlay } from "../../editor/testplay";
+import { TEST_PLAY_DEFAULT_MODE, startTestPlay, type TestPlay } from "../../editor/testplay";
+import { GAME_MODES } from "../../protocol";
 import type { Screen } from "../../state";
 import { h } from "../dom";
 import { icon, type IconName } from "../icons";
@@ -77,11 +78,11 @@ export const editorScreen: ScreenFactory = (ctx) => {
   const sideToggleLabel = h("span", { class: "editor-label" }, "Map settings");
   const sideToggle = h(
     "button",
-    { type: "button", class: "editor-side-toggle", "aria-expanded": "false", "aria-controls": inspectorId, onclick: () => setSide(sideEl.dataset.open !== "true") },
+    { type: "button", class: "editor-side-toggle", "aria-expanded": "false", "aria-controls": inspectorId, onclick: () => setSide(!sideShown()) },
     icon("sliders-horizontal"),
     sideToggleLabel,
   );
-  // The inspector toggle heads the tool rail on phones and narrow windows (hidden on desktop).
+  // The inspector toggle heads the tool rail on phones and narrow windows, and on desktop while the inspector is collapsed.
   const settingsGroup = h("div", { class: "editor-tool-group editor-settings-group" }, sideToggle);
 
   const toolButtons = new Map<Tool, HTMLButtonElement>();
@@ -136,6 +137,12 @@ export const editorScreen: ScreenFactory = (ctx) => {
     icon("play"),
     h("span", { class: "editor-label" }, "Test play"),
   );
+  // The game mode test play starts in; a map built for one mode (a deathball, a capture map) is tried in that mode.
+  const modeSelect = h(
+    "select",
+    { class: "editor-mode", "aria-label": "Test play mode", title: "Test play mode" },
+    ...GAME_MODES.map((m) => h("option", { value: String(m.id), selected: m.id === TEST_PLAY_DEFAULT_MODE }, m.name)),
+  );
   // Edit and view controls float over the canvas, bottom right.
   viewport.append(
     h(
@@ -164,7 +171,7 @@ export const editorScreen: ScreenFactory = (ctx) => {
     h("button", { type: "button", class: "quiet", "aria-label": "Back", onclick: () => void exit() }, icon("arrow-left"), h("span", { class: "editor-label" }, "Back")),
     h("h1", { class: "editor-sr" }, "Map editor"),
     nameInput,
-    h("div", { class: "editor-top-tools" }, undoBtn, redoBtn, saveBtn, useRoomBtn, testBtn, menuBtn),
+    h("div", { class: "editor-top-tools" }, undoBtn, redoBtn, saveBtn, useRoomBtn, modeSelect, testBtn, menuBtn),
   );
 
   // Footer under the canvas: the hint. Phones hide it visually; it is still announced.
@@ -262,9 +269,14 @@ export const editorScreen: ScreenFactory = (ctx) => {
   const editorNodes: Node[] = toolsPart;
   root.replaceChildren(...editorNodes);
 
-  /** Opens or closes the inspector sheet on phones (no effect on desktop). */
+  // Desktop docks the inspector beside the canvas (collapsible); narrow windows slide it over the canvas as a sheet.
+  const desktopSide = matchMedia("(min-width: 900px)");
+  const sideShown = (): boolean => (desktopSide.matches ? sideEl.dataset.collapsed !== "true" : sideEl.dataset.open === "true");
+
+  /** Shows or hides the inspector: the sheet on phones and narrow windows, the docked panel on desktop. */
   function setSide(open: boolean): void {
-    sideEl.dataset.open = String(open);
+    if (desktopSide.matches) sideEl.dataset.collapsed = String(!open);
+    else sideEl.dataset.open = String(open);
     sideToggle.setAttribute("aria-expanded", String(open));
   }
 
@@ -603,7 +615,7 @@ export const editorScreen: ScreenFactory = (ctx) => {
     starting = true;
     let started: TestPlay;
     try {
-      started = await startTestPlay(ctx, ctrl.doc, (failure) => stopTest(failure));
+      started = await startTestPlay(ctx, ctrl.doc, Number(modeSelect.value), (failure) => stopTest(failure));
     } catch (err) {
       ctx.toast(`Could not start test play: ${errorText(err)}`, "error");
       return;
@@ -634,7 +646,8 @@ export const editorScreen: ScreenFactory = (ctx) => {
     if (failure) ctx.toast(`Test play stopped: ${failure}`, "error");
   }
 
-  setSide(false);
+  // Docked and shown on desktop; the sheet starts closed on phones and narrow windows.
+  setSide(desktopSide.matches);
   refresh();
   markSaved();
   window.addEventListener("beforeunload", onBeforeUnload);

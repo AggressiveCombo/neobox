@@ -53,6 +53,12 @@
   gap: 8px;
 }
 
+/* Test play's game mode: sized to its longest name, not the full width selects take elsewhere. */
+.editor-mode {
+  width: auto;
+  max-width: 11em;
+}
+
 .editor-name {
   flex: 1 1 220px;
   min-width: 0;
@@ -270,6 +276,26 @@
   flex-direction: column;
   min-height: 0;
   background: var(--surface);
+}
+
+/* Desktop: the inspector's close button collapses the panel and the canvas takes its width; the rail's toggle brings it back. */
+@media (min-width: 900px) {
+  .editor-side[data-collapsed="true"] {
+    display: none;
+  }
+
+  .editor-body:has(> .editor-side[data-collapsed="true"]) .editor-settings-group {
+    display: flex;
+  }
+
+  .editor-body:has(> .editor-side[data-collapsed="true"]) .editor-side-toggle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    min-height: var(--control);
+    background: var(--surface);
+  }
 }
 
 .editor-side-head {

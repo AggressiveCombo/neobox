@@ -928,6 +928,45 @@ async function matchEditorInspector(s) {
   return "shape Offset X and Y survive a reselect after Enter and blur commits";
 }
 
+/**
+ * editor-inspector-close and editor-testplay-mode: on desktop the inspector's close button hides the panel (the canvas
+ * widens) and the rail's Map settings button brings it back; test play starts in the mode picked beside it.
+ */
+async function matchEditorPanelAndMode(s) {
+  const user = await signedIn(s, "edpanel");
+  const { page } = user;
+  await navTo(page, "Map editor");
+  const canvas = editorCanvas(page);
+  await canvas.waitFor({ state: "visible" });
+  const side = page.getByRole("complementary", { name: "Inspector", exact: true });
+  await side.waitFor({ state: "visible" });
+  const wideBefore = (await waitStable(canvas)).width;
+  await page.getByRole("button", { name: "Close inspector", exact: true }).click();
+  await side.waitFor({ state: "hidden" });
+  const wideAfter = (await waitStable(canvas)).width;
+  check(wideAfter > wideBefore + 100, `the canvas did not take the inspector's width (${wideBefore} -> ${wideAfter})`);
+  await page.locator(".editor-side-toggle").click();
+  await side.waitFor({ state: "visible" });
+  // A built-in map from the editor's Menu: a fresh map has no ground, so nobody would stay on screen.
+  await button(page, "Menu").click();
+  await page.locator(".editor-list .editor-item").first().click();
+  const replace = page.getByRole("alertdialog", { name: "Replace the current map?", exact: true });
+  if (await replace.waitFor({ state: "visible", timeout: 1500 }).then(() => true, () => false)) {
+    await replace.getByRole("button", { name: "Replace map", exact: true }).click();
+  }
+  await page.locator(".editor-menu").waitFor({ state: "hidden" });
+  const mode = page.getByRole("combobox", { name: "Test play mode", exact: true });
+  check((await mode.inputValue()) === "6", `test play mode starts at ${await mode.inputValue()}, not Endless`);
+  await mode.selectOption({ label: "Team rounds" });
+  await button(page, "Test play").click();
+  await page.locator(".offline.playing").waitFor();
+  // A mode other than Endless adds a dummy opponent: the overlay's QA hook draws two name labels (you and Dummy).
+  await page.waitForFunction(() => (globalThis.__qaDraw?.rects ?? []).filter((r) => r.kind === "label").length === 2, null, { timeout: 15000 });
+  await button(page.locator(".offline-top"), "Edit").click();
+  await canvas.waitFor({ state: "visible" });
+  return `inspector closes (canvas ${wideBefore} -> ${wideAfter} px) and reopens; test play in Team rounds runs with a dummy opponent`;
+}
+
 /** postgame: a private room's signed-in host and guest see Game over with an XP line; Escape closes the host's; the room roster shows the level chip. */
 async function matchPostgame(s) {
   const user = await signedIn(s, "pg");
@@ -993,5 +1032,6 @@ export const matchInvScenarios = [
   { name: "inv match editor save", inv: ["editor-save-dialog", "editor-toasts"], run: matchEditorSave },
   { name: "inv match editor guest", inv: ["editor-save-dialog (guest)"], run: matchEditorGuest },
   { name: "inv match editor inspector", inv: ["editor-inspector-shape"], run: matchEditorInspector },
+  { name: "inv match editor panel and mode", inv: ["editor-inspector-close", "editor-testplay-mode"], run: matchEditorPanelAndMode },
   { name: "inv match postgame", inv: ["postgame"], run: matchPostgame },
 ];
