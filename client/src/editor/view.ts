@@ -98,6 +98,61 @@ function gridStep(scale: number): number {
   return STEPS[STEPS.length - 1]!;
 }
 
+/**
+ * The static layer (grid, frame, bodies, joints, markers) of the last drawn view. A selection
+ * change only changes the overlays, so the layer is blitted from here instead of redrawn.
+ */
+interface Layer {
+  target: HTMLCanvasElement;
+  doc: Obj;
+  view: View;
+  w: number;
+  h: number;
+  dpr: number;
+  scopeBi: number;
+  bitmap: HTMLCanvasElement;
+}
+let layer: Layer | null = null;
+let scratch: HTMLCanvasElement | null = null;
+
+/** Draw the static layer for this view into an offscreen bitmap of the canvas's device size. */
+function renderLayer(target: HTMLCanvasElement, doc: Obj, view: View, w: number, h: number, dpr: number, scopeBi: number): Layer | null {
+  const pw = Math.round(w * dpr);
+  const ph = Math.round(h * dpr);
+  const bitmap = scratch ?? document.createElement("canvas");
+  scratch = bitmap;
+  if (bitmap.width !== pw || bitmap.height !== ph) {
+    bitmap.width = pw;
+    bitmap.height = ph;
+  }
+  const c = bitmap.getContext("2d");
+  if (!c) return null;
+  c.setTransform(dpr, 0, 0, dpr, 0, 0);
+  c.clearRect(0, 0, w, h);
+  c.fillStyle = BG;
+  c.fillRect(0, 0, w, h);
+
+  const S = (p: Pt): Pt => screenAt(view, w, h, p);
+  drawGrid(c, view, w, h);
+  drawFrame(c, doc, S);
+  const k = view.scale;
+  const ox = w / 2 - view.x * k;
+  const oy = h / 2 - view.y * k;
+  getList(doc, "body").forEach((b, i) => {
+    const geo = bodyGeo(b);
+    const bb = geo.bounds;
+    if (!bb || bb.maxX * k + ox < 0 || bb.minX * k + ox > w || bb.maxY * k + oy < 0 || bb.minY * k + oy > h) return;
+    drawBody(c, geo, b["50"] === true, ox, oy, k, scopeBi >= 0 && i !== scopeBi ? 0.3 : 1);
+  });
+  c.globalAlpha = scopeBi >= 0 ? 0.3 : 1;
+  for (const j of getList(doc, "joint")) drawJoint(c, doc, j, S);
+  for (const kind of MARKER_KINDS) {
+    for (const o of getList(doc, kind)) drawMarker(c, kind, screenAt(view, w, h, { x: num(o, "1", 0), y: num(o, "2", 0) }));
+  }
+  c.globalAlpha = 1;
+  return { target, doc, view: { ...view }, w, h, dpr, scopeBi, bitmap };
+}
+
 /** Draw the whole map and the scene's overlays onto `canvas`. */
 export function drawMap(canvas: HTMLCanvasElement, doc: Obj, view: View, scene: Scene): void {
   const w = canvas.clientWidth;
@@ -112,29 +167,16 @@ export function drawMap(canvas: HTMLCanvasElement, doc: Obj, view: View, scene: 
   }
   const c = canvas.getContext("2d");
   if (!c) return;
+  const scope = scene.scope;
+  const scopeBi = scope ? scope.bi : -1;
+  const hit = layer !== null && layer.target === canvas && layer.doc === doc && layer.view.x === view.x && layer.view.y === view.y && layer.view.scale === view.scale && layer.w === w && layer.h === h && layer.dpr === dpr && layer.scopeBi === scopeBi;
+  if (!hit) layer = renderLayer(canvas, doc, view, w, h, dpr, scopeBi);
+  c.setTransform(1, 0, 0, 1, 0, 0);
+  c.clearRect(0, 0, pw, ph);
+  if (layer) c.drawImage(layer.bitmap, 0, 0, pw, ph);
   c.setTransform(dpr, 0, 0, dpr, 0, 0);
-  c.fillStyle = BG;
-  c.fillRect(0, 0, w, h);
 
   const S = (p: Pt): Pt => screenAt(view, w, h, p);
-  drawGrid(c, view, w, h);
-  drawFrame(c, doc, S);
-  const k = view.scale;
-  const ox = w / 2 - view.x * k;
-  const oy = h / 2 - view.y * k;
-  const scope = scene.scope;
-  getList(doc, "body").forEach((b, i) => {
-    const geo = bodyGeo(b);
-    const bb = geo.bounds;
-    if (!bb || bb.maxX * k + ox < 0 || bb.minX * k + ox > w || bb.maxY * k + oy < 0 || bb.minY * k + oy > h) return;
-    drawBody(c, geo, b["50"] === true, ox, oy, k, scope && i !== scope.bi ? 0.3 : 1);
-  });
-  c.globalAlpha = scope ? 0.3 : 1;
-  for (const j of getList(doc, "joint")) drawJoint(c, doc, j, S);
-  for (const kind of MARKER_KINDS) {
-    for (const o of getList(doc, kind)) drawMarker(c, kind, screenAt(view, w, h, { x: num(o, "1", 0), y: num(o, "2", 0) }));
-  }
-  c.globalAlpha = 1;
   drawSelection(c, doc, scene.sel, S);
   const scoped = scope ? getList(doc, "body")[scope.bi] : undefined;
   if (scope && scoped) drawScope(c, scoped, scope.shapes, view.scale, S);
