@@ -805,7 +805,10 @@ async function matchEditorMenu(s) {
   await button(page, "Menu").click();
   await menu.waitFor({ state: "visible" });
   const maps = await builtinMaps(s.base);
-  check((await items.count()) === maps.length, `editor menu lists ${await items.count()} maps, the server has ${maps.length}`);
+  // The list fills from the server after the menu opens: wait for the full count, then report the count that was checked.
+  await page.waitForFunction((n) => document.querySelectorAll(".editor-list .editor-item").length >= n, maps.length, { timeout: 10000 }).catch(() => {});
+  const listed = await items.count();
+  check(listed === maps.length, `editor menu lists ${listed} maps, the server has ${maps.length}`);
   await button(page, "Close").click();
   await menu.waitFor({ state: "hidden" });
   // a built-in map from the menu; a fresh editor has nothing to replace
