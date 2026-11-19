@@ -277,7 +277,9 @@ export const libraryScreen: ScreenFactory = (ctx) => {
     });
     const shown = new Set(maps.map((m) => m.id));
     for (const id of cards.keys()) if (!shown.has(id)) cards.delete(id);
-    grid.replaceChildren(...els);
+    const have = Array.from(grid.children);
+    if (!fresh && have.every((el, i) => el === els[i])) grid.append(...els.slice(have.length));
+    else grid.replaceChildren(...els);
     status.textContent = "";
     const empty = maps.length === 0;
     emptyBox.replaceChildren(...(empty ? [h("p", null, emptyText())] : []));

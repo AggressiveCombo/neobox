@@ -17,6 +17,8 @@ const SPEEDS = [0.25, 0.5, 1, 2, 4];
 const JUMP_SECONDS = 5;
 /** Largest wall-clock step applied per frame, so a background tab does not skip the replay. */
 const MAX_FRAME_MS = 250;
+/** Wall-clock budget per idle slice of keyframe building (the pass is about a second of CPU for a 10-minute replay). */
+const BUILD_SLICE_MS = 8;
 
 function errText(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
@@ -62,6 +64,7 @@ export const replayScreen: ScreenFactory = (ctx) => {
   let speed = 1;
   let follow = -1;
   let dragging = false;
+  let buildTimer: number | undefined;
 
   // Playing-view controls (rebuilt by showPlaying).
   let playBtn: HTMLButtonElement | null = null;
@@ -95,9 +98,30 @@ export const replayScreen: ScreenFactory = (ctx) => {
 
   let releaseTop: (() => void) | null = null;
 
+  function stopBuild(): void {
+    window.clearTimeout(buildTimer);
+    buildTimer = undefined;
+  }
+
+  /** Build the loaded replay's seek keyframes in idle slices, starting after the first painted frames so opening does not wait on it. */
+  function buildKeyframes(eng: Engine, loaded: ReplayInfo): void {
+    let msPerTick = 0;
+    const slice = (): void => {
+      buildTimer = undefined;
+      if (info !== loaded) return;
+      const ticks = msPerTick > 0 ? Math.max(1, Math.floor(BUILD_SLICE_MS / msPerTick)) : 1;
+      const t0 = performance.now();
+      const done = eng.replayBuildKeyframes(ticks);
+      msPerTick = (performance.now() - t0) / ticks;
+      if (!done) buildTimer = window.setTimeout(slice, 0);
+    };
+    requestAnimationFrame(() => requestAnimationFrame(() => (buildTimer = window.setTimeout(slice, 0))));
+  }
+
   /** Stop the loop and release the loaded replay (idempotent). */
   function unload(): void {
     loop.stop();
+    stopBuild();
     if (info) engine?.replayClose();
     info = null;
     board = null;
@@ -254,6 +278,7 @@ export const replayScreen: ScreenFactory = (ctx) => {
     follow = loaded.players[0]?.[0] ?? -1;
     showPlaying();
     loop.start();
+    buildKeyframes(eng, loaded);
   }
 
   async function openFile(file: File): Promise<void> {

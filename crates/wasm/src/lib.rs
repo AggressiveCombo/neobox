@@ -108,8 +108,7 @@ impl DummyMode {
 
 /// The scripted players of a start JSON: `dummies: [{id, mode}]`, `mode`
 /// being "idle" or "left_even". Absent: none.
-fn parse_dummies(text: &[u8]) -> Result<Vec<Dummy>, String> {
-    let v: serde_json::Value = serde_json::from_slice(text).map_err(|e| e.to_string())?;
+fn parse_dummies(v: &serde_json::Value) -> Result<Vec<Dummy>, String> {
     let Some(list) = v.get("dummies") else { return Ok(Vec::new()) };
     let list = list.as_array().ok_or("dummies must be a list")?;
     list.iter()
@@ -620,26 +619,49 @@ pub extern "C" fn nb_replay_close() {
     with(|a| a.replay = None)
 }
 
+/// Simulate up to `max_ticks` more ticks of the loaded replay into its seek keyframes (idle-time work
+/// so seeks step at most one interval). Returns 1 when the whole replay has keyframes, else 0.
+#[unsafe(no_mangle)]
+pub extern "C" fn nb_replay_build_keyframes(max_ticks: u32) -> i32 {
+    with(|a| {
+        let Some(p) = a.replay.as_mut() else { return fail(a, "no replay loaded") };
+        p.build_keyframes(max_ticks) as i32
+    })
+}
+
 // ------------------------------------------------------------------ local games
 
 /// # Safety
 /// `json`/`len` must describe readable memory.
 ///
 /// Start an offline game from a `MatchStart` (JSON); `player` is the local
-/// player's id (one of `start.players`).
+/// player's id (one of `start.players`). A `map` object in the JSON is the
+/// map itself (used instead of `maps` codes), parsed once with no
+/// encode/decode round trip.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn nb_local_start(json: u32, len: u32, player: u32) -> i32 {
     let text = unsafe { bytes(json, len) };
     with(|a| {
-        let dummies = match parse_dummies(text) {
+        let mut root: serde_json::Value = match serde_json::from_slice(text) {
+            Ok(v) => v,
+            Err(e) => return fail(a, e),
+        };
+        let dummies = match parse_dummies(&root) {
             Ok(d) => d,
             Err(e) => return fail(a, e),
         };
-        let start: MatchStart = match serde_json::from_slice(text) {
+        let map = root.as_object_mut().and_then(|o| o.remove("map"));
+        let start: MatchStart = match serde_json::from_value(root) {
             Ok(s) => s,
             Err(e) => return fail(a, e),
         };
-        match ServerMatch::new(start) {
+        let m = match map {
+            Some(map) => MapData::from_json(&map)
+                .map(|md| ServerMatch::with_maps(start, vec![State::from_map(&md)]))
+                .map_err(|e| e.to_string()),
+            None => ServerMatch::new(start).map_err(|e| e.to_string()),
+        };
+        match m {
             Ok(m) => {
                 a.local = Some(LocalGame { prev: m.state.clone(), m, player, acc: 0.0, seq: 0, latch: 0, last_mask: 0, applied: 0, dummies });
                 0

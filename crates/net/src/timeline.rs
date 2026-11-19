@@ -184,9 +184,14 @@ pub struct InputReceipt {
 impl ServerMatch {
     pub fn new(start: MatchStart) -> Result<ServerMatch, MatchError> {
         let maps = load_maps(&start)?;
+        Ok(ServerMatch::with_maps(start, maps))
+    }
+
+    /// A match on the lobby states `maps` (at least one; `start.maps` is not read).
+    pub fn with_maps(start: MatchStart, maps: Vec<State>) -> ServerMatch {
         let gs = start.settings.clone();
         let state = match_start(&maps[0], start.seed, &start.players, &gs, start.intro, start.rotation);
-        Ok(ServerMatch {
+        ServerMatch {
             tick: start.start_tick,
             current: TickData { tick: start.start_tick, ..TickData::default() },
             start,
@@ -198,7 +203,7 @@ impl ServerMatch {
             input_seqs: Vec::new(),
             masks: Vec::new(),
             last_outcome: Outcome::Running,
-        })
+        }
     }
 
     /// Process an input frame of `player`. Changes already processed are

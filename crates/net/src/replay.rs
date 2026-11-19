@@ -14,8 +14,8 @@ use std::collections::BTreeMap;
 /// 2: map bodies carry the race fields (snapshots of version 1 no longer
 /// decode; version-1 recordings from a match start still play).
 pub const REPLAY_VERSION: u32 = 2;
-/// Ticks between the states [`ReplayPlayer`] keeps for seeking backwards.
-pub const KEYFRAME_INTERVAL: u32 = 300;
+/// Ticks between the states [`ReplayPlayer`] keeps for seeking; built as playback passes them or by [`ReplayPlayer::build_keyframes`].
+pub const KEYFRAME_INTERVAL: u32 = 60;
 /// Longest accepted recording (ticks): 10 hours at 30 Hz.
 pub const MAX_REPLAY_TICKS: usize = 30 * 60 * 60 * 10;
 
@@ -222,6 +222,8 @@ pub struct ReplayPlayer {
     /// (tick, state) every KEYFRAME_INTERVAL ticks from `first`, filled as
     /// playback passes them
     keyframes: Vec<(u32, State)>,
+    /// where [`ReplayPlayer::build_keyframes`] stopped: (tick, state), kept between slices
+    build: Option<(u32, State)>,
     tick: u32,
     prev: State,
     state: State,
@@ -245,15 +247,16 @@ impl ReplayPlayer {
         for &(p, m) in &replay.held {
             inputs.record(p, first.saturating_sub(1), m);
         }
+        let count = ticks.len() as u32;
         let mut events = Vec::with_capacity(ticks.len());
-        for t in &ticks {
+        for t in ticks {
             for &(p, m) in &t.changes {
                 inputs.record(p, t.tick, m);
             }
-            events.push(t.events.clone());
+            events.push(t.events);
         }
         Ok(ReplayPlayer {
-            end: first + ticks.len() as u32,
+            end: first + count,
             replay,
             sim: Sim::new(),
             gs,
@@ -262,6 +265,7 @@ impl ReplayPlayer {
             events,
             first,
             keyframes: vec![(first, state.clone())],
+            build: None,
             tick: first,
             prev: state.clone(),
             state,
@@ -303,31 +307,58 @@ impl ReplayPlayer {
         let (next, _) = advance(&mut self.sim, &self.state, &self.scratch, evs.as_ref(), &self.gs, &self.maps);
         self.prev = std::mem::replace(&mut self.state, next);
         self.tick += 1;
-        if (self.tick - self.first) % KEYFRAME_INTERVAL == 0 && self.keyframes.last().is_some_and(|k| k.0 < self.tick) {
+        // keep the chain contiguous: a keyframe only where the last one is one interval back
+        if self.keyframes.last().is_some_and(|k| k.0 + KEYFRAME_INTERVAL == self.tick) {
             self.keyframes.push((self.tick, self.state.clone()));
         }
         true
     }
 
-    /// Move to the state at `tick` (clamped to the recording).
+    /// Move to the state at `tick` (clamped to the recording). Restores the nearest
+    /// keyframe before `tick - 1` when that saves stepping, then steps; afterwards
+    /// `states()` holds the states at `tick - 1` and `tick` (the interpolation pair).
     pub fn seek(&mut self, tick: u32) {
         let tick = tick.clamp(self.first, self.end);
-        if tick < self.tick || tick - self.tick > KEYFRAME_INTERVAL {
-            // nearest known keyframe at or before the target
-            let k = match self.keyframes.binary_search_by_key(&tick, |k| k.0) {
-                Ok(i) => i,
-                Err(i) => i - 1,
-            };
-            if self.keyframes[k].0 > self.tick || tick < self.tick {
-                let (t, s) = &self.keyframes[k];
-                self.tick = *t;
-                self.state = s.clone();
-                self.prev = s.clone();
-            }
+        let before = tick.saturating_sub(1).max(self.first);
+        let k = self.keyframes.partition_point(|k| k.0 <= before) - 1;
+        let (kt, ks) = &self.keyframes[k];
+        if tick < self.tick || *kt > self.tick {
+            self.tick = *kt;
+            self.state = ks.clone();
+            self.prev = ks.clone();
         }
         while self.tick < tick {
             self.step();
         }
+    }
+
+    /// Simulate up to `max_ticks` more ticks past the last keyframe, keeping one every
+    /// [`KEYFRAME_INTERVAL`]. The position is kept between calls, so a slice may be shorter
+    /// than an interval. Returns true once the whole recording has keyframes.
+    /// Meant for idle time after loading, so seeks step at most one interval.
+    pub fn build_keyframes(&mut self, max_ticks: u32) -> bool {
+        let last = self.keyframes.len() - 1;
+        let (mut tick, mut state) = match self.build.take() {
+            Some(c) if c.0 >= self.keyframes[last].0 => c,
+            _ => (self.keyframes[last].0, self.keyframes[last].1.clone()),
+        };
+        let mut budget = max_ticks;
+        while tick < self.end && budget > 0 {
+            let i = (tick - self.first) as usize;
+            self.inputs.masks_at(tick, &mut self.scratch);
+            let evs = to_events(&self.events[i]);
+            let (next, _) = advance(&mut self.sim, &state, &self.scratch, evs.as_ref(), &self.gs, &self.maps);
+            state = next;
+            tick += 1;
+            budget -= 1;
+            if (tick - self.first) % KEYFRAME_INTERVAL == 0 {
+                self.keyframes.push((tick, state.clone()));
+            }
+        }
+        if tick < self.end {
+            self.build = Some((tick, state));
+        }
+        tick >= self.end
     }
 }
 
@@ -415,5 +446,48 @@ mod tests {
         assert_eq!((player.first_tick(), player.end_tick()), (0, 600));
         player.seek(600);
         assert_eq!(checksum(player.states().1), hashes[600]);
+    }
+
+    #[test]
+    fn seek_lands_on_the_stepped_state() {
+        let start = start();
+        let mut server = ServerMatch::new(start.clone()).unwrap();
+        let mut recorder = ReplayRecorder::new(start, None);
+        let mut hashes = vec![checksum(&server.state)];
+        let mut rng = 0x2545_f491_4f6c_dd1du64;
+        for _ in 0..900 {
+            for p in 0..2u32 {
+                rng ^= rng << 13;
+                rng ^= rng >> 7;
+                rng ^= rng << 17;
+                if rng % 5 == 0 {
+                    let frame = InputFrame { ack: 0, now: server.tick, changes: vec![(server.input_ack(p) + 1, server.tick, (rng >> 8) as u8)] };
+                    server.submit(p, &frame);
+                }
+            }
+            recorder.push(&[server.step()]);
+            hashes.push(checksum(&server.state));
+        }
+        let source = Replay::from_json(recorder.finish(vec![(0, "a".to_string())]).to_json().as_bytes()).unwrap();
+
+        // forward, backward, onto a keyframe, the end, and the first tick; keyframes built in the background before the third
+        let mut player = ReplayPlayer::new(source.clone()).unwrap();
+        for (n, target) in [430u32, 61, 300, 899, 1].into_iter().enumerate() {
+            if n == 2 {
+                while !player.build_keyframes(100) {}
+            }
+            player.seek(target);
+            let seeked = checksum(player.states().1);
+            let seeked_prev = checksum(player.states().0);
+            let mut stepped = ReplayPlayer::new(source.clone()).unwrap();
+            while stepped.tick() < target {
+                stepped.step();
+            }
+            let stepped_now = checksum(stepped.states().1);
+            eprintln!("seek tick {target}: seek {seeked:016x} stepped-from-zero {stepped_now:016x}");
+            assert_eq!(seeked, stepped_now, "tick {target}");
+            assert_eq!(seeked, hashes[target as usize], "tick {target} vs server");
+            assert_eq!(seeked_prev, checksum(stepped.states().0), "prev of tick {target}");
+        }
     }
 }

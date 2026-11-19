@@ -8,7 +8,6 @@ import { FrameLoop } from "../local-loop";
 import type { MatchStart } from "../protocol";
 import { h } from "../ui/dom";
 import { touchControls } from "../ui/screens/hud";
-import { mapText } from "./io";
 import type { Obj } from "./schema";
 
 const TICK_HZ = 30;
@@ -32,7 +31,6 @@ function errText(err: unknown): string {
  */
 export async function startTestPlay(ctx: AppCtx, doc: Obj, onLeave: (failure?: string) => void): Promise<TestPlay> {
   const eng: Engine = await ctx.engine();
-  const code = ctx.wasm.mapEncode(mapText(doc));
   const names: ReadonlyMap<number, string> = new Map([[0, ctx.store.state.name || "You"]]);
   let running = false;
   let destroyed = false;
@@ -49,11 +47,11 @@ export async function startTestPlay(ctx: AppCtx, doc: Obj, onLeave: (failure?: s
       tick_hz: TICK_HZ,
       players: [[0, 1]],
       settings: { game_mode: ENDLESS },
-      maps: [code],
+      maps: [],
       intro: false,
       rotation: false,
     };
-    eng.localStart(match, 0);
+    eng.localStart({ ...match, map: doc }, 0);
     running = true;
   };
 

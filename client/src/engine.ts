@@ -41,6 +41,7 @@ export interface NeoboxExports {
   nb_replay_load(json: number, jsonLen: number): number;
   nb_replay_frame(tickF: number, follow: number): number;
   nb_replay_close(): void;
+  nb_replay_build_keyframes(maxTicks: number): number;
   nb_local_start(json: number, jsonLen: number, player: number): number;
   nb_local_frame(dtMs: number, mask: number): number;
   nb_local_end(): void;
@@ -62,9 +63,10 @@ export interface FrameView {
 
 export class EngineError extends Error {}
 
-/** Start options of an offline game: a `MatchStart` plus its scripted training dummies. */
+/** Start options of an offline game: a `MatchStart` plus its scripted training dummies. `map`, when set, is the map itself and is used instead of `maps`. */
 export interface LocalStart extends MatchStart {
   dummies?: { id: number; mode: "idle" | "left_even" }[];
+  map?: object;
 }
 
 export class Engine {
@@ -245,6 +247,13 @@ export class Engine {
 
   replayClose(): void {
     this.x.nb_replay_close();
+  }
+
+  /** Simulate up to `maxTicks` more ticks into the loaded replay's seek keyframes; true once all are built. */
+  replayBuildKeyframes(maxTicks: number): boolean {
+    const rc = this.x.nb_replay_build_keyframes(maxTicks);
+    this.check(rc);
+    return rc === 1;
   }
 
   /** Start an offline game (practice, training, editor test-play) as player `player` of `start.players`. */
