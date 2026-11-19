@@ -104,8 +104,9 @@ function gridStep(scale: number): number {
 }
 
 /**
- * The static layer (grid, frame, bodies except `skip`) of the last drawn view. Joints and markers
- * are drawn on every frame; a selection change blits the layer instead of redrawing it.
+ * The static layer (grid, frame, bodies except `skip`) of the last drawn view, rendered LAYER_MARGIN CSS px past each
+ * edge of the canvas. Joints and markers are drawn on every frame; a selection change blits the layer, and a pan blits it
+ * shifted, redrawing only once the view has moved more than the margin.
  */
 interface Layer {
   target: HTMLCanvasElement;
@@ -119,6 +120,18 @@ interface Layer {
   bitmap: HTMLCanvasElement;
 }
 let layer: Layer | null = null;
+/** CSS px drawn past each canvas edge, so a pan of up to this much reuses the layer. */
+const LAYER_MARGIN = 256;
+/** A view change within this long of the previous one is part of a gesture: the layer is moved and scaled, not redrawn. */
+const GESTURE_MS = 250;
+/** The full render after a gesture follows this long after its last view change. */
+const SETTLE_MS = 120;
+/** The view of the previous draw and when it last changed. */
+let lastView: View | null = null;
+let lastChange = -Infinity;
+let settleTimer: number | undefined;
+/** Set while the settle timer draws: the gesture is over, so the layer is redrawn. */
+let settling = false;
 let scratch: HTMLCanvasElement | null = null;
 const NO_SKIP: readonly number[] = [];
 
@@ -130,10 +143,13 @@ function drawBodyAt(c: CanvasRenderingContext2D, body: Obj, i: number, scopeBi: 
   drawBody(c, geo, body["50"] === true, ox, oy, k, scopeBi >= 0 && i !== scopeBi ? 0.3 : 1);
 }
 
-/** Draw the static layer for this view into an offscreen bitmap of the canvas's device size. */
+/** Draw the static layer for this view into an offscreen bitmap: the canvas's device size plus LAYER_MARGIN on each side, same centre. */
 function renderLayer(target: HTMLCanvasElement, doc: Obj, view: View, w: number, h: number, dpr: number, scopeBi: number, skip: readonly number[]): Layer | null {
-  const pw = Math.round(w * dpr);
-  const ph = Math.round(h * dpr);
+  // The layer is a larger viewport on the same centre, so every drawing helper works on it unchanged.
+  const lw = w + 2 * LAYER_MARGIN;
+  const lh = h + 2 * LAYER_MARGIN;
+  const pw = Math.round(lw * dpr);
+  const ph = Math.round(lh * dpr);
   const bitmap = scratch ?? document.createElement("canvas");
   scratch = bitmap;
   if (bitmap.width !== pw || bitmap.height !== ph) {
@@ -143,19 +159,19 @@ function renderLayer(target: HTMLCanvasElement, doc: Obj, view: View, w: number,
   const c = bitmap.getContext("2d");
   if (!c) return null;
   c.setTransform(dpr, 0, 0, dpr, 0, 0);
-  c.clearRect(0, 0, w, h);
+  c.clearRect(0, 0, lw, lh);
   c.fillStyle = BG;
-  c.fillRect(0, 0, w, h);
+  c.fillRect(0, 0, lw, lh);
 
-  const S = (p: Pt): Pt => screenAt(view, w, h, p);
-  drawGrid(c, view, w, h);
+  const S = (p: Pt): Pt => screenAt(view, lw, lh, p);
+  drawGrid(c, view, lw, lh);
   drawFrame(c, doc, S);
   const k = view.scale;
-  const ox = w / 2 - view.x * k;
-  const oy = h / 2 - view.y * k;
+  const ox = lw / 2 - view.x * k;
+  const oy = lh / 2 - view.y * k;
   const skipped = new Set(skip);
   getList(doc, "body").forEach((b, i) => {
-    if (!skipped.has(i)) drawBodyAt(c, b, i, scopeBi, ox, oy, k, w, h);
+    if (!skipped.has(i)) drawBodyAt(c, b, i, scopeBi, ox, oy, k, lw, lh);
   });
   return { target, doc, view: { ...view }, w, h, dpr, scopeBi, skip, bitmap };
 }
@@ -179,11 +195,55 @@ export function drawMap(canvas: HTMLCanvasElement, doc: Obj, view: View, scene: 
   const moving = scene.moving;
   const layerDoc = moving ? moving.base : doc;
   const skip = moving ? moving.bodies : NO_SKIP;
-  const hit = layer !== null && layer.target === canvas && layer.doc === layerDoc && layer.view.x === view.x && layer.view.y === view.y && layer.view.scale === view.scale && layer.w === w && layer.h === h && layer.dpr === dpr && layer.scopeBi === scopeBi && layer.skip.length === skip.length && layer.skip.every((v, i) => v === skip[i]);
-  if (!hit) layer = renderLayer(canvas, layerDoc, view, w, h, dpr, scopeBi, skip);
+  const same =
+    layer !== null &&
+    layer.target === canvas &&
+    layer.doc === layerDoc &&
+    layer.w === w &&
+    layer.h === h &&
+    layer.dpr === dpr &&
+    layer.scopeBi === scopeBi &&
+    layer.skip.length === skip.length &&
+    layer.skip.every((v, i) => v === skip[i]);
+  // The layer's scale relative to the view, and where the layer's centre lands on the canvas (CSS px).
+  const ratio = layer ? view.scale / layer.view.scale : 1;
+  const shiftX = layer ? (layer.view.x - view.x) * view.scale : 0;
+  const shiftY = layer ? (layer.view.y - view.y) * view.scale : 0;
+  const exact = same && ratio === 1 && Math.abs(shiftX) <= LAYER_MARGIN && Math.abs(shiftY) <= LAYER_MARGIN;
+  // During a pan or zoom gesture (view changes closer than GESTURE_MS apart), the last layer is shown moved and scaled,
+  // and one full render follows SETTLE_MS after the last change, so a gesture never redraws every body on every event.
+  const now = performance.now();
+  const changed = lastView === null || lastView.x !== view.x || lastView.y !== view.y || lastView.scale !== view.scale;
+  const inGesture = changed && now - lastChange < GESTURE_MS;
+  if (changed) {
+    lastChange = now;
+    lastView = { ...view };
+  }
+  const approx = !exact && same && !settling && inGesture;
+  window.clearTimeout(settleTimer);
+  if (approx) {
+    settleTimer = window.setTimeout(() => {
+      settling = true;
+      drawMap(canvas, doc, view, scene);
+      settling = false;
+    }, SETTLE_MS);
+  } else if (!exact) layer = renderLayer(canvas, layerDoc, view, w, h, dpr, scopeBi, skip);
   c.setTransform(1, 0, 0, 1, 0, 0);
   c.clearRect(0, 0, pw, ph);
-  if (layer) c.drawImage(layer.bitmap, 0, 0, pw, ph);
+  if (layer) {
+    if (approx) {
+      c.fillStyle = BG;
+      c.fillRect(0, 0, pw, ph);
+      const lw = (w + 2 * LAYER_MARGIN) * ratio;
+      const lh = (h + 2 * LAYER_MARGIN) * ratio;
+      c.drawImage(layer.bitmap, (w / 2 + shiftX - lw / 2) * dpr, (h / 2 + shiftY - lh / 2) * dpr, lw * dpr, lh * dpr);
+    } else {
+      // Whole device pixels, so the blit copies the layer 1:1 (a fractional offset would resample and blur it).
+      const sx = exact ? shiftX : 0;
+      const sy = exact ? shiftY : 0;
+      c.drawImage(layer.bitmap, Math.round((sx - LAYER_MARGIN) * dpr), Math.round((sy - LAYER_MARGIN) * dpr));
+    }
+  }
   c.setTransform(dpr, 0, 0, dpr, 0, 0);
 
   const S = (p: Pt): Pt => screenAt(view, w, h, p);
