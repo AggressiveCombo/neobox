@@ -87,6 +87,17 @@ const qaView: { cx: number; cy: number; w: number; h: number; aw: number; ah: nu
 };
 Object.assign(globalThis, { __qaCam: qaView });
 
+/** QA hook: the menu backdrop's drawn view (backdropCamera), which computeCamera's hook above does not carry. The game never reads it. */
+export function publishBackdrop(cam: Camera, arenaW: number, arenaH: number): void {
+  qaView.cx = cam.cx;
+  qaView.cy = cam.cy;
+  qaView.w = cam.w;
+  qaView.h = cam.h;
+  qaView.aw = arenaW;
+  qaView.ah = arenaH;
+  qaView.away = cam.away;
+}
+
 /**
  * The view for a frame. It frames every live sprite: the subject (the followed player, else the held
  * centre, else the arena middle) is weighted into the middle of the group, the view zooms out only as far

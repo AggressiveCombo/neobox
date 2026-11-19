@@ -3,7 +3,7 @@
 
 import { fetchBuiltinMaps, fetchTicket, wsUrl, wsUrlFor, type BuiltinMap } from "./api";
 import { sfx } from "./audio";
-import { backdropCamera, computeCamera, fitView, fitViewBetween, findLocal, publishView, type ViewRect } from "./camera";
+import { backdropCamera, computeCamera, fitView, fitViewBetween, findLocal, publishBackdrop, publishView, type ViewRect } from "./camera";
 import type { AppCtx, HudHandle, Present, ScreenFactory, ScreenHandle, WasmTools } from "./ctx";
 import type { Engine } from "./engine";
 import { engineLoader } from "./engine-loader";
@@ -245,6 +245,7 @@ export function start(): Store<AppState> {
     scene.localKeys = input.mask();
     const local = computeCamera(scene, findLocal(scene));
     const cam = backdrop ? backdropCamera(scene, menuBox(), window.innerWidth, window.innerHeight) : local;
+    if (backdrop) publishBackdrop(cam, scene.arenaW, scene.arenaH);
     renderer?.draw(scene, cam);
     overlay.draw(scene, cam, names, tickHz, chrome);
     lastPresent = performance.now();
