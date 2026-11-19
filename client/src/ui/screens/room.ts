@@ -820,7 +820,7 @@ export const roomScreen: ScreenFactory = (ctx: AppCtx) => {
     const eng = await ctx.engine();
     const json = eng.replayExport(room.players.map((p): [number, string] => [p.id, p.name]));
     if (json === null) {
-      ctx.toast("no finished match to save", "error");
+      ctx.toast("nothing has been recorded to save", "error");
       return;
     }
     const blob = await gzipText(json);
