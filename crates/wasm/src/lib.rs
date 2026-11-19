@@ -541,7 +541,9 @@ pub extern "C" fn nb_frame(now_ms: f64, mask: u32) -> u32 {
         s.local_input(target, mask | a.latch);
         let rb_before = s.rollbacks;
         let feed_age = now_ms - a.last_feed_ms;
-        s.set_feed_silent(feed_age > FEED_SILENT_MS);
+        // silent feed, or a clock lead the cap would hold back (the feed late, not silent)
+        let lead = tick_f - s.known as f64;
+        s.set_feed_silent(feed_age > FEED_SILENT_MS || lead > s.prediction_cap() as f64);
         let stalled = s.advance_to(target + 1);
         if a.warm_ms.is_none() {
             let st = &mut a.stall;
