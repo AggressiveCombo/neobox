@@ -532,15 +532,28 @@ function scopeInspector(doc: Obj, bi: number, body: Obj, shapes: readonly number
   );
 }
 
-/** Editable rows for every shape of a body. */
+/** Editable rows for every shape of a body. A shape's rows are built when its disclosure first opens, so a selection with many shapes does not rebuild them all. A lone shape starts open. */
 function shapesBlock(doc: Obj, bodyIdx: number, commit: (next: Obj) => void): HTMLElement {
   const body = getList(doc, "body")[bodyIdx] ?? {};
   const shapes = list(body, "s");
+  const lone = shapes.length === 1;
   return h(
     "section",
     { class: "inspector-group inspector-shapes" },
     h("h3", null, `Shapes (${shapes.length})`),
-    ...shapes.map((s, si) => shapeBlock(doc, bodyIdx, body, si, asObj(s), commit)),
+    ...shapes.map((s, si) => {
+      const shape = asObj(s);
+      const details = h("details", { class: "inspector-shape-details", open: lone }, h("summary", null, `Shape ${si + 1}`));
+      let built = false;
+      const build = (): void => {
+        if (built || !details.open) return;
+        built = true;
+        details.append(shapeBlock(doc, bodyIdx, body, si, shape, commit));
+      };
+      details.addEventListener("toggle", build);
+      build();
+      return details;
+    }),
   );
 }
 

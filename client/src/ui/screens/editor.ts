@@ -270,6 +270,9 @@ export const editorScreen: ScreenFactory = (ctx) => {
 
   // Shows the current selection's inspector. Focus inside the inspector with an
   // unchanged selection keeps the inspector as it is, so typing is not interrupted.
+  // The rebuild runs in a later task: rebuilding inside the press would dirty the
+  // DOM ahead of the press's hit test, which forces a full style and layout.
+  let inspectorTimer = 0;
   function refreshInspector(): void {
     const doc = ctrl.doc;
     const scope = ctrl.scope;
@@ -279,15 +282,19 @@ export const editorScreen: ScreenFactory = (ctx) => {
     shownDoc = doc;
     if (sameSel && inspectorHost.contains(document.activeElement)) return;
     shownSel = sel;
-    inspectorHost.replaceChildren(
-      renderInspector({
-        doc,
-        sel: ctrl.sel,
-        scope,
-        commit: (next) => ctrl.commit(next),
-        remove: () => ctrl.removeSelection(),
-      }),
-    );
+    const shownItems = ctrl.sel;
+    clearTimeout(inspectorTimer);
+    inspectorTimer = window.setTimeout(() => {
+      inspectorHost.replaceChildren(
+        renderInspector({
+          doc,
+          sel: shownItems,
+          scope,
+          commit: (next) => ctrl.commit(next),
+          remove: () => ctrl.removeSelection(),
+        }),
+      );
+    }, 0);
   }
 
   function refresh(): void {
