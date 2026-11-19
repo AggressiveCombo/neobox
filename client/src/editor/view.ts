@@ -39,6 +39,11 @@ export interface Scene {
   preview: Preview | null;
   /** Body being edited in place: other bodies are dimmed and its selected shapes highlighted. */
   scope: { bi: number; shapes: readonly number[] } | null;
+  /**
+   * A gesture moves `bodies` of `base` (the doc it started from): the static layer keeps those bodies
+   * where `base` has them and they are drawn from `doc` on each frame, so a drag does not redraw the map.
+   */
+  moving: { base: Obj; bodies: readonly number[] } | null;
 }
 
 export function clampScale(s: number): number {
@@ -99,8 +104,8 @@ function gridStep(scale: number): number {
 }
 
 /**
- * The static layer (grid, frame, bodies, joints, markers) of the last drawn view. A selection
- * change only changes the overlays, so the layer is blitted from here instead of redrawn.
+ * The static layer (grid, frame, bodies except `skip`) of the last drawn view. Joints and markers
+ * are drawn on every frame; a selection change blits the layer instead of redrawing it.
  */
 interface Layer {
   target: HTMLCanvasElement;
@@ -110,13 +115,23 @@ interface Layer {
   h: number;
   dpr: number;
   scopeBi: number;
+  skip: readonly number[];
   bitmap: HTMLCanvasElement;
 }
 let layer: Layer | null = null;
 let scratch: HTMLCanvasElement | null = null;
+const NO_SKIP: readonly number[] = [];
+
+/** Draw body `i` when its bounds meet the canvas; (ox, oy) is the map origin in CSS px and k the px per unit. */
+function drawBodyAt(c: CanvasRenderingContext2D, body: Obj, i: number, scopeBi: number, ox: number, oy: number, k: number, w: number, h: number): void {
+  const geo = bodyGeo(body);
+  const bb = geo.bounds;
+  if (!bb || bb.maxX * k + ox < 0 || bb.minX * k + ox > w || bb.maxY * k + oy < 0 || bb.minY * k + oy > h) return;
+  drawBody(c, geo, body["50"] === true, ox, oy, k, scopeBi >= 0 && i !== scopeBi ? 0.3 : 1);
+}
 
 /** Draw the static layer for this view into an offscreen bitmap of the canvas's device size. */
-function renderLayer(target: HTMLCanvasElement, doc: Obj, view: View, w: number, h: number, dpr: number, scopeBi: number): Layer | null {
+function renderLayer(target: HTMLCanvasElement, doc: Obj, view: View, w: number, h: number, dpr: number, scopeBi: number, skip: readonly number[]): Layer | null {
   const pw = Math.round(w * dpr);
   const ph = Math.round(h * dpr);
   const bitmap = scratch ?? document.createElement("canvas");
@@ -138,19 +153,11 @@ function renderLayer(target: HTMLCanvasElement, doc: Obj, view: View, w: number,
   const k = view.scale;
   const ox = w / 2 - view.x * k;
   const oy = h / 2 - view.y * k;
+  const skipped = new Set(skip);
   getList(doc, "body").forEach((b, i) => {
-    const geo = bodyGeo(b);
-    const bb = geo.bounds;
-    if (!bb || bb.maxX * k + ox < 0 || bb.minX * k + ox > w || bb.maxY * k + oy < 0 || bb.minY * k + oy > h) return;
-    drawBody(c, geo, b["50"] === true, ox, oy, k, scopeBi >= 0 && i !== scopeBi ? 0.3 : 1);
+    if (!skipped.has(i)) drawBodyAt(c, b, i, scopeBi, ox, oy, k, w, h);
   });
-  c.globalAlpha = scopeBi >= 0 ? 0.3 : 1;
-  for (const j of getList(doc, "joint")) drawJoint(c, doc, j, S);
-  for (const kind of MARKER_KINDS) {
-    for (const o of getList(doc, kind)) drawMarker(c, kind, screenAt(view, w, h, { x: num(o, "1", 0), y: num(o, "2", 0) }));
-  }
-  c.globalAlpha = 1;
-  return { target, doc, view: { ...view }, w, h, dpr, scopeBi, bitmap };
+  return { target, doc, view: { ...view }, w, h, dpr, scopeBi, skip, bitmap };
 }
 
 /** Draw the whole map and the scene's overlays onto `canvas`. */
@@ -169,16 +176,33 @@ export function drawMap(canvas: HTMLCanvasElement, doc: Obj, view: View, scene: 
   if (!c) return;
   const scope = scene.scope;
   const scopeBi = scope ? scope.bi : -1;
-  const hit = layer !== null && layer.target === canvas && layer.doc === doc && layer.view.x === view.x && layer.view.y === view.y && layer.view.scale === view.scale && layer.w === w && layer.h === h && layer.dpr === dpr && layer.scopeBi === scopeBi;
-  if (!hit) layer = renderLayer(canvas, doc, view, w, h, dpr, scopeBi);
+  const moving = scene.moving;
+  const layerDoc = moving ? moving.base : doc;
+  const skip = moving ? moving.bodies : NO_SKIP;
+  const hit = layer !== null && layer.target === canvas && layer.doc === layerDoc && layer.view.x === view.x && layer.view.y === view.y && layer.view.scale === view.scale && layer.w === w && layer.h === h && layer.dpr === dpr && layer.scopeBi === scopeBi && layer.skip.length === skip.length && layer.skip.every((v, i) => v === skip[i]);
+  if (!hit) layer = renderLayer(canvas, layerDoc, view, w, h, dpr, scopeBi, skip);
   c.setTransform(1, 0, 0, 1, 0, 0);
   c.clearRect(0, 0, pw, ph);
   if (layer) c.drawImage(layer.bitmap, 0, 0, pw, ph);
   c.setTransform(dpr, 0, 0, dpr, 0, 0);
 
   const S = (p: Pt): Pt => screenAt(view, w, h, p);
+  const k = view.scale;
+  const ox = w / 2 - view.x * k;
+  const oy = h / 2 - view.y * k;
+  const bodies = getList(doc, "body");
+  for (const i of skip) {
+    const b = bodies[i];
+    if (b) drawBodyAt(c, b, i, scopeBi, ox, oy, k, w, h);
+  }
+  c.globalAlpha = scopeBi >= 0 ? 0.3 : 1;
+  for (const j of getList(doc, "joint")) drawJoint(c, doc, j, S);
+  for (const kind of MARKER_KINDS) {
+    for (const o of getList(doc, kind)) drawMarker(c, kind, screenAt(view, w, h, { x: num(o, "1", 0), y: num(o, "2", 0) }));
+  }
+  c.globalAlpha = 1;
   drawSelection(c, doc, scene.sel, S);
-  const scoped = scope ? getList(doc, "body")[scope.bi] : undefined;
+  const scoped = scope ? bodies[scope.bi] : undefined;
   if (scope && scoped) drawScope(c, scoped, scope.shapes, view.scale, S);
   drawPreview(c, scene.preview, S);
 }

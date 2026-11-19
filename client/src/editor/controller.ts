@@ -1187,6 +1187,14 @@ export class EditorController {
     return null;
   }
 
+  /** The bodies the current gesture moves: drawn live over the static layer of the gesture's start doc. */
+  private movingBodies(): Scene["moving"] {
+    const g = this.gesture;
+    if (g?.kind === "move") return { base: g.base, bodies: g.refs.filter((r) => r.kind === "body").map((r) => r.i) };
+    if (g?.kind === "shapeMove") return { base: g.base, bodies: [g.bi] };
+    return null;
+  }
+
   private paint(): void {
     if (this.paintFrame) return;
     this.paintFrame = requestAnimationFrame(() => {
@@ -1198,7 +1206,7 @@ export class EditorController {
   private draw(): void {
     if (!this.fitted) this.fit();
     const scope = this.scope;
-    const scene: Scene = { sel: this.selection, preview: this.preview(), scope: scope ? { bi: scope.index, shapes: scope.shapes } : null };
+    const scene: Scene = { sel: this.selection, preview: this.preview(), scope: scope ? { bi: scope.index, shapes: scope.shapes } : null, moving: this.movingBodies() };
     drawMap(this.canvas, this.doc, this.view, scene);
   }
 
