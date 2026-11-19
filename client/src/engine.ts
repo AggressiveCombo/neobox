@@ -69,6 +69,9 @@ export interface FrameView {
   words: number;
 }
 
+/** `replayFrame` result while a seek waits for keyframes (the wasm side's REPLAY_PENDING). */
+const REPLAY_PENDING = -2;
+
 export class EngineError extends Error {}
 
 /** Stall and clock counters of a session (see `Engine.stallStats`). */
@@ -337,20 +340,23 @@ export class Engine {
     return JSON.parse(this.textCall(json, (p, n) => this.x.nb_replay_load(p, n))) as ReplayInfo;
   }
 
-  /** Build the replay frame at fractional tick `tickF`, following player `follow` (-1 none). */
-  replayFrame(tickF: number, follow: number): void {
-    this.check(this.x.nb_replay_frame(tickF, follow));
+  /** Build the replay frame at fractional tick `tickF`, following player `follow` (-1 none). Returns the tick shown, or null while a seek waits for keyframes (the previous frame stays). */
+  replayFrame(tickF: number, follow: number): number | null {
+    const rc = this.x.nb_replay_frame(tickF, follow);
+    if (rc === REPLAY_PENDING) return null;
+    this.check(rc);
+    return rc;
   }
 
   replayClose(): void {
     this.x.nb_replay_close();
   }
 
-  /** Simulate up to `maxTicks` more ticks into the loaded replay's seek keyframes; true once all are built. */
-  replayBuildKeyframes(maxTicks: number): boolean {
+  /** Simulate up to `maxTicks` more ticks into the loaded replay's seek keyframes. `done` once all are built and checked; `failed` once a checkpoint failed its check (the seek data is dropped). */
+  replayBuildKeyframes(maxTicks: number): { done: boolean; failed: boolean } {
     const rc = this.x.nb_replay_build_keyframes(maxTicks);
     this.check(rc);
-    return rc === 1;
+    return { done: (rc & 1) === 1, failed: (rc & 2) === 2 };
   }
 
   /** Start an offline game (practice, training, editor test-play) as player `player` of `start.players`. */

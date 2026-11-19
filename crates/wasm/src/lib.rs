@@ -27,6 +27,9 @@ const MAX_RESEND: usize = 32;
 /// Most ticks a replay frame steps through to collect their events; a longer jump is a seek.
 const REPLAY_FEED_TICKS: u32 = 60;
 
+/// `nb_replay_frame` result when the seek needs keyframes that are not built yet (nothing changes then).
+const REPLAY_PENDING: i32 = -2;
+
 /// Prediction stalls since the warm-up ended: frames the cap held the local head back, and the
 /// longest run of such frames in ms (from the frame gaps).
 #[derive(Default)]
@@ -322,6 +325,7 @@ pub unsafe extern "C" fn nb_server_frame(ptr: u32, len: u32, now_ms: f64) -> i32
                     s.on_ticks(&ticks);
                     if let Some(r) = a.recorder.as_mut() {
                         r.push(&ticks);
+                        r.capture(s.base, s.confirmed_state());
                     }
                     s.input_ack(input_ack);
                     if let Some(c) = a.clock.as_mut() {
@@ -760,7 +764,9 @@ pub unsafe extern "C" fn nb_replay_load(json: u32, len: u32) -> i32 {
 }
 
 /// Build the frame of the loaded replay at fractional tick `tick_f`,
-/// following player `follow` (-1: none). Seeking anywhere is allowed;
+/// following player `follow` (-1: none). Returns the tick shown, or REPLAY_PENDING
+/// when the seek needs checkpoints or keyframes not built yet (nothing changes then; see
+/// `nb_replay_build_keyframes`). Seeking anywhere is allowed;
 /// events (sounds, kills, hits) are collected while playback moves forward by at most
 /// REPLAY_FEED_TICKS ticks; seeks collect none.
 #[unsafe(no_mangle)]
@@ -773,8 +779,12 @@ pub extern "C" fn nb_replay_frame(tick_f: f64, follow: i32) -> i32 {
         let base = t.floor() as u32;
         // show the step from `base` to `base + 1` (the last state at the end)
         let target = (base + 1).min(p.end_tick());
+        let feed = target > a.replay_feed_tick && target - a.replay_feed_tick <= REPLAY_FEED_TICKS;
+        if !feed && p.seek_waits(target) {
+            return REPLAY_PENDING;
+        }
         a.feed.clear();
-        if target > a.replay_feed_tick && target - a.replay_feed_tick <= REPLAY_FEED_TICKS {
+        if feed {
             while p.tick() < target && p.step() {
                 let (prev, cur) = p.states();
                 a.feed.add(p.tick(), prev, cur);
@@ -787,7 +797,7 @@ pub extern "C" fn nb_replay_frame(tick_f: f64, follow: i32) -> i32 {
         let (prev, cur) = p.states();
         let meta = Meta { tick: p.tick(), local: follow, ..Meta::default() };
         a.frame.build(prev, cur, alpha, p.settings(), meta, &a.feed);
-        0
+        base as i32
     })
 }
 
@@ -796,13 +806,15 @@ pub extern "C" fn nb_replay_close() {
     with(|a| a.replay = None)
 }
 
-/// Simulate up to `max_ticks` more ticks of the loaded replay into its seek keyframes (idle-time work
-/// so seeks step at most one interval). Returns 1 when the whole replay has keyframes, else 0.
+/// Simulate up to `max_ticks` more ticks of the loaded replay into its seek keyframes, checking its
+/// checkpoints as they pass (idle-time work so seeks step at most one interval). Returns bit 0 when the
+/// whole replay is built and checked, and bit 1 when a checkpoint failed its check (the seek data is dropped).
 #[unsafe(no_mangle)]
 pub extern "C" fn nb_replay_build_keyframes(max_ticks: u32) -> i32 {
     with(|a| {
         let Some(p) = a.replay.as_mut() else { return fail(a, "no replay loaded") };
-        p.build_keyframes(max_ticks) as i32
+        let done = p.build_keyframes(max_ticks);
+        (done as i32) | ((p.checkpoints_failed() as i32) << 1)
     })
 }
 

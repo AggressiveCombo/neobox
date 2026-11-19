@@ -65,6 +65,8 @@ export const replayScreen: ScreenFactory = (ctx) => {
   let follow = -1;
   let dragging = false;
   let buildTimer: number | undefined;
+  /** The tick the last frame was built for; the readout shows it, so a seek waiting on keyframes keeps the old time. */
+  let shownTick = 0;
 
   // Playing-view controls (rebuilt by showPlaying).
   let playBtn: HTMLButtonElement | null = null;
@@ -106,13 +108,18 @@ export const replayScreen: ScreenFactory = (ctx) => {
   /** Build the loaded replay's seek keyframes in idle slices, starting after the first painted frames so opening does not wait on it. */
   function buildKeyframes(eng: Engine, loaded: ReplayInfo): void {
     let msPerTick = 0;
+    let reported = false;
     const slice = (): void => {
       buildTimer = undefined;
       if (info !== loaded) return;
       const ticks = msPerTick > 0 ? Math.max(1, Math.floor(BUILD_SLICE_MS / msPerTick)) : 1;
       const t0 = performance.now();
-      const done = eng.replayBuildKeyframes(ticks);
+      const { done, failed } = eng.replayBuildKeyframes(ticks);
       msPerTick = (performance.now() - t0) / ticks;
+      if (failed && !reported) {
+        reported = true;
+        ctx.toast("This replay's seek data didn't match, so seeking is slower");
+      }
       if (!done) buildTimer = window.setTimeout(slice, 0);
     };
     requestAnimationFrame(() => requestAnimationFrame(() => (buildTimer = window.setTimeout(slice, 0))));
@@ -133,8 +140,8 @@ export const replayScreen: ScreenFactory = (ctx) => {
   /** The readout: the position against the total (fixed when the replay opens, see showPlaying), and the tick. */
   function renderTime(): void {
     if (!info || !timeNowEl || !timeTickEl) return;
-    timeNowEl.textContent = clock((tick - info.first) / info.hz);
-    timeTickEl.textContent = `  ·  tick ${Math.floor(tick)}`;
+    timeNowEl.textContent = clock((shownTick - info.first) / info.hz);
+    timeTickEl.textContent = `  ·  tick ${shownTick}`;
   }
 
   function seek(t: number): void {
@@ -201,11 +208,15 @@ export const replayScreen: ScreenFactory = (ctx) => {
         syncControls();
       }
     }
-    engine.replayFrame(tick, follow);
-    const scene = ctx.present(names, info.hz);
-    if (scene && board) {
-      board.render(scene, names, -1, info.hz);
-      board.record(scene, names);
+    const shown = engine.replayFrame(tick, follow);
+    // null: a seek waits for keyframes the worker has not sent yet; the last frame stays on screen.
+    if (shown !== null) {
+      shownTick = shown;
+      const scene = ctx.present(names, info.hz);
+      if (scene && board) {
+        board.render(scene, names, -1, info.hz);
+        board.record(scene, names);
+      }
     }
     if (seekEl && !dragging) seekEl.value = String(Math.round(tick));
     renderTime();
@@ -273,6 +284,7 @@ export const replayScreen: ScreenFactory = (ctx) => {
     names = new Map(loaded.names);
     fileName = name;
     tick = loaded.first;
+    shownTick = loaded.first;
     playing = false;
     speed = 1;
     follow = loaded.players[0]?.[0] ?? -1;
