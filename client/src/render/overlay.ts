@@ -100,11 +100,18 @@ interface KillEntry {
 }
 
 const METRIC_CACHE_MAX = 512;
+/** Name label sprites: room past the ink box for the 3 px outline and its antialiasing; and the entries kept. */
+const LABEL_PAD = 3;
+const LABEL_SPRITE_MAX = 64;
+/** A name label rendered once (outline and fill) in device px; (ax, ay) is the text anchor (centre, bottom baseline) in it, CSS px. */
+interface LabelSprite { canvas: HTMLCanvasElement; w: number; h: number; ax: number; ay: number }
 
 export class Overlay {
   private readonly ctx: CanvasRenderingContext2D;
   private readonly cssCache = new Map<number, string>();
   private readonly metricCache = new Map<string, { w: number; h: number }>();
+  /** Stroked text is the overlay's costliest call, so each label is drawn once into a sprite and blitted per frame. */
+  private readonly labelSprites = new Map<string, LabelSprite>();
   private readonly feed: KillEntry[] = [];
   private readonly hitFlashes: { id: number; at: number }[] = [];
   /** CSS px at the top taken by a screen's own controls (AppCtx.reserveTop); the top bars go below. */
@@ -235,7 +242,43 @@ export class Overlay {
     return m;
   }
 
-  private drawNames(scene: Scene, cam: Camera, names: ReadonlyMap<number, string>, cssW: number, cssH: number): void {
+  /** The sprite for `name` in `font` and `colour` at `dpr`, made on first use. */
+  private labelSprite(font: string, colour: string, name: string, dpr: number): LabelSprite {
+    const key = `${font}\u0000${colour}\u0000${dpr}\u0000${name}`;
+    let s = this.labelSprites.get(key);
+    if (s !== undefined) return s;
+    const canvas = document.createElement("canvas");
+    const ctx = canvas.getContext("2d");
+    if (!ctx) throw new Error("2d canvas unavailable");
+    const setup = (): void => {
+      ctx.font = font;
+      ctx.textAlign = "center";
+      ctx.textBaseline = "bottom";
+    };
+    // The ink box around the anchor, measured as drawn: engines place descenders and overhangs differently
+    // relative to the "bottom" baseline (Firefox puts descender ink below it), so neither the advance nor the font box holds it.
+    setup();
+    const t = ctx.measureText(name);
+    const ax = Math.ceil(t.actualBoundingBoxLeft) + LABEL_PAD;
+    const ay = Math.ceil(t.actualBoundingBoxAscent) + LABEL_PAD;
+    canvas.width = Math.ceil((ax + Math.ceil(t.actualBoundingBoxRight) + LABEL_PAD) * dpr);
+    canvas.height = Math.ceil((ay + Math.max(0, Math.ceil(t.actualBoundingBoxDescent)) + LABEL_PAD) * dpr);
+    // Resizing reset the context state.
+    setup();
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.lineJoin = "round";
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = OUTLINE;
+    ctx.strokeText(name, ax, ay);
+    ctx.fillStyle = colour;
+    ctx.fillText(name, ax, ay);
+    s = { canvas, w: canvas.width / dpr, h: canvas.height / dpr, ax, ay };
+    if (this.labelSprites.size >= LABEL_SPRITE_MAX) this.labelSprites.clear();
+    this.labelSprites.set(key, s);
+    return s;
+  }
+
+  private drawNames(scene: Scene, cam: Camera, names: ReadonlyMap<number, string>, cssW: number, cssH: number): DrawRect[] {
     const ctx = this.ctx;
     const [sx, sy, ox, oy] = worldXf(cam);
     const pxPerUnit = cssW / cam.w;
@@ -282,13 +325,13 @@ export class Overlay {
       }
       placed.push({ left: l.x - l.w / 2, right: l.x + l.w / 2, top: l.y - l.h, bottom: l.y });
     }
+    const dpr = window.devicePixelRatio || 1;
     for (const l of labels.sort((a, b) => Number(a.local) - Number(b.local))) {
-      ctx.font = l.font;
-      ctx.lineWidth = 3;
-      ctx.strokeStyle = OUTLINE;
-      ctx.strokeText(l.name, l.x, l.y);
-      ctx.fillStyle = l.colour;
-      ctx.fillText(l.name, l.x, l.y);
+      // Snapped to device pixels so the blit copies the sprite 1:1 instead of resampling it.
+      const s = this.labelSprite(l.font, l.colour, l.name, dpr);
+      const left = Math.round((l.x - s.ax) * dpr) / dpr;
+      const top = Math.round((l.y - s.ay) * dpr) / dpr;
+      ctx.drawImage(s.canvas, left, top, s.w, s.h);
       // The local player reads its own status from the stamina bar and kill line instead.
       if (l.player.id === leader && !l.local) this.drawCrown(l.x, l.y - l.h - 6);
       if (l.local && scene.maxStamina > 0) {
