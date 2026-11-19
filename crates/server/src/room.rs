@@ -231,6 +231,8 @@ struct RPlayer {
     ack: u32,
     last_sent: Option<u32>,
     margin16: i32,
+    /// The client frame number `margin16` was measured from.
+    margin_frame: u32,
     last_bytes: (u64, u64),
     rate: (u64, u64),
     /// The best (map, ticks) already announced for this player; a finish counts only when it beats it.
@@ -784,6 +786,7 @@ impl Room {
             ack: 0,
             last_sent: None,
             margin16: 0,
+            margin_frame: 0,
             last_bytes: (0, 0),
             rate: (0, 0),
             record_seen: None,
@@ -1506,6 +1509,7 @@ impl Room {
             p.ack = start.start_tick;
             p.last_sent = None;
             p.margin16 = 0;
+            p.margin_frame = 0;
             p.text(&ServerMsg::MatchStart { start: start.clone(), you: p.in_match.then_some(p.id) });
         }
         let now = Instant::now();
@@ -1579,6 +1583,7 @@ impl Room {
                 let to_next = g.next_tick.saturating_duration_since(Instant::now()).as_secs_f64() * self.tick_hz;
                 let precise = receipt.margin as f64 - (1.0 - to_next.clamp(0.0, 1.0));
                 p.margin16 = (precise * 16.0).round().clamp(-30000.0, 30000.0) as i32;
+                p.margin_frame = f.frame;
                 // peers learn each accepted change now rather than with the next batch
                 for &(tick, mask) in &receipt.taken {
                     for q in self.players.iter().filter(|q| q.id != id && q.in_match) {
@@ -1850,7 +1855,7 @@ impl Room {
             }
             let ticks: Vec<TickData> = g.history.iter().filter(|d| d.tick >= from).cloned().collect();
             let input_ack = g.m.input_ack(p.id);
-            p.send(Out::Binary(ServerFrame::Batch { ticks, input_ack, margin16: p.margin16 }.encode()));
+            p.send(Out::Binary(ServerFrame::Batch { ticks, input_ack, margin16: p.margin16, margin_frame: p.margin_frame }.encode()));
             p.last_sent = Some(latest - 1);
             if let Some(h) = checksum {
                 p.send(Out::Binary(ServerFrame::Checksum { tick: latest, hash: h }.encode()));

@@ -125,7 +125,7 @@ fn clients_converge_and_lose_no_input() {
             for (c, &ack) in acks.iter().enumerate() {
                 let ticks: Vec<TickData> = history.iter().filter(|d| d.tick >= ack).cloned().collect();
                 if !ticks.is_empty() {
-                    let frame = ServerFrame::Batch { ticks, input_ack: server.input_ack(c as u32), margin16: 0 };
+                    let frame = ServerFrame::Batch { ticks, input_ack: server.input_ack(c as u32), margin16: 0, margin_frame: 0 };
                     link.send(now, c, frame.encode());
                 }
             }
@@ -147,7 +147,7 @@ fn clients_converge_and_lose_no_input() {
                     intended[c].push(0);
                 }
                 s.advance_to(target);
-                let mut bytes = ClientFrame::Input(s.input_frame(s.head(), 32)).encode();
+                let mut bytes = ClientFrame::Input(s.input_frame(s.head(), 32, 0)).encode();
                 bytes.push(c as u8);
                 link.send(now, SERVER, bytes);
             }

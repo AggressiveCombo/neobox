@@ -144,11 +144,11 @@ async fn play(
                         }
                     }
                     Message::Binary(b) => match ServerFrame::decode(&b) {
-                        Ok(ServerFrame::Batch { ticks, input_ack, margin16 }) => {
+                        Ok(ServerFrame::Batch { ticks, input_ack, margin16, margin_frame }) => {
                             if let (Some(s), Some(c)) = (session.as_mut(), clock.as_mut()) {
                                 s.on_ticks(&ticks);
                                 s.input_ack(input_ack);
-                                c.on_margin(margin16 as f64 / 16.0);
+                                c.on_margin(margin_frame, margin16 as f64 / 16.0);
                                 if s.desync.is_some() {
                                     s.desync = None;
                                     tx.send(send_json(&ClientMsg::Resync)).await.map_err(|e| e.to_string())?;
@@ -184,7 +184,7 @@ async fn play(
                     break;
                 }
                 let (Some(s), Some(c)) = (session.as_mut(), clock.as_mut()) else { continue };
-                let target = c.update(dt).floor().max(0.0) as u32;
+                let target = c.update(dt, s.known as f64).floor().max(0.0) as u32;
                 // change input every ~10 frames
                 rng ^= rng << 13;
                 rng ^= rng >> 7;
@@ -198,7 +198,7 @@ async fn play(
                 report.max_prediction = report.max_prediction.max(s.head().saturating_sub(s.known));
                 let new_head = s.head();
                 if new_head >= last_sent_tick || s.last_input_seq() != sent_seq {
-                    let bytes = ClientFrame::Input(s.input_frame(new_head, 32)).encode();
+                    let bytes = ClientFrame::Input(s.input_frame(new_head, 32, c.next_frame())).encode();
                     tx.send(Message::Binary(bytes.into())).await.map_err(|e| e.to_string())?;
                     last_sent_tick = new_head + 1;
                     sent_seq = s.last_input_seq();

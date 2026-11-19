@@ -466,6 +466,9 @@ pub struct InputFrame {
     pub ack: u32,
     /// The client's current (predicted) tick.
     pub now: u32,
+    /// The client's frame number, from 1 and increasing per connection. The
+    /// server echoes the number of the newest frame it measured a margin from.
+    pub frame: u32,
     /// (sequence number, tick, mask) of each change, ascending sequence.
     pub changes: Vec<(u32, u32, u8)>,
 }
@@ -496,8 +499,9 @@ pub enum ClientFrame {
 pub enum ServerFrame {
     /// Consecutive confirmed ticks, plus per-recipient feedback: the newest
     /// input change sequence number processed, and how many ticks early the
-    /// client's heartbeat arrived (in 1/16 ticks; negative = late).
-    Batch { ticks: Vec<TickData>, input_ack: u32, margin16: i32 },
+    /// client's heartbeat arrived (in 1/16 ticks; negative = late), with the
+    /// frame number that margin was measured from (0 before any frame).
+    Batch { ticks: Vec<TickData>, input_ack: u32, margin16: i32, margin_frame: u32 },
     Pong { client_time: f64, server_tick: u32, tick_phase: f64 },
     Checksum { tick: u32, hash: u64 },
     /// A change the server accepted for `player`, sent ahead of the batch of its tick.
@@ -519,6 +523,7 @@ impl ClientFrame {
                 w.u8(C_INPUT);
                 w.var(f.ack as u64);
                 w.var(f.now as u64);
+                w.var(f.frame as u64);
                 w.u8(f.changes.len() as u8);
                 for (seq, t, m) in &f.changes {
                     w.var(*seq as u64);
@@ -540,6 +545,7 @@ impl ClientFrame {
             C_INPUT => {
                 let ack = r.var32()?;
                 let now = r.var32()?;
+                let frame = r.var32()?;
                 let n = r.u8()? as usize;
                 if n > 64 {
                     return Err(DecodeError);
@@ -551,7 +557,7 @@ impl ClientFrame {
                     let t = u32::try_from(t).map_err(|_| DecodeError)?;
                     changes.push((seq, t, r.u8()?));
                 }
-                ClientFrame::Input(InputFrame { ack, now, changes })
+                ClientFrame::Input(InputFrame { ack, now, frame, changes })
             }
             C_PING => ClientFrame::Ping { client_time: r.f64()? },
             _ => return Err(DecodeError),
@@ -567,10 +573,11 @@ impl ServerFrame {
     pub fn encode(&self) -> Vec<u8> {
         let mut w = Writer::default();
         match self {
-            ServerFrame::Batch { ticks, input_ack, margin16 } => {
+            ServerFrame::Batch { ticks, input_ack, margin16, margin_frame } => {
                 w.u8(S_BATCH);
                 w.var(*input_ack as u64);
                 w.svar(*margin16 as i64);
+                w.var(*margin_frame as u64);
                 w.var(ticks.first().map_or(0, |t| t.tick) as u64);
                 w.var(ticks.len() as u64);
                 for t in ticks {
@@ -622,6 +629,7 @@ impl ServerFrame {
             S_BATCH => {
                 let input_ack = r.var32()?;
                 let margin16 = r.svar()? as i32;
+                let margin_frame = r.var32()?;
                 let first = r.var32()?;
                 let n = r.var()? as usize;
                 if n > 4096 {
@@ -651,7 +659,7 @@ impl ServerFrame {
                     }
                     ticks.push(TickData { tick: first + i as u32, changes, events });
                 }
-                ServerFrame::Batch { ticks, input_ack, margin16 }
+                ServerFrame::Batch { ticks, input_ack, margin16, margin_frame }
             }
             S_PONG => ServerFrame::Pong { client_time: r.f64()?, server_tick: r.var32()?, tick_phase: r.f64()? },
             S_CHECKSUM => ServerFrame::Checksum { tick: r.var32()?, hash: r.u64()? },
@@ -671,7 +679,7 @@ mod tests {
 
     #[test]
     fn frames_roundtrip() {
-        let c = ClientFrame::Input(InputFrame { ack: 1234, now: 1301, changes: vec![(7, 1300, 2), (8, 1305, 6), (9, 1306, 0)] });
+        let c = ClientFrame::Input(InputFrame { ack: 1234, now: 1301, frame: 9, changes: vec![(7, 1300, 2), (8, 1305, 6), (9, 1306, 0)] });
         assert_eq!(ClientFrame::decode(&c.encode()).unwrap(), c);
         let s = ServerFrame::Batch {
             ticks: vec![
@@ -680,6 +688,7 @@ mod tests {
             ],
             input_ack: 101,
             margin16: -9,
+            margin_frame: 4,
         };
         assert_eq!(ServerFrame::decode(&s.encode()).unwrap(), s);
         let h = ServerFrame::Hint { player: 3, tick: 1234, mask: 5 };

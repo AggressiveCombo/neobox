@@ -62,7 +62,7 @@ fn run() -> Vec<(u32, u32)> {
     for _ in 0..masks[0].len() + ROUND_TICKS {
         for p in 0..2u32 {
             let mask = masks[p as usize].get(server.tick as usize).copied().unwrap_or(0);
-            let frame = InputFrame { ack: 0, now: server.tick, changes: vec![(server.input_ack(p) + 1, server.tick, mask)] };
+            let frame = InputFrame { ack: 0, now: server.tick, frame: 0, changes: vec![(server.input_ack(p) + 1, server.tick, mask)] };
             server.submit(p, &frame);
         }
         server.step();

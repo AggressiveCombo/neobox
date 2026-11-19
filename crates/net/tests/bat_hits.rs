@@ -52,7 +52,7 @@ fn exchange(delay: usize) -> (Vec<(u32, u32)>, f64) {
     for t in 0..host.len().max(guest.len()) {
         let masks = [host.get(t).copied().unwrap_or(0), guest.get(t).copied().unwrap_or(0)];
         for p in 0..2u32 {
-            let frame = InputFrame { ack: 0, now: server.tick, changes: vec![(server.input_ack(p) + 1, server.tick, masks[p as usize])] };
+            let frame = InputFrame { ack: 0, now: server.tick, frame: 0, changes: vec![(server.input_ack(p) + 1, server.tick, masks[p as usize])] };
             server.submit(p, &frame);
         }
         server.step();

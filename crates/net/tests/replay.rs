@@ -51,7 +51,7 @@ fn replay_reproduces_the_server_match() {
             rng ^= rng >> 7;
             rng ^= rng << 17;
             if rng % 7 == 0 {
-                let frame = neobox_net::InputFrame { ack: 0, now: server.tick, changes: vec![(server.input_ack(p) + 1, server.tick, (rng >> 8) as u8)] };
+                let frame = neobox_net::InputFrame { ack: 0, now: server.tick, frame: 0, changes: vec![(server.input_ack(p) + 1, server.tick, (rng >> 8) as u8)] };
                 server.submit(p, &frame);
             }
         }

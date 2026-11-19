@@ -285,7 +285,7 @@ pub unsafe extern "C" fn nb_server_frame(ptr: u32, len: u32, now_ms: f64) -> i32
     with(|a| {
         let Ok(f) = ServerFrame::decode(b) else { return fail(a, "bad server frame") };
         match f {
-            ServerFrame::Batch { ticks, input_ack, margin16 } => {
+            ServerFrame::Batch { ticks, input_ack, margin16, margin_frame } => {
                 if let Some(s) = a.session.as_mut() {
                     let was = s.desync.is_some();
                     s.on_ticks(&ticks);
@@ -294,7 +294,7 @@ pub unsafe extern "C" fn nb_server_frame(ptr: u32, len: u32, now_ms: f64) -> i32
                     }
                     s.input_ack(input_ack);
                     if let Some(c) = a.clock.as_mut() {
-                        c.on_margin(margin16 as f64 / 16.0);
+                        c.on_margin(margin_frame, margin16 as f64 / 16.0);
                     }
                     return (!was && s.desync.is_some()) as i32;
                 }
@@ -427,7 +427,7 @@ pub extern "C" fn nb_frame(now_ms: f64, mask: u32) -> u32 {
         // progress, the one new inputs are stamped with
         let newest = s.last_input_seq();
         if target >= a.last_sent || newest != a.sent_seq {
-            a.out = ClientFrame::Input(s.input_frame(target, MAX_RESEND)).encode();
+            a.out = ClientFrame::Input(s.input_frame(target, MAX_RESEND, clock.next_frame())).encode();
             a.last_sent = a.last_sent.max(target + 1);
             a.sent_seq = newest;
             return a.out.len() as u32;
@@ -694,14 +694,14 @@ pub extern "C" fn nb_local_frame(dt_ms: f64, mask: u32) -> i32 {
                 let mask = d.mode.mask(at);
                 if mask != d.applied {
                     let seq = g.m.input_ack(d.id) + 1;
-                    g.m.submit(d.id, &InputFrame { ack: 0, now: at, changes: vec![(seq, at, mask)] });
+                    g.m.submit(d.id, &InputFrame { ack: 0, now: at, frame: 0, changes: vec![(seq, at, mask)] });
                     d.applied = mask;
                 }
             }
             if effective != g.applied {
                 g.seq += 1;
                 let tick = g.m.tick;
-                g.m.submit(g.player, &InputFrame { ack: 0, now: tick, changes: vec![(g.seq, tick, effective)] });
+                g.m.submit(g.player, &InputFrame { ack: 0, now: tick, frame: 0, changes: vec![(g.seq, tick, effective)] });
                 g.applied = effective;
             }
             g.prev = g.m.state.clone();

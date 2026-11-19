@@ -18,6 +18,9 @@ pub const MAX_PREDICTION: u32 = 45;
 /// prediction here, so a rollback after it is at most this deep.
 pub const PREDICTION_CAP: u32 = 20;
 
+/// Most ticks the clock aims ahead of the server's margin reading (see [`TickClock::on_margin`]).
+pub const MAX_TARGET_MARGIN: f64 = 4.0;
+
 /// Ticks between server state checksums.
 pub const CHECKSUM_INTERVAL: u32 = 30;
 
@@ -563,11 +566,11 @@ impl ClientSession {
     }
 
     /// Input frame carrying the oldest `max` unacknowledged changes, sent
-    /// with the current tick `now` as heartbeat.
-    pub fn input_frame(&self, now: u32, max: usize) -> InputFrame {
+    /// with the current tick `now` as heartbeat and the client's frame number `frame`.
+    pub fn input_frame(&self, now: u32, max: usize, frame: u32) -> InputFrame {
         let first = self.pending.partition_point(|p| p.0 <= self.acked_seq);
         let end = (first + max).min(self.pending.len());
-        InputFrame { ack: self.known, now, changes: self.pending[first..end].to_vec() }
+        InputFrame { ack: self.known, now, frame, changes: self.pending[first..end].to_vec() }
     }
 
     /// The server processed our input changes up to sequence number `seq`.
@@ -858,38 +861,96 @@ pub struct TickClock {
     margin: f64,
     have_margin: bool,
     spread: Spread,
+    /// frame numbers issued so far
+    frames: u32,
+    /// margins from frames numbered below this were sent before the last correction
+    floor: u32,
+    /// newest frame a margin was taken from
+    last_frame: u32,
+    stats: ClockStats,
 }
 
 impl TickClock {
     pub fn new(hz: f64, start_tick: f64, lead: f64) -> TickClock {
-        TickClock { hz, tick: start_tick + lead, target_margin: 1.5, margin: 0.0, have_margin: false, spread: Spread::default() }
+        TickClock {
+            hz,
+            tick: start_tick + lead,
+            target_margin: 1.5,
+            margin: 0.0,
+            have_margin: false,
+            spread: Spread::default(),
+            frames: 0,
+            floor: 1,
+            last_frame: 0,
+            stats: ClockStats::default(),
+        }
     }
 
-    /// Feedback from the server: how early our newest input arrived. The target
-    /// lead is one tick plus twice the spread of the recent margins, clamped to
-    /// one to six ticks.
-    pub fn on_margin(&mut self, margin_ticks: f64) {
+    /// Number for the next input frame sent (from 1). The server echoes it with
+    /// the margin it measured from that frame.
+    pub fn next_frame(&mut self) -> u32 {
+        self.frames += 1;
+        self.frames
+    }
+
+    /// Counters of the clock since the last [`Self::reset_stats`].
+    pub fn stats(&self) -> ClockStats {
+        self.stats
+    }
+
+    /// Start counting the clock's stats afresh.
+    pub fn reset_stats(&mut self) {
+        self.stats = ClockStats::default();
+    }
+
+    /// Feedback from the server: how early input frame `frame` arrived. The
+    /// target lead is one tick plus twice the spread of the recent margins,
+    /// clamped to one to six ticks. A margin counts once, and never from a frame
+    /// sent before the last correction: such a margin still shows the offset
+    /// that correction removed, and would correct it again.
+    pub fn on_margin(&mut self, frame: u32, margin_ticks: f64) {
+        if frame < self.floor || frame <= self.last_frame {
+            self.stats.stale += 1;
+            if (margin_ticks - self.target_margin).abs() > 8.0 {
+                self.stats.stale_big += 1;
+            }
+            return;
+        }
+        self.stats.margins += 1;
+        self.last_frame = frame;
         self.spread.push(margin_ticks);
-        self.target_margin = (1.0 + 2.0 * self.spread.get()).clamp(1.0, 6.0);
+        self.target_margin = (1.0 + 2.0 * self.spread.get()).clamp(1.0, MAX_TARGET_MARGIN);
         if !self.have_margin {
             self.margin = margin_ticks;
             self.have_margin = true;
             // large errors are corrected immediately
             if (margin_ticks - self.target_margin).abs() > 8.0 {
                 self.tick += self.target_margin - margin_ticks;
+                self.stats.corrections += 1;
+                self.restart_feedback();
                 self.have_margin = false;
             }
         } else {
             self.margin += (margin_ticks - self.margin) * 0.1;
             if (margin_ticks - self.target_margin).abs() > 15.0 {
                 self.tick += self.target_margin - margin_ticks;
+                self.stats.corrections += 1;
+                self.restart_feedback();
                 self.margin = self.target_margin;
             }
         }
     }
 
-    /// Longest believable gap between two frames, in seconds.
-    const MAX_GAP_S: f64 = 0.5;
+    /// After the clock moves: margins from frames already sent are stale.
+    fn restart_feedback(&mut self) {
+        self.floor = self.frames + 1;
+    }
+
+    /// Longest gap between two frames that is a hitch to track, in seconds. A
+    /// stalled tab still advances the clock by the real gap, so the lead the
+    /// server sees does not change; a resync to the confirmed tick would instead
+    /// use a confirmed tick that the queued batches have not yet caught up to.
+    const MAX_GAP_S: f64 = 1.0;
 
     /// Advance by `dt` seconds; returns the current fractional tick. A gap that
     /// cannot be a frame (negative, or longer than `MAX_GAP_S`) means the local
@@ -897,16 +958,33 @@ impl TickClock {
     /// plus the target lead, instead of running ahead or behind for seconds.
     pub fn update(&mut self, dt: f64, confirmed: f64) -> f64 {
         if !(0.0..=Self::MAX_GAP_S).contains(&dt) {
+            self.stats.gap_resets += 1;
             self.tick = confirmed + self.target_margin;
             self.margin = self.target_margin;
             self.have_margin = false;
+            self.restart_feedback();
             return self.tick;
         }
         let err = if self.have_margin { self.target_margin - self.margin } else { 0.0 };
         let rate = 1.0 + (err * 0.02).clamp(-0.06, 0.06);
-        self.tick += dt.clamp(0.0, 0.25) * self.hz * rate;
+        self.tick += dt * self.hz * rate;
         self.tick
     }
+}
+
+/// Counters of a [`TickClock`], for the qa instrument.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct ClockStats {
+    /// margins counted
+    pub margins: u64,
+    /// margins dropped: sent before the last correction, or not newer than the last one counted
+    pub stale: u64,
+    /// dropped margins more than 8 ticks off target (they would have moved the clock)
+    pub stale_big: u64,
+    /// corrections the margins made to the clock
+    pub corrections: u64,
+    /// clock steps resynced from `update` (the gap was not a frame)
+    pub gap_resets: u64,
 }
 
 /// Samples kept by a [`Spread`].
@@ -1016,7 +1094,7 @@ mod tests {
     #[test]
     fn confirmed_feed_ignores_rolled_back_predictions() {
         let mut server = ServerMatch::new(start()).unwrap();
-        server.submit(0, &InputFrame { ack: 0, now: 0, changes: vec![(1, 0, 1)] });
+        server.submit(0, &InputFrame { ack: 0, now: 0, frame: 0, changes: vec![(1, 0, 1)] });
         let ticks: Vec<TickData> = (0..30).map(|_| server.step()).collect();
 
         let mut reference = ClientSession::new(start(), None).unwrap();
@@ -1126,7 +1204,7 @@ mod tests {
     /// What the server sends a client, in order on one stream.
     enum Down {
         /// a tick's confirmed data, the server's input ack and margin in ticks
-        Batch(TickData, u32, f64),
+        Batch(TickData, u32, (f64, u32)),
         /// a change forwarded ahead of its batch: player, tick, mask
         Hint(u32, u32, u8),
     }
@@ -1159,7 +1237,7 @@ mod tests {
         let newest = p.session.last_input_seq();
         if target >= p.last_sent || newest != p.sent_seq {
             let at = jittered(&mut p.rng, net, t + owl, p.to_server.back().map(|b| b.0));
-            p.to_server.push_back((at, p.session.input_frame(target, MAX_RESEND)));
+            p.to_server.push_back((at, p.session.input_frame(target, MAX_RESEND, p.clock.next_frame())));
             p.last_sent = p.last_sent.max(target + 1);
             p.sent_seq = newest;
         }
@@ -1199,7 +1277,7 @@ mod tests {
                 }
             })
             .collect();
-        let mut margins = [0.0f64; 2];
+        let mut margins = [(0.0f64, 0u32); 2];
         let mut next_step = 0.0f64;
         let mut next_frame = [0.0f64; 2];
         let end = secs * 1000.0;
@@ -1260,16 +1338,16 @@ mod tests {
                     }
                     // the server's margin counts the part of its current tick already elapsed
                     let to_next = ((next_step - arr) / tick_ms).clamp(0.0, 1.0);
-                    margins[i] = ((receipt.margin as f64 - (1.0 - to_next)) * 16.0).round() / 16.0;
+                    margins[i] = (((receipt.margin as f64 - (1.0 - to_next)) * 16.0).round() / 16.0, f.frame);
                 }
                 Ev::Down(i) => {
                     let (_, msg) = peers[i].to_client.pop_front().unwrap();
                     let p = &mut peers[i];
                     match msg {
-                        Down::Batch(data, ack, margin) => {
+                        Down::Batch(data, ack, (margin, frame)) => {
                             p.session.on_ticks(&[data]);
                             p.session.input_ack(ack);
-                            p.clock.on_margin(margin);
+                            p.clock.on_margin(frame, margin);
                         }
                         Down::Hint(player, tick, mask) => p.session.on_hint(player, tick, mask),
                     }
@@ -1313,12 +1391,18 @@ mod tests {
         assert_eq!(s.get(), 0.0);
     }
 
+    /// Feeds one margin, echoed for a frame sent just now.
+    fn feed(c: &mut TickClock, margin: f64) {
+        let frame = c.next_frame();
+        c.on_margin(frame, margin);
+    }
+
     /// Steady input margins want the minimum lead of one tick.
     #[test]
     fn steady_margin_wants_minimum_lead() {
         let mut c = TickClock::new(HZ, 0.0, 0.0);
         for _ in 0..SPREAD_SAMPLES {
-            c.on_margin(2.0);
+            feed(&mut c, 2.0);
         }
         assert_eq!(c.target_margin, 1.0);
     }
@@ -1328,7 +1412,7 @@ mod tests {
     fn clock_step_resyncs_in_one_update() {
         for step in [3.0, -3.0] {
             let mut c = TickClock::new(HZ, 0.0, 0.0);
-            c.on_margin(2.0);
+            feed(&mut c, 2.0);
             let t = c.update(step, 100.0);
             assert_eq!(t, 100.0 + c.target_margin);
         }
@@ -1342,14 +1426,14 @@ mod tests {
         assert!((t - (100.0 + 0.1 * HZ)).abs() < 1e-9);
     }
 
-    /// Margins alternating between 0 and 2 ticks (spread 2) ask for 1 + 2 * 2 = 5 ticks of lead.
+    /// Margins alternating between 0 and 2 ticks (spread 2) ask for 1 + 2 * 2 = 5 ticks of lead, clamped to [`MAX_TARGET_MARGIN`].
     #[test]
     fn margin_spread_sets_target() {
         let mut c = TickClock::new(HZ, 0.0, 0.0);
         for i in 0..SPREAD_SAMPLES {
-            c.on_margin(if i % 2 == 0 { 0.0 } else { 2.0 });
+            feed(&mut c, if i % 2 == 0 { 0.0 } else { 2.0 });
         }
-        assert_eq!(c.target_margin, 5.0);
+        assert_eq!(c.target_margin, MAX_TARGET_MARGIN);
     }
 
     /// Rollback depth p95 at 100 ms RTT stays within 8 ticks on a clean link, with
@@ -1363,6 +1447,23 @@ mod tests {
             eprintln!("{label}: p50 {p50} p95 {p95}");
             assert!(p95 <= 8, "{label}: p95 {p95} (p50 {p50})");
         }
+    }
+
+    /// Repeated echoes, and echoes for frames sent before a correction, do not move the clock.
+    #[test]
+    fn stale_margin_echoes_do_not_move_clock() {
+        let mut c = TickClock::new(HZ, 100.0, 0.0);
+        let (f1, f2, f3) = (c.next_frame(), c.next_frame(), c.next_frame());
+        c.on_margin(f1, 2.0);
+        let before = c.tick;
+        c.on_margin(f1, 2.0);
+        c.on_margin(f3, -20.0);
+        let corrected = c.tick;
+        assert!(corrected != before, "the large error is corrected");
+        c.on_margin(f1, -20.0);
+        c.on_margin(f2, -20.0);
+        c.on_margin(f3, -20.0);
+        assert_eq!(c.tick, corrected);
     }
 
     /// Two players on one flat floor, one unit apart, neither on a team: the bat reaches the other.
@@ -1420,7 +1521,7 @@ mod tests {
                     }
                 }
             });
-            server.submit(who, &InputFrame { ack: 0, now: t, changes: vec![(t + 1, t, bat(&sent))] });
+            server.submit(who, &InputFrame { ack: 0, now: t, frame: 0, changes: vec![(t + 1, t, bat(&sent))] });
             in_flight.push_back(server.step());
             if in_flight.len() > lag {
                 c.on_ticks(&[in_flight.pop_front().unwrap()]);

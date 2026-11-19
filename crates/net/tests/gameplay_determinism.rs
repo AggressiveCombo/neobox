@@ -86,7 +86,7 @@ fn server_and_replay() -> (Vec<State>, Vec<State>) {
     for _ in 0..TICKS {
         for p in 0..2u32 {
             let mask = script(p as usize, server.tick);
-            let frame = InputFrame { ack: 0, now: server.tick, changes: vec![(server.input_ack(p) + 1, server.tick, mask)] };
+            let frame = InputFrame { ack: 0, now: server.tick, frame: 0, changes: vec![(server.input_ack(p) + 1, server.tick, mask)] };
             server.submit(p, &frame);
         }
         let data = server.step();
