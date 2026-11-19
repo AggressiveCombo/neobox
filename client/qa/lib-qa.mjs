@@ -200,6 +200,22 @@ export async function initScript(context, fn, arg) {
   await context.addInitScript(fn, arg);
 }
 
+/**
+ * The test-only X-Forwarded-For (GeoIP location, per-address budgets) is for the QA server, which startServer runs on
+ * loopback. Browsers send it to every origin, and a third-party CORS preflight rejects it: the YouTube player then fails
+ * with an unhandled NetworkError (a pageerror). Keep it on loopback and drop it elsewhere, as e2e/lib.mjs open() does.
+ */
+const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]"]);
+export async function stripThirdPartyForwardedFor(context) {
+  await context.route("**/*", (route) => {
+    const req = route.request();
+    if (LOOPBACK_HOSTS.has(new URL(req.url()).hostname)) return route.fallback();
+    const h = { ...req.headers() };
+    delete h["x-forwarded-for"];
+    return route.continue({ headers: h });
+  });
+}
+
 /** Screenshot of one page into the evidence folder. Returns the path (or null when the page is gone). */
 export async function shot(page, file) {
   mkdirSync(path.dirname(file), { recursive: true });

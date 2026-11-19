@@ -34,6 +34,7 @@ import {
   sleep,
   startMatch,
   startServer,
+  stripThirdPartyForwardedFor,
   button,
   menuName,
   navTo,
@@ -518,6 +519,7 @@ async function openPage(s, browser, engine, row, cfg, opened) {
     acceptDownloads: true,
     extraHTTPHeaders: { "X-Forwarded-For": ip },
   });
+  await stripThirdPartyForwardedFor(context);
   await context.addInitScript(playfieldInit, { hideGpu: cfg.renderer !== "webgpu", palette: cfg.palette, name: cfg.name, selfTest: cfg.selfTest, sampleMs: SAMPLE_MS });
   const page = await context.newPage();
   page.setDefaultTimeout(20000);

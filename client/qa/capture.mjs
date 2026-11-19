@@ -6,7 +6,7 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { Scenario, dismissPhoneSplash, nextClientIp } from "../e2e/lib.mjs";
-import { watchPage } from "./lib-qa.mjs";
+import { stripThirdPartyForwardedFor, watchPage } from "./lib-qa.mjs";
 import { axeCounts, domMeasure, nextFrames, reducedMotion, reflowDetails, reflowIssues } from "./metrics.mjs";
 import { focusWalk } from "./focus.mjs";
 import { analyseScreenshot } from "./image.mjs";
@@ -125,6 +125,7 @@ export class QaScenario extends Scenario {
     // A service worker fetches on its own, past context.route: a state that stubs a request sets "block".
     if (serviceWorkers) options.serviceWorkers = serviceWorkers;
     const context = await this.env.browser.newContext(options);
+    await stripThirdPartyForwardedFor(context);
     // The row is the viewport: a fullscreen request (phone splash tap, HUD button) resizes headless Firefox to the screen (1366x768).
     await context.addInitScript(() => {
       Element.prototype.requestFullscreen = function requestFullscreen() {
