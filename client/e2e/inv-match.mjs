@@ -264,6 +264,8 @@ async function matchPad(s) {
     };
     window.__e2ePad = pad;
     Object.defineProperty(navigator, "getGamepads", { value: () => [pad], configurable: true });
+    // A browser fires gamepadconnected when a pad appears; the game polls only while one is connected.
+    window.dispatchEvent(new Event("gamepadconnected"));
   });
   const pressPad = (index, down) =>
     page.evaluate(([i, d]) => {
@@ -413,6 +415,7 @@ async function installPad(page) {
     };
     window.__e2ePad = pad;
     Object.defineProperty(navigator, "getGamepads", { value: () => [pad], configurable: true });
+    window.dispatchEvent(new Event("gamepadconnected"));
   });
 }
 
