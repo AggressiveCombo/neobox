@@ -138,9 +138,10 @@ export function computeCamera(scene: Scene, local?: PlayerRec): Camera {
   }
   const w0 = scene.viewWidth;
   const h0 = w0 / VIEW_ASPECT;
-  // An axis the playable bounds fit inside at the base view is fixed: centred on them and not part of the zoom need,
-  // so a map that fits both axes has a fixed camera (no follow, no zoom pumping).
-  const bounds = playBounds(scene);
+  // The camera's bounds are the arena, as in the original: a map whose arena fits the base view has a fixed camera
+  // centred on it (no follow, no zoom pumping), and a larger arena is followed and clamped to its edges. Ground or
+  // map machinery past the arena edge is not framed.
+  const bounds: Bounds = { x0: 0, y0: 0, x1: Math.max(0, scene.arenaW), y1: Math.max(0, scene.arenaH) };
   const fitsX = bounds.x1 - bounds.x0 <= w0;
   const fitsY = bounds.y1 - bounds.y0 <= h0;
   // The narrowest view that keeps the group inside the insets, on the axes that move.
@@ -228,18 +229,19 @@ function clampAxis(c: number, view: number, lo: number, hi: number): number {
   return Math.min(Math.max(c, lo + view / 2), hi - view / 2);
 }
 
-/**
- * The playable bounds: the arena united with the map's static geometry (the frame's fixed extent). Static ground past
- * the arena edge is framed and backed, so no legal spot shows VOID. Only static bodies count: moving bodies,
- * projectiles, effects and aim lines change every frame, and a camera fixed on the bounds must not follow them.
- */
+/** A world-space rectangle. */
 export interface Bounds {
   x0: number;
   y0: number;
   x1: number;
   y1: number;
 }
-export function playBounds(scene: Scene): Bounds {
+/**
+ * The backdrop's bounds: the arena united with the map's static geometry (the frame's fixed extent), so static ground
+ * that comes into view past the arena edge is drawn over the backdrop, never over page colour. Moving bodies,
+ * projectiles, effects and aim lines are not in the extent.
+ */
+export function backdropBounds(scene: Scene): Bounds {
   // The fixed extent is infinite (min > max) when the map has no visible static body.
   const has = scene.fixedX0 <= scene.fixedX1 && scene.fixedY0 <= scene.fixedY1;
   return {

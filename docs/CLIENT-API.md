@@ -103,7 +103,7 @@ Header (words 0..41):
 | 35 | u32 | predicted bat hit offset (words) |
 | 36 | u32 | confirmed bat hit count (event log) |
 | 37 | u32 | confirmed bat hit offset (words) |
-| 38-41 | f32 | static geometry extent: min x, min y, max x, max y of the static bodies' drawn triangles (world units; all infinite when there is none). Moving bodies, projectiles, effects and aim lines are not in it: the camera frames the arena united with this extent. |
+| 38-41 | f32 | static geometry extent: min x, min y, max x, max y of the static bodies' drawn triangles (world units; all infinite when there is none). Moving bodies, projectiles, effects and aim lines are not in it. The camera frames the arena (as the original); the backdrop covers the arena united with this extent, so static ground in view past the arena edge never sits on page colour. |
 
 World vertices: 3 words each `x f32, y f32, colour u32`; the colour's bytes
 in memory are R, G, B, A (i.e. `r | g << 8 | b << 16 | a << 24`, ready for a

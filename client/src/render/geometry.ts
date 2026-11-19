@@ -5,7 +5,7 @@
 
 import type { PlayerRec, Scene } from "../frame";
 import { FLAG_AIR_JUMP, FLAG_BAT, FLAG_DASH, FLAG_FROZEN, FLAG_GHOST, FLAG_LOCAL, FLAG_PUSHING, FLAG_TELEPORT } from "../frame";
-import { findLocal, playBounds } from "../camera";
+import { backdropBounds, findLocal } from "../camera";
 import { TEAM_BLUE, TEAM_FFA, TEAM_RED, TEAM_SPECTATOR } from "../protocol";
 import { prefs, type Palette } from "../prefs";
 import { BIT } from "../input";
@@ -235,7 +235,7 @@ export class Geometry {
     this.reserve(BACKGROUND_VERTICES);
     const top = packRgba(scene.bgTop, 1);
     const bottom = packRgba(scene.bgBottom, 1);
-    const b = playBounds(scene);
+    const b = backdropBounds(scene);
     const h = Math.max(0, scene.arenaH);
     this.background.first = this.used;
     this.putBand(b.x0, b.y0, b.x1, 0, top, top);
