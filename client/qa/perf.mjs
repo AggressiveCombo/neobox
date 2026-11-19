@@ -60,6 +60,9 @@ const GATE = {
   heapSlope: 0.5,
   heapEndPct: 15,
   actionP95: 300,
+  // Continuous gestures (drag, pan, zoom) draw every event: one 60 Hz frame at normal CPU, two at 4x (as E12).
+  gestureP95: 16.7,
+  gesture4xP95: 33.4,
   inpMs: 200,
 };
 const RENDERERS = ["webgpu", "webgl2"];
@@ -452,7 +455,10 @@ async function timedClick(page, trigger, confirm) {
   return t1 - t0;
 }
 
-/** ui.actionMs.p95.<action> per action: p95 over ACTION_N samples, every run kept (rubric D12). */
+/** Continuous gestures: each event must be drawn within a frame budget, not the 300 ms action budget (rubric rev8c). */
+const GESTURES = new Set(["editorDrag", "editorPan", "editorZoom"]);
+
+/** ui.actionMs.p95.<action> per action: p95 over ACTION_N samples, every run kept (rubric D12); gestures use the frame gate. */
 function actionResult(samples, { cpu }) {
   const sfx = cpu ? ".cpu4x" : "";
   const metrics = { cpu4x: cpu };
@@ -460,16 +466,19 @@ function actionResult(samples, { cpu }) {
   for (const [action, ms] of Object.entries(samples)) {
     const key = `ui.actionMs.p95.${action}${sfx}`;
     const p95 = percentile(ms, 95);
+    const gate = GESTURES.has(action) ? (cpu ? GATE.gesture4xP95 : GATE.gestureP95) : GATE.actionP95;
     metrics[key] = round(p95, 0);
     metrics[`${key}.n`] = ms.length;
     metrics[`${key}.runs`] = ms.map((v) => round(v, 0));
     if (ms.length < ACTION_N) problems.push(`${action} n=${ms.length} < ${ACTION_N}`);
-    if (!(p95 < GATE.actionP95)) problems.push(`${key} ${round(p95, 0)} >= ${GATE.actionP95} ms`);
+    // Actions pass strictly under their band (< 300 ms); gestures pass at or under their frame budget.
+    const within = GESTURES.has(action) ? p95 <= gate : p95 < gate;
+    if (!within) problems.push(`${key} ${round(p95, 1)} ${GESTURES.has(action) ? ">" : ">="} ${gate} ms`);
   }
   return {
     pass: problems.length === 0,
     metrics,
-    detail: problems.length ? problems.join("; ") : `9-band: p95 < ${GATE.actionP95} ms (n=${ACTION_N} each)`,
+    detail: problems.length ? problems.join("; ") : `9-band: actions p95 < ${GATE.actionP95} ms, gestures within ${cpu ? GATE.gesture4xP95 : GATE.gestureP95} ms (n=${ACTION_N} each)`,
   };
 }
 
@@ -761,6 +770,48 @@ async function stressEditorActions(s, base, { cpu }) {
     await page.waitForTimeout(250);
   }
   await page.keyboard.press("Control+z");
+  // editorPan (right-button drag) and editorZoom (wheel): each event to the end of the frame that draws it, as for the drag.
+  // The canvas is compared before and after each gesture: the case fails unless the view moved.
+  await page.evaluate((busy) => {
+    const q = (window.__qaView = { pan: [], zoom: [] });
+    const timed = (list, stamp) => requestAnimationFrame(() => setTimeout(() => list.push(performance.now() - stamp), 0));
+    window.addEventListener("pointermove", (e) => e.buttons === 2 && timed(q.pan, e.timeStamp), { capture: true });
+    window.addEventListener(
+      "wheel",
+      (e) => {
+        if (busy) {
+          const end = performance.now() + busy;
+          while (performance.now() < end);
+        }
+        timed(q.zoom, e.timeStamp);
+      },
+      { capture: true },
+    );
+  }, selfTestMode() === "action" ? BUSY_MS / 5 : 0);
+  const box = await canvas.boundingBox();
+  const cx = box.x + box.width / 2;
+  const cy = box.y + box.height / 2;
+  const viewBefore = await canvas.screenshot();
+  await page.mouse.move(cx, cy);
+  await page.mouse.down({ button: "right" });
+  for (let i = 1; i <= ACTION_N + 5; i++) {
+    await page.mouse.move(cx - i * 12, cy - (i % 3) * 4);
+    await page.waitForTimeout(60);
+  }
+  await page.mouse.up({ button: "right" });
+  await page.waitForTimeout(500);
+  const viewPanned = await canvas.screenshot();
+  if (viewPanned.equals(viewBefore)) throw new Error("editorPan: a right-button drag did not move the view");
+  await page.mouse.move(cx, cy);
+  for (let i = 0; i < ACTION_N + 3; i++) {
+    await page.mouse.wheel(0, -40);
+    await page.waitForTimeout(60);
+  }
+  await page.waitForTimeout(500);
+  if ((await canvas.screenshot()).equals(viewPanned)) throw new Error("editorZoom: the wheel did not change the view");
+  const view = await page.evaluate(() => window.__qaView);
+  const pan = view.pan.slice(-ACTION_N);
+  const zoom = view.zoom.slice(-ACTION_N);
   // testPlayStart: Test play to the first match frame; Edit returns to the editor (untimed).
   const play = page.getByRole("button", { name: "Test play", exact: true });
   const testPlay = [];
@@ -769,7 +820,7 @@ async function stressEditorActions(s, base, { cpu }) {
     await button(page.locator(".offline-top"), "Edit").click();
     await canvas.waitFor();
   }
-  return actionResult({ openEditorMap: openMs, editorSelect: select, editorDrag: drag, testPlayStart: testPlay }, { cpu });
+  return actionResult({ openEditorMap: openMs, editorSelect: select, editorDrag: drag, editorPan: pan, editorZoom: zoom, testPlayStart: testPlay }, { cpu });
 }
 
 /**
