@@ -70,11 +70,17 @@ let lastCentre: { x: number; y: number } | null = null;
 /** Player a spectator follows; -1 none. Only used while the viewer has no local player. */
 let spectateId = -1;
 /** QA hook (client/qa/playfield.mjs): the view the last computed frame was drawn with. The game never reads it. */
-const qaView: { cx: number; cy: number; w: number; h: number; tick: number; follow: number; away: readonly number[] } = {
+const qaView: { cx: number; cy: number; w: number; h: number; aw: number; ah: number; bx0: number; by0: number; bx1: number; by1: number; tick: number; follow: number; away: readonly number[] } = {
   cx: 0,
   cy: 0,
   w: 0,
   h: 0,
+  aw: 0,
+  ah: 0,
+  bx0: 0,
+  by0: 0,
+  bx1: 0,
+  by1: 0,
   tick: -1,
   follow: -1,
   away: [],
@@ -142,6 +148,12 @@ export function computeCamera(scene: Scene, local?: PlayerRec): Camera {
   qaView.cy = cy;
   qaView.w = w;
   qaView.h = h;
+  qaView.aw = scene.arenaW;
+  qaView.ah = scene.arenaH;
+  qaView.bx0 = bounds.x0;
+  qaView.by0 = bounds.y0;
+  qaView.bx1 = bounds.x1;
+  qaView.by1 = bounds.y1;
   qaView.tick = scene.tick;
   qaView.follow = local?.id ?? -1;
   qaView.away = away;

@@ -4,12 +4,12 @@
 // device pixels.
 
 import type { Camera, ViewRect } from "../camera";
-import { worldXf } from "../camera";
+import { findLocal, worldXf } from "../camera";
 import type { Scene } from "../frame";
 import { FLAG_LOCAL, HIT_KIND_PLAYER } from "../frame";
 import { TEAM_BLUE, TEAM_RED, TEAM_SPECTATOR, isTeamMode } from "../protocol";
 import { reducedMotion } from "../ui/a11y";
-import { AWAY_RING_BELOW_LUM, cssHex, playerRgb, relLuminance } from "./geometry";
+import { AWAY_RING_BELOW_LUM, MARKER_GAP, MARKER_HALF_WIDTH, MARKER_HEIGHT, cssHex, playerRgb, relLuminance } from "./geometry";
 
 const NAME_FONT = "500 12px system-ui, sans-serif";
 const LOCAL_NAME_FONT = "700 13px system-ui, sans-serif";
@@ -91,6 +91,8 @@ interface NameLabel {
 }
 /** Axis-aligned box of a placed name label, in CSS px. */
 interface Box { left: number; right: number; top: number; bottom: number }
+/** A drawn rect for the QA draw-order hook, in window CSS px. z: 0 = the GL layer (drawn first), 1 = the overlay canvas (drawn over GL). */
+interface DrawRect { kind: "label" | "marker"; id: number; z: number; box: Box }
 
 interface KillEntry {
   killer: number;
@@ -176,7 +178,7 @@ export class Overlay {
     if (chrome) this.recordEvents(scene);
     this.drawDamageBars(scene, cam, cssW, cssH);
     if (chrome) this.drawIntro(scene, tickHz, cssW, cssH);
-    this.drawNames(scene, cam, names, cssW, cssH);
+    this.publishDraw(scene.tick, this.drawNames(scene, cam, names, cssW, cssH));
     if (chrome) this.drawHitFlashes(scene, cam, cssW, cssH);
     if (!chrome) return;
     this.publishAway(scene.tick, this.drawAway(scene, cam, names, cssW, cssH));
@@ -314,6 +316,7 @@ export class Overlay {
     // The local player's label keeps its place and is drawn last, on top. Others stack upward off it and off each other.
     // The leader's crown sits above its label, so its box includes that strip; no label is stacked over a crown.
     const placed: Box[] = [];
+    const drawn: DrawRect[] = [];
     for (const l of [...labels].sort((a, b) => Number(b.local) - Number(a.local))) {
       const crown = !l.local && l.player.id === leader ? CROWN_RISE : 0;
       if (!l.local) {
@@ -323,7 +326,9 @@ export class Overlay {
           l.y -= l.h + NAME_GAP;
         }
       }
-      placed.push({ left: l.x - l.w / 2, right: l.x + l.w / 2, top: l.y - l.h, bottom: l.y });
+      const box = { left: l.x - l.w / 2, right: l.x + l.w / 2, top: l.y - l.h - crown, bottom: l.y };
+      placed.push(box);
+      drawn.push({ kind: "label", id: l.player.id, z: 1, box });
     }
     const dpr = window.devicePixelRatio || 1;
     for (const l of labels.sort((a, b) => Number(a.local) - Number(b.local))) {
@@ -338,6 +343,20 @@ export class Overlay {
         this.drawStamina(l.player.stamina / scene.maxStamina, l.x, l.centreY + l.bodyHalf + 4);
       }
     }
+    // The followed player's jump emblem: geometry's putMarker triangle in the same world transform, on the GL layer under the overlay.
+    const followed = findLocal(scene);
+    if (followed !== undefined) {
+      const size = followed.size;
+      const tipY = followed.y - size / 2 - size * MARKER_GAP;
+      const topY = tipY - size * MARKER_HEIGHT;
+      const hw = size * MARKER_HALF_WIDTH;
+      const x0 = ((followed.x - hw) * sx + ox + 1) * cssW / 2;
+      const x1 = ((followed.x + hw) * sx + ox + 1) * cssW / 2;
+      const y0 = (1 - (topY * sy + oy)) * cssH / 2;
+      const y1 = (1 - (tipY * sy + oy)) * cssH / 2;
+      drawn.push({ kind: "marker", id: followed.id, z: 0, box: { left: Math.min(x0, x1), right: Math.max(x0, x1), top: Math.min(y0, y1), bottom: Math.max(y0, y1) } });
+    }
+    return drawn;
   }
 
   /**
@@ -407,6 +426,11 @@ export class Overlay {
   /** QA hook (like __qaCam): this frame's edge chips in window CSS px, keyed by the scene tick. */
   private publishAway(tick: number, chips: AwayChip[]): void {
     Object.assign(globalThis, { __qaAway: { tick, chips } });
+  }
+
+  /** QA hook (like __qaCam): this frame's name labels and the followed player's marker, in window CSS px, with their z order. */
+  private publishDraw(tick: number, rects: DrawRect[]): void {
+    Object.assign(globalThis, { __qaDraw: { tick, rects } });
   }
 
   /** Small crown centred on (x, y), for the FFA leader. */

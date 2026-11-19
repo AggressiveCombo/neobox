@@ -16,6 +16,9 @@ import { h, labelSwap, showLabel } from "./dom";
 const PAGE_SIZE = 10;
 /** Largest wall-clock step applied per frame. A hitch (the first draws of a clip, GC, a stalled tab) freezes the clip for its length instead of jumping it ahead: at 250 ms one hitch moved the clip 5-7 ticks in a single frame. */
 const MAX_FRAME_MS = 50;
+/** QA hook (like __qaCam): the playing clip's tick and the wall-clock step (ms) applied to it on the last frame. The game never reads it. */
+const qaClip = { tick: -1, dtMs: 0 };
+Object.assign(globalThis, { __qaClip: qaClip });
 /** Wait before trying the list again after a failed fetch or a full pass of failed loads. */
 const RETRY_MS = 15_000;
 
@@ -194,8 +197,11 @@ export function mountMenuClips(ctx: AppCtx, host: HTMLElement, onPlaying?: (on: 
     }
     frozenFor = null;
     p.tick += (dt / 1000) * p.info.hz;
+    qaClip.tick = p.tick;
+    qaClip.dtMs = dt;
     if (p.tick >= p.info.end) {
       playing = null;
+      qaClip.tick = -1;
       bar.hidden = true;
       onPlaying?.(false);
       startNext();
@@ -218,6 +224,7 @@ export function mountMenuClips(ctx: AppCtx, host: HTMLElement, onPlaying?: (on: 
     cancelAnimationFrame(rafId);
     window.clearTimeout(retryTimer);
     playing = null;
+    qaClip.tick = -1;
     eng?.replayClose();
     bar.remove();
     ctx.sfx.sceneMuted = soundWasMuted;

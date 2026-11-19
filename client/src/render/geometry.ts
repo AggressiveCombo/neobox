@@ -81,9 +81,9 @@ const TRAIL_RGB = 0x4d6d73;
 const HIGHLIGHT_STROKE = 0.08;
 const HIGHLIGHT_KEYS = BIT.PUSH | BIT.ROCKET | BIT.BAT | BIT.GRAB;
 /** Marker gap, height, half width and 1 px outline, in player sides. */
-const MARKER_GAP = 0.15;
-const MARKER_HEIGHT = 0.24;
-const MARKER_HALF_WIDTH = 0.2;
+export const MARKER_GAP = 0.15;
+export const MARKER_HEIGHT = 0.24;
+export const MARKER_HALF_WIDTH = 0.2;
 const MARKER_STROKE = 0.025;
 const MARKER_STROKE_RGB = 0x000222;
 /** Spawn preview: alpha and the vertices of its square. */
