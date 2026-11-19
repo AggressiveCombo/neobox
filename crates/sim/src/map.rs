@@ -14,7 +14,8 @@
 
 use crate::js::{to_number, truthy};
 use serde_json::{Map, Value};
-use std::sync::Arc;
+use neobox_box2d::Shape;
+use std::sync::{Arc, OnceLock};
 
 /// Largest object id accepted in sparse buckets (bodies are stored by id).
 pub const MAX_OBJECT_ID: f64 = 65535.0;
@@ -223,6 +224,16 @@ pub const BODY_STATIC: f64 = 0.0;
 pub const BODY_KINEMATIC: f64 = 1.0;
 pub const BODY_DYNAMIC: f64 = 2.0;
 
+/// Box2D shapes of a [`BodyDef`]'s `shapes`, built on first use. Derived data: it takes no part in equality.
+#[derive(Clone, Debug, Default)]
+pub(crate) struct PhysicsCache(pub(crate) OnceLock<Vec<Option<Shape>>>);
+
+impl PartialEq for PhysicsCache {
+    fn eq(&self, _: &Self) -> bool {
+        true
+    }
+}
+
 /// Immutable part of a body (shared between all simulation states).
 #[derive(serde::Serialize, serde::Deserialize, Clone, Debug, PartialEq)]
 pub struct BodyDef {
@@ -300,6 +311,9 @@ pub struct BodyDef {
     pub race_progress: f64,
     pub shapes: Vec<MapShape>,
     pub extra: Extra,
+    /// Box2D shapes of `shapes`, built on first use.
+    #[serde(skip)]
+    pub(crate) physics: PhysicsCache,
 }
 
 impl Default for BodyDef {
@@ -350,6 +364,7 @@ impl Default for BodyDef {
             race_progress: 0.0,
             shapes: Vec::new(),
             extra: Extra::default(),
+            physics: PhysicsCache::default(),
         }
     }
 }
@@ -819,6 +834,7 @@ fn decode_body(o: &Map<String, Value>) -> Result<(f64, MapBody), MapError> {
                 "41", "43", "44", "45", "50", "55", "56", "57", "58", "60", "61", "62", "63", "64", "65", "s", "pf",
             ],
         ),
+        physics: PhysicsCache::default(),
     };
     let body = MapBody {
         x: num(o, "2", 0.0),

@@ -2,7 +2,7 @@
 //! `pu` bucket.
 
 use crate::js;
-use crate::map::{MapCap, MapJoint, MapTurret, BODY_DYNAMIC, BODY_KINEMATIC, BODY_STATIC, SHAPE_CIRCLE, SHAPE_POLYGON};
+use crate::map::{BodyDef, MapCap, MapJoint, MapShape, MapTurret, BODY_DYNAMIC, BODY_KINEMATIC, BODY_STATIC, SHAPE_CIRCLE, SHAPE_POLYGON};
 use crate::player::Limiter;
 use crate::state::*;
 use crate::step::{body_tag, effect, kind, sort_near, sound, tag, v2, Ctx};
@@ -74,6 +74,36 @@ impl BodyObj {
     }
 }
 
+impl BodyDef {
+    /// The physics shapes of `shapes` (`None` where a row creates no fixture), built once per definition.
+    pub(crate) fn physics_shapes(&self) -> &[Option<Shape>] {
+        self.physics.0.get_or_init(|| self.shapes.iter().map(physics_shape).collect())
+    }
+}
+
+/// The physics shape of one map shape row; `None` where the row creates no fixture.
+fn physics_shape(s: &MapShape) -> Option<Shape> {
+    if s.no_physics {
+        return None;
+    }
+    if s.kind == SHAPE_CIRCLE {
+        let mut c = CircleShape::new(s.radius);
+        c.set_local_position(v2(s.x, s.y));
+        Some(Shape::Circle(c))
+    } else if s.kind == SHAPE_POLYGON {
+        if !s.closed || s.points.len() <= 2 {
+            return None;
+        }
+        let pts: Vec<Vec2> = s.points.iter().map(|p| v2(p[0] + s.x, p[1] + s.y)).collect();
+        let mut p = PolygonShape::new();
+        p.set_as_array(&pts, pts.len());
+        Some(Shape::Polygon(p))
+    } else {
+        // the original would throw creating a fixture without a shape
+        None
+    }
+}
+
 /// `oo` for a map body.
 pub(crate) fn body_create(ctx: &mut Ctx<'_>, world: &mut World, i: usize) {
     let o = &mut ctx.bodies[i];
@@ -103,27 +133,12 @@ pub(crate) fn body_create(ctx: &mut Ctx<'_>, world: &mut World, i: usize) {
     bd.user_data = tag(kind::BODY, i);
     let body = world.create_body(&bd);
     o.body = Some(body);
-    for s in &def.shapes {
-        if s.no_physics {
-            continue;
-        }
-        let shape = if s.kind == SHAPE_CIRCLE {
-            let mut c = CircleShape::new(s.radius);
-            c.set_local_position(v2(s.x, s.y));
-            Shape::Circle(c)
-        } else if s.kind == SHAPE_POLYGON {
-            if !s.closed || s.points.len() <= 2 {
-                continue;
-            }
-            let pts: Vec<Vec2> = s.points.iter().map(|p| v2(p[0] + s.x, p[1] + s.y)).collect();
-            let mut p = PolygonShape::new();
-            p.set_as_array(&pts, pts.len());
-            Shape::Polygon(p)
-        } else {
-            // the original would throw creating a fixture without a shape
+    let shapes = def.physics_shapes();
+    for (s, shape) in def.shapes.iter().zip(shapes) {
+        let Some(shape) = shape else {
             continue;
         };
-        let mut fd = FixtureDef::new(shape);
+        let mut fd = FixtureDef::new(shape.clone());
         fd.density = s.density.unwrap_or(def.density);
         fd.friction = s.friction.unwrap_or(def.friction);
         fd.restitution = s.restitution.unwrap_or(def.restitution);
