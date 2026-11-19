@@ -14,6 +14,8 @@ import { icon } from "./icons";
 const API_SRC = "https://www.youtube.com/iframe_api";
 /** Seconds a player may drift from the room's position before it seeks. */
 const DRIFT_S = 2;
+/** Seconds to wait for the player to report ready before the jukebox is marked unavailable. */
+const PLAYER_READY_MS = 15000;
 const VIDEO_ID_RE = /^[A-Za-z0-9_-]{11}$/;
 
 interface YtPlayer {
@@ -94,10 +96,13 @@ export function mountJukebox(ctx: AppCtx): void {
   let current: JukeboxState | null = null;
   /** performance.now() when `current` arrived: the room's position is advanced by the time since. */
   let heardAt = 0;
+  /** The player could not load: the panel says so, and the room's music is not silenced for it. */
+  let unavailable = false;
 
-  // YouTube replaces its target element with the player frame, so it gets its own node.
+  // The player frame lives in this mount (ensurePlayer gives YouTube an inner node to replace).
   const playerMount = h("div", { class: "jukebox-screen" });
   const title = h("strong", { class: "jukebox-title" });
+  const note = h("p", { class: "jukebox-note", hidden: true }, "The video player could not load, so the jukebox is silent.");
   const stateChip = h("span", { class: "chip", role: "status", "aria-live": "polite" });
 
   function applyVolume(): void {
@@ -108,14 +113,20 @@ export function mountJukebox(ctx: AppCtx): void {
     else player.unMute();
   }
 
-  /** Creates the player once the API has loaded; it applies the room's state when ready. */
+  /** Creates the player once the API has loaded; it applies the room's state when ready. A load that fails, or a
+   *  player that never reports ready, makes the jukebox unavailable until a later attempt succeeds. */
   function ensurePlayer(): void {
     if (playerBuild !== null) return;
-    const { promise, resolve } = Promise.withResolvers<YtPlayer>();
+    const { promise, resolve, reject } = Promise.withResolvers<YtPlayer>();
     playerBuild = promise;
-    loadApi().then(
-      (yt) => {
-        const created = new yt.Player(playerMount, {
+    const readyTimer = setTimeout(() => reject(new Error("The video player did not start.")), PLAYER_READY_MS);
+    loadApi().then((yt) => {
+      try {
+        // YouTube replaces its target with the player frame: a fresh inner node keeps the frame inside the mount,
+        // so hiding the mount hides it and clearing the mount removes a frame that becomes ready too late.
+        const target = h("div");
+        playerMount.replaceChildren(target);
+        const created = new yt.Player(target, {
           width: "100%",
           height: "100%",
           // The page origin lets the embed target its postMessage calls; without it the API warns on each message.
@@ -126,17 +137,27 @@ export function mountJukebox(ctx: AppCtx): void {
             onError: () => ctx.toast("The jukebox could not play this video. Try another one.", "error"),
           },
         });
+      } catch (err) {
+        reject(err);
+      }
+    }, reject);
+    promise.then(
+      (p) => {
+        clearTimeout(readyTimer);
+        player = p;
+        unavailable = false;
+        applyVolume();
+        apply();
       },
-      (err: unknown) => {
+      () => {
+        clearTimeout(readyTimer);
         playerBuild = null;
-        ctx.toast(err instanceof Error ? err.message : String(err), "error");
+        playerMount.replaceChildren();
+        unavailable = true;
+        music.setJukebox(false);
+        render(ctx.store.state);
       },
     );
-    promise.then((p) => {
-      player = p;
-      applyVolume();
-      apply();
-    });
   }
 
   /** Brings the player in line with the room's jukebox: load, play, pause, or seek when it drifted. */
@@ -211,6 +232,7 @@ export function mountJukebox(ctx: AppCtx): void {
     { class: "jukebox", "aria-label": "Jukebox", hidden: true },
     h("header", { class: "jukebox-head" }, title, stateChip),
     playerMount,
+    note,
     hostRow,
     h("label", { class: "jukebox-volume" }, h("span", { title: "Volume" }, icon("volume-2", 18)), volume),
   );
@@ -220,8 +242,10 @@ export function mountJukebox(ctx: AppCtx): void {
     panel.hidden = jb === null;
     if (jb === null) return;
     title.textContent = jb.title;
-    stateChip.textContent = jb.playing ? "Playing" : "Paused";
-    stateChip.className = jb.playing ? "chip ink" : "chip";
+    stateChip.textContent = unavailable ? "Unavailable" : jb.playing ? "Playing" : "Paused";
+    stateChip.className = jb.playing && !unavailable ? "chip ink" : "chip";
+    playerMount.hidden = unavailable;
+    note.hidden = !unavailable;
     toggleBtn.replaceChildren(icon(jb.playing ? "pause" : "play"), jb.playing ? "Pause" : "Resume");
     hostRow.hidden = !isHost(state);
   }
@@ -233,9 +257,10 @@ export function mountJukebox(ctx: AppCtx): void {
     if (jb !== (prev.room?.jukebox ?? null)) {
       current = jb;
       heardAt = performance.now();
+      if (jb === null) unavailable = false;
       if (jb !== null) ensurePlayer();
       apply();
-      music.setJukebox(jb?.playing === true);
+      music.setJukebox(jb?.playing === true && !unavailable);
     }
     if (next.room !== prev.room || next.myId !== prev.myId) render(next);
   });

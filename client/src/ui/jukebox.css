@@ -63,6 +63,23 @@
   border: 0;
 }
 
+/* Shown in place of the player when it could not load. */
+.jukebox-note {
+  margin: 0;
+  padding: 16px 12px;
+  text-align: center;
+  color: var(--ink-2, inherit);
+  aspect-ratio: 16 / 9;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #000;
+}
+
+.jukebox-note[hidden] {
+  display: none;
+}
+
 .jukebox-host {
   display: flex;
   flex-direction: column;
