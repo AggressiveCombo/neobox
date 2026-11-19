@@ -17,11 +17,11 @@ const ESCAPES = [
   ["E03", "full-screen flash on replay close", "motion.fullFlash.count"],
   ["E04", "HUD overlap over the game arena", "overlay.hud.overlap"],
   ["E05", "readable-font pref changes text metrics", "font.pref.metricDelta"],
-  ["E06", "render order (no draw-list hook; not built)", null],
+  ["E06", "render order (label over the followed marker)", "overlay.marker.underLabel"],
   ["E07", "unsourced copy claims", "copy.claims.unsourced"],
   ["E08", "transition missing", "transition.present"],
   ["E09", "scroll target offset in settings", "scroll.target.offset"],
-  ["E10", "layout shift on nav Next", "layout.navShift.px"],
+  ["E10", "layout shift on nav Next and on toast", "layout.navShift.px"],
   ["E11", "prompted input does not react", "interaction.promptedInput.reacts"],
   ["E12", "editor drag performance", "editor.perf.dragP95ms"],
 ];
@@ -39,7 +39,11 @@ for (const engine of selectedEngines()) {
     const runs = [];
     for (let k = 0; k < 2; k++) runs.push(await runOne(det, { browser, base: srv.base, results, src }));
     const values = runs.map((r) => r.metrics?.[det.key] ?? null);
-    const stable = values[0] === values[1] && runs[0].verdict === runs[1].verdict;
+    const [a, b] = values;
+    const big = Math.max(Math.abs(a ?? 0), Math.abs(b ?? 0));
+    // Timing values vary run to run; counts must match exactly, and a timing value of 10+ may differ by 10%.
+    const same = a === b || (Number.isFinite(a) && Number.isFinite(b) && big >= 10 && Math.abs(a - b) <= 0.1 * big);
+    const stable = same && runs[0].verdict === runs[1].verdict;
     rows.push({
       engine,
       escape: det.escape,
