@@ -1,7 +1,7 @@
 // Inventory rows for the match HUD, its menu, chat, input, offline, phone and editor screens. Each scenario names
 // the rows it proves in `inv`; every check asserts a row's "shows" column, with role/name locators where they exist.
 
-import { builtinMaps, button, createRoom, dismissPhoneSplash, joinByInvite, matchWithGuest, menuName, navTo, playFromMenu, probeChanges, roomTitle, signedIn, sleep, startMatch, uniqueName, waitForPixels, waitQuiet } from "./lib.mjs";
+import { builtinMaps, button, createRoom, dismissPhoneSplash, joinByInvite, matchWithGuest, menuName, navTo, playFromMenu, probeChanges, roomTitle, signedIn, sleep, startMatch, uniqueName, waitForPixels, waitQuiet, waitStable } from "./lib.mjs";
 import { mkdtempSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -886,6 +886,48 @@ async function matchEditorGuest(s) {
   return "guest Save to library shows the sign-in prompt in one modal";
 }
 
+/** editor-inspector: shape fields keep every edit across a reselect: one committed with Enter, one committed by a click on the canvas, both read back after the body is selected again. */
+async function matchEditorInspector(s) {
+  const user = await signedIn(s, "edinsp");
+  const { page } = user;
+  await navTo(page, "Map editor");
+  const canvas = editorCanvas(page);
+  await canvas.waitFor({ state: "visible" });
+  const box = await waitStable(canvas);
+  const cx = box.x + box.width / 2;
+  const cy = box.y + box.height / 2;
+  await button(page, "Box").click();
+  await page.mouse.move(cx - 80, cy - 50);
+  await page.mouse.down();
+  await page.mouse.move(cx + 80, cy + 50, { steps: 8 });
+  await page.mouse.up();
+  await button(page, "Select").click();
+  const shape = page.locator(".editor-side details.inspector-shape-details").first();
+  const offX = shape.getByLabel("Offset X", { exact: true });
+  const offY = shape.getByLabel("Offset Y", { exact: true });
+  const selectBody = async () => {
+    await page.mouse.click(cx, cy);
+    await offX.waitFor({ state: "visible" });
+  };
+  await selectBody();
+  await offX.fill("7.5");
+  await offX.press("Enter");
+  await offY.fill("3");
+  // A canvas press blurs the field (its change commits the 3), then clears the selection.
+  await page.mouse.click(box.x + 5, box.y + 5);
+  await selectBody();
+  const want = { x: "7.5", y: "3" };
+  let got = {};
+  for (let i = 0; i < 30; i++) {
+    got = { x: await offX.inputValue(), y: await offY.inputValue() };
+    if (got.x === want.x && got.y === want.y) break;
+    await sleep(100);
+  }
+  check(got.x === want.x, `Offset X is ${got.x} after reselect, edited to ${want.x}`);
+  check(got.y === want.y, `Offset Y is ${got.y} after reselect, edited to ${want.y}`);
+  return "shape Offset X and Y survive a reselect after Enter and blur commits";
+}
+
 /** postgame: a private room's signed-in host and guest see Game over with an XP line; Escape closes the host's; the room roster shows the level chip. */
 async function matchPostgame(s) {
   const user = await signedIn(s, "pg");
@@ -950,5 +992,6 @@ export const matchInvScenarios = [
   { name: "inv match editor menu", inv: ["editor-page", "editor-menu", "editor-testplay"], run: matchEditorMenu },
   { name: "inv match editor save", inv: ["editor-save-dialog", "editor-toasts"], run: matchEditorSave },
   { name: "inv match editor guest", inv: ["editor-save-dialog (guest)"], run: matchEditorGuest },
+  { name: "inv match editor inspector", inv: ["editor-inspector-shape"], run: matchEditorInspector },
   { name: "inv match postgame", inv: ["postgame"], run: matchPostgame },
 ];

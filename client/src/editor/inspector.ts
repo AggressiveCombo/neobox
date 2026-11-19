@@ -416,11 +416,16 @@ function fieldGroups(gs: readonly Group[], item: Obj, defaults: Obj, set: (f: Fi
   );
 }
 
+/** A map edit: takes the current map and returns the next one. */
+export type Edit = (doc: Obj) => Obj;
+/** Fields commit edits, not maps: an edit runs at commit time against the map then, so a commit after another edit keeps that edit. */
+type Commit = (edit: Edit) => void;
+
 export interface InspectorOpts {
   doc: Obj;
   sel: readonly Ref[];
-  /** Replace the map with `next` as one undo step. */
-  commit(next: Obj): void;
+  /** Apply `edit` to the current map as one undo step. It runs synchronously. */
+  commit(edit: Edit): void;
   /** Delete the selected entities. */
   remove(): void;
   /** Body being edited in place and its selected shapes, if any. */
@@ -439,7 +444,7 @@ export function renderInspector(o: InspectorOpts): HTMLElement {
     const bodies = sel.filter((r) => r.kind === "body").map((r) => r.i);
     const merge =
       bodies.length === sel.length && bodies.length > 1
-        ? [h("button", { type: "button", onclick: () => o.commit(mergeBodies(doc, bodies).doc) }, "Merge bodies")]
+        ? [h("button", { type: "button", onclick: () => o.commit((d) => mergeBodies(d, bodies).doc) }, "Merge bodies")]
         : [];
     return h(
       "div",
@@ -453,7 +458,7 @@ export function renderInspector(o: InspectorOpts): HTMLElement {
   const ref = sel[0]!;
   const item = getList(doc, ref.kind)[ref.i];
   if (!item) return mapSettings(doc, o.commit);
-  const apply = (patch: Obj): void => o.commit(patchEntity(doc, ref, patch));
+  const apply = (patch: Obj): void => o.commit((d) => patchEntity(d, ref, patch));
   const setField = (f: Field, v: Value): void => apply({ [f.key]: stored(f, v) });
   const fields = (fs: Field[], defaults: Obj): HTMLElement[] => fs.map((f) => fieldRow(f, readField(item, f, defaults), (v) => setField(f, v)));
 
@@ -502,7 +507,7 @@ function anchorName(id: number): string {
 }
 
 /** The inspector while editing inside a body: the selected shape's fields, or the body's shape list when none is selected. */
-function scopeInspector(doc: Obj, bi: number, body: Obj, shapes: readonly number[], commit: (next: Obj) => void, remove: () => void): HTMLElement {
+function scopeInspector(doc: Obj, bi: number, body: Obj, shapes: readonly number[], commit: Commit, remove: () => void): HTMLElement {
   if (shapes.length === 0) {
     return h(
       "div",
@@ -527,13 +532,13 @@ function scopeInspector(doc: Obj, bi: number, body: Obj, shapes: readonly number
     "div",
     { class: "inspector" },
     h("h2", { class: "inspector-title" }, `Shape ${si + 1} in body ${num(body, "1", bi)}`),
-    shapeBlock(doc, bi, body, si, asObj(list(body, "s")[si] ?? {}), commit),
+    shapeBlock(bi, body, si, asObj(list(body, "s")[si] ?? {}), commit),
     del,
   );
 }
 
 /** Editable rows for every shape of a body. A shape's rows are built when its disclosure first opens, so a selection with many shapes does not rebuild them all. A lone shape starts open. */
-function shapesBlock(doc: Obj, bodyIdx: number, commit: (next: Obj) => void): HTMLElement {
+function shapesBlock(doc: Obj, bodyIdx: number, commit: Commit): HTMLElement {
   const body = getList(doc, "body")[bodyIdx] ?? {};
   const shapes = list(body, "s");
   const lone = shapes.length === 1;
@@ -548,7 +553,7 @@ function shapesBlock(doc: Obj, bodyIdx: number, commit: (next: Obj) => void): HT
       const build = (): void => {
         if (built || !details.open) return;
         built = true;
-        details.append(shapeBlock(doc, bodyIdx, body, si, shape, commit));
+        details.append(shapeBlock(bodyIdx, body, si, shape, commit));
       };
       details.addEventListener("toggle", build);
       build();
@@ -558,7 +563,7 @@ function shapesBlock(doc: Obj, bodyIdx: number, commit: (next: Obj) => void): HT
 }
 
 /** Numeric X/Y fields for each point of a polygon shape: the keyboard route to the vertex drag. Shape-relative, like the stored outline. */
-function pointFields(doc: Obj, bodyIdx: number, si: number, shape: Obj, commit: (next: Obj) => void): HTMLElement {
+function pointFields(bodyIdx: number, si: number, shape: Obj, commit: Commit): HTMLElement {
   const outline = shapeOutline(shape);
   const axis = (k: number, which: "x" | "y", value: number): HTMLElement => {
     const input = h("input", {
@@ -570,10 +575,13 @@ function pointFields(doc: Obj, bodyIdx: number, si: number, shape: Obj, commit: 
         const el = e.target as HTMLInputElement;
         const n = Number(el.value);
         if (!Number.isFinite(n)) return;
-        const q = outline[k]!;
-        const moved = which === "x" ? { x: n, y: q.y } : { x: q.x, y: n };
         try {
-          commit(setShapeOutline(doc, bodyIdx, si, outline.map((p, i) => (i === k ? moved : p))));
+          commit((d) => {
+            const pts = shapeOutline(shapeAt(d, bodyIdx, si));
+            const q = pts[k]!;
+            const moved = which === "x" ? { x: n, y: q.y } : { x: q.x, y: n };
+            return setShapeOutline(d, bodyIdx, si, pts.map((p, i) => (i === k ? moved : p)));
+          });
         } catch {
           // Not a simple polygon: keep the stored outline and show it again.
           el.value = String(value);
@@ -590,8 +598,13 @@ function pointFields(doc: Obj, bodyIdx: number, si: number, shape: Obj, commit: 
   );
 }
 
-function shapeBlock(doc: Obj, bodyIdx: number, body: Obj, si: number, shape: Obj, commit: (next: Obj) => void): HTMLElement {
-  const set = (patch: Obj): void => commit(patchShape(doc, bodyIdx, si, patch));
+/** The stored shape `si` of body `bodyIdx` in `doc`, or an empty object. */
+function shapeAt(doc: Obj, bodyIdx: number, si: number): Obj {
+  return asObj(list(getList(doc, "body")[bodyIdx] ?? {}, "s")[si] ?? {});
+}
+
+function shapeBlock(bodyIdx: number, body: Obj, si: number, shape: Obj, commit: Commit): HTMLElement {
+  const set = (patch: Obj): void => commit((d) => patchShape(d, bodyIdx, si, patch));
   const circle = isCircle(shape);
   const fs: Field[] = [
     { key: "2", label: "Offset X", kind: "num", step: 0.5 },
@@ -604,7 +617,10 @@ function shapeBlock(doc: Obj, bodyIdx: number, body: Obj, si: number, shape: Obj
     type: "color",
     value: shapeColor(shape),
     "aria-label": `Shape ${si + 1} colour`,
-    onchange: (e: Event) => commit(setShapeColor(doc, bodyIdx, si, hexColor((e.target as HTMLInputElement).value))),
+    onchange: (e: Event) => {
+      const hex = hexColor((e.target as HTMLInputElement).value);
+      commit((d) => setShapeColor(d, bodyIdx, si, hex));
+    },
   });
   const overrides = OVERRIDES.map(([key, label, bodyKey]) => {
     const inherited = num(body, bodyKey, Number(BODY_DEFAULTS[bodyKey]));
@@ -615,7 +631,11 @@ function shapeBlock(doc: Obj, bodyIdx: number, body: Obj, si: number, shape: Obj
       h("input", {
         type: "checkbox",
         checked: own,
-        onchange: (e: Event) => set({ [key]: (e.target as HTMLInputElement).checked ? inherited : undefined }),
+        onchange: (e: Event) => {
+          const on = (e.target as HTMLInputElement).checked;
+          // The inherited value is read when the edit runs, like the other shape commits.
+          commit((d) => patchShape(d, bodyIdx, si, { [key]: on ? num(getList(d, "body")[bodyIdx] ?? {}, bodyKey, Number(BODY_DEFAULTS[bodyKey])) : undefined }));
+        },
       }),
       h("span", null, `Own ${label.toLowerCase()}`),
       h("input", {
@@ -638,21 +658,19 @@ function shapeBlock(doc: Obj, bodyIdx: number, body: Obj, si: number, shape: Obj
     h("p", { class: "field-label" }, `Shape ${si + 1}: ${label}`),
     h("label", { class: "field shape-row" }, h("span", { class: "field-label" }, "Colour"), colour),
     ...fs.map((f) => fieldRow(f, readField(shape, f, SHAPE_DEFAULTS), (v) => set({ [f.key]: stored(f, v) }))),
-    ...(circle ? [] : [pointFields(doc, bodyIdx, si, shape, commit)]),
+    ...(circle ? [] : [pointFields(bodyIdx, si, shape, commit)]),
     ...overrides,
   );
 }
 
 /** Map-wide settings, shown when nothing is selected. */
-function mapSettings(doc: Obj, commit: (next: Obj) => void): HTMLElement {
+function mapSettings(doc: Obj, commit: Commit): HTMLElement {
   const set = asObj(doc.set);
   return h(
     "div",
     { class: "inspector" },
     h("h2", { class: "inspector-title" }, "Map"),
     h("p", { class: "hint" }, `${getList(doc, "body").length} bodies, ${getList(doc, "joint").length} joints`),
-    ...fieldGroups(MAP_GROUPS, set, SETTINGS_DEFAULTS, (f, v) =>
-      commit({ ...doc, set: withField(set, f.key, stored(f, v), SETTINGS_DEFAULTS) }),
-    ),
+    ...fieldGroups(MAP_GROUPS, set, SETTINGS_DEFAULTS, (f, v) => commit((d) => ({ ...d, set: withField(asObj(d.set), f.key, stored(f, v), SETTINGS_DEFAULTS) }))),
   );
 }

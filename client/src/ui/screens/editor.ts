@@ -282,15 +282,17 @@ export const editorScreen: ScreenFactory = (ctx) => {
     shownDoc = doc;
     if (sameSel && inspectorHost.contains(document.activeElement)) return;
     shownSel = sel;
-    const shownItems = ctrl.sel;
     clearTimeout(inspectorTimer);
     inspectorTimer = window.setTimeout(() => {
+      // A focused field may hold an edit that commits on blur: blur first, so the edit lands before the rebuild replaces its input.
+      const focused = document.activeElement;
+      if (focused instanceof HTMLElement && inspectorHost.contains(focused)) focused.blur();
       inspectorHost.replaceChildren(
         renderInspector({
-          doc,
-          sel: shownItems,
-          scope,
-          commit: (next) => ctrl.commit(next),
+          doc: ctrl.doc,
+          sel: ctrl.sel,
+          scope: ctrl.scope,
+          commit: (edit) => ctrl.commit(edit(ctrl.doc)),
           remove: () => ctrl.removeSelection(),
         }),
       );
