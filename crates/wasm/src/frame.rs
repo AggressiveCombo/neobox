@@ -2,14 +2,14 @@
 //! consecutive simulation states.
 
 use neobox_net::FedKeys;
-use neobox_sim::map::{BodyDef, MapShape, SHAPE_CIRCLE};
+use neobox_sim::map::{BodyDef, MapShape, BODY_STATIC, SHAPE_CIRCLE};
 use neobox_sim::state::{Body, Effect, Player, Projectile, State, ATTACH_ON};
 use neobox_sim::step::kind;
 use neobox_sim::GameSettings;
 use std::collections::HashMap;
 
-pub const LAYOUT_VERSION: u32 = 7;
-pub const HEADER_WORDS: usize = 38;
+pub const LAYOUT_VERSION: u32 = 8;
+pub const HEADER_WORDS: usize = 42;
 pub const PLAYER_WORDS: usize = 14;
 pub const SOUND_WORDS: usize = 5;
 pub const SCORE_WORDS: usize = 15;
@@ -348,6 +348,9 @@ impl FrameBuilder {
     /// Build the frame for `cur`, interpolating from `prev` by `t` in [0, 1].
     pub fn build(&mut self, prev: &State, cur: &State, t: f64, gs: &GameSettings, meta: Meta, feed: &Feed) {
         self.verts.clear();
+        // Extent of the static bodies' drawn triangles (min x, min y, max x, max y): the map's fixed geometry, which the
+        // camera frames. Moving bodies, projectiles, effects and aim lines are left out, so they never move a fixed view.
+        let mut fixed = [f32::INFINITY, f32::INFINITY, f32::NEG_INFINITY, f32::NEG_INFINITY];
         self.bars.clear();
         // bodies, back to front by z-index (stable)
         let mut order: Vec<(f64, u32)> = cur.bodies.iter().map(|(k, b)| (b.def.z_index, k)).collect();
@@ -355,7 +358,14 @@ impl FrameBuilder {
         for (_, id) in order {
             let b = cur.bodies.get(id).expect("body");
             let pb = prev.bodies.get(id);
+            let from = self.verts.len();
             self.body(pb, b, t);
+            if b.def.motion == BODY_STATIC {
+                for v in self.verts[from..].chunks_exact(3) {
+                    let (x, y) = (f32::from_bits(v[0]), f32::from_bits(v[1]));
+                    fixed = [fixed[0].min(x), fixed[1].min(y), fixed[2].max(x), fixed[3].max(y)];
+                }
+            }
             let bar = if b.def.invisible { None } else { damage_bar(b.damage, b.def.dynamic_threshold, b.def.removal_threshold) };
             if let Some((frac, colour)) = bar {
                 let (x, y, _) = body_pose(pb, b, t);
@@ -586,6 +596,10 @@ impl FrameBuilder {
         w[27] = st.wrap as u32;
         w[28] = meta.prediction.to_bits();
         w[29] = meta.rollbacks_per_s.to_bits();
+        // static geometry extent (all infinite when the map has no visible static body)
+        for (i, v) in fixed.iter().enumerate() {
+            w[38 + i] = v.to_bits();
+        }
     }
 }
 
@@ -811,13 +825,17 @@ mod tests {
     fn square_def() -> std::sync::Arc<BodyDef> {
         let points = vec![[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]];
         let shape = MapShape { kind: 0.0, color: 0x00ff00 as f64, points, ..MapShape::default() };
-        std::sync::Arc::new(BodyDef { shapes: vec![shape], ..BodyDef::default() })
+        let mut def = BodyDef::default();
+        def.shapes = vec![shape];
+        std::sync::Arc::new(def)
     }
 
     fn triangle_def() -> std::sync::Arc<BodyDef> {
         let points = vec![[0.0, 0.0], [2.0, 0.0], [0.0, 2.0]];
         let shape = MapShape { kind: 0.0, color: 0xff0000 as f64, points, ..MapShape::default() };
-        std::sync::Arc::new(BodyDef { shapes: vec![shape], ..BodyDef::default() })
+        let mut def = BodyDef::default();
+        def.shapes = vec![shape];
+        std::sync::Arc::new(def)
     }
 
     fn mesh_summary(ms: &[Mesh]) -> Vec<(Vec<[f32; 2]>, u32)> {

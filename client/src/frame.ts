@@ -121,6 +121,11 @@ export interface Scene {
   rollbacksPerSec: number;
   worldOffset: number;
   worldCount: number;
+  /** Extent of the map's static bodies as drawn (world units); infinite when it has none. Moving bodies, projectiles and effects are not in it. */
+  fixedX0: number;
+  fixedY0: number;
+  fixedX1: number;
+  fixedY1: number;
   /** Local input mask (input.ts BIT values), set by the caller after readScene; not part of the frame. */
   localKeys: number;
   players: PlayerRec[];
@@ -256,6 +261,10 @@ export function readScene(fb: FrameView): Scene {
     rollbacksPerSec: f32[29] ?? 0,
     worldOffset: u32[2] ?? 0,
     worldCount: u32[1] ?? 0,
+    fixedX0: f32[38] ?? Infinity,
+    fixedY0: f32[39] ?? Infinity,
+    fixedX1: f32[40] ?? -Infinity,
+    fixedY1: f32[41] ?? -Infinity,
     localKeys: 0,
     players,
     sounds,

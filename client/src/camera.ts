@@ -229,8 +229,9 @@ function clampAxis(c: number, view: number, lo: number, hi: number): number {
 }
 
 /**
- * The playable bounds: the arena united with the map's geometry (world vertices, x f32 and y f32 per 3-word vertex,
- * as geometry.ts copies them). Ground past the arena edge is framed and backed, so no legal spot shows VOID.
+ * The playable bounds: the arena united with the map's static geometry (the frame's fixed extent). Static ground past
+ * the arena edge is framed and backed, so no legal spot shows VOID. Only static bodies count: moving bodies,
+ * projectiles, effects and aim lines change every frame, and a camera fixed on the bounds must not follow them.
  */
 export interface Bounds {
   x0: number;
@@ -239,20 +240,14 @@ export interface Bounds {
   y1: number;
 }
 export function playBounds(scene: Scene): Bounds {
-  const b: Bounds = { x0: 0, y0: 0, x1: Math.max(0, scene.arenaW), y1: Math.max(0, scene.arenaH) };
-  const f = scene.view.f32;
-  const available = Math.floor((f.length - scene.worldOffset) / 3);
-  const count = Math.max(0, Math.min(scene.worldCount, available));
-  for (let i = 0; i < count; i++) {
-    const at = scene.worldOffset + 3 * i;
-    const x = f[at];
-    const y = f[at + 1];
-    if (x < b.x0) b.x0 = x;
-    if (x > b.x1) b.x1 = x;
-    if (y < b.y0) b.y0 = y;
-    if (y > b.y1) b.y1 = y;
-  }
-  return b;
+  // The fixed extent is infinite (min > max) when the map has no visible static body.
+  const has = scene.fixedX0 <= scene.fixedX1 && scene.fixedY0 <= scene.fixedY1;
+  return {
+    x0: has ? Math.min(0, scene.fixedX0) : 0,
+    y0: has ? Math.min(0, scene.fixedY0) : 0,
+    x1: Math.max(0, scene.arenaW, has ? scene.fixedX1 : 0),
+    y1: Math.max(0, scene.arenaH, has ? scene.fixedY1 : 0),
+  };
 }
 
 /** Clip-space transform (sx, sy, ox, oy): clip = (x*sx + ox, y*sy + oy). */
