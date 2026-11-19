@@ -660,6 +660,23 @@
   background: rgb(10 10 10 / 0.6);
 }
 
+@media (forced-colors: active) {
+  .hud-touch-layer .hud-touch {
+    background-color: ButtonFace;
+    color: ButtonText;
+    border: 1px solid ButtonText;
+  }
+
+  .hud-touch-layer .hud-touch .hud-touch-label {
+    color: inherit;
+  }
+
+  .hud-touch-layer .hud-touch.hud-on {
+    background-color: Highlight;
+    color: HighlightText;
+  }
+}
+
 .hud-touch-push { grid-area: push; }
 .hud-touch-rocket { grid-area: rocket; }
 .hud-touch-bat { grid-area: bat; }

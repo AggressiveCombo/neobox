@@ -295,6 +295,25 @@
   background: var(--hud-solid);
 }
 
+/* Forced colours: system colours on the overlay chrome, so every chip and title resolves to a named pair. */
+@media (forced-colors: active) {
+  .offline-top,
+  .offline-title,
+  .offline-dock {
+    background-color: Canvas;
+    color: CanvasText;
+  }
+
+  .offline-top button,
+  .offline-top select,
+  .offline-dock button,
+  .offline-dock select {
+    background-color: ButtonFace;
+    color: ButtonText;
+    border: 1px solid ButtonText;
+  }
+}
+
 /* The bottom dock: transport, seek bar, jump and speed. */
 .offline-dock {
   display: flex;
