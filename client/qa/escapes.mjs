@@ -23,7 +23,7 @@ const ESCAPES = [
   ["E09", "scroll target offset in settings", "scroll.target.offset"],
   ["E10", "layout shift on nav Next and on toast", "layout.navShift.px"],
   ["E11", "prompted input does not react", "interaction.promptedInput.reacts"],
-  ["E12", "editor drag performance", "editor.perf.dragP95ms"],
+  ["E12", "editor drag performance", "editor.perf.dragP95Frames"],
 ];
 
 const argv = process.argv.slice(2);
@@ -37,13 +37,15 @@ for (const engine of selectedEngines()) {
   const srv = await startServer();
   for (const det of DETECTORS) {
     const runs = [];
-    for (let k = 0; k < 2; k++) runs.push(await runOne(det, { browser, base: srv.base, results, src }));
+    for (let k = 0; k < 2; k++) runs.push(await runOne(det, { browser, base: srv.base, results, src, engine }));
     const values = runs.map((r) => r.metrics?.[det.key] ?? null);
     const [a, b] = values;
     const big = Math.max(Math.abs(a ?? 0), Math.abs(b ?? 0));
-    // Timing values vary run to run; counts must match exactly, and a timing value of 10+ may differ by 10%.
-    const same = a === b || (Number.isFinite(a) && Number.isFinite(b) && big >= 10 && Math.abs(a - b) <= 0.1 * big);
-    const stable = same && runs[0].verdict === runs[1].verdict;
+    // Values: counts must match exactly, timings may differ by 0.5 ms or 10%, whichever is larger. A pass must reproduce
+    // its value; a fail must reproduce its verdict (the count of a broken build varies run to run).
+    const same = a === b || (Number.isFinite(a) && Number.isFinite(b) && Math.abs(a - b) <= Math.max(0.5, 0.1 * big));
+    const na = runs[0].verdict === "na";
+    const stable = na ? runs[1].verdict === "na" : runs[0].verdict === runs[1].verdict && (runs[0].verdict === "fail" || same);
     rows.push({
       engine,
       escape: det.escape,
@@ -51,8 +53,8 @@ for (const engine of selectedEngines()) {
       run1: values[0],
       run2: values[1],
       stable,
-      verdict: stable ? runs[0].verdict.toUpperCase() : "UNSTABLE",
-      detail: runs[0].detail ?? null,
+      verdict: na && stable ? "N/A" : stable ? runs[0].verdict.toUpperCase() : "UNSTABLE",
+      detail: runs[1].detail && runs[1].detail !== runs[0].detail ? `${runs[0].detail ?? ""} || run2: ${runs[1].detail}` : runs[0].detail ?? null,
     });
   }
   await srv.stop();

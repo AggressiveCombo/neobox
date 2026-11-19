@@ -211,8 +211,11 @@ Layout-only width sweep: CSS widths 280 to 3840 in steps of 20 at heights 480, 8
 
 ## temporal.mjs and escapes.mjs (escape detectors)
 
-Detectors for the escape classes that need a time series or a frame sequence: E01 replay camera jitter, E02 idle camera drift, E03 full-screen flash on replay close, E05 readable-font metric change, E07 unsourced copy claims (no browser), E08 missing transition, E09 settings scroll target, E10 nav layout shift. E04, E06, E11 and E12 have no detector yet.
+Detectors for the escape classes that need a time series or a frame sequence: E01 camera and tick jitter at the menu clip and replay start, E02 camera drift at fixed zoom while the player plays a map that fits both axes (walks into both walls, jumps, aims and fires the rocket across the floor and walls, bats, pushes), E03 full-screen flash on replay close, E04 HUD overlap over the game view (void past the arena is recorded too), E05 readable-font metric change, E06 label over the followed marker, E07 unsourced copy claims (no browser), E08 missing transition, E09 settings scroll target, E10 nav and toast layout shift (the toast trigger is the editor copy), E11 prompted input reaction, E12 editor drag p95 at 1x (in 60 Hz vsync frames, gate 1) and at 4x CPU (ms, Chromium only; N/A elsewhere).
+
+Rule: a detector must perform the player actions of its class, not watch an idle scene. An idle scene cannot show a camera that follows moving bodies, aim lines or effects; E02 plays for that reason.
 
 - `temporal.mjs` exports `DETECTORS` and `runOne`. Keys are in `thresholds.json` with `"runner": true`; `validate.mjs` does not require fixtures for them.
-- `escapes.mjs --dist <build dir> [--src <src dir>]` runs every detector twice per engine and writes `escapes/escapes.md` and `escapes/escapes.json` (one row per escape: run1, run2, stable, verdict). The subfolder keeps `writeIndex` from reading the table. Default out: `QA_OUT`.
+- `escapes.mjs --dist <build dir> [--src <src dir>]` runs every detector twice per engine and writes `escapes/escapes.md` and `escapes/escapes.json` (one row per escape: run1, run2, stable, verdict). Stable: both runs give the same verdict, and a PASS also reproduces its value (counts exact, timings within 0.5 ms or 10%). A FAIL need not reproduce its value, since a broken build's count varies run to run. The subfolder keeps `writeIndex` from reading the table. Default out: `QA_OUT`.
 - Commands: `cd client && QA_ENGINES=chromium QA_OUT=<dir> node qa/escapes.mjs --dist <dist>`; `node qa/temporal.mjs --dist <dist>` runs each detector once.
+- Self-test `QA_SELF_TEST=dragstall` (E12 only): a 40 ms main-thread stall on every frame of each editor drag; the 1x and 4x E12 cases must FAIL.

@@ -3,11 +3,11 @@
 // keyed as in thresholds.json (keys with "runner": true). validateRecord decides the verdict.
 //
 // Detectors (escape id, threshold key):
-//   E01 motion.jitter.count       menu clip start and replay start: camera reversals/jumps and tick jumps in the first second
-//   E02 camera.static.drift.px    practice run, 10 s: camera drift in screen px while nothing moves
+//   E01 motion.jitter.count       menu clip start: clip tick jumps only (camera follows the stall); replay start: camera reversals/jumps and tick jumps in the first second
+//   E02 camera.static.drift.px    practice run on a map that fits both axes, the player playing it: camera drift in screen px at fixed zoom
 //   E03 motion.fullFlash.count    replay Close: unmasked, game-less runs of the GL view that last <= 150 ms (rAF sampler)
-//   E04 overlay.hud.overlap       replay and practice: opaque panels drawn over the game arena (count);
-//                                  overlay.void.px: how far the view reaches past the arena (px)
+//   E04 overlay.hud.overlap       replay and practice: opaque panels (any position) over the game view, each >= 1% of it (count);
+//                                  overlay.void.px: how far a game-view frame reaches past the playable bounds (px)
 //   E05 font.pref.metricDelta     About page: readable-font pref changes text metrics (%)
 //   E07 copy.claims.unsourced     copy claims with no source (no browser; copy-claims.mjs)
 //   E08 transition.present        settings sections and training Next: share of changes that animate (rAF sampler, ratio)
@@ -15,8 +15,8 @@
 //   E10 layout.navShift.px        news dialog Next and training Next move between pages (px)
 //                                  layout.toastShift.px: controls move when a toast appears (px)
 //   E11 interaction.promptedInput.reacts  training: share of prompts whose named key lights its .key within 150 ms
-//   E12 editor.perf.dragP95ms     editor: p95 rAF interval while a shape is dragged (ms), 1x CPU
-//                                  editor.perf.drag4xP95ms: the same drag at 4x CPU on the stress map
+//   E12 editor.perf.dragP95Frames: editor: p95 rAF interval while a shape is dragged, in 60 Hz vsync frames (1 = on time), 1x CPU
+//                                  editor.perf.drag4xP95ms: the same drag at 4x CPU on the stress map (ms)
 //   E06 overlay.marker.underLabel: frames where a name label is drawn over the followed player's marker (__qaDraw)
 //
 // Trace: an init script on each context records the camera (globalThis.__qaCam, camera.ts) and the
@@ -38,7 +38,7 @@ const PREFS_KEY = "neobox.prefs"; // src/storage-keys.ts
 /** First default key per action (prefs.ts DEFAULT_KEYS). */
 const FIRST_KEY = { left: "ArrowLeft", right: "ArrowRight", up: "ArrowUp", down: "ArrowDown", push: "KeyX", rocket: "KeyZ", bat: "KeyC", grab: "KeyV" };
 /** Stress map (1500 bodies) for the 4x-CPU editor drag; QA_STRESS_MAP overrides the path. */
-const STRESS_MAP = process.env.QA_STRESS_MAP ?? path.resolve(QA_DIR, "../../../neobox-scratch/editor-perf/stress.json");
+const STRESS_MAP = process.env.QA_STRESS_MAP ?? path.resolve(QA_DIR, "fixtures/stress-map.json");
 
 /** Init script: per-frame camera and tick trace, and the marks for the replay view and the menu clip. */
 const TRACE = () => {
@@ -51,7 +51,8 @@ const TRACE = () => {
     const cam = c && c.w > 0;
     const t = performance.now();
     if ((cam || tick >= 0) && trace.frames.length < 6000) {
-      trace.frames.push({ t, cx: cam ? c.cx : undefined, cy: cam ? c.cy : undefined, w: cam ? c.w : undefined, h: cam ? c.h : undefined, aw: cam ? c.aw : undefined, ah: cam ? c.ah : undefined, tick });
+      const play = cam && Boolean(document.querySelector(".offline.playing"));
+      trace.frames.push({ t, cx: cam ? c.cx : undefined, cy: cam ? c.cy : undefined, w: cam ? c.w : undefined, h: cam ? c.h : undefined, aw: cam ? c.aw : undefined, ah: cam ? c.ah : undefined, bx0: cam ? c.bx0 : undefined, by0: cam ? c.by0 : undefined, bx1: cam ? c.bx1 : undefined, by1: cam ? c.by1 : undefined, play, tick });
     }
     const k = window.__qaClip;
     if (k && k.tick >= 0 && trace.clip.length < 6000) trace.clip.push({ t, tick: k.tick, dtMs: k.dtMs });
@@ -84,7 +85,9 @@ function traced(s) {
 /**
  * Camera direction reversals and jumps in [from, to]. A step is a frame-to-frame change of cx above
  * 0.1% of the view width. A reversal flips the sign of the last step above 0.5% of the view width (a
- * visible wobble; smaller flips depend on frame timing). A jump is a step above 4x the median moving step.
+ * visible wobble; smaller flips depend on frame timing). A jump is a step above 4x the median moving step and
+ * above 1% of the view width: the median collapses while the camera is still, so the floor keeps a pan that
+ * starts from rest (a sub-visible step) from counting as a snap.
  */
 export function cameraJitter(frames, from, to) {
   const win = frames.filter((f) => f.w > 0 && f.t >= from && f.t <= to);
@@ -102,24 +105,25 @@ export function cameraJitter(frames, from, to) {
     if (Math.abs(d) <= eps) continue;
     const sign = Math.sign(d);
     if (last && sign !== last && Math.abs(d) > rev) reversals++;
-    if (Math.abs(d) > 4 * med) jumps++;
+    if (Math.abs(d) > Math.max(4 * med, 0.01 * (win[0].w || 1))) jumps++;
     last = sign;
   }
   return { count: reversals + jumps, reversals, jumps, n: win.length };
 }
 
 /**
- * Engine tick jumps in [from, to]: a frame that advances the tick by more than max(3, 4x the median
- * positive step). A long frame step (a stalled frame advanced by the full time gap) shows as a jump.
+ * Engine tick jumps in [from, to]: a frame that advances the tick by more than max(3, 4x the median positive step)
+ * plus half a tick. The clip advances by dt x hz with dt capped at 50 ms (menu-clips.ts), so a capped frame at 60 Hz
+ * is exactly 3 ticks and float rounding can land just above it; a stall (the pre build's 250 ms cap) is far above it.
  */
 export function tickJumps(frames, from, to) {
   const win = frames.filter((f) => f.tick >= 0 && f.t >= from && f.t <= to);
   const steps = [];
   for (let i = 1; i < win.length; i++) steps.push(win[i].tick - win[i - 1].tick);
   const pos = steps.filter((d) => d > 0);
-  if (!pos.length) return 0;
-  const limit = Math.max(3, 4 * median(pos));
-  return steps.filter((d) => d > limit).length;
+  if (!pos.length) return { jumps: 0, max: 0 };
+  const limit = Math.max(3, 4 * median(pos)) + 0.5;
+  return { jumps: steps.filter((d) => d > limit).length, max: Math.max(...pos) };
 }
 
 /**
@@ -158,7 +162,7 @@ const sampleGl = (ms) =>
     requestAnimationFrame(step);
   });
 
-/** Page side of E04: opaque fixed/absolute panels over the game arena (outermost only). */
+/** Page side of E04: opaque panels (any position) that cover at least 1% of the game view, outermost only. */
 const overlapPanels = () => {
   const gl = document.getElementById("gl-host");
   if (!gl) return { n: -1, names: [] };
@@ -174,14 +178,13 @@ const overlapPanels = () => {
   for (const root of document.querySelectorAll(".offline.playing, .hud")) {
     for (const el of root.querySelectorAll("*")) {
       const cs = getComputedStyle(el);
-      if ((cs.position !== "fixed" && cs.position !== "absolute") || cs.display === "none" || cs.visibility === "hidden") continue;
+      if (cs.display === "none" || cs.visibility === "hidden") continue;
       if (alpha(cs.backgroundColor) < 0.5) continue;
       const b = el.getBoundingClientRect();
-      if (b.width < 120 || b.height < 60) continue;
       if (b.left <= a.left + 2 && b.right >= a.right - 2 && b.top <= a.top + 2 && b.bottom >= a.bottom - 2) continue; // a backdrop behind the whole arena
       const ox = Math.min(a.right, b.right) - Math.max(a.left, b.left);
       const oy = Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top);
-      if (ox > 2 && oy > 2) cands.add(el);
+      if (ox > 0 && oy > 0 && ox * oy >= 0.01 * a.width * a.height) cands.add(el);
     }
   }
   const outer = [...cands].filter((el) => {
@@ -261,22 +264,30 @@ const settleScroll = () =>
     requestAnimationFrame(step);
   });
 
-/** Jumps in the 1 s after `at`: engine tick steps and, when `withCam`, camera direction reversals and jumps. */
-function windowJitter(tr, at, withCam) {
-  const cam = withCam ? cameraJitter(tr.frames, at, at + 1000) : { count: 0, reversals: 0, jumps: 0, n: 0 };
+/**
+ * Jumps in the 1 s after `at`: engine tick steps and, when `countCam`, camera direction reversals and jumps of the
+ * drawn view (__qaCam: the menu backdrop's view or the game's follow view). A stalled clip frame moves the clip's ticks
+ * by the frame cap, so a stall reads as one tick jump and, if the view followed the clip, as one camera jump.
+ */
+function windowJitter(tr, at, countCam) {
+  const cam = cameraJitter(tr.frames, at, at + 1000);
   const ticks = tickJumps(tr.frames, at, at + 1000);
   const clipTicks = tickJumps(tr.clip, at, at + 1000);
-  return { count: cam.count + ticks + clipTicks, text: `reversals=${cam.reversals} camJumps=${cam.jumps} tickJumps=${ticks} clipTickJumps=${clipTicks} frames=${cam.n}` };
+  const count = (countCam ? cam.count : 0) + ticks.jumps + clipTicks.jumps;
+  return { count, text: `reversals=${cam.reversals} camJumps=${cam.jumps} tickJumps=${ticks.jumps} clipTickJumps=${clipTicks.jumps} clipMaxStep=${clipTicks.max.toFixed(2)} frames=${cam.n}` };
 }
 
-/** E01: the menu clip's first second (clip ticks, anchored on its first tick), then the replay's first second (camera and ticks, anchored on its mark). */
+/** E01: the menu clip's first second (clip ticks, anchored on its first tick; a 300 ms main-thread stall injected 200 ms in, so the frame cap is exercised on every run), then the replay's first second (camera and ticks, anchored on its mark). */
 async function jitterMotion(s) {
   const menu = await stateById("menu-anon").prepare(traced(s));
   const clipUp = await menu.page
     .waitForFunction(() => window.__qaTrace?.clip?.some((c) => c.tick >= 0), null, { timeout: 10000 })
     .then(() => true, () => false);
   if (!clipUp) return { pass: false, detail: "menu clip never started" };
-  await sleep(1200);
+  await sleep(200);
+  // Fault injection: a 300 ms main-thread stall. The clip advances by the frame dt capped by MAX_FRAME_MS; the fixed cap keeps the step to ~1.5 ticks.
+  await menu.page.evaluate(() => { const end = performance.now() + 300; while (performance.now() < end); });
+  await sleep(1000);
   const mt = await menu.page.evaluate(() => window.__qaTrace);
   const clip = windowJitter(mt, mt.clip.find((c) => c.tick >= 0).t, true);
   const rp = await stateById("replay-loaded").prepare(traced(s));
@@ -301,10 +312,32 @@ async function fullFlash(s) {
   return { metrics: { "motion.fullFlash.count": r.flashes }, detail: `lit runs ms=${r.runs.join(",") || "none (0 flashes)"}` };
 }
 
-/** E02: a 10 s practice run; the view centre must not move in world units while the zoom holds. */
+/**
+ * E02's player actions on a map that fits both axes: walk into each wall, jump, aim the rocket across the floor and at each
+ * wall and fire, swing the bat, push. Default bindings (prefs.ts DEFAULT_KEYS). A camera that follows the moving bodies,
+ * the rocket aim lines or the bat arcs only moves while the player makes them move, so an idle scene cannot test it.
+ */
+async function playFloorAndWalls(page) {
+  const hold = async (keys, ms) => {
+    for (const k of keys) await page.keyboard.down(k);
+    await sleep(ms);
+    for (const k of keys) await page.keyboard.up(k);
+  };
+  for (let pass = 0; pass < 2; pass++) {
+    await hold(["ArrowRight"], 1800);
+    await hold(["ArrowLeft"], 1800);
+    await hold(["ArrowLeft", "ArrowUp"], 300);
+    await hold(["KeyZ", "ArrowLeft"], 900);
+    await hold(["KeyZ", "ArrowRight"], 1200);
+    await hold(["KeyC", "ArrowRight"], 800);
+    await hold(["KeyX", "ArrowLeft"], 400);
+  }
+}
+
+/** E02: a practice run where the player plays the floor and both walls; the view centre must not move in world units while the zoom holds. */
 async function cameraDrift(s) {
   const h = await stateById("practice-running").prepare(traced(s));
-  await sleep(10000);
+  await playFloorAndWalls(h.page);
   const tr = await h.page.evaluate(() => ({ frames: window.__qaTrace.frames, css: document.querySelector("canvas")?.getBoundingClientRect().width ?? 0 }));
   const f = tr.frames.filter((x) => x.w > 0 && Number.isFinite(x.cx) && Number.isFinite(x.cy));
   // Self-test (QA_SELF_TEST=drift): a slow world-unit creep at fixed zoom, the defect E02 must catch.
@@ -328,20 +361,25 @@ async function cameraDrift(s) {
   return { metrics: { "camera.static.drift.px": Number(px.toFixed(2)) }, detail: `frames=${f.length} heldAtZoom=${held} levels=${levels.size} zoomSpan=${span.toFixed(2)}% px=${px.toFixed(2)}` };
 }
 
-/** Page side of E04 void: how far the view reaches past the arena, in css px (camera centre cx/cy, view w/h, arena aw/ah). */
+/**
+ * Page side of E04 void: how far a settled game view reaches past the playable bounds (where the backdrop is painted),
+ * in css px. The first 500 ms of the game view are skipped: the camera still holds the previous screen's pose there.
+ */
 const voidPx = () => {
-  const f = window.__qaTrace.frames.filter((x) => x.w > 0 && Number.isFinite(x.aw));
+  const all = window.__qaTrace.frames.filter((x) => x.play && x.w > 0 && Number.isFinite(x.bx0));
+  const t0 = all.length ? all[0].t : 0;
+  const f = all.filter((x) => x.t >= t0 + 500);
   const gl = document.getElementById("gl-host") ?? document.querySelector("canvas");
   const css = gl ? gl.getBoundingClientRect().width : 0;
   let worst = 0;
   for (const x of f) {
-    const out = Math.max(0, x.w / 2 - x.cx, x.cx + x.w / 2 - x.aw, x.h / 2 - x.cy, x.cy + x.h / 2 - x.ah);
+    const out = Math.max(0, x.bx0 - (x.cx - x.w / 2), x.cx + x.w / 2 - x.bx1, x.by0 - (x.cy - x.h / 2), x.cy + x.h / 2 - x.by1);
     worst = Math.max(worst, (out * css) / x.w);
   }
   return { n: f.length, px: Number(worst.toFixed(2)) };
 };
 
-/** E04: the replay and the practice run, each with the panels that cover the game arena and the void past the arena. */
+/** E04: the replay and the practice run: the opaque panels over the game view, and the void past the playable bounds. */
 async function hudOverlap(s) {
   const parts = [];
   let total = 0;
@@ -533,62 +571,99 @@ async function promptedInput(s) {
   return { metrics: { "interaction.promptedInput.reacts": reacts }, detail: parts.join(" ") };
 }
 
-/** One drag over the editor canvas (mouse down, `steps` moves, up). Returns the rAF intervals (ms) during the drag. */
+/** The editor on the stress map (fixtures/stress-map.json, 1500 bodies), opened in-app: the editor reads the draft when it opens. */
+async function stressEditor(s) {
+  const h = await stateById("menu-user").prepare(traced(s));
+  await h.page.evaluate((d) => localStorage.setItem("neobox.editor.draft", d), readFileSync(STRESS_MAP, "utf8"));
+  await navTo(h.page, "Map editor");
+  await h.page.locator("canvas.editor-canvas").waitFor({ timeout: 60000 });
+  return h.page;
+}
+
+/**
+ * One drag over the editor canvas: pointer down, `steps` moves, each followed by one animation frame, so the drag spans
+ * `steps` frames; then pointer up. Returns the frame intervals (ms) of the frames that start inside the drag, without the first two.
+ */
 async function dragFrames(page, steps) {
   const box = await page.locator("canvas.editor-canvas").boundingBox();
   const cx = box.x + box.width / 2;
   const cy = box.y + box.height / 2;
+  const nextFrame = () => page.evaluate(() => new Promise((r) => requestAnimationFrame(() => r())));
   await page.mouse.move(cx, cy);
+  await nextFrame();
   const sampling = page.evaluate(
     () =>
       new Promise((resolve) => {
-        const d = [];
-        let last = performance.now();
-        const step = (t) => {
-          d.push(t - last);
-          last = t;
-          if (d.length < 150) requestAnimationFrame(step);
-          else resolve(d);
+        window.__dragStop = false;
+        const t = [];
+        const step = () => {
+          t.push(performance.now());
+          if (window.__dragStop) resolve(t);
+          else requestAnimationFrame(step);
         };
         requestAnimationFrame(step);
       }),
   );
+  await page.evaluate(() => {
+    window.__dragDown = performance.now();
+  });
+  if (process.env.QA_SELF_TEST === "dragstall") {
+    // Every frame of the drag spends 40 ms in the main thread: over the 33.4 ms 4x gate and 2+ vsync frames at 1x.
+    await page.evaluate(() => {
+      window.__stallOn = true;
+      const spin = () => {
+        if (!window.__stallOn) return;
+        const e = performance.now() + 40;
+        while (performance.now() < e);
+        requestAnimationFrame(spin);
+      };
+      requestAnimationFrame(spin);
+    });
+  }
   await page.mouse.down();
-  for (let i = 1; i <= steps; i++) await page.mouse.move(cx + i * 2, cy + i);
+  for (let i = 1; i <= steps; i++) {
+    await page.mouse.move(cx + i * 2, cy + i);
+    await nextFrame();
+  }
   await page.mouse.up();
-  return (await sampling).slice(2);
-}
-
-/** E12: the editor with two shapes; one is dragged across the canvas. p95 of the rAF interval during the drag. */
-async function editorDrag(s) {
-  const h = await stateById("editor-shapes").prepare(traced(s));
-  const frames = await dragFrames(h.page, 60);
-  const p95 = Number(percentile(frames, 95).toFixed(2));
-  return { metrics: { "editor.perf.dragP95ms": p95 }, detail: `frames=${frames.length} max=${Math.max(...frames).toFixed(1)}` };
+  await page.evaluate(() => {
+    window.__dragUp = performance.now();
+    window.__dragStop = true;
+  });
+  if (process.env.QA_SELF_TEST === "dragstall") await page.evaluate(() => { window.__stallOn = false; });
+  const [down, up] = await page.evaluate(() => [window.__dragDown, window.__dragUp]);
+  const ts = (await sampling).filter((x) => x >= down && x <= up);
+  return ts.slice(1).map((x, i) => x - ts[i]).slice(2);
 }
 
 /**
- * E12 at 4x CPU: the stress map (editor-perf/stress.json, 1500 bodies) is the editor draft, then the same drag.
- * Chromium only (the CDP throttle); other engines fail explicitly.
+ * E12: the stress map at 1x CPU; a 20-frame warm-up drag, then one 400-frame drag. p95 of its frame intervals in
+ * vsync frames. Webkit reports rAF in whole ms, so a 60 Hz frame reads 16 or 17 ms; each interval is rounded to
+ * whole frames (floor 1) before the p95. The 1500-body redraw is what the drag pays for (4084ab8 redraws only the moving bodies).
+ */
+async function editorDrag(s) {
+  const page = await stressEditor(s);
+  await dragFrames(page, 20);
+  const frames = await dragFrames(page, 400);
+  const vsync = frames.map((ms) => Math.max(1, Math.round(ms / (1000 / 60))));
+  const p95 = Number(percentile(vsync, 95).toFixed(2));
+  return { metrics: { "editor.perf.dragP95Frames": p95 }, detail: `frames=${frames.length} p50ms=${percentile(frames, 50).toFixed(1)} maxms=${Math.max(...frames).toFixed(1)}` };
+}
+
+/**
+ * E12 at 4x CPU: the same stress-map drag under CDP CPU throttling. Chromium only (runOne reports other engines N/A).
+ * A 60-step warm-up, then three 400-step drags pooled (1200 intervals): with one 400-step drag the p95 is the 20th-largest
+ * interval, and that single drag swung 10 ms to 19 ms between runs of the same build. The pooled p95 is the same statistic.
  */
 async function editorDrag4x(s) {
-  const h = await stateById("menu-user").prepare(traced(s));
-  const page = h.page;
-  let cdp;
-  try {
-    cdp = await page.context().newCDPSession(page);
-  } catch {
-    return { pass: false, detail: "CDP unavailable (chromium only)" };
-  }
-  const draft = readFileSync(STRESS_MAP, "utf8");
-  // The editor reads the draft when it opens: set it from the menu, then open the editor in-app. A reload meets the unload prompt and hung.
-  await page.evaluate((d) => localStorage.setItem("neobox.editor.draft", d), draft);
-  await navTo(page, "Map editor");
-  await page.locator("canvas.editor-canvas").waitFor({ timeout: 60000 });
+  const page = await stressEditor(s);
+  const cdp = await page.context().newCDPSession(page);
   await cdp.send("Emulation.setCPUThrottlingRate", { rate: 4 });
-  const frames = await dragFrames(page, 50);
+  await dragFrames(page, 60);
+  const frames = [];
+  for (let i = 0; i < 3; i++) frames.push(...(await dragFrames(page, 400)));
   const p95 = Number(percentile(frames, 95).toFixed(2));
-  return { metrics: { "editor.perf.drag4xP95ms": p95 }, detail: `frames=${frames.length} max=${Math.max(...frames).toFixed(1)}` };
+  return { metrics: { "editor.perf.drag4xP95ms": p95 }, detail: `frames=${frames.length} p50=${percentile(frames, 50).toFixed(1)} max=${Math.max(...frames).toFixed(1)}` };
 }
 
 /** E06: frames where a name label (overlay, z 1) is drawn over the followed player's marker (GL, z 0). Window CSS px. */
@@ -629,20 +704,17 @@ const controlBoxes = () => {
     });
 };
 
-/** E10 toast: each trigger opens the toast; `pre` runs before the first snapshot, `act` raises the toast. */
+/**
+ * E10 toast: each trigger raises a toast; `pre` runs before the first snapshot, `act` raises it. The editor copy raises
+ * one on every engine: "Code copied", or "Select the code and copy it by hand" where the clipboard write is refused.
+ * The room invite raises none headless (it opens the invite dialog), so it is not a trigger.
+ */
 const TOAST_TRIGGERS = [
   {
     name: "editor",
     state: "editor-shapes",
     pre: async (h) => h.page.locator(".editor-menu-toggle").click(),
     act: async (h) => h.page.getByRole("button", { name: /copy map code/i }).first().click(),
-  },
-  {
-    name: "room",
-    state: "room-host",
-    // The app copies the link only where the context may write the clipboard; without it there is no toast.
-    pre: async (h) => h.page.context().grantPermissions(["clipboard-read", "clipboard-write"], { origin: new URL(h.page.url()).origin }).catch(() => {}),
-    act: async (h) => h.page.getByRole("button", { name: "Invite", exact: true }).first().click(),
   },
 ];
 
@@ -653,7 +725,7 @@ async function toastShift(s) {
   for (const t of TOAST_TRIGGERS) {
     const h = await stateById(t.state).prepare(traced(s));
     await sleep(500);
-    if (t.pre) await t.pre(h);
+    await t.pre(h);
     await sleep(300);
     const before = await h.page.evaluate(controlBoxes);
     await t.act(h);
@@ -662,14 +734,17 @@ async function toastShift(s) {
     const after = await h.page.evaluate(controlBoxes);
     const at = new Map(before.map((r) => [r.k, r]));
     let d = 0;
+    let who = "";
     for (const r of after) {
       const o = at.get(r.k);
-      if (o) d = Math.max(d, Math.abs(o.x - r.x) + Math.abs(o.y - r.y));
+      if (!o) continue;
+      const m = Math.abs(o.x - r.x) + Math.abs(o.y - r.y);
+      if (m > d) [d, who] = [m, r.k];
     }
     worst = Math.max(worst, d);
-    parts.push(`${t.name}=${d.toFixed(1)}`);
+    parts.push(`${t.name}=${d.toFixed(1)}${who ? ` (${who})` : ""}`);
   }
-  return { metrics: { "layout.toastShift.px": Number(worst.toFixed(1)) }, detail: parts.join(" ") };
+  return { metrics: { "layout.toastShift.px": Number(worst.toFixed(1)) }, detail: parts.join("; ") };
 }
 
 /** Copy claims need no browser: the source strings and the register decide. */
@@ -693,22 +768,25 @@ export const DETECTORS = [
   { escape: "E10", key: "layout.navShift.px", run: navShift },
   { escape: "E10", key: "layout.toastShift.px", run: toastShift },
   { escape: "E11", key: "interaction.promptedInput.reacts", run: promptedInput },
-  { escape: "E12", key: "editor.perf.dragP95ms", run: editorDrag },
-  { escape: "E12", key: "editor.perf.drag4xP95ms", run: editorDrag4x },
+  { escape: "E12", key: "editor.perf.dragP95Frames", run: editorDrag },
+  { escape: "E12", key: "editor.perf.drag4xP95ms", run: editorDrag4x, engines: ["chromium"], naReason: "CPU throttle is CDP-only (chromium)" },
 ];
 
 /**
  * Runs one detector. Returns { id, verdict, metrics, detail }. ctx: { base, src? }.
  * `browser` and `results` are needed for browser detectors (Results.case gives each case its own scenario).
  */
-export async function runOne(det, { browser, base, results, src } = {}) {
-  const ctx = { base, src };
+export async function runOne(det, { browser, base, results, src, engine } = {}) {
+  const ctx = { base, src, engine };
   const judge = (out) => {
     const metrics = out?.metrics ?? {};
     const failures = validateRecord({ metrics, fit: false });
     if (!Number.isFinite(metrics[det.key])) failures.push("no finite metric");
     return { metrics, failures, detail: [out?.detail, ...failures].filter(Boolean).join("; ") || undefined };
   };
+  if (det.engines && !det.engines.includes(ctx.engine)) {
+    return { id: `${det.escape}-${det.key}`, verdict: "na", metrics: {}, detail: `not applicable on ${ctx.engine}: ${det.naReason}` };
+  }
   if (det.browser === false) {
     const out = await det.run(ctx);
     const j = judge(out);

@@ -49,5 +49,9 @@
   "copy.claims.unsourced": { "max": 0, "runner": true },
   "overlay.hud.overlap": { "max": 0, "runner": true },
   "interaction.promptedInput.reacts": { "min": 1, "runner": true },
-  "editor.perf.dragP95ms": { "max": 16.7, "runner": true }
+  "editor.perf.dragP95Frames": { "max": 1, "runner": true },
+  "editor.perf.drag4xP95ms": { "max": 33.4, "runner": true },
+  "overlay.void.px": { "max": 2, "runner": true },
+  "overlay.marker.underLabel": { "max": 0, "runner": true },
+  "layout.toastShift.px": { "max": 1, "runner": true }
 }
