@@ -35,6 +35,14 @@ export interface NeoboxExports {
   nb_map_encode(json: number, jsonLen: number): number;
   nb_rtt(): number;
   nb_net_stats(): number;
+  nb_rollback_hist(): number;
+  nb_hash_log(): number;
+  nb_set_cap(cap: number): void;
+  nb_corr_hist(): number;
+  nb_stall_stats(): number;
+  nb_set_trace(on: number): void;
+  nb_trace(): number;
+  nb_reset_stall(): void;
   nb_map_decode(code: number, codeLen: number): number;
   nb_replay_export(names: number, namesLen: number): number;
   nb_replay_clip(names: number, namesLen: number, maxSecs: number, minSecs: number): number;
@@ -62,6 +70,26 @@ export interface FrameView {
 }
 
 export class EngineError extends Error {}
+
+/** Stall and clock counters of a session (see `Engine.stallStats`). */
+export interface StallStats {
+  /** frames the prediction cap held the local head back */
+  stallFrames: number;
+  /** runs of consecutive stalled frames */
+  stallRuns: number;
+  /** longest such run, ms */
+  longestStallMs: number;
+  /** frames counted */
+  frames: number;
+  margins: number;
+  staleMargins: number;
+  /** stale margins more than 8 ticks off target */
+  staleBig: number;
+  corrections: number;
+  gapResets: number;
+  /** largest local-player correction of a remote rollback, world units */
+  corrMax: number;
+}
 
 /** Start options of an offline game: a `MatchStart` plus its scripted training dummies. `map`, when set, is the map itself and is used instead of `maps`. */
 export interface LocalStart extends MatchStart {
@@ -167,6 +195,75 @@ export class Engine {
     if (n < 16) return { kind: 0, a: 0, b: 0, rollbackP95: 0 };
     const w = new Uint32Array(this.x.memory.buffer.slice(this.x.nb_out_ptr(), this.x.nb_out_ptr() + 16));
     return { kind: w[0], a: w[1], b: w[2], rollbackP95: w[3] };
+  }
+
+  /** Rollback depth histogram since the depth warm-up: bin i counts depth i ticks, the last bin deeper ones. */
+  rollbackHist(): number[] {
+    return this.bins(this.x.nb_rollback_hist());
+  }
+
+  /** Local-player correction histogram (see `nb_corr_hist`): bin i counts remote rollbacks moving it i/2 to (i+1)/2 units. */
+  correctionHist(): number[] {
+    return this.bins(this.x.nb_corr_hist());
+  }
+
+  private bins(n: number): number[] {
+    if (n === 0) return [];
+    return Array.from(new BigUint64Array(this.x.memory.buffer.slice(this.x.nb_out_ptr(), this.x.nb_out_ptr() + n)), Number);
+  }
+
+  /** Client state hashes at every confirmed tick that is a multiple of 60: tick and hash (16 hex digits). */
+  hashLog(): { tick: number; hash: string }[] {
+    const n = this.x.nb_hash_log();
+    const out: { tick: number; hash: string }[] = [];
+    if (n === 0) return out;
+    const dv = new DataView(this.x.memory.buffer.slice(this.x.nb_out_ptr(), this.x.nb_out_ptr() + n));
+    for (let i = 0; i + 12 <= n; i += 12) {
+      out.push({ tick: dv.getUint32(i, true), hash: dv.getBigUint64(i + 4, true).toString(16).padStart(16, "0") });
+    }
+    return out;
+  }
+
+  /** Prediction cap (ticks) of the session; applies now and to later sessions. */
+  setPredictionCap(cap: number): void {
+    this.x.nb_set_cap(cap);
+  }
+
+  /** Stall and clock counters since the depth warm-up (see `nb_stall_stats`); null without a session. */
+  stallStats(): StallStats | null {
+    const n = this.x.nb_stall_stats();
+    if (n < 40) return null;
+    const dv = new DataView(this.x.memory.buffer.slice(this.x.nb_out_ptr(), this.x.nb_out_ptr() + n));
+    const u = (i: number) => dv.getUint32(i * 4, true);
+    return {
+      stallFrames: u(0),
+      stallRuns: u(1),
+      longestStallMs: u(2),
+      frames: u(3),
+      margins: u(4),
+      staleMargins: u(5),
+      staleBig: u(6),
+      corrections: u(7),
+      gapResets: u(8),
+      corrMax: dv.getFloat32(36, true),
+    };
+  }
+
+  /** Per-frame trace rows since the last call, 9 floats each (see `nb_trace`). */
+  takeTrace(): Float32Array {
+    const n = this.x.nb_trace();
+    if (n === 0) return new Float32Array(0);
+    return new Float32Array(this.x.memory.buffer.slice(this.x.nb_out_ptr(), this.x.nb_out_ptr() + n));
+  }
+
+  /** Starts (true) or stops per-frame tracing; starting clears the trace. */
+  setTrace(on: boolean): void {
+    this.x.nb_set_trace(on ? 1 : 0);
+  }
+
+  /** Resets the stall and clock counters for the play window (see `nb_reset_stall`). */
+  resetStall(): void {
+    this.x.nb_reset_stall();
   }
 
   private outView(n: number): Uint8Array {

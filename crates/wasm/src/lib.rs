@@ -16,12 +16,28 @@ use std::cell::RefCell;
 /// Match time (ms) whose rollback depths are left out: the tick clock is still settling.
 const DEPTH_WARMUP_MS: f64 = 3000.0;
 
+/// Feed silence (ms since the last server batch) after which prediction may run the outage
+/// distance past the confirmed tick (see `ClientSession::set_feed_silent`).
+const FEED_SILENT_MS: f64 = 50.0;
+
 /// Most unacknowledged input changes sent per packet (the rest follow in
 /// later packets, oldest first, so none is ever skipped).
 const MAX_RESEND: usize = 32;
 
 /// Most ticks a replay frame steps through to collect their events; a longer jump is a seek.
 const REPLAY_FEED_TICKS: u32 = 60;
+
+/// Prediction stalls since the warm-up ended: frames the cap held the local head back, and the
+/// longest run of such frames in ms (from the frame gaps).
+#[derive(Default)]
+struct StallStats {
+    frames: u32,
+    runs: u32,
+    in_run: bool,
+    run_ms: f64,
+    longest_ms: f64,
+    total: u32,
+}
 
 #[derive(Default)]
 struct App {
@@ -31,6 +47,8 @@ struct App {
     out: Vec<u8>,
     err: String,
     last_now: f64,
+    /// match time of the last server batch (the feed's age sets prediction while it is silent)
+    last_feed_ms: f64,
     last_mask: u8,
     /// keys pressed during the tick in progress (a tap shorter than a tick
     /// still counts for that tick)
@@ -49,6 +67,12 @@ struct App {
     warm_ms: Option<f64>,
     rollback_window: (f64, u64),
     rollback_rate: f32,
+    /// prediction cap for new sessions (0: the net crate's default)
+    cap: u32,
+    stall: StallStats,
+    /// per-frame trace rows (see `nb_trace`), kept while tracing
+    trace_on: bool,
+    trace: Vec<f32>,
     /// recording of the current (or last) online match
     recorder: Option<ReplayRecorder>,
     /// replay being watched
@@ -205,8 +229,14 @@ fn begin(a: &mut App, mut session: ClientSession, now_ms: f64) {
     a.last_sent = 0;
     a.sent_seq = 0;
     a.last_now = now_ms;
+    a.last_feed_ms = now_ms;
     a.latch = 0;
     a.input_tick = session.head();
+    if a.cap > 0 {
+        session.set_prediction_cap(a.cap);
+    }
+    a.stall = StallStats::default();
+    a.trace.clear();
     a.session = Some(session);
 }
 
@@ -286,6 +316,7 @@ pub unsafe extern "C" fn nb_server_frame(ptr: u32, len: u32, now_ms: f64) -> i32
         let Ok(f) = ServerFrame::decode(b) else { return fail(a, "bad server frame") };
         match f {
             ServerFrame::Batch { ticks, input_ack, margin16, margin_frame } => {
+                a.last_feed_ms = now_ms;
                 if let Some(s) = a.session.as_mut() {
                     let was = s.desync.is_some();
                     s.on_ticks(&ticks);
@@ -352,6 +383,117 @@ pub extern "C" fn nb_net_stats() -> i32 {
     })
 }
 
+/// Rollback depth histogram of the current session: little-endian u64 counts, bin i for depth i ticks
+/// (the last bin holds deeper rollbacks). Returns the byte count, 0 without a session.
+#[unsafe(no_mangle)]
+pub extern "C" fn nb_rollback_hist() -> i32 {
+    with(|a| {
+        let Some(s) = a.session.as_ref() else { return 0 };
+        a.out.clear();
+        for &n in s.rollback_hist() {
+            a.out.extend_from_slice(&n.to_le_bytes());
+        }
+        a.out.len() as i32
+    })
+}
+
+/// Client state hashes: per logged confirmed tick (every `CLIENT_HASH_INTERVAL`), the tick as a
+/// little-endian u32 then its hash as a little-endian u64. Returns the byte count, 0 without a session.
+#[unsafe(no_mangle)]
+pub extern "C" fn nb_hash_log() -> i32 {
+    with(|a| {
+        let Some(s) = a.session.as_ref() else { return 0 };
+        a.out.clear();
+        for &(t, h) in s.client_hashes() {
+            a.out.extend_from_slice(&t.to_le_bytes());
+            a.out.extend_from_slice(&h.to_le_bytes());
+        }
+        a.out.len() as i32
+    })
+}
+
+/// Sets the prediction cap (ticks) of the current session and of the ones that follow; 0 keeps the net crate's default.
+#[unsafe(no_mangle)]
+pub extern "C" fn nb_set_cap(cap: u32) {
+    with(|a| {
+        a.cap = cap;
+        if let Some(s) = a.session.as_mut() {
+            if cap > 0 {
+                s.set_prediction_cap(cap);
+            }
+        }
+    })
+}
+
+/// Local-player correction histogram since the warm-up: bin i counts remote rollbacks that moved the
+/// local player by i/2 to (i+1)/2 world units; the last bin holds 32 units and more. Little-endian u64s.
+/// Returns the byte count, 0 without a session.
+#[unsafe(no_mangle)]
+pub extern "C" fn nb_corr_hist() -> i32 {
+    with(|a| {
+        let Some(s) = a.session.as_ref() else { return 0 };
+        a.out.clear();
+        for &n in s.correction_hist() {
+            a.out.extend_from_slice(&n.to_le_bytes());
+        }
+        a.out.len() as i32
+    })
+}
+
+/// Prediction stalls since the warm-up and the clock's counters, as little-endian u32s: stall frames,
+/// stall runs, longest run (ms), frames counted, margins counted, stale margins, stale margins more than
+/// 8 ticks off target, clock corrections, gap resets; then the largest local correction (f32 world units).
+/// Returns the byte count, 0 without a session.
+#[unsafe(no_mangle)]
+pub extern "C" fn nb_stall_stats() -> i32 {
+    with(|a| {
+        let (Some(s), Some(c)) = (a.session.as_ref(), a.clock.as_ref()) else { return 0 };
+        let cs = c.stats();
+        let st = &a.stall;
+        let words = [st.frames, st.runs, st.longest_ms.round() as u32, st.total, cs.margins as u32, cs.stale as u32, cs.stale_big as u32, cs.corrections as u32, cs.gap_resets as u32];
+        a.out.clear();
+        for w in words {
+            a.out.extend_from_slice(&w.to_le_bytes());
+        }
+        a.out.extend_from_slice(&(s.correction_max() as f32).to_le_bytes());
+        a.out.len() as i32
+    })
+}
+
+/// Starts (non-zero) or stops per-frame tracing; starting clears the trace.
+#[unsafe(no_mangle)]
+pub extern "C" fn nb_set_trace(on: u32) {
+    with(|a| {
+        a.trace_on = on != 0;
+        a.trace.clear();
+    })
+}
+
+/// Trace rows since the last call, 8 little-endian f32 per frame: frame dt (ms), target lead (ticks,
+/// fractional tick minus the confirmed tick), prediction (head minus confirmed), clock margin, target
+/// margin, stalled (0/1), rollbacks in the frame, depth of the latest rollback. Returns the byte count.
+#[unsafe(no_mangle)]
+pub extern "C" fn nb_trace() -> i32 {
+    with(|a| {
+        a.out.clear();
+        for w in a.trace.drain(..) {
+            a.out.extend_from_slice(&w.to_le_bytes());
+        }
+        a.out.len() as i32
+    })
+}
+
+/// Resets the stall and clock counters for the play window (the trace and the depth counters keep theirs).
+#[unsafe(no_mangle)]
+pub extern "C" fn nb_reset_stall() {
+    with(|a| {
+        a.stall = StallStats::default();
+        if let Some(c) = a.clock.as_mut() {
+            c.reset_stats();
+        }
+    })
+}
+
 /// Round-trip time estimate in milliseconds; -1 until the first pong.
 #[unsafe(no_mangle)]
 pub extern "C" fn nb_rtt() -> f64 {
@@ -376,6 +518,8 @@ pub extern "C" fn nb_frame(now_ms: f64, mask: u32) -> u32 {
             if *w >= DEPTH_WARMUP_MS {
                 a.warm_ms = None;
                 s.reset_depth_stats();
+                clock.reset_stats();
+                a.stall = StallStats::default();
             }
         }
         let tick_f = clock.update(dt, s.known as f64);
@@ -396,13 +540,44 @@ pub extern "C" fn nb_frame(now_ms: f64, mask: u32) -> u32 {
         a.latch |= pressed;
         s.local_input(target, mask | a.latch);
         let rb_before = s.rollbacks;
-        s.advance_to(target + 1);
+        let feed_age = now_ms - a.last_feed_ms;
+        s.set_feed_silent(feed_age > FEED_SILENT_MS);
+        let stalled = s.advance_to(target + 1);
+        if a.warm_ms.is_none() {
+            let st = &mut a.stall;
+            st.total += 1;
+            if stalled {
+                st.frames += 1;
+                if !st.in_run {
+                    st.in_run = true;
+                    st.runs += 1;
+                    st.run_ms = 0.0;
+                }
+                st.run_ms += dt.max(0.0) * 1000.0;
+                st.longest_ms = st.longest_ms.max(st.run_ms);
+            } else {
+                st.in_run = false;
+            }
+        }
         // rollbacks per second (for the stats overlay)
         a.rollback_window.0 += dt;
         a.rollback_window.1 += s.rollbacks - rb_before;
         if a.rollback_window.0 >= 1.0 {
             a.rollback_rate = (a.rollback_window.1 as f64 / a.rollback_window.0) as f32;
             a.rollback_window = (0.0, 0);
+        }
+        if a.trace_on {
+            a.trace.extend_from_slice(&[
+                (dt * 1000.0) as f32,
+                (tick_f - s.known as f64) as f32,
+                s.head().saturating_sub(s.known) as f32,
+                clock.margin as f32,
+                clock.target_margin as f32,
+                stalled as u8 as f32,
+                (s.rollbacks - rb_before) as f32,
+                s.last_depth as f32,
+                feed_age as f32,
+            ]);
         }
         // events of the ticks newly reached since the last frame. Confirmed ticks give the event
         // log (kills, bat hits: the same on every client, each fed once); predicted ticks give

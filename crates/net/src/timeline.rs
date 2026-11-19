@@ -16,13 +16,20 @@ pub const MAX_PREDICTION: u32 = 45;
 
 /// Most ticks predicted past the server's confirmed tick. A feed stall stops
 /// prediction here, so a rollback after it is at most this deep.
-pub const PREDICTION_CAP: u32 = 20;
+pub const PREDICTION_CAP: u32 = 12;
+
+/// Prediction allowed while the feed is silent (see [`ClientSession::set_feed_silent`]), in ms.
+/// A lost packet holds the feed for hundreds of ms; the sim keeps moving on predicted inputs
+/// and rollback corrects them when the feed resumes.
+pub const OUTAGE_PREDICTION_MS: f64 = 3000.0;
 
 /// Most ticks the clock aims ahead of the server's margin reading (see [`TickClock::on_margin`]).
 pub const MAX_TARGET_MARGIN: f64 = 4.0;
 
 /// Ticks between server state checksums.
 pub const CHECKSUM_INTERVAL: u32 = 30;
+/// Client-to-client state hash period, ticks: each client logs the hash of every confirmed tick that is a multiple of it.
+pub const CLIENT_HASH_INTERVAL: u32 = 60;
 
 #[derive(Debug)]
 pub enum MatchError {
@@ -332,6 +339,8 @@ pub enum Desync {
 
 /// Rollback depths are counted exactly up to this many ticks; deeper ones share the last bin.
 const DEPTH_BINS: usize = 64;
+/// Local-player correction bins, 0.5 world units each; the last holds 32 units and more.
+const CORR_BINS: usize = 64;
 
 /// Client-side prediction with rollback.
 ///
@@ -363,6 +372,8 @@ pub struct ClientSession {
     dirty: Option<u32>,
     /// server checksums awaiting comparison
     server_hashes: VecDeque<(u32, u64)>,
+    /// (tick, state hash) at every confirmed tick that is a multiple of [`CLIENT_HASH_INTERVAL`]
+    hash_log: Vec<(u32, u64)>,
     /// the first reason this session lost sync (it needs a snapshot after this)
     pub desync: Option<Desync>,
     /// rollbacks by depth in ticks; the last bin holds `DEPTH_BINS` and deeper
@@ -375,6 +386,21 @@ pub struct ClientSession {
     pub resimulated: u64,
     /// drain positions of the live frame's feed; `None` until attached (nothing is pruned before it drains)
     feed: Option<FeedCursor>,
+    /// most ticks predicted past the confirmed tick (see [`PREDICTION_CAP`])
+    cap: u32,
+    /// the feed is silent: prediction may go up to `outage_cap` past the confirmed tick
+    silent: bool,
+    /// most ticks predicted past the confirmed tick while the feed is silent
+    outage_cap: u32,
+    /// the pending rollback was caused by a remote input
+    remote_dirty: bool,
+    /// depth of the latest rollback, in ticks
+    pub last_depth: u32,
+    /// per remote rollback: the local player's largest displacement over the rewritten ticks
+    corr_hist: [u64; CORR_BINS + 1],
+    corr_max: f64,
+    /// the local player's positions before the rollback being measured
+    corr_buf: Vec<Option<(f64, f64)>>,
 }
 
 /// The live frame's drain positions: the confirmed and the predicted ticks already fed.
@@ -438,6 +464,7 @@ impl ClientSession {
     }
 
     fn with_state(start: MatchStart, local: Option<u32>, maps: Vec<State>, gs: GameSettings, state: State, tick: u32) -> ClientSession {
+        let outage_cap = (OUTAGE_PREDICTION_MS * start.tick_hz / 1000.0).ceil() as u32;
         let mut states = VecDeque::with_capacity(64);
         states.push_back(state);
         ClientSession {
@@ -457,6 +484,7 @@ impl ClientSession {
             states,
             used: VecDeque::with_capacity(64),
             dirty: None,
+            hash_log: Vec::new(),
             server_hashes: VecDeque::new(),
             desync: None,
             depth_hist: [0; DEPTH_BINS + 1],
@@ -466,6 +494,14 @@ impl ClientSession {
             rollbacks: 0,
             resimulated: 0,
             feed: None,
+            cap: PREDICTION_CAP,
+            silent: false,
+            outage_cap,
+            remote_dirty: false,
+            last_depth: 0,
+            corr_hist: [0; CORR_BINS + 1],
+            corr_max: 0.0,
+            corr_buf: Vec::new(),
         }
     }
 
@@ -510,8 +546,15 @@ impl ClientSession {
     pub fn drain_confirmed(&mut self, mut f: impl FnMut(u32, &State, &State)) {
         let Some(c) = self.feed else { return };
         let to = self.known;
+        let mut logged = None;
         for (t, p, q) in self.pairs_between(c.confirmed, to) {
+            if t % CLIENT_HASH_INTERVAL == 0 {
+                logged.get_or_insert_with(Vec::new).push((t, checksum(q)));
+            }
             f(t, p, q);
+        }
+        if let Some(l) = logged {
+            self.hash_log.extend(l);
         }
         if let Some(c) = self.feed.as_mut() {
             c.confirmed = to;
@@ -660,6 +703,7 @@ impl ClientSession {
                 let differs = !Self::same_masks(u, &actual) || *had != !t.events.is_empty();
                 self.scratch = actual;
                 if differs {
+                    self.remote_dirty = true;
                     self.mark_dirty(t.tick);
                 }
             }
@@ -691,6 +735,7 @@ impl ClientSession {
             let differs = self.used.get((tick - self.base) as usize).is_some_and(|(u, _)| !Self::same_masks(u, &masks));
             self.scratch = masks;
             if differs {
+                self.remote_dirty = true;
                 self.mark_dirty(tick);
                 self.resimulate();
             }
@@ -778,6 +823,18 @@ impl ClientSession {
     /// Start counting rollback depths afresh (the stats skip the match's warm-up).
     pub fn reset_depth_stats(&mut self) {
         self.depth_hist = [0; DEPTH_BINS + 1];
+        self.corr_hist = [0; CORR_BINS + 1];
+        self.corr_max = 0.0;
+    }
+
+    /// Rollbacks by depth since the last [`Self::reset_depth_stats`] (bin i: depth i; the last bin holds `DEPTH_BINS` and deeper).
+    pub fn rollback_hist(&self) -> &[u64] {
+        &self.depth_hist
+    }
+
+    /// (tick, state hash) of every confirmed tick that is a multiple of [`CLIENT_HASH_INTERVAL`], oldest first.
+    pub fn client_hashes(&self) -> &[(u32, u64)] {
+        &self.hash_log
     }
 
     fn check_hash(&mut self) {
@@ -811,15 +868,23 @@ impl ClientSession {
 
     /// Recompute every state after the dirty tick, up to the current head.
     fn resimulate(&mut self) {
+        let remote = std::mem::take(&mut self.remote_dirty);
         let Some(d) = self.dirty.take() else { return };
         let head = self.head();
         if d >= head {
             return;
         }
         self.rollbacks += 1;
+        self.last_depth = head - d;
         self.depth_hist[((head - d) as usize).min(DEPTH_BINS)] += 1;
         if let Some(c) = self.feed.as_mut() {
             c.predicted = c.predicted.min(d);
+        }
+        // the local player's position at each tick the rollback rewrites, as shown before it
+        let me = self.local.filter(|_| remote);
+        if let Some(l) = me {
+            self.corr_buf.clear();
+            self.corr_buf.extend(self.states.iter().skip((d - self.base) as usize + 1).map(|s| local_pos(s, l)));
         }
         let keep = (d - self.base) as usize + 1;
         self.states.truncate(keep);
@@ -832,16 +897,62 @@ impl ClientSession {
             self.step_one();
             self.resimulated += 1;
         }
+        if let Some(l) = me {
+            let mut worst = 0.0f64;
+            for (new, old) in self.states.iter().skip(keep).map(|s| local_pos(s, l)).zip(&self.corr_buf) {
+                if let (Some((nx, ny)), Some((ox, oy))) = (new, *old) {
+                    worst = worst.max((nx - ox).hypot(ny - oy));
+                }
+            }
+            self.corr_max = self.corr_max.max(worst);
+            self.corr_hist[((worst * 2.0) as usize).min(CORR_BINS)] += 1;
+        }
     }
 
-    /// Predict forward to `target` (bounded by the prediction window).
-    pub fn advance_to(&mut self, target: u32) {
+    /// Predict forward to `target`, bounded by the prediction window. Returns true when the
+    /// window stopped the prediction short of `target`.
+    pub fn advance_to(&mut self, target: u32) -> bool {
         self.resimulate();
-        let limit = self.known + PREDICTION_CAP;
+        let cap = if self.silent { self.outage_cap } else { self.cap };
+        let limit = self.known + cap;
         while self.head() < target.min(limit) {
             self.step_one();
         }
+        self.head() < target
     }
+
+    /// Most ticks predicted past the confirmed tick (clamped to 1..=[`MAX_PREDICTION`]).
+    pub fn set_prediction_cap(&mut self, cap: u32) {
+        self.cap = cap.clamp(1, MAX_PREDICTION);
+    }
+
+    /// Most ticks predicted past the confirmed tick.
+    pub fn prediction_cap(&self) -> u32 {
+        self.cap
+    }
+
+    /// Whether the feed is silent (no batch for a while). While it is, prediction may run up to
+    /// [`OUTAGE_PREDICTION_MS`] past the confirmed tick instead of the prediction cap.
+    pub fn set_feed_silent(&mut self, silent: bool) {
+        self.silent = silent;
+    }
+
+    /// Per remote-driven rollback, the largest displacement of the local player's position over the
+    /// rewritten ticks, as a histogram in 0.5 world-unit bins (the last holds 32 units and more).
+    /// Counted since the last [`Self::reset_depth_stats`].
+    pub fn correction_hist(&self) -> &[u64] {
+        &self.corr_hist
+    }
+
+    /// Largest such displacement since the last [`Self::reset_depth_stats`].
+    pub fn correction_max(&self) -> f64 {
+        self.corr_max
+    }
+}
+
+/// The player `l`'s position in `s`, if it is in the match.
+fn local_pos(s: &State, l: u32) -> Option<(f64, f64)> {
+    s.players.get(l).map(|p| (p.x, p.y))
 }
 
 /// Local tick clock: keeps our inputs arriving at the server a few ticks ahead
@@ -856,9 +967,9 @@ pub struct TickClock {
     /// fractional tick
     pub tick: f64,
     /// target arrival margin in ticks
-    target_margin: f64,
+    pub target_margin: f64,
     /// smoothed arrival margin in ticks
-    margin: f64,
+    pub margin: f64,
     have_margin: bool,
     spread: Spread,
     /// frame numbers issued so far
@@ -1106,20 +1217,20 @@ mod tests {
         // predicts player 0 idle; the server holds it left from tick 0
         let mut c = ClientSession::new(start(), Some(0)).unwrap();
         c.attach_feed();
-        c.advance_to(20);
+        c.advance_to(PREDICTION_CAP);
         let mut predicted = Vec::new();
         c.drain_predicted(|_, _, cur| predicted.push(checksum(cur)));
         c.on_ticks(&ticks);
         assert!(c.rollbacks > 0);
         let mut got = Vec::new();
         c.drain_confirmed(|_, _, cur| got.push(checksum(cur)));
-        // the rollback rewinds the predicted feed to its first tick: all 20 ticks come round again,
+        // the rollback rewinds the predicted feed to its first tick: all predicted ticks come round again,
         // while the confirmed feed has nothing left
         let mut refed = 0;
         c.drain_predicted(|_, _, _| refed += 1);
         let mut again = 0;
         c.drain_confirmed(|_, _, _| again += 1);
-        assert_eq!(predicted.len(), 20);
+        assert_eq!(predicted.len(), PREDICTION_CAP as usize);
         assert_eq!(refed, ticks.len());
         assert_ne!(predicted, want);
         assert_eq!(got, want);
@@ -1464,6 +1575,17 @@ mod tests {
         c.on_margin(f2, -20.0);
         c.on_margin(f3, -20.0);
         assert_eq!(c.tick, corrected);
+    }
+
+    /// Main-thread stalls of 500 ms (a janky tab) keep rollback depth p95 within budget at 100 ms RTT.
+    #[test]
+    fn rtt100_stall_rollback_depth_p95_within_budget() {
+        for (period, phase) in [(2000.0, 0.0), (2000.0, 137.0), (5000.0, 0.0)] {
+            let stall = Stall { period, len: 500.0, phase };
+            let s = two_peer_rollbacks(50.0, 0.0, [true, true], Some(stall), 60.0);
+            let p95 = s.rollback_depth_pct(95);
+            assert!(p95 <= 8, "period {period} phase {phase}: p95 {p95}");
+        }
     }
 
     /// Two players on one flat floor, one unit apart, neither on a team: the bat reaches the other.

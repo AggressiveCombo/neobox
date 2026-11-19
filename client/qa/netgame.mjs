@@ -6,7 +6,8 @@
 //   node qa/netgame.mjs <chromium|firefox|webkit>
 // Env: QA_OUT (output dir, see lib-qa.mjs outDir), JN_CONDS (default rtt0,rtt100,impair;
 // also jit, loss, lat), JN_DUR (play window ms, default 30000), JN_PROBE (optional page probe
-// script (sets window.__jnProbe.summary()/reset(); the summary lands in res.probe), NEOBOX_DIST (client build).
+// script (sets window.__jnProbe.summary()/reset(); the summary lands in res.probe), NEOBOX_DIST (client build),
+// JN_CPU_RATE (chromium only: CDP CPU throttle factor, default 1: no throttle).
 // Chromium runs webgpu and webgl2; firefox and webkit run webgl2 (no WebGPU there).
 //
 // Proxy: HTTP passes through untouched. A WebSocket upgrade is then split into whole frames, and
@@ -21,7 +22,7 @@
 //   net.desync.count        clients whose Snapshot row showed a desync reason ("gap a-b" or
 //                           "hash t") during play. The reason is sticky per session, so each
 //                           client counts at most once. Threshold 0.
-//   net.rollback.depth.p95  last HUD "Rollback p95" sample (ticks), worst of the two clients.
+//   net.rollback.depth.p95  exact p95 over every rollback (engine histogram, ticks), worst of the two clients.
 //                           Threshold <= 8 at 100 ms RTT. Starved runs are flagged (res.starved).
 //   net.impair.pass         1 on the impair condition (150 ms RTT, 50 ms jitter, 2% loss) when
 //                           the match runs the full play window with no resync, no desync, both
@@ -63,9 +64,74 @@ mkdirSync(EVID, { recursive: true });
 const LOG = path.join(OUT, `netgame-${engine}.jsonl`);
 const DUR = Number(process.env.JN_DUR ?? 30000);
 const PROBE_JS = process.env.JN_PROBE ? path.resolve(process.env.JN_PROBE) : null;
+// JN_CAP: prediction cap (ticks) set on both clients once the match runs (default: the engine's).
+// JN_TRACE=1: per-frame trace rows of both clients, written to the evidence dir at play start.
+const CAP = Number(process.env.JN_CAP ?? 0);
+const TRACE = process.env.JN_TRACE === "1";
 
 // The page probe is optional (JN_PROBE): its summary() and reset() are read through window.__jnProbe.
 const probeSummary = (page) => page.evaluate(() => window.__jnProbe?.summary?.() ?? null);
+
+// Engine QA hook (game.ts __qaNet): the rollback depth and correction histograms, the client state
+// hashes, the stall counters and the per-frame trace (rows are empty unless JN_TRACE is set).
+const NET_HOOK_JS = () => {
+  const e = window.__qaNet?.engine;
+  return e
+    ? { hist: e.rollbackHist(), corr: e.correctionHist(), hashes: e.hashLog(), stall: e.stallStats(), trace: Array.from(e.takeTrace()) }
+    : null;
+};
+
+const histSum = (h) => h.reduce((a, b) => a + b, 0);
+
+const corrP95 = (h) => (histPct(h, 95) === null ? null : (histPct(h, 95) + 1) * 0.5);
+// Nearest-rank percentile of a depth histogram: the same rule as the engine's rollback_depth_pct.
+function histPct(h, p) {
+  const n = histSum(h);
+  if (n === 0) return null;
+  const rank = Math.max(1, Math.ceil((n * p) / 100));
+  let seen = 0;
+  for (let i = 0; i < h.length; i++) {
+    seen += h[i];
+    if (seen >= rank) return i;
+  }
+  return h.length - 1;
+}
+
+// Client-to-client hash compare (RUBRIC D22): the logged ticks both clients share whose hashes differ.
+function compareHashLogs(a, b) {
+  const other = new Map(b.map((x) => [x.tick, x.hash]));
+  const mismatches = [];
+  let compared = 0;
+  for (const x of a) {
+    if (!other.has(x.tick)) continue;
+    compared++;
+    if (other.get(x.tick) !== x.hash) mismatches.push(x.tick);
+  }
+  return { compared, mismatches };
+}
+
+// Self-test divergence: the middle entry of the guest log with one hash bit flipped.
+function flipHash(log) {
+  const i = Math.floor(log.length / 2);
+  return log.map((x, j) => (j === i ? { tick: x.tick, hash: (BigInt(`0x${x.hash}`) ^ 1n).toString(16).padStart(16, "0") } : x));
+}
+
+// Instrument tolerance above the injected RTT (ms). At 0 ms the game's RTT is its frame-timed pong
+// floor: 26-46 ms on loaded firefox and webkit hosts (judge R5 C-D22-01), so rtt0 allows 50 ms.
+const rttTolMs = (rtt) => (rtt === 0 ? 50 : 8);
+
+// CPU throttle through CDP Emulation.setCPUThrottlingRate on each page (chromium only; other engines
+// have no such control and record that they ran unthrottled).
+const CPU_RATE = Number(process.env.JN_CPU_RATE ?? 1);
+async function applyCpuThrottle(pages, rate, engineName) {
+  if (!(rate > 1)) return { rate: 1, applied: false };
+  if (engineName !== "chromium") return { rate, applied: false, reason: "no CPU throttle control" };
+  for (const page of pages) {
+    const cdp = await page.context().newCDPSession(page);
+    await cdp.send("Emulation.setCPUThrottlingRate", { rate });
+  }
+  return { rate, applied: true };
+}
 const STARVED_FPS = 20;
 const STARVED_RTT_MS = 100;
 const NET_OBJECTIVE_LIMIT = 99; // long enough that the match outlasts the play window
@@ -414,6 +480,7 @@ async function netRun(browser, renderer, cond) {
   try {
     const { host, guest, code } = await matchWithGuest(s, { clipboard: false, objectiveLimit: NET_OBJECTIVE_LIMIT });
     res.code = code;
+    res.cap = CAP > 0 ? CAP : null;
     await ensureProbe(host.page);
     await ensureProbe(guest.page);
     await waitForPixels(host, "host canvas");
@@ -422,14 +489,48 @@ async function netRun(browser, renderer, cond) {
     await host.page.keyboard.press("F3");
     await guest.page.keyboard.press("F3");
     await sleep(500);
+    if (CAP > 0) await Promise.all([host.page, guest.page].map((p) => p.evaluate((c) => window.__qaNet?.engine?.setPredictionCap(c), CAP)));
     const c0 = { resync: proxy.counts.resync, checksum: proxy.counts.checksum };
     if (PROBE_JS) await Promise.all([host.page, guest.page].map((p) => p.evaluate(() => window.__jnProbe?.reset?.())));
     const p0 = { host: await probeChanges(host.page), guest: await probeChanges(guest.page) };
     for (const k of ["up", "down"]) proxy.hops[k].length = 0;
+    res.cpuThrottle = await applyCpuThrottle([host.page, guest.page], CPU_RATE, engine);
     const cpu0 = cpuSnap();
+    await Promise.all([host.page, guest.page].map((p) => p.evaluate(() => window.__qaNet?.engine?.resetStall())));
+    if (TRACE) await Promise.all([host.page, guest.page].map((p) => p.evaluate(() => window.__qaNet?.engine?.setTrace(true))));
     const samples = await play(host, guest, DUR);
     const cpu1 = cpuSnap();
     const p1 = { host: await probeChanges(host.page), guest: await probeChanges(guest.page) };
+    // Engine hook, read as the play window ends: every rollback depth (exact p95 over all of them)
+    // and each client's state hash every CLIENT_HASH_INTERVAL ticks, compared client to client. The
+    // self-test flips one hash in a copy of the guest log; the compare must report it.
+    const eng = await Promise.all([host.page, guest.page].map((p) => p.evaluate(NET_HOOK_JS)));
+    const hist = { host: eng[0]?.hist ?? [], guest: eng[1]?.hist ?? [] };
+    res.rollbackDepth = {
+      count: { host: histSum(hist.host), guest: histSum(hist.guest) },
+      p95: { host: histPct(hist.host, 95), guest: histPct(hist.guest, 95) },
+      max: { host: histPct(hist.host, 100), guest: histPct(hist.guest, 100) },
+    };
+    const corr = { host: eng[0]?.corr ?? [], guest: eng[1]?.corr ?? [] };
+    res.stall = { host: eng[0]?.stall ?? null, guest: eng[1]?.stall ?? null };
+    // correction bins are 0.5 world units; the p95 is reported at the bin's upper edge
+    res.correction = {
+      n: { host: histSum(corr.host), guest: histSum(corr.guest) },
+      p95: { host: corrP95(corr.host), guest: corrP95(corr.guest) },
+      maxWu: { host: res.stall.host?.corrMax ?? null, guest: res.stall.guest?.corrMax ?? null },
+    };
+    if (TRACE) writeFileSync(path.join(EVID, `netgame-${tag}-trace.json`), JSON.stringify({ host: eng[0]?.trace ?? [], guest: eng[1]?.trace ?? [] }));
+    const hostHashes = eng[0]?.hashes ?? [];
+    const guestHashes = eng[1]?.hashes ?? [];
+    const cmp = compareHashLogs(hostHashes, guestHashes);
+    const selfTest = compareHashLogs(hostHashes, flipHash(guestHashes));
+    res.clientHash = {
+      compared: cmp.compared,
+      mismatches: cmp.mismatches.length,
+      firstMismatch: cmp.mismatches[0] ?? null,
+      ok: cmp.compared > 0 && cmp.mismatches.length === 0,
+      selfTestDetected: selfTest.compared > 0 && selfTest.mismatches.length > 0,
+    };
     res.load = loadBetween(cpu0, cpu1);
     const sum = (xs) => ({
       n: xs.length,
@@ -478,13 +579,13 @@ async function netRun(browser, renderer, cond) {
     res.boardGuest = gb;
     res.boardAgree = JSON.stringify(hb) === JSON.stringify(gb);
     res.rttMs = { guestMedian: pct(rtt, 50), hostMedian: pct(hostRtt, 50), n: rtt.length };
-    // Instrument check: on a loss- and jitter-free cell the game's RTT must read the injected RTT (+0..8 ms).
+    // Instrument check: on a loss- and jitter-free cell the game's RTT must read the injected RTT (+0..8 ms; rtt0 +0..50 ms, see rttTolMs).
     const rttMed = Math.max(res.rttMs.hostMedian ?? 0, res.rttMs.guestMedian ?? 0);
     const lossless = cond.jitter === 0 && cond.loss === 0;
     res.instrument = {
       injectedRttMs: cond.rtt,
       measuredRttMs: rttMed,
-      ok: lossless ? rttMed >= cond.rtt && rttMed <= cond.rtt + 8 : null,
+      ok: lossless ? rttMed >= cond.rtt && rttMed <= cond.rtt + rttTolMs(cond.rtt) : null,
     };
     res.predDepthTicks = { hostP95: pct(pred, 95), hostMax: pct(pred, 100) };
     res.rollbacksPerSec = { hostP95: pct(rb, 95), hostMax: pct(rb, 100) };
@@ -505,7 +606,9 @@ async function netRun(browser, renderer, cond) {
     await shot(host, "host");
     await shot(guest, "guest");
 
-    const desyncCount = Number(desyncReasons.host.length > 0) + Number(desyncReasons.guest.length > 0);
+    // Server-checksum desyncs (HUD Snapshot row) and client-to-client hash mismatches both count.
+    const desyncCount =
+      Number(desyncReasons.host.length > 0) + Number(desyncReasons.guest.length > 0) + Number(res.clientHash.mismatches > 0);
     // The match ran the whole play window: the loop ran at least DUR, and each client's last sample
     // still carries HUD rows (the rows are gone once the match ends).
     const fullWindow =
@@ -519,10 +622,13 @@ async function netRun(browser, renderer, cond) {
       res.boardAgree &&
       res.canvasChanges.host > 20 &&
       res.canvasChanges.guest > 20 &&
-      fullWindow;
+      fullWindow &&
+      res.clientHash.ok &&
+      res.clientHash.selfTestDetected;
     res.metrics = {
       "net.desync.count": desyncCount,
-      "net.rollback.depth.p95": Math.max(rollbackP95.host ?? 0, rollbackP95.guest ?? 0),
+      "net.rollback.depth.p95": Math.max(res.rollbackDepth.p95.host ?? 0, res.rollbackDepth.p95.guest ?? 0),
+      "net.clientHash.mismatches": res.clientHash.mismatches,
       "net.impair.pass": cond.id === "impair" ? Number(res.pass) : null,
     };
     res.problems = s.problems();

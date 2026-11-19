@@ -14,6 +14,10 @@ import type { AppState, Store } from "./state";
 const qaTick = { tick: -1 };
 Object.assign(globalThis, { __qaTick: qaTick });
 
+/** QA hook (like __qaTick): the engine of the live match, for its rollback histogram and client hash log. */
+const qaNet: { engine: Engine | null } = { engine: null };
+Object.assign(globalThis, { __qaNet: qaNet });
+
 /** Ping frame period, ms. */
 const PING_MS = 1000;
 /** Stats publish period, ms. */
@@ -69,6 +73,7 @@ export class MatchLoop {
     const now = performance.now();
     if (snap) this.d.engine.matchSnapshot(start, snap.held, local, snap.tick, snap.bytes, now);
     else this.d.engine.matchStart(start, local, now);
+    qaNet.engine = this.d.engine;
     this.lastPing = now;
     this.lastStats = now;
     this.fpsSince = now;
