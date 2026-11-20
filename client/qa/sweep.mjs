@@ -49,7 +49,24 @@ export async function runSweep({ cells, jobs = 3, outRoot, resume = false }) {
   const server = await startServer();
   try {
     const browsers = new Map();
-    for (const engine of new Set(runs.map((r) => r.engine))) browsers.set(engine, await launchEngine(engine));
+    // One browser per engine, shared by the workers. A browser that died under load is relaunched for the next
+    // capture (and for the retry); otherwise every later newContext fails with "Target ... has been closed".
+    const relaunching = new Map();
+    const browserFor = (engine) => {
+      const live = browsers.get(engine);
+      if (live?.isConnected()) return Promise.resolve(live);
+      if (!relaunching.has(engine)) {
+        relaunching.set(
+          engine,
+          launchEngine(engine).then((fresh) => {
+            browsers.set(engine, fresh);
+            relaunching.delete(engine);
+            return fresh;
+          }),
+        );
+      }
+      return relaunching.get(engine);
+    };
     let next = 0;
     const worker = async () => {
       while (next < runs.length) {
@@ -58,10 +75,10 @@ export async function runSweep({ cells, jobs = 3, outRoot, resume = false }) {
         const file = path.join(captureDir(outRoot, { engine, theme, row, axis, renderer }), `${state}.json`);
         let record = resume && existsSync(file) ? JSON.parse(readFileSync(file, "utf8")) : null;
         if (!record || record.error) {
-          const capture = () =>
+          const capture = async () =>
             captureOne({
               base: server.base,
-              browser: browsers.get(engine),
+              browser: await browserFor(engine),
               engine,
               theme,
               row,
