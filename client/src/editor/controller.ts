@@ -59,8 +59,10 @@ const TOOL_KEYS: Record<string, Tool> = {
 
 const HIT_PX = 8;
 const DRAG_PX = 3;
-/** Smallest box or circle the editor creates, in map units. */
+/** Smallest box the editor creates, in map units. */
 const MIN_SIZE = 1;
+/** The original clamps a circle's radius to half a unit (its circle drag), so a small drag makes the smallest circle rather than none. */
+const MIN_RADIUS = 0.5;
 /** Half the side of a box, or the radius of a circle, that Enter places at the view centre (screen pixels, so it reads the same at any zoom). */
 const KEY_PX = 40;
 /** Joints made by the joint tool are pivots; the inspector changes the kind. */
@@ -759,8 +761,7 @@ export class EditorController {
       case "circle":
         if (!g.moved) return this.tapCentre(g.c);
         this.pending = null;
-        if (dist(g.c, g.r) < MIN_SIZE) return this.notify();
-        this.placeCircle(g.c, dist(g.c, g.r));
+        this.placeCircle(g.c, Math.max(MIN_RADIUS, dist(g.c, g.r)));
         return;
     }
   }
@@ -824,13 +825,7 @@ export class EditorController {
       return;
     }
     const c = this.pending;
-    const r = dist(c, s);
-    if (r < MIN_SIZE) {
-      this.note = "Tap a point away from the centre.";
-      this.notify();
-      return;
-    }
-    this.placeCircle(c, r);
+    this.placeCircle(c, Math.max(MIN_RADIUS, dist(c, s)));
   }
 
   /** Add convex world-space parts as polygon shapes: to the scoped body while editing in place, else as a new body. */
