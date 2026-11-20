@@ -265,8 +265,12 @@ async function menuButtons(s) {
   await page.getByRole("button", { name: "Mute music", exact: true }).waitFor();
   check((await prefs(page))?.musicMuted === false, "musicMuted not restored after unmute");
 
+  const exit = page.getByRole("button", { name: "Exit fullscreen", exact: true });
   await page.getByRole("button", { name: /fullscreen/i }).first().click();
   check(await page.evaluate(() => document.fullscreenEnabled), "fullscreen not enabled");
+  // A refused request fires no fullscreenchange: the menu toasts it and the label stays Fullscreen.
+  await exit.or(page.getByText("The browser did not change fullscreen.")).first().waitFor({ state: "visible" });
+  check(await exit.count() === 1, "the browser refused the Fullscreen request (menu toast shown); the label stayed Fullscreen");
   await page.waitForFunction(() => document.fullscreenElement !== null);
 
   await page.getByText(/recorded by neobox/).first().waitFor();
