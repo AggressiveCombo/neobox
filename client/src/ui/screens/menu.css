@@ -555,10 +555,12 @@ button.home-privacy {
     grid-row: 3;
     align-self: center;
     gap: 10px;
+    /* The title sizes to this column (its word is about 4.1em wide), so zoom leaves it inside the column. */
+    container-type: inline-size;
   }
 
   .home-title {
-    font-size: clamp(2rem, 12vh, 3rem);
+    font-size: min(clamp(2rem, 12vh, 3rem), 22cqi);
   }
 
   .home-index {
