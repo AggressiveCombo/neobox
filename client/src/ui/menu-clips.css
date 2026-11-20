@@ -46,6 +46,15 @@
   pointer-events: auto;
 }
 
+/* Coarse pointers: the control is the touch target, so it is 44px square. The global button rule
+   (min-height: --control) already makes it 48px tall there; the chip keeps its look. */
+@media (pointer: coarse) {
+  .menu-clip-pause {
+    width: 44px;
+    height: 44px;
+  }
+}
+
 /* A white ring: it shows on the dark chip and on the green clip alike. */
 .menu-clip-pause:focus-visible {
   outline: 2px solid #ffffff;
