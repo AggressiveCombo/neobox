@@ -276,6 +276,11 @@ export class EditorController {
     return this.selection;
   }
 
+  /** True while a pointer gesture (move, marquee, draw, ...) is in progress. */
+  get dragging(): boolean {
+    return this.gesture !== null;
+  }
+
   get tool(): Tool {
     return this.activeTool;
   }
@@ -737,7 +742,10 @@ export class EditorController {
     }
     const g = this.gesture;
     this.gesture = null;
-    if (g) this.finish(g);
+    if (g) {
+      this.finish(g);
+      this.notify();
+    }
     this.paint();
   }
 
@@ -1153,6 +1161,7 @@ export class EditorController {
     if (!g) return;
     this.gesture = null;
     if ("base" in g) this.history.live(g.base);
+    this.notify();
   }
 
   private commitWith(next: Obj, sel: Ref[]): void {

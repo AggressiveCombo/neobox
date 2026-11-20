@@ -45,6 +45,17 @@ function iconButton(name: IconName, label: string, onclick: () => void): HTMLBut
   return h("button", { type: "button", class: "icon", "aria-label": label, title: label, onclick }, icon(name));
 }
 
+/** Writes only a changed value: an unchanged write still dirties style and layout, and the chrome refreshes on every selection change. */
+function setText(el: Element, text: string): void {
+  if (el.textContent !== text) el.textContent = text;
+}
+function setAttr(el: Element, name: string, value: string): void {
+  if (el.getAttribute(name) !== value) el.setAttribute(name, value);
+}
+function setDisabled(el: HTMLButtonElement, off: boolean): void {
+  if (el.disabled !== off) el.disabled = off;
+}
+
 export const editorScreen: ScreenFactory = (ctx) => {
   const root = h("main", { class: "screen editor" });
   // Room mode: the editor was opened from a room and edits that room's map.
@@ -290,6 +301,8 @@ export const editorScreen: ScreenFactory = (ctx) => {
   // DOM ahead of the press's hit test, which forces a full style and layout.
   let inspectorTimer = 0;
   function refreshInspector(): void {
+    // During a gesture the selection and document change every step; the rebuild waits for the release, which notifies.
+    if (ctrl.dragging) return;
     const doc = ctrl.doc;
     const scope = ctrl.scope;
     const sel = `${ctrl.sel.map((r) => JSON.stringify(r)).join("|")}/${JSON.stringify(scope)}`;
@@ -316,22 +329,23 @@ export const editorScreen: ScreenFactory = (ctx) => {
   }
 
   function refresh(): void {
-    for (const [tool, btn] of toolButtons) btn.setAttribute("aria-pressed", String(tool === ctrl.tool));
-    undoBtn.disabled = !ctrl.canUndo;
-    redoBtn.disabled = !ctrl.canRedo;
+    for (const [tool, btn] of toolButtons) setAttr(btn, "aria-pressed", String(tool === ctrl.tool));
+    setDisabled(undoBtn, !ctrl.canUndo);
+    setDisabled(redoBtn, !ctrl.canRedo);
     const scope = ctrl.scope;
-    scopeBar.hidden = !scope;
-    scopeText.textContent = scope ? `Editing shapes inside body ${scope.id}. Esc returns.` : "";
-    mergeBtn.disabled = ctrl.sel.filter((r) => r.kind === "body").length < 2;
-    deleteBtn.disabled = ctrl.sel.length === 0;
+    if (scopeBar.hidden !== !scope) scopeBar.hidden = !scope;
+    setText(scopeText, scope ? `Editing shapes inside body ${scope.id}. Esc returns.` : "");
+    setDisabled(mergeBtn, ctrl.sel.filter((r) => r.kind === "body").length < 2);
+    setDisabled(deleteBtn, ctrl.sel.length === 0);
     const shapes = ctrl.physicsShapes;
-    lagEl.textContent = `${shapes} physics ${shapes === 1 ? "shape" : "shapes"}: ${lagVerdict(shapes)}`;
-    hintEl.textContent = ctrl.message || ctrl.hint;
-    if (document.activeElement !== nameInput) nameInput.value = mapName ?? "";
+    setText(lagEl, `${shapes} physics ${shapes === 1 ? "shape" : "shapes"}: ${lagVerdict(shapes)}`);
+    setText(hintEl, ctrl.message || ctrl.hint);
+    if (document.activeElement !== nameInput && nameInput.value !== (mapName ?? "")) nameInput.value = mapName ?? "";
     const sideName = ctrl.sel.length > 0 || scope ? "Selection" : "Map settings";
-    sideTitle.textContent = sideToggleLabel.textContent = sideName;
-    sideToggle.title = sideName;
-    sideToggle.setAttribute("aria-label", sideName);
+    setText(sideTitle, sideName);
+    setText(sideToggleLabel, sideName);
+    setAttr(sideToggle, "title", sideName);
+    setAttr(sideToggle, "aria-label", sideName);
     refreshInspector();
   }
 
