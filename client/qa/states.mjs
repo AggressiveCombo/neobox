@@ -18,7 +18,6 @@ import {
   matchWithGuest,
   menuName,
   navTo,
-  drumOption,
   playFromMenu,
   roomCode,
   roomTitle,
