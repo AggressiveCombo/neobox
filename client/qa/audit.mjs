@@ -127,7 +127,7 @@ const HARVEST = () => {
       href: el.tagName === "A" ? el.href : null,
       disabled: el.disabled === true || el.getAttribute("aria-disabled") === "true",
       // The active tab, page or tool: clicking it changes nothing by design (editor tools mark the active one with aria-pressed).
-      selected: el.getAttribute("aria-selected") === "true" || el.getAttribute("aria-pressed") === "true" || (el.getAttribute("aria-current") ?? "false") !== "false",
+      selected: el.getAttribute("aria-selected") === "true" || el.getAttribute("aria-checked") === "true" || el.getAttribute("aria-pressed") === "true" || (el.getAttribute("aria-current") ?? "false") !== "false",
       // Something else sits on the control's centre (an open modal): it cannot be clicked from here.
       covered: !!top && !el.contains(top) && !top.contains(el),
     };
