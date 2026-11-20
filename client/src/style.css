@@ -288,6 +288,8 @@ button,
   overflow-y: auto;
   /* A scrollbar appearing on a longer page would shift the centred column; keep its room on every page. */
   scrollbar-gutter: stable;
+  /* Focus scrolling keeps a control clear of the sticky page head (min 72px plus the safe-area inset). */
+  scroll-padding-top: calc(72px + env(safe-area-inset-top));
   pointer-events: none;
 }
 
