@@ -298,7 +298,7 @@ export const STATES = [
   state("offline-load", {}, async (s) => {
     // Loaded online, then the network goes down and the page reloads: the service worker (sw.js, app shell precached)
     // serves the page, and the server paths fail as they do with the server unreachable.
-    const h = await s.open("anon");
+    const h = await s.open("anon", { serviceWorkers: "allow" });
     // Sound files are not in the app shell: their fetches fail offline, and the app logs the failure it caught.
     h.expected = [SERVER_PATH, SFX_FILE, MUSIC_FILE, /\/sw\.js(\?|$)/];
     // The offline reload re-checks the worker script, which cannot be fetched; the sound files fail too, and the app logs it.

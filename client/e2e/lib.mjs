@@ -392,11 +392,11 @@ export class Scenario {
    * Opens a fresh headless context and page. `name` pre-fills the guest name
    * (localStorage "neobox.name", only when unset). Native dialogs (alert, confirm, prompt) fail the scenario;
    * the app's own confirms are DOM dialogs and are driven like any other control.
-   * Service workers are blocked: once the app's worker controls a page, Firefox and WebKit send even the requests it
-   * passes through from the worker, where page and context routes cannot see them, so a scenario's route would hold
-   * or miss by timing. The worker itself is covered by the QA instruments (qa/robust.mjs, qa/states.mjs).
+   * Service workers are blocked unless `serviceWorkers` is "allow": once the app's worker controls a page, Firefox and WebKit
+   * send even the requests it passes through from the worker, where page and context routes cannot see them, so a scenario's
+   * route would hold or miss by timing. The QA offline-load state allows it: it needs the worker to serve the app shell.
    */
-  async open(label, { phone = false, viewport, name, clipboard = false, ip: forcedIp } = {}) {
+  async open(label, { phone = false, viewport, name, clipboard = false, ip: forcedIp, serviceWorkers = "block" } = {}) {
     // `ip` is the client address the browser sends as X-Forwarded-For (picks its GeoIP location).
     const ip = forcedIp ?? nextClientIp();
     const context = await this.env.browser.newContext({
@@ -404,7 +404,7 @@ export class Scenario {
       ...(viewport && { viewport }),
       acceptDownloads: true,
       extraHTTPHeaders: { "X-Forwarded-For": ip },
-      serviceWorkers: "block",
+      serviceWorkers,
     });
     // The test-only X-Forwarded-For must not reach third-party origins: their CORS preflight rejects it, and the
     // embedded YouTube player then fails with an unhandled NetworkError (a pageerror). The server origin keeps it.
