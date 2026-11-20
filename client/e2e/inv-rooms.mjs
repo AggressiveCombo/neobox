@@ -180,7 +180,7 @@ async function createLockedRoom(h, base, roomName, password) {
   await playFromMenu(page, null);
   await button(page, "New room").click();
   await page.getByRole("heading", { name: "Create a room", exact: true }).waitFor();
-  await page.getByLabel("room name", { exact: true }).fill(roomName);
+  await page.getByRole("textbox", { name: "room name", exact: true }).fill(roomName);
   await page.getByLabel("Password", { exact: true }).fill(password);
   await button(page, "Create room").click();
   await roomTitle(page, roomName).waitFor();
@@ -204,7 +204,7 @@ async function browseEmpty(s) {
 
   await button(page, "New room").click();
   await page.getByRole("heading", { name: "Create a room", exact: true }).waitFor();
-  check(await page.getByLabel("room name", { exact: true }).isVisible(), "the create form has no room name field");
+  check(await page.getByRole("textbox", { name: "room name", exact: true }).isVisible(), "the create form has no room name field");
   check(await page.getByLabel("Password", { exact: true }).isVisible(), "the create form has no Password field");
   check((await page.getByLabel("Max players", { exact: true }).inputValue()) === "8", "Max players does not default to 8");
   check(await page.getByLabel("Public", { exact: true }).isChecked(), "Public is not checked by default");

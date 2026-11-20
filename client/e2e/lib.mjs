@@ -765,7 +765,7 @@ export async function createRoom(h, base, roomName, { isPublic } = {}) {
   await playFromMenu(page, null);
   await button(page, "New room").click();
   await page.getByRole("heading", { name: "Create a room", exact: true }).waitFor();
-  await page.getByLabel("room name", { exact: true }).fill(roomName);
+  await page.getByRole("textbox", { name: "room name", exact: true }).fill(roomName);
   if (isPublic !== undefined) {
     const box = page.getByLabel("Public", { exact: true });
     if ((await box.isChecked()) !== isPublic) await box.setChecked(isPublic);

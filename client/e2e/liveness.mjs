@@ -221,7 +221,7 @@ async function dropClosesCreateRoom(s) {
   await menuName(page).waitFor();
   await playFromMenu(page, null);
   await button(page, "New room").click();
-  const name = page.getByLabel("room name", { exact: true });
+  const name = page.getByRole("textbox", { name: "room name", exact: true });
   await name.waitFor();
   await name.fill("Drop draft");
   h.link.hole = true;
@@ -230,7 +230,7 @@ async function dropClosesCreateRoom(s) {
   h.link.hole = false;
   await playFromMenu(page, null);
   await button(page, "New room").click();
-  const again = page.getByLabel("room name", { exact: true });
+  const again = page.getByRole("textbox", { name: "room name", exact: true });
   await again.waitFor();
   check((await again.inputValue()) === "Drop draft", "the typed room name did not survive the drop");
   return "the drop closed Create room with a Connection lost toast; the typed name is still there when Create room reopens";
