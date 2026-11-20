@@ -240,6 +240,7 @@ export class EditorController {
   private draftTimer = 0;
   private paintFrame = 0;
   private note = "";
+  private fitShown = true;
   private colour = bodyColor(0);
   private readonly cleanups: (() => void)[] = [];
 
@@ -301,6 +302,14 @@ export class EditorController {
   /** Physics shapes the map costs (see physicsShapeCount). */
   get physicsShapes(): number {
     return physicsShapeCount(this.doc);
+  }
+
+  /** The view is already the whole map at the canvas width, so Reset zoom has nothing to do (and no canvas to act on). */
+  get atFit(): boolean {
+    const { w, h } = this.size();
+    if (w === 0 || h === 0) return true;
+    const f = fitView(this.doc, w);
+    return this.view.x === f.x && this.view.y === f.y && this.view.scale === f.scale;
   }
 
   setFillColour(colour: number): void {
@@ -1249,6 +1258,12 @@ export class EditorController {
     const scope = this.scope;
     const scene: Scene = { sel: this.selection, preview: this.preview(), scope: scope ? { bi: scope.index, shapes: scope.shapes } : null, moving: this.movingBodies() };
     drawMap(this.canvas, this.doc, this.view, scene);
+    // Pans and zooms do not notify; the frame that draws a new view is where Reset zoom's state can change.
+    const fit = this.atFit;
+    if (fit !== this.fitShown) {
+      this.fitShown = fit;
+      this.notify();
+    }
   }
 
   private notify(): void {

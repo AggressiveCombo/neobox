@@ -332,6 +332,7 @@ export const editorScreen: ScreenFactory = (ctx) => {
     for (const [tool, btn] of toolButtons) setAttr(btn, "aria-pressed", String(tool === ctrl.tool));
     setDisabled(undoBtn, !ctrl.canUndo);
     setDisabled(redoBtn, !ctrl.canRedo);
+    setDisabled(resetZoomBtn, ctrl.atFit);
     const scope = ctrl.scope;
     if (scopeBar.hidden !== !scope) scopeBar.hidden = !scope;
     setText(scopeText, scope ? `Editing shapes inside body ${scope.id}. Esc returns.` : "");
