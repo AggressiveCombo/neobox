@@ -55,9 +55,9 @@
   }
 }
 
-/* A white ring: it shows on the dark chip and on the green clip alike. */
+/* A ring in the theme ink: it is drawn outside the chip, on the page or the clip, so white vanishes on a light page. */
 .menu-clip-pause:focus-visible {
-  outline: 2px solid #ffffff;
+  outline: 2px solid var(--ink);
   outline-offset: 2px;
 }
 

@@ -12,6 +12,12 @@
   mask-image: linear-gradient(to bottom, #000 calc(100% - 24px), transparent);
 }
 
+.news-body:focus-visible {
+  outline: 2px solid var(--ink);
+  /* Inset: the foot's mask-image clips anything outside the box, so an outer ring would not show. */
+  outline-offset: -2px;
+}
+
 .news-date {
   color: var(--muted);
   font-size: var(--step-small);
