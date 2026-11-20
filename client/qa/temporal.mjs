@@ -10,7 +10,7 @@
 //                                  overlay.void.px: how far a game-view frame reaches past the playable bounds (px)
 //   E05 font.pref.metricDelta     About page: readable-font pref changes text metrics (%)
 //   E07 copy.claims.unsourced     copy claims with no source (no browser; copy-claims.mjs)
-//   E08 transition.present        settings sections and training Next: share of changes that animate (rAF sampler, ratio)
+//   E08 transition.present        settings sections and training Next: share of changes that animate (browser animation events and scroll timing; rAF samples secondary)
 //   E09 scroll.target.offset      settings nav: section lands at the scroll target (px)
 //   E10 layout.navShift.px        news dialog Next and training Next move between pages (px)
 //                                  layout.toastShift.px: controls move when a toast appears (px)
@@ -195,10 +195,13 @@ const overlapPanels = () => {
 };
 
 /**
- * Page side of E08. startSignature starts a per-frame recorder in the page and resolves after its first frame,
- * so it is running before the click. stopSignature stops it and returns the samples. Recording stays in the page,
- * so a slow Playwright round trip cannot miss the change. mode "scroll": the settings scroller's scrollTop;
- * mode "training": each lesson span's opacity, transform and top (the animation is on the spans).
+ * Page side of E08. startSignature starts a recorder in the page and resolves after its first frame, so it is
+ * running before the click. stopSignature stops it and returns what it saw. The recorder stays in the page, so a
+ * slow Playwright round trip cannot miss the change. Presence comes from the browser's own state, not from frame
+ * samples: `anim` counts animationstart and transitionrun events inside the training lesson; `deferred` (mode
+ * "scroll") is set when the settings scroller did not move during the click itself but moved afterwards, i.e. the
+ * scroll is an animation. `sigs` (per-frame samples) is a secondary signal.
+ * mode "scroll": the settings scroller's scrollTop; mode "training": each lesson span's opacity, transform and top.
  */
 const startSignature = (mode) =>
   new Promise((resolve) => {
@@ -207,10 +210,11 @@ const startSignature = (mode) =>
       while (sc && !["auto", "scroll"].includes(getComputedStyle(sc).overflowY)) sc = sc.parentElement;
       return sc;
     };
+    const scrollTop = () => scrollerOf(document.querySelector("section.settings-section"))?.scrollTop ?? null;
     const sigOf = () => {
       if (mode === "scroll") {
-        const sc = scrollerOf(document.querySelector("section.settings-section"));
-        return sc ? String(Math.round(sc.scrollTop * 10)) : "none";
+        const top = scrollTop();
+        return top === null ? "none" : String(Math.round(top * 10));
       }
       const el = document.querySelector(".training-text");
       if (!el) return "none";
@@ -221,7 +225,20 @@ const startSignature = (mode) =>
         })
         .join("#");
     };
-    const rec = { on: true, out: [] };
+    const rec = { on: true, mode, out: [], anim: 0, start: null, sync: null, scrollTop };
+    rec.onAnim = (e) => {
+      if (e.target instanceof Element && e.target.closest(".training-text")) rec.anim++;
+    };
+    rec.onClickStart = () => {
+      rec.start = scrollTop();
+    };
+    rec.onClickEnd = () => {
+      rec.sync = scrollTop();
+    };
+    document.addEventListener("animationstart", rec.onAnim, true);
+    document.addEventListener("transitionrun", rec.onAnim, true);
+    window.addEventListener("click", rec.onClickStart, true);
+    window.addEventListener("click", rec.onClickEnd);
     window.__qaSig = rec;
     const step = () => {
       if (!rec.on) return;
@@ -236,11 +253,19 @@ const startSignature = (mode) =>
 
 const stopSignature = () => {
   const rec = window.__qaSig;
-  if (!rec) return [];
+  if (!rec) return { sigs: [], anim: 0, deferred: false };
   rec.on = false;
-  return rec.out;
+  document.removeEventListener("animationstart", rec.onAnim, true);
+  document.removeEventListener("transitionrun", rec.onAnim, true);
+  window.removeEventListener("click", rec.onClickStart, true);
+  window.removeEventListener("click", rec.onClickEnd);
+  const end = rec.scrollTop();
+  return {
+    sigs: rec.out,
+    anim: rec.anim,
+    deferred: rec.mode === "scroll" && rec.start !== null && rec.sync === rec.start && end !== rec.start,
+  };
 };
-
 
 /** Page side of E09 and the settle wait: resolves once the settings scroller stops moving (or after 2 s). */
 const settleScroll = () =>
@@ -437,21 +462,36 @@ async function fontPref(s) {
 }
 
 /**
- * E08: four listed changes (settings sections 1-3 from the nav, and training Next). A change animates when
- * its sampled signature takes at least 4 distinct values (start, end and 2 in between). The metric is the
- * share of the four that animate.
+ * E08: four listed changes (settings sections 1-3 from the nav, and training Next). A change animates when the
+ * browser reports an animation for it (animationstart or transitionrun inside the lesson, or a settings scroll that
+ * is deferred to motion), or when its sampled signature takes at least 4 distinct values. Presence comes from the
+ * browser's state, so it does not depend on the frame rate; the samples only add to it. The metric is the share of
+ * the four that animate.
+ * Self-test (QA_SELF_TEST=notransition): transitions and animations are off and the settings scroll is instant.
  */
 async function transitions(s) {
   const parts = [];
   let animated = 0;
   const changes = 4;
-  const judge = (label, sigs) => {
-    const distinct = new Set(sigs).size;
-    const ok = distinct >= 4;
+  const off = process.env.QA_SELF_TEST === "notransition";
+  const disable = (page) =>
+    page.evaluate(() => {
+      const style = document.createElement("style");
+      style.textContent = "*,*::before,*::after{transition:none!important;animation:none!important}";
+      document.head.append(style);
+      const scrollIntoView = Element.prototype.scrollIntoView;
+      Element.prototype.scrollIntoView = function (opts) {
+        return scrollIntoView.call(this, { ...opts, behavior: "instant" });
+      };
+    });
+  const judge = (label, rec) => {
+    const distinct = new Set(rec.sigs).size;
+    const ok = rec.anim > 0 || rec.deferred || distinct >= 4;
     if (ok) animated++;
-    parts.push(`${label}=${distinct}${ok ? "" : "(no anim)"}`);
+    parts.push(`${label}=${distinct}/${rec.anim}${rec.deferred ? "/deferred" : ""}${ok ? "" : "(no anim)"}`);
   };
   const st = await stateById("settings").prepare(traced(s));
+  if (off) await disable(st.page);
   for (const i of [1, 2, 3]) {
     await st.page.evaluate(startSignature, "scroll");
     await st.page.locator(".settings-nav-item").nth(i).click();
@@ -459,6 +499,7 @@ async function transitions(s) {
     judge(`settings${i}`, await st.page.evaluate(stopSignature));
   }
   const tr = await stateById("training").prepare(traced(s));
+  if (off) await disable(tr.page);
   await tr.page.evaluate(startSignature, "training");
   await tr.page.locator(".training-next").first().click();
   await sleep(700);
