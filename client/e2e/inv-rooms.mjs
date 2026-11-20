@@ -818,6 +818,43 @@ async function kickBanLeave(s) {
   return `/kick -> "was kicked" and rejoin; /ban -> "was banned" and Manage ban list; /unban -> "was unbanned"; Unban button lifts a ban; guest Leave -> "has left the game"`;
 }
 
+/**
+ * A kick leaves the room in place. The guest's app used to call history.back() for it: under CPU throttle the kick is
+ * handled late, and that Back popped on past the lobby (a second Back, to the menu) or cancelled the guest's own
+ * navigation (ERR_ABORTED). The guest now replaces the room's entry instead of going back.
+ */
+async function kickLeavesInPlace(s) {
+  const { h, code, roomName } = await openHostRoomNamed(s);
+  const { g, name: guestName } = await joinGuest(s, code, roomName);
+  const gp = g.page;
+  const inRoom = () => rosterRows(h.page).filter({ hasText: guestName }).waitFor({ state: "visible" });
+  const cdp = await gp.context().newCDPSession(gp);
+  await cdp.send("Emulation.setCPUThrottlingRate", { rate: 20 });
+  try {
+    await gp.evaluate(() => {
+      window.__pops = 0;
+      window.addEventListener("popstate", () => window.__pops++);
+    });
+    await sayPaced(h.page, `/kick ${guestName}`);
+    await gp.getByText("You were kicked from the room.", { exact: true }).first().waitFor({ state: "visible" });
+    await sleep(1500); // a history traversal started by the kick has landed by now
+    const after = await gp.evaluate(() => ({ pops: window.__pops, screen: history.state?.screen ?? null, path: location.pathname }));
+    check(after.pops === 0, `the kick traversed the guest's history ${after.pops} time(s)`);
+    check(after.screen === "menu" && after.path === "/", `after the kick the guest is on "${after.screen}" at ${after.path}, not the menu`);
+
+    // a navigation the guest starts right after a kick is not cancelled by the kick
+    await joinByInvite(g, s.base, code, roomName);
+    await inRoom();
+    await sayPaced(h.page, `/kick ${guestName}`);
+    await joinByInvite(g, s.base, code, roomName);
+    await inRoom();
+  } finally {
+    await cdp.send("Emulation.setCPUThrottlingRate", { rate: 1 }).catch(() => {});
+    await cdp.detach().catch(() => {});
+  }
+  return "kick under CPU throttle: no history traversal, the guest lands on the menu; a navigation started right after a kick is not cancelled";
+}
+
 // ---------------------------------------------------------------- group 7: match commands, replay, map commands
 
 /** Sends a line in a match: the HUD chat opens with Enter when it is closed. */
@@ -1091,6 +1128,7 @@ export const roomsInvScenarios = [
   { name: "inv rooms report player", inv: ["room-row-menu", "room-report-modal"], run: reportPlayer },
   { name: "inv rooms chat host", inv: ["cmd-host", "sys-host"], run: chatHost },
   { name: "inv rooms chat kick ban", inv: ["cmd-kick", "sys-kick-ban", "cmd-ban", "cmd-unban", "sys-left"], run: kickBanLeave },
+  { name: "inv rooms kick leaves in place", inv: [], run: kickLeavesInPlace },
   { name: "inv rooms match record end", inv: ["cmd-record", "cmd-end"], run: matchRecordEnd },
   { name: "inv rooms replay save", inv: ["room-replay-save"], run: replaySave },
   { name: "inv rooms map commands", inv: ["notice-map-cmd", "cmd-upvote", "cmd-downvote", "cmd-fav", "cmd-unfav", "cmd-fave", "cmd-unfave"], run: mapCommands },

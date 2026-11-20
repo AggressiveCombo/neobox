@@ -885,7 +885,14 @@ export function start(): Store<AppState> {
         if (roomCode !== null) leaveRoom();
         return;
       case "kicked":
-        leaveRoom();
+        // Leaves the room in place: a history.back() here would land after any navigation the player started
+        // since the kick, and its popstate moves the screen on past the lobby.
+        leavingInPlace = true;
+        try {
+          leaveRoom();
+        } finally {
+          leavingInPlace = false;
+        }
         store.set({ notice: kickText(msg.reason) });
         return;
       case "chat":
@@ -1131,6 +1138,9 @@ export function start(): Store<AppState> {
   /** The state a screen change was made from while a modal's history pop is in flight: recorded once that pop lands. */
   let deferredFrom: AppState | null = null;
 
+  /** Set while a kick leaves the room: the room's entry is replaced in place, never traversed. */
+  let leavingInPlace = false;
+
   /** Writes the history entry for the screen change from `prev` to `state`: a screen entry, or the modal entry it takes over. */
   function recordScreen(state: AppState, prev: AppState): void {
     const cur: NavState | null = history.state;
@@ -1143,7 +1153,7 @@ export function start(): Store<AppState> {
       history.replaceState({ screen: state.screen, prev: prev.screen }, "", url);
     } else if (cur === null || state.screen === prev.screen || (wasRoom && isRoom)) {
       history.replaceState({ screen: state.screen, prev: cur?.prev ?? null }, "", url);
-    } else if (cur.prev === state.screen) {
+    } else if (cur.prev === state.screen && !leavingInPlace) {
       // Back to the screen this one was entered from: the entry below is that screen.
       history.back();
     } else if (wasRoom) {
