@@ -211,10 +211,10 @@ button.home-account {
   display: none;
 }
 
-/* Right column: the square, centred in it and as large as the height allows. Turned, its
-   corners reach about 13% past its box on each side, which the column's spare width takes.
-   The height also leaves room for the clip credit under its bottom edge (0.64 of the side,
-   an 8px gap, a 28px bar) and 16px to the viewport bottom: side <= (100vh - 104px) / 1.28. */
+/* Right column: the card square, centred in it and as large as the height allows. The card takes the arena's shape
+   (menu.ts) and turns by --menu-angle, its corners reaching about 13% past its box on each side, which the column's
+   spare width takes. The height also leaves room for the clip caption under the card's lowest corner (about 0.63 of
+   the side below the centre, a gap, a 28px bar) and 16px to the viewport bottom: side <= (100vh - 104px) / 1.28. */
 .menu-art {
   grid-column: 2;
   grid-row: 2 / 6;
@@ -232,8 +232,11 @@ button.home-account {
 
 .menu-square {
   position: absolute;
-  inset: 0;
-  transform: rotate(var(--angle, -18deg));
+  left: 50%;
+  top: 50%;
+  width: calc(var(--card-w, 1) * 100%);
+  height: calc(var(--card-h, 1) * 100%);
+  transform: translate(-50%, -50%) rotate(var(--menu-angle));
   display: grid;
   place-items: center;
   overflow: hidden;
@@ -247,7 +250,7 @@ button.home-account {
 .menu-square .mark {
   width: 34%;
   height: 34%;
-  transform: rotate(calc(-1 * var(--angle, -18deg)));
+  transform: rotate(calc(-1 * var(--menu-angle)));
   opacity: 0;
 }
 
@@ -255,13 +258,11 @@ button.home-account {
   opacity: 1;
 }
 
-/* The clip credit, under the card: the turned square's lowest corner reaches 0.63 of its side below the centre (the
-   art's box ends at 0.5), so the credit starts 0.14 of the side plus a gap below the box. It never covers the arena. */
+/* The clip credit, under the card: menu.ts sets its top to the card's lowest corner plus a gap, so it never covers the arena. */
 .menu-credit {
   position: absolute;
   left: 10%;
   right: 10%;
-  top: calc(114% + 8px);
   transform: rotate(0deg);
   pointer-events: none;
 }
