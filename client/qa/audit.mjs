@@ -311,7 +311,8 @@ async function warmUp(h) {
   await requestsQuiet(h);
   const pause = h.page.getByRole("button", { name: "Pause clip" });
   // The clip bar shows once its list loads: a screen without one waits out the timeout and skips the pause.
-  await pause.first().waitFor({ state: "visible", timeout: 3000 }).then(() => pause.first().click({ timeout: 3000 }), () => undefined);
+  // A modal over the bar (menu-news) leaves it unclickable; the warm-up goes on without pausing.
+  await pause.first().waitFor({ state: "visible", timeout: 3000 }).then(() => pause.first().click({ timeout: 3000 }).catch(() => undefined), () => undefined);
   await requestsQuiet(h);
 }
 /** Waits until no request has left the page for 800 ms (or 6 s at most). */
@@ -890,8 +891,8 @@ const base = server.base;
 const mode = selfTestMode();
 const wanted = (key) => ONLY.includes(key) && (!mode || MODE_CASE[mode] === key);
 
-/** Whole-case budget like robust.mjs: a hung case fails as 'timeout' instead of idling the run. Audit walks every screen, so the budget is generous. */
-const CASE_TIMEOUT_MS = 3600000;
+/** Whole-case budget like robust.mjs: a hung case fails as 'timeout' instead of idling the run. The dead-control walk of every screen and viewport can run for hours; QA_CASE_TIMEOUT_MS sets it for a full run. */
+const CASE_TIMEOUT_MS = Number(process.env.QA_CASE_TIMEOUT_MS) || 3600000;
 function caseBudgeted(results, id, fn, opts) {
   return results.case(
     id,
