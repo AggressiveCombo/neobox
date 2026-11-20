@@ -1002,8 +1002,14 @@ export function start(): Store<AppState> {
     }
     // Offline, Browse stays where it is: its offline page says so, and Retry reconnects. Other screens go to the menu.
     const offlineBrowse = !navigator.onLine && store.state.screen === "browse";
+    // The browser draws its notice panel only on its own screen. A notice still pending here (the kick that the
+    // server sent just before this close) goes out as a toast instead of being lost with the screen change.
+    const pending = offlineBrowse ? null : store.state.notice;
     resetToMenu(offlineBrowse ? "browse" : "menu");
-    if (notice?.text && !offlineBrowse) toast(notice.text, "error");
+    if (pending !== null) {
+      store.set({ notice: null });
+      toast(pending, "error");
+    } else if (notice?.text && !offlineBrowse) toast(notice.text, "error");
   }
 
   /** Connect if needed, then say hello with `name`. The welcome message moves the app to the browser. */
