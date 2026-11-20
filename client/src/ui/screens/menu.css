@@ -212,14 +212,16 @@ button.home-account {
 }
 
 /* Right column: the square, centred in it and as large as the height allows. Turned, its
-   corners reach about 13% past its box on each side, which the column's spare width takes. */
+   corners reach about 13% past its box on each side, which the column's spare width takes.
+   The height also leaves room for the clip credit under its bottom edge (0.64 of the side,
+   an 8px gap, a 28px bar) and 16px to the viewport bottom: side <= (100vh - 104px) / 1.28. */
 .menu-art {
   grid-column: 2;
   grid-row: 2 / 6;
   position: relative;
   align-self: center;
   justify-self: center;
-  width: min(78%, 70vh);
+  width: min(78%, calc((100vh - 104px) / 1.28));
   aspect-ratio: 1;
   min-width: 0;
 }
