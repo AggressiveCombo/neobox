@@ -422,10 +422,20 @@ export class Scenario {
       route.fulfill({ contentType: "application/javascript", body: YOUTUBE_API_STUB }),
     );
     if (clipboard) {
-      await context.grantPermissions(["clipboard-read", "clipboard-write"], { origin: this.base });
-      // A system share sheet would take the invite instead of the clipboard; the suite reads the clipboard.
+      // Each page keeps its own clipboard: the OS clipboard is shared by every concurrent run, so a read there can
+      // take another run's link. A system share sheet would take the invite instead, so `share` is absent too.
       await context.addInitScript(() => {
         Object.defineProperty(navigator, "share", { value: undefined, configurable: true });
+        const store = { text: "" };
+        Object.defineProperty(navigator, "clipboard", {
+          configurable: true,
+          value: {
+            writeText: async (text) => {
+              store.text = String(text);
+            },
+            readText: async () => store.text,
+          },
+        });
       });
     }
     if (name) {
