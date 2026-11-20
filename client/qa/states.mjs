@@ -306,6 +306,8 @@ export const STATES = [
     await menuName(h.page).waitFor();
     // The first visit installs the worker; activate claims the page, so wait until it controls the page.
     await h.page.waitForFunction(() => navigator.serviceWorker.controller !== null, null, { timeout: 30_000 });
+    // Offline there are no third-party requests left to strip. A context route blocks Firefox's offline reload that the worker serves, so it goes first.
+    await h.context.unrouteAll({ behavior: "ignoreErrors" });
     await goOffline(h);
     await h.page.reload();
     await menuName(h.page).waitFor();
