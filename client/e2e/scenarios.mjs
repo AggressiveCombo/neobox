@@ -447,6 +447,7 @@ async function reconnectSlowEngine(s) {
   // a slower CPU also stretches the engine's compile (chromium exposes the throttle)
   const cdp = s.env.browser.browserType().name() === "chromium" ? await guest.context.newCDPSession(guest.page) : null;
   await cdp?.send("Emulation.setCPUThrottlingRate", { rate: 4 });
+  guest.reloading = true;
   await guest.page.reload();
   const didAsk = await Promise.race([requested.then(() => true), sleep(10_000).then(() => false)]);
   check(didAsk, "the reloaded page did not ask for the engine");
