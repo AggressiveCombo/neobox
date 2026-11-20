@@ -49,6 +49,14 @@ const FONT_ABORT_RE = /downloadable font: download failed .*status=2152398850\b/
 /** YouTube's jukebox embed logs rejected third-party cookies; only that message from a YouTube-origin file is noise. */
 const YOUTUBE_COOKIE_RE = /Cookie .* has been rejected/;
 const YOUTUBE_ORIGIN_RE = /^https:\/\/(www\.)?youtube\.com\//;
+/** A stand-in for YouTube's IFrame API: `YT.Player` reports ready on the next tick and has no-op controls. */
+const YOUTUBE_API_STUB = `window.YT = { Player: function (el, opts) {
+  setTimeout(() => opts.events.onReady(), 0);
+  const noop = () => {};
+  return { cueVideoById: noop, loadVideoById: noop, playVideo: noop, pauseVideo: noop, seekTo: noop,
+    getCurrentTime: () => 0, setVolume: noop, mute: noop, unMute: noop };
+} };
+window.onYouTubeIframeAPIReady();`;
 
 export const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -405,6 +413,12 @@ export class Scenario {
       delete h["x-forwarded-for"];
       return route.continue({ headers: h });
     });
+    // The jukebox loads YouTube's IFrame API. Its widget code posts messages from our page to a frame that is not
+    // YouTube's, which the browser logs as console errors; only the API's UI-facing behavior matters to the suite,
+    // so the API is served locally: a player that reports ready and ignores every call.
+    await context.route("https://www.youtube.com/iframe_api", (route) =>
+      route.fulfill({ contentType: "application/javascript", body: YOUTUBE_API_STUB }),
+    );
     if (clipboard) {
       await context.grantPermissions(["clipboard-read", "clipboard-write"], { origin: this.base });
       // A system share sheet would take the invite instead of the clipboard; the suite reads the clipboard.
