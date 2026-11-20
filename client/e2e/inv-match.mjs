@@ -800,7 +800,17 @@ async function matchEditorMenu(s) {
   await navTo(page, "Map editor");
   const canvas = editorCanvas(page);
   await canvas.waitFor({ state: "visible" });
-  // The canvas takes the stage's size (the side panel and viewport decide it); its backing store follows that box at the device ratio.
+  // The canvas takes the stage's size (the side panel and viewport decide it); its first paint, a frame or more after the box is known, sets its backing store at the device ratio. Wait for that paint: a snapshot right after "visible" still sees the 300x150 default.
+  await page.waitForFunction(
+    () => {
+      const c = document.querySelector("canvas.editor-canvas");
+      if (!c || c.clientWidth === 0 || c.clientHeight === 0) return false;
+      const dpr = Math.min(window.devicePixelRatio || 1, 2);
+      return Math.abs(c.width - Math.round(c.clientWidth * dpr)) <= 1 && Math.abs(c.height - Math.round(c.clientHeight * dpr)) <= 1;
+    },
+    null,
+    { timeout: 10000 },
+  ).catch(() => {});
   const size = await canvas.evaluate((c) => ({ w: c.width, h: c.height, cssW: c.clientWidth, cssH: c.clientHeight, dpr: Math.min(window.devicePixelRatio || 1, 2) }));
   check(size.cssW > 0 && size.cssH > 0, `editor canvas has no box (${size.cssW}x${size.cssH})`);
   check(Math.abs(size.w - Math.round(size.cssW * size.dpr)) <= 1 && Math.abs(size.h - Math.round(size.cssH * size.dpr)) <= 1, `editor canvas backing ${size.w}x${size.h} does not match its box ${size.cssW}x${size.cssH} at ${size.dpr}x`);
