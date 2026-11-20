@@ -72,6 +72,7 @@ function touchButton(ctx: AppCtx, slot: TouchSlot, action: TouchAction): HTMLBut
     btn.classList.toggle("hud-on", on);
   };
   btn.addEventListener("pointerdown", (e: PointerEvent) => {
+    if (btn.disabled) return;
     e.preventDefault();
     btn.setPointerCapture(e.pointerId);
     press(true);
@@ -223,11 +224,23 @@ export function rotateGate(): { el: HTMLElement; destroy(): void } {
  * Movement stick and action buttons, sized and handed by the touch prefs (live).
  * Feeds ctx.input. The offline test-play screens reuse it outside a match.
  */
-export function touchControls(ctx: AppCtx): { el: HTMLElement; destroy(): void } {
+export function touchControls(ctx: AppCtx): { el: HTMLElement; setLive(on: boolean): void; destroy(): void } {
   const touchCapable = isTouchDevice();
   const actions = h("div", { class: "hud-actions" });
   const el = h("div", { class: "hud-touch-layer", hidden: !touchCapable }, touchStick(ctx), actions);
   let layoutJson = "";
+  // The buttons act only while live: the start countdown and spectating leave them off (setLive).
+  let live = true;
+  const applyLive = (): void => {
+    for (const btn of actions.querySelectorAll<HTMLButtonElement>(".hud-touch")) {
+      btn.disabled = !live;
+      // Let go while held, so the engine does not keep the bit set.
+      if (!live && btn.classList.contains("hud-on")) {
+        ctx.input.setTouch("buttons", TOUCH_BUTTONS[btn.dataset.action as TouchAction].bit, false);
+        btn.classList.remove("hud-on");
+      }
+    }
+  };
   const applyPrefs = (): void => {
     el.style.setProperty("--hud-touch-scale", String(prefs.value.touchScale));
     el.classList.toggle("hud-left-handed", prefs.value.touchLeftHanded);
@@ -238,11 +251,17 @@ export function touchControls(ctx: AppCtx): { el: HTMLElement; destroy(): void }
     // A held button leaves with its old layout: release the bits it set first.
     ctx.input.clearTouch();
     actions.replaceChildren(...TOUCH_SLOTS.map((slot) => touchButton(ctx, slot, layout[slot])));
+    applyLive();
   };
   applyPrefs();
   const unsubscribe = prefs.subscribe(applyPrefs);
   return {
     el,
+    setLive(on: boolean) {
+      if (on === live) return;
+      live = on;
+      applyLive();
+    },
     destroy() {
       unsubscribe();
       ctx.input.clearTouch();
@@ -724,6 +743,7 @@ export const hudScreen: HudFactory = (ctx) => {
       latestScene = scene;
       board.record(scene, roomNames);
       updateSpectate(scene);
+      touch.setLive(scene.intro < 0 && !spectating);
       // The start countdown is announced each second ("Match starting in 3 seconds", then 2, 1) and then "Go"; its digits are also drawn on the canvas.
       const secs = Math.ceil(scene.intro / ctx.store.state.tickHz);
       if (scene.intro < 0) {

@@ -660,6 +660,13 @@
   background: rgb(10 10 10 / 0.6);
 }
 
+/* Inert during the start countdown and while spectating: dimmed, with no accent edge. */
+.hud-touch-layer .hud-touch:disabled {
+  opacity: 0.4;
+  box-shadow: none;
+}
+
+
 @media (forced-colors: active) {
   .hud-touch-layer .hud-touch {
     background-color: ButtonFace;
