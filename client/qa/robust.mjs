@@ -431,15 +431,14 @@ async function offlineWarmCase(s, base, cdp, engine) {
   await host.context.route("**/api/stats", (route) => route.abort("internetdisconnected"));
   const failed = [];
   for (const title of ["Browse rooms", "Quick play", "Library", "Friends"]) {
-    const open = title === "Browse rooms" || title === "Quick play" ? button(host.page, title) : null;
-    await (open ? open.click() : navTo(host.page, title));
+    await navTo(host.page, title);
     const shown = await host.page.getByRole("heading", { name: `${title} unavailable offline` }).waitFor({ timeout: 5000 }).then(() => true, () => false);
     const retry = await sectionRetry(host.page, title).isVisible();
     if (!shown || !retry) failed.push(title);
     await host.page.goBack();
     await menuName(host.page).waitFor();
   }
-  await button(host.page, "Browse rooms").click();
+  await navTo(host.page, "Browse rooms");
   await sectionRetry(host.page, "Browse rooms").click();
   const stillNoted = await host.page.getByText("Still offline. Try again when the connection is back.").waitFor({ timeout: 5000 }).then(() => true, () => false);
   await host.context.unroute("**/api/stats");

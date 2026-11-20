@@ -44,6 +44,7 @@ import {
   watchPage,
   writeIndex,
 } from "./lib-qa.mjs";
+import { drumOption, rollDrum } from "../e2e/lib.mjs";
 
 // Rubric D12 bands at the 9 level (section 3); a case passes when every banded metric it covers
 // meets them. Worst run counts (rubric section 1 rule 8).
@@ -491,7 +492,7 @@ async function roomActions(s, base, { cpu }) {
   const { page } = await s.open("guest", { name: uniqueName("guest") });
   await page.goto(base);
   await menuName(page).waitFor();
-  await button(page, "Browse rooms").click();
+  await navTo(page, "Browse rooms");
   const row = page.locator("button.room-row").filter({ hasText: roomName });
   if (cpu) await setCpu(await cdpOf(page), CPU_RATE);
   const join = [];
@@ -513,7 +514,7 @@ async function startActions(s, base, { cpu }) {
   const guest = (await s.open("guest", { name: guestName })).page;
   await guest.goto(base);
   await menuName(guest).waitFor();
-  await button(guest, "Browse rooms").click();
+  await navTo(guest, "Browse rooms");
   await guest.locator("button.room-row").filter({ hasText: roomName }).click();
   const { page } = host;
   await page.getByText(guestName, { exact: true }).first().waitFor();
@@ -535,7 +536,7 @@ async function createActions(s, base, { cpu }) {
   const { page } = await s.open("host", { name: uniqueName("host") });
   await page.goto(base);
   await menuName(page).waitFor();
-  await button(page, "Browse rooms").click();
+  await navTo(page, "Browse rooms");
   if (cpu) await setCpu(await cdpOf(page), CPU_RATE);
   const ms = [];
   for (let i = 0; i < ACTION_N; i++) {
@@ -550,16 +551,17 @@ async function createActions(s, base, { cpu }) {
   return actionResult({ createRoom: ms }, { cpu });
 }
 
-/** openSettings: Settings from the menu's more navigation opens its page; the menu is reloaded (untimed) between samples. */
+/** openSettings: Settings from the home drum opens its page; the menu is reloaded (untimed) between samples. */
 async function settingsActions(s, base, { cpu }) {
   const { page } = await s.open("settings");
   if (cpu) await setCpu(await cdpOf(page), CPU_RATE);
-  const nav = button(page.getByRole("navigation", { name: "more", exact: true }), "Settings");
+  const nav = drumOption(page, "Settings");
   const heading = page.getByRole("heading", { name: "Settings", exact: true });
   const ms = [];
   for (let i = 0; i < ACTION_N; i++) {
     await page.goto(base);
     await menuName(page).waitFor();
+    await rollDrum(page, "Settings");
     ms.push(await timedClick(page, nav, heading));
   }
   return actionResult({ openSettings: ms }, { cpu });
@@ -978,7 +980,7 @@ async function inpCase(s, base, { cpu }) {
   await menuName(page).waitFor();
   if (cpu) await setCpu(await cdpOf(page), CPU_RATE);
   const menu = await keyInteractions(page, menuName(page));
-  await button(page, "Browse rooms").click();
+  await navTo(page, "Browse rooms");
   await page.locator("button.room-row").filter({ hasText: roomName }).click();
   await roomHeader(page).waitFor();
   const chat = await keyInteractions(page, page.getByLabel("Chat message", { exact: true }));

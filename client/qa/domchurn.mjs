@@ -108,7 +108,7 @@ try {
   await section(results, "menu", async () => {
     const { page } = await openPage(browser, base, null);
     results.menu = await idleWindow(page, "menu", 12);
-    results.menuFocus = await focusSurvives(page, "menu Browse rooms", button(page, "Browse rooms"));
+    results.menuFocus = await focusSurvives(page, "menu drum", page.getByRole("listbox", { name: "Destinations", exact: true }));
     await page.close();
   });
 
@@ -142,7 +142,7 @@ try {
   await section(results, "quick", async () => {
     const { page } = await openPage(browser, base, null);
     await menuName(page).fill(uniqueName("qd"));
-    await button(page, "Quick play").click();
+    await navTo(page, "Quick play");
     await page.getByRole("heading", { name: "Quick play", exact: true }).waitFor();
     await page.locator(".quick-card", { hasText: "Sweaty Bois" }).getByText(/\d+ playing/).waitFor();
     results.quick = await idleWindow(page, "quick play", 35);
@@ -187,7 +187,7 @@ try {
 
     // Browse: the room list with the room above. Focus its row and check it survives.
     const guest = await openPage(browser, base, null);
-    await button(guest.page, "Browse rooms").click();
+    await navTo(guest.page, "Browse rooms");
     const row = guest.page.locator("button.room-row").filter({ hasText: roomName });
     await row.waitFor();
     results.browse = await idleWindow(guest.page, "browse");

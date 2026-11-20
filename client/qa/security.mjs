@@ -57,7 +57,7 @@ import {
   watchPage,
   writeIndex,
 } from "./lib-qa.mjs";
-import { joinByInvite, navTo, playFromMenu } from "../e2e/lib.mjs";
+import { drumOption, joinByInvite, navTo, playFromMenu } from "../e2e/lib.mjs";
 
 const MODE = selfTestMode();
 const want = (key) => MODE === null || MODE === key;
@@ -127,7 +127,7 @@ async function nameSurface(page, base, payload) {
   await menuName(page).waitFor();
   await menuName(page).fill(payload);
   await page.locator(".field-error:not([hidden])").first().waitFor();
-  if (!(await page.locator(".home-browse").isDisabled())) throw new Error(`name accepted: ${payload}`);
+  if ((await drumOption(page, "Browse rooms").getAttribute("aria-disabled")) !== "true") throw new Error(`name accepted: ${payload}`);
 }
 
 // The server strips '<' and '>' from room names (clean_label), so the title shows the stored form. The raw payload
