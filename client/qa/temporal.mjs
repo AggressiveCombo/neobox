@@ -10,6 +10,7 @@
 //                                  overlay.void.px: how far a game-view frame reaches past the playable bounds (px)
 //                                  menu clip card (desktop light/dark, phone portrait): overlay.backdrop.void.px (VOID-colour px inside the card, css px^2),
 //                                  overlay.backdrop.page.px (page-white px inside the card outside the arena, css px^2),
+//                                  overlay.backdrop.edge.px (the 2 css px band just outside the card's edge that is not the page colour, css px^2),
 //                                  overlay.backdrop.control.count (bar with no clip, caption over pause or clipped or wrapped or translucent, card past the viewport),
 //                                  overlay.backdrop.caption.pct (caption and pause share of the card area, %),
 //                                  overlay.backdrop.players.out.count (cases where the centroid is outside the card in any sampled frame, or a live player is inside it in < 98% of its frames)
@@ -460,10 +461,12 @@ const backdropGeometry = () => {
   // the turn is about the centre, which the bounding box keeps; the card's own size is its layout size
   const cx = r.left + r.width / 2;
   const cy = r.top + r.height / 2;
-  const hw = sq.offsetWidth / 2;
-  const hh = sq.offsetHeight / 2;
+  // the card's layout size (fractional): offsetWidth rounds, and the arena fits the real card
+  const sqBox = getComputedStyle(sq);
+  const hw = parseFloat(sqBox.width) / 2;
+  const hh = parseFloat(sqBox.height) / 2;
   // css px per world unit: the view is the card's rect, so the camera's w spans its width
-  const k = gl.offsetWidth / cam.w;
+  const k = parseFloat(getComputedStyle(gl).width) / cam.w;
   // world -> page px: the content's turn about the card's centre (camera.ts: the view is centred on the arena)
   const toPage = (wx, wy) => {
     const x = (wx - cam.cx) * k;
@@ -574,7 +577,7 @@ const backdropGeometry = () => {
   };
 };
 
-/** Decodes a PNG of the card and counts, in CSS px^2, over the card's pixels outside the arena (and outside its 2 css px edge ring, where the walls antialias), and outside the caption and pause control (their opaque chips are clip chrome): VOID pixels (the clear colour, #0a0a0a; the card shows the map's background past the arena, never the clear colour) and PAGE pixels (the page's own background colour, so the card shows no page past the arena). Map geometry (walls, platforms, pills) is not counted. */
+/** Decodes a PNG of the card and counts, in CSS px^2, over the card's pixels outside the arena (and outside its 2 css px edge ring, where the walls antialias), and outside the caption and pause control (their opaque chips are clip chrome): VOID pixels (the clear colour, #0a0a0a; the card shows the map's background past the arena, never the clear colour) and PAGE pixels (the page's own background colour, so the card shows no page past the arena). Map geometry (walls, platforms, pills) is not counted. EDGE pixels: the 2 css px band just outside the card's edge (from 0.5 px out, past the edge's antialiased pixel) that is not the page's background colour (a hairline of the card's margin shows there). */
 const backdropPixels = async ({ b64, g }) => {
   const img = new Image();
   img.src = `data:image/png;base64,${b64}`;
@@ -592,6 +595,7 @@ const backdropPixels = async ({ b64, g }) => {
   const inRect = (x, y, [l, t, r, b]) => x >= l && x <= r && y >= t && y <= b;
   let page = 0;
   let voidArea = 0;
+  let edge = 0;
   for (let py = 0; py < img.height; py += 1) {
     for (let px = 0; px < img.width; px += 1) {
       const x = g.shot.x + (px + 0.5) / scale;
@@ -600,6 +604,15 @@ const backdropPixels = async ({ b64, g }) => {
       const dy = y - (g.clip.y + g.clip.h / 2);
       const u = dx * cos + dy * sin;
       const v = -dx * sin + dy * cos;
+      // the band just outside the card's edge: it must be the page, never the card's own colour (the hairline)
+      const ou = Math.abs(u) - g.half[0];
+      const ov = Math.abs(v) - g.half[1];
+      if ((ou >= 0.5 && ou <= 2.5 && Math.abs(v) <= g.half[1]) || (ov >= 0.5 && ov <= 2.5 && Math.abs(u) <= g.half[0])) {
+        const i = (py * img.width + px) * 4;
+        const isPage = Math.abs(data[i] - pr) <= 6 && Math.abs(data[i + 1] - pg) <= 6 && Math.abs(data[i + 2] - pb) <= 6;
+        if (!isPage && !g.controls.some((c) => inRect(x, y, c))) edge += 1;
+        continue;
+      }
       if (Math.abs(u) > g.half[0] - 2 || Math.abs(v) > g.half[1] - 2) continue;
       // the walls' antialiased outer edge sits on the arena's edge: geometry, so the 2 css px ring around the arena is not the page
       if (Math.abs(u) <= g.arenaHalf[0] + 2 && Math.abs(v) <= g.arenaHalf[1] + 2) continue;
@@ -610,7 +623,7 @@ const backdropPixels = async ({ b64, g }) => {
       if (Math.abs(r - pr) <= 3 && Math.abs(gr - pg) <= 3 && Math.abs(b - pb) <= 3) page += 1;
     }
   }
-  return { white: page / (scale * scale), voidArea: voidArea / (scale * scale) };
+  return { white: page / (scale * scale), voidArea: voidArea / (scale * scale), edge: edge / (scale * scale) };
 };
 
 /** Frame issues (overlay.backdrop.frame.count): the card's content does not turn with the card, the arena is small in the card or not its shape, the caption is detached from the card's corner. Counted apart from the controls. */
@@ -629,6 +642,7 @@ async function menuBackdrop(s) {
   const shots = new Set([1000, 3000, 8000]);
   const parts = [];
   let worstVoid = 0;
+  let worstEdge = 0;
   let pagePx = 0;
   let controls = 0;
   let coverPct = 0;
@@ -654,28 +668,32 @@ async function menuBackdrop(s) {
     let live = true;
     let casePage = 0;
     let caseVoid = 0;
+    let caseEdge = 0;
     for (let i = 1; i <= 16; i += 1) {
       const wait = i * 500;
       await sleep(500);
       const g = await h.page.evaluate(backdropGeometry);
       if (!g) return { pass: false, detail: `${name}: no menu card or camera` };
       geom = `card=${(2 * g.half[0]).toFixed(0)}x${(2 * g.half[1]).toFixed(0)} turn=${g.cardDeg.toFixed(1)}/${g.contentDeg.toFixed(1)} arena=${g.arenaHalf.map((v) => (2 * v).toFixed(0)).join("x")} bar=${g.controls.map((c) => c.map((v) => Math.round(v)).join(",")).join(" ")}`;
-      let px = { white: 0, voidArea: 0 };
+      let px = { white: 0, voidArea: 0, edge: 0 };
       if (g.live && shots.has(wait)) {
         // The card's box can reach past the viewport (a card-past-viewport control issue above): shoot only what is on screen.
-        const x0 = Math.max(0, g.clip.x);
-        const y0 = Math.max(0, g.clip.y);
-        const x1 = Math.min(h.page.viewportSize().width, g.clip.x + g.clip.w);
-        const y1 = Math.min(h.page.viewportSize().height, g.clip.y + g.clip.h);
+        // the 3 css px margin around the card is the edge band (backdropPixels): shoot it too, on screen only
+        // Playwright snaps the clip to whole device px outward, so the image starts at the floored origin: map pixels from that
+        const x0 = Math.max(0, Math.floor(g.clip.x - 3));
+        const y0 = Math.max(0, Math.floor(g.clip.y - 3));
+        const x1 = Math.min(h.page.viewportSize().width, Math.ceil(g.clip.x + g.clip.w + 3));
+        const y1 = Math.min(h.page.viewportSize().height, Math.ceil(g.clip.y + g.clip.h + 3));
         if (x1 > x0 && y1 > y0) {
           const shot = await h.page.screenshot({ clip: { x: x0, y: y0, width: x1 - x0, height: y1 - y0 } });
           px = await h.page.evaluate(backdropPixels, { b64: shot.toString("base64"), g: { ...g, shot: { x: x0, y: y0, w: x1 - x0 } } });
         }
-        pixels.push(`+${wait}ms white=${px.white.toFixed(1)} void=${px.voidArea.toFixed(1)}`);
+        pixels.push(`+${wait}ms white=${px.white.toFixed(1)} void=${px.voidArea.toFixed(1)} edge=${px.edge.toFixed(1)}`);
       }
       live = live && g.live;
       casePage = Math.max(casePage, px.white);
       caseVoid = Math.max(caseVoid, px.voidArea);
+      caseEdge = Math.max(caseEdge, px.edge);
       coverPct = Math.max(coverPct, g.coverPct);
       const frameIssues = g.issues.filter((x) => FRAME_ISSUES.has(x));
       frame += frameIssues.length;
@@ -694,6 +712,7 @@ async function menuBackdrop(s) {
     }
     pagePx = Math.max(pagePx, casePage);
     worstVoid = Math.max(worstVoid, caseVoid);
+    worstEdge = Math.max(worstEdge, caseEdge);
     // The centroid is inside the card in every sampled frame, and each live player inside it in >= 98% of its frames.
     const centroidPct = frames ? (100 * centroidIn) / frames : 0;
     const minInsidePct = perPlayer.size ? Math.min(...[...perPlayer.values()].map((t) => (100 * t.inside) / t.n)) : 0;
@@ -706,6 +725,7 @@ async function menuBackdrop(s) {
   return {
     metrics: {
       "overlay.backdrop.void.px": worstVoid,
+      "overlay.backdrop.edge.px": Math.round(worstEdge),
       "overlay.backdrop.page.px": Math.round(pagePx),
       "overlay.backdrop.control.count": controls,
       "overlay.backdrop.caption.pct": Math.round(coverPct),

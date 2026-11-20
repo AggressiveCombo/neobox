@@ -269,8 +269,12 @@ export function start(): Store<AppState> {
   function menuBox(): ViewRect {
     const el = document.querySelector<HTMLElement>(".menu-square");
     if (el && el.offsetWidth > 0) {
+      // The layout size, not offsetWidth (which rounds to whole px): the arena must fit the card's real size on both axes.
+      const s = getComputedStyle(el);
+      const w = parseFloat(s.width);
+      const h = parseFloat(s.height);
       const r = el.getBoundingClientRect();
-      return { x: r.left + r.width / 2 - el.offsetWidth / 2, y: r.top + r.height / 2 - el.offsetHeight / 2, w: el.offsetWidth, h: el.offsetHeight };
+      return { x: r.left + r.width / 2 - w / 2, y: r.top + r.height / 2 - h / 2, w, h };
     }
     return { x: 0, y: 0, w: window.innerWidth, h: window.innerHeight };
   }

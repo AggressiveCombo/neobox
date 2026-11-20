@@ -49,6 +49,7 @@
   "copy.claims.unsourced": { "max": 0, "runner": true },
   "overlay.hud.overlap": { "max": 0, "runner": true },
   "overlay.backdrop.page.px": { "max": 0, "runner": true },
+  "overlay.backdrop.edge.px": { "max": 0, "runner": true },
   "overlay.backdrop.void.px": { "max": 2, "runner": true },
   "overlay.backdrop.control.count": { "max": 0, "runner": true },
   "overlay.backdrop.caption.pct": { "max": 20, "runner": true },
