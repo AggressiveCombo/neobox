@@ -345,8 +345,19 @@ function writeShot(name, buf) {
   writeFileSync(file, buf);
   return rel(file);
 }
-/** The same scenario with every prepare() on a phone viewport: the scan covers desktop and phone. */
-const phoneOf = (s) => Object.assign(Object.create(s), { open: (label, o = {}) => s.open(label, { ...o, phone: true }) });
+/**
+ * The same scenario with every prepare() on a phone viewport: the scan covers desktop and phone. The phone welcome is
+ * skipped (its Play asks for fullscreen, and headless Firefox then resizes the window away from the phone viewport, so
+ * clicks land on nothing). The welcome keeps its own coverage in e2e inv-match "phone splash".
+ */
+const phoneOf = (s) =>
+  Object.assign(Object.create(s), {
+    open: async (label, o = {}) => {
+      const h = await s.open(label, { ...o, phone: true });
+      await h.context.addInitScript(() => localStorage.setItem("neobox.phoneSplashSeen", "1"));
+      return h;
+    },
+  });
 
 let engine = "";
 let memo = null;
@@ -388,6 +399,17 @@ const closeHandle = (h) => h.context.close().catch(() => {});
 async function closeSeeds(s, from, keep) {
   for (const h of s.handles.slice(from)) if (h !== keep) await h.context.close().catch(() => {});
 }
+/** A state's prepare, tried twice: a navigation the browser refuses (one root goto failed after 70 minutes) closes what the first try opened. */
+async function prepareState(s, id, scope, from) {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await stateById(id).prepare(scope);
+    } catch (err) {
+      await closeSeeds(s, from, null);
+      if (attempt >= 2) throw err;
+    }
+  }
+}
 const placeholderHits = (text) =>
   [...text.matchAll(PLACEHOLDER)].map((m) => text.slice(Math.max(0, m.index - 30), m.index + m[0].length + 30).replace(/\s+/g, " "));
 
@@ -414,7 +436,7 @@ function pruneInduced(s) {
 async function harvestAll(s) {
   if (memo) return memo;
   memo = { desktop: [], phone: [], errors: [] };
-  const phoneScope = Object.assign(Object.create(s), { open: (label, o = {}) => s.open(label, { ...o, phone: true }) });
+  const phoneScope = phoneOf(s);
   for (const st of STATES) {
     for (const [vp, scope] of [
       ["desktop", s],
@@ -572,11 +594,11 @@ async function deadCase(s) {
   const coveredElsewhere = []; // behind a modal in one state, uncovered in a no-modal state
   const reachable = new Set(); // "vp|name": a no-modal state shows the control uncovered
   const behindModal = []; // covered controls, resolved once every state of both viewports is scanned
+  const stateFailed = []; // states that could not open: their controls are not scanned, so the verdict fails
   const idle = {}; // per "vp state": share of pixels that move at rest (masked out of every change)
   const phoneScope = phoneOf(s);
   let clicked = 0;
   for (const [vp, scope] of [
-  const stateFailed = []; // states that could not open: their controls are not scanned, so the verdict fails
     ["desktop", s],
     ["phone", phoneScope],
   ]) {
@@ -590,7 +612,7 @@ async function deadCase(s) {
       const open = async () => {
         await release();
         const from = s.handles.length;
-        const h = track(await stateById(id).prepare(scope));
+        const h = track(await prepareState(s, id, scope, from));
         await inject(h.page);
         await warmUp(h);
         const controls = await settledHarvest(h.page);
@@ -613,6 +635,16 @@ async function deadCase(s) {
         });
         st.idle = idleMask(await idleFrames(h.page));
         idle[`${vp} ${id}`] = movingShare(st.idle);
+      };
+      // A reopen that fails fails this state: the controls not yet clicked are not scanned, so the verdict fails on it.
+      const reopen = async () => {
+        try {
+          await open();
+          return true;
+        } catch (err) {
+          stateFailed.push(`${vp} ${id} (reopen): ${firstLine(err)}`);
+          return false;
+        }
       };
       try {
         await open();
@@ -648,7 +680,7 @@ async function deadCase(s) {
           continue;
         }
         if (cur.dirty || !(await atRest(cur.h.page, cur.idle))) {
-          await open();
+          if (!(await reopen())) break;
           if (!cur.controls.some((f) => f.name === c.name)) {
             unclickable.push(`${label}: screen did not return to the same controls`);
             continue;
@@ -657,7 +689,7 @@ async function deadCase(s) {
         // A re-render since the last click can drop a control without a navigation; reopen the state and look again before calling it unclickable.
         const hasControl = async () => (await cur.h.page.evaluate(HARVEST)).some((f) => f.name === c.name);
         if (!(await hasControl())) {
-          await open();
+          if (!(await reopen())) break;
           if (!(await hasControl())) {
             const now = (await cur.h.page.evaluate(HARVEST)).map((f) => f.name);
             unclickable.push(`${label}: control "${c.name}" is no longer on screen after reopening the state [${now.length} on screen: ${now.slice(0, 4).join(" | ")}]`);
