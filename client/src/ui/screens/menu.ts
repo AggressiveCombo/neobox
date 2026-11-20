@@ -21,8 +21,6 @@ import { REPO_URL } from "./about";
 import { type DrumItem, mountDrum } from "./menu-drum";
 
 const STATS_REFRESH_MS = 10_000;
-/** Tilt of the home square, degrees. */
-const SQUARE_ANGLE = -18;
 
 /** The destinations, in drum order. The description is the hint shown while the option is centred. */
 const DESTINATIONS: { label: string; screen: Screen; icon: IconName; desc: string }[] = [
@@ -314,34 +312,29 @@ export const menuScreen: ScreenFactory = (ctx) => {
     sync();
   }
 
-  // The clip square: the GL view behind the UI shows only inside it while a clip plays.
+  // The clip card: the GL view behind the UI shows only inside it while a clip plays. Its shape is the arena's (setCardAspect),
+  // and it turns by --menu-angle, as its view does (style.css).
   const square = h("div", { class: "menu-square", "aria-hidden": "true" }, h("span", { class: "mark" }));
-  square.style.setProperty("--angle", `${SQUARE_ANGLE}deg`);
   const creditSlot = h("div", { class: "menu-credit" });
   const art = h("div", { class: "menu-art" }, square, creditSlot);
 
+  /** The card takes the arena's shape, fitted in the art square: its longer side fills the square. */
+  function setCardAspect(aspect: number): void {
+    square.style.setProperty("--card-w", String(Math.min(1, aspect)));
+    square.style.setProperty("--card-h", String(Math.min(1, 1 / aspect)));
+  }
+
   /**
-   * Mask the game view and its overlay to the square's corners while a clip plays. Otherwise
-   * mask all of it: a frame left on the canvas (the clip that just ended, the match before)
-   * must not flash over the whole window.
+   * While a clip plays the view is the card itself (app.ts), so nothing is masked. Otherwise mask all of it: a frame left on
+   * the canvas (the clip that just ended, the match before) must not flash over the whole window. The caption hangs under the
+   * card's lowest corner, a gap below it, so it never covers the arena.
    */
   function fitView(): void {
-    if (!glHost) return;
-    if (!liveClip) {
-      setMask("inset(50%)");
-      return;
-    }
-    const r = square.getBoundingClientRect();
-    const base = glHost.getBoundingClientRect();
-    const cx = r.left + r.width / 2 - base.left;
-    const cy = r.top + r.height / 2 - base.top;
-    const radius = (square.offsetWidth / 2) * Math.SQRT2;
-    const points: string[] = [];
-    for (let k = 0; k < 4; k += 1) {
-      const a = ((SQUARE_ANGLE + 45 + k * 90) * Math.PI) / 180;
-      points.push(`${(cx + radius * Math.cos(a)).toFixed(1)}px ${(cy + radius * Math.sin(a)).toFixed(1)}px`);
-    }
-    setMask(`polygon(${points.join(", ")})`);
+    setMask(liveClip ? "" : "inset(50%)");
+    const angle = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--menu-angle")) || 0;
+    const rad = (angle * Math.PI) / 180;
+    const drop = (square.offsetWidth / 2) * Math.abs(Math.sin(rad)) + (square.offsetHeight / 2) * Math.abs(Math.cos(rad));
+    creditSlot.style.top = `${art.offsetHeight / 2 + drop + 8}px`;
   }
 
   function setMask(clipPath: string): void {
@@ -353,8 +346,9 @@ export const menuScreen: ScreenFactory = (ctx) => {
     liveClip = state === "live";
     square.classList.toggle("is-live", state === "live");
     square.classList.toggle("is-idle", state === "idle");
+    if (state === "idle") setCardAspect(1);
     fitView();
-  });
+  }, setCardAspect);
   const resizeObserver = new ResizeObserver(() => fitView());
   resizeObserver.observe(square);
   fitView();

@@ -214,44 +214,33 @@ function axisCentre(l: number, lo: number, hi: number, len: number, a: number, b
   return q >= hi - len / 2 && q <= lo + len / 2 ? q : p;
 }
 
-/** The arena's fit inside the turned card keeps this share of the card's side free on each side, so the arena's boundary walls (one world unit thick, on the arena edge) stay clear of the card's edges. */
-const BACKDROP_MARGIN = 1 / 16;
-
-/** The gap (CSS px) kept between the arena's bottom edge and the caption bar's top edge. */
-const BACKDROP_BAR_GAP = 8;
+/** The arena fills the menu card less this share of the card's side on each side, so the arena's boundary walls (one world unit thick, on the arena edge) stay clear of the card's edges. */
+const BACKDROP_MARGIN = 1 / 20;
 
 /**
- * Backdrop camera (the main menu's clip). The card is the menu square `box`: its unturned side `side` (window CSS px),
- * its turn `angle` (degrees), and `bar`: the caption bar's top edge, in CSS px below the card's centre (0 when there is
- * no bar below the centre). The view is centred on the arena's centre and scaled so the whole arena fits inside the
- * turned square, less BACKDROP_MARGIN per side, and its bottom edge stays BACKDROP_BAR_GAP above the bar. `fill` is the
- * turned square's world bounding box: the backdrop's background covers it, so the card shows the map's own background
- * past the arena (no page colour, no void). Fixed on the arena's centre: no follow, no zoom, so the clip holds still from
- * its first frame.
+ * Backdrop camera (the main menu's clip). The GL view is the menu card itself, un-turned: `box` is its rect in CSS px
+ * (the card's turn is a CSS transform on the view, so the scene tilts with the card). The view is centred on the arena's
+ * centre and scaled so the whole arena fills the card, less BACKDROP_MARGIN per side. `fill` is the card's world rect:
+ * the backdrop's background covers it, so the card shows the map's own background past the arena (no page colour, no
+ * void). Fixed on the arena's centre: no follow, no zoom, so the clip holds still from its first frame.
  * Also publishes the live players' ids and world positions to the QA hook (qaView.live).
  */
-export function backdropCamera(scene: Scene, box: { cx: number; cy: number; side: number; angle: number; bar: number }, winW: number, winH: number): Camera {
-  const rad = (box.angle * Math.PI) / 180;
-  const c = Math.abs(Math.cos(rad));
-  const s = Math.abs(Math.sin(rad));
-  const hw = scene.arenaW / 2;
-  const hh = scene.arenaH / 2;
-  // The arena's half-extent along the turned square's own axes; the square's half side must hold it, less the margin.
-  const need = Math.max(hw * c + hh * s, hw * s + hh * c);
-  const kFit = (2 * need) / ((1 - 2 * BACKDROP_MARGIN) * box.side);
-  // The arena is axis-aligned on screen: its bottom edge is hh / k CSS px below the centre, and must clear the bar.
-  const kBar = box.bar > BACKDROP_BAR_GAP ? hh / (box.bar - BACKDROP_BAR_GAP) : 0;
-  const k = Math.max(kFit, kBar);
-  const reach = (box.side * k * (c + s)) / 2;
-  const live = liveSprites(scene);
-  qaView.live = live.map((p) => [p.id, p.x, p.y] as const);
+export function backdropCamera(scene: Scene, box: { w: number; h: number }): Camera {
+  const fit = 1 - 2 * BACKDROP_MARGIN;
+  // World units per CSS px: the larger of the arena's ratios to the card, so the whole arena fits on both axes.
+  const k = Math.max(scene.arenaW / (fit * box.w), scene.arenaH / (fit * box.h));
+  const w = box.w * k;
+  const h = box.h * k;
+  const cx = scene.arenaW / 2;
+  const cy = scene.arenaH / 2;
+  qaView.live = liveSprites(scene).map((p) => [p.id, p.x, p.y] as const);
   return {
-    cx: hw + (winW / 2 - box.cx) * k,
-    cy: hh + (winH / 2 - box.cy) * k,
-    w: winW * k,
-    h: winH * k,
+    cx,
+    cy,
+    w,
+    h,
     away: [],
-    fill: { x0: hw - reach, y0: hh - reach, x1: hw + reach, y1: hh + reach },
+    fill: { x0: cx - w / 2, y0: cy - h / 2, x1: cx + w / 2, y1: cy + h / 2 },
   };
 }
 

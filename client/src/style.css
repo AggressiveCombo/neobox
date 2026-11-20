@@ -269,6 +269,24 @@ a:hover {
   pointer-events: none;
 }
 
+/* The menu card's clip view turns with the card (menu.css, --menu-angle); reduced motion stands the card upright. */
+:root {
+  --menu-angle: -18deg;
+}
+
+:root[data-motion="reduce"] {
+  --menu-angle: 0deg;
+}
+
+#gl-host.is-backdrop,
+#overlay.is-backdrop {
+  transform: rotate(var(--menu-angle));
+}
+
+#gl-host.is-backdrop {
+  box-shadow: none;
+}
+
 /* Buttons respond at once and keep pinch zoom (WCAG 1.4.4); the game surfaces above stay touch-action: none. */
 button,
 [role="button"] {

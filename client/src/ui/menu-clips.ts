@@ -47,10 +47,10 @@ export type ClipState = "loading" | "live" | "idle";
 
 /**
  * Start the background clip playback in `host`. `onState` reports what the card shows: "loading" (blank, no clip
- * frame yet), "live" (a clip is drawn, with its caption), "idle" (no clip can play: the brand tile). Returns the
- * cleanup function (stops it).
+ * frame yet), "live" (a clip is drawn, with its caption), "idle" (no clip can play: the brand tile). `onAspect` reports
+ * the arena's width over its height whenever a drawn clip's arena has a new shape. Returns the cleanup function (stops it).
  */
-export function mountMenuClips(ctx: AppCtx, host: HTMLElement, onState?: (state: ClipState) => void): () => void {
+export function mountMenuClips(ctx: AppCtx, host: HTMLElement, onState?: (state: ClipState) => void, onAspect?: (aspect: number) => void): () => void {
   let destroyed = false;
   let eng: Engine | null = null;
   let clips: ClipSummary[] = [];
@@ -64,6 +64,8 @@ export function mountMenuClips(ctx: AppCtx, host: HTMLElement, onState?: (state:
   let frozenFor: Playing | null = null;
   let loading = false;
   let state: ClipState = "loading";
+  /** The arena shape last reported to onAspect. */
+  let reportedAspect = 0;
   let rafId = 0;
   let last = 0;
   let retryTimer = 0;
@@ -161,7 +163,13 @@ export function mountMenuClips(ctx: AppCtx, host: HTMLElement, onState?: (state:
   function draw(engine: Engine, p: Playing): boolean {
     // null: a seek waits for keyframes not yet built; nothing is presented, so an empty buffer never shows as the clip.
     if (engine.replayFrame(p.tick, p.follow) === null) return false;
-    if (!ctx.present(p.names, p.info.hz, false)) return false;
+    const scene = ctx.present(p.names, p.info.hz, false);
+    if (!scene) return false;
+    const aspect = scene.arenaW / scene.arenaH;
+    if (aspect !== reportedAspect && Number.isFinite(aspect)) {
+      reportedAspect = aspect;
+      onAspect?.(aspect);
+    }
     if (!p.shown) {
       p.shown = true;
       const caption = `${p.clip.map_name} · recorded by ${p.clip.recorder}`;

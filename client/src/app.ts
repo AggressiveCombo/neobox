@@ -223,7 +223,7 @@ export function start(): Store<AppState> {
   /** When the game view was last drawn; the view hides once nothing has drawn it for a moment. */
   let lastPresent = 0;
   let viewShown = true;
-  /** The main menu's clip covers the whole window (its square is turned); game screens use the view rect. */
+  /** The main menu's clip: the view is the menu card, which CSS turns (the scene turns with it); game screens use the view rect. */
   let backdrop = false;
   const overlayCanvas = byId("overlay");
   const setViewShown = (shown: boolean): void => {
@@ -249,7 +249,8 @@ export function start(): Store<AppState> {
     const scene = readScene(fb);
     scene.localKeys = input.mask();
     const local = computeCamera(scene, findLocal(scene));
-    const cam = backdrop ? backdropCamera(scene, menuBox(), window.innerWidth, window.innerHeight) : local;
+    if (backdrop) syncBackdropView();
+    const cam = backdrop ? backdropCamera(scene, menuBox()) : local;
     if (backdrop) publishBackdrop(cam, scene.arenaW, scene.arenaH);
     renderer?.draw(scene, cam);
     overlay.draw(scene, cam, names, tickHz, chrome);
@@ -264,20 +265,28 @@ export function start(): Store<AppState> {
     lastPresent = performance.now();
   };
 
-  /** The menu clip's window in CSS px: the turned square (ui/screens/menu.ts) with its unturned side and turn, else the whole window. `bar` is the caption bar's top edge below the centre (0 when no bar shows). */
-  function menuBox(): { cx: number; cy: number; side: number; angle: number; bar: number } {
+  /** The menu card's rect in CSS px, un-turned (the turn is CSS on the view too); the window when no card shows. */
+  function menuBox(): ViewRect {
     const el = document.querySelector<HTMLElement>(".menu-square");
     if (el && el.offsetWidth > 0) {
       const r = el.getBoundingClientRect();
-      const cy = r.top + r.height / 2;
-      // The turn is set by ui/screens/menu.ts (SQUARE_ANGLE) as --angle; no turn when it is absent.
-      const angle = parseFloat(getComputedStyle(el).getPropertyValue("--angle")) || 0;
-      const bar = document.querySelector<HTMLElement>(".menu-clip-bar:not([hidden])");
-      const barTop = bar ? bar.getBoundingClientRect().top - cy : 0;
-      return { cx: r.left + r.width / 2, cy, side: el.offsetWidth, angle, bar: barTop };
+      return { x: r.left + r.width / 2 - el.offsetWidth / 2, y: r.top + r.height / 2 - el.offsetHeight / 2, w: el.offsetWidth, h: el.offsetHeight };
     }
-    return { cx: window.innerWidth / 2, cy: window.innerHeight / 2, side: Math.min(window.innerWidth, window.innerHeight), angle: 0, bar: 0 };
+    return { x: 0, y: 0, w: window.innerWidth, h: window.innerHeight };
   }
+
+  /** The card moves with the page and changes size with its art: the view follows it, and the canvases resize only when its rect changed. */
+  let backdropView = "";
+  function syncBackdropView(): void {
+    const v = menuBox();
+    const key = `${v.x},${v.y},${v.w},${v.h}`;
+    if (key === backdropView) return;
+    backdropView = key;
+    resizeAll();
+  }
+  window.addEventListener("scroll", () => {
+    if (backdrop) syncBackdropView();
+  }, { capture: true, passive: true });
 
   const wasm: WasmTools = {
     mapPreview: (code) => needEngine().mapPreview(code),
@@ -411,7 +420,11 @@ export function start(): Store<AppState> {
     mounted = screen;
     const wasBackdrop = backdrop;
     backdrop = screen === "menu";
-    if (backdrop !== wasBackdrop) resizeAll();
+    if (backdrop !== wasBackdrop) {
+      glHost.classList.toggle("is-backdrop", backdrop);
+      overlayCanvas.classList.toggle("is-backdrop", backdrop);
+      resizeAll();
+    }
     uiRoot.replaceChildren(handle.el);
     if (from !== null) playScreenTransition(uiRoot, leaving, handle.el, scrollTop);
     // The controls of a new screen (and the transition's motion) set the band the game view fits between.
@@ -571,7 +584,7 @@ export function start(): Store<AppState> {
   function gameView(): ViewRect {
     const winW = window.innerWidth;
     const winH = window.innerHeight;
-    if (backdrop) return { x: 0, y: 0, w: winW, h: winH };
+    if (backdrop) return menuBox();
     if (winW > winH) {
       let left = 0;
       let right = winW;
