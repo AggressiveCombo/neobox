@@ -341,12 +341,24 @@ async function roomMatch(s) {
   // Frames freeze during the start countdown; wait it out, then holding
   // ArrowRight moves the guest's player, so the rendered frames keep changing.
   await sleep(4000);
+  const tick = () => guest.page.evaluate(() => globalThis.__qaTick?.tick ?? -1);
   const before = await probeChanges(guest.page);
+  const ticks0 = await tick();
   await guest.page.keyboard.down("ArrowRight");
-  await sleep(1000);
+  // The sim runs on its own clock while the frames wait for the browser's animation frames, which a loaded host
+  // delivers more slowly. Hold until the frames show the move and the sim has advanced, for up to 10 s.
+  const end = Date.now() + 10_000;
+  let moved = 0;
+  let ticks = 0;
+  for (;;) {
+    moved = (await probeChanges(guest.page)) - before;
+    ticks = (await tick()) - ticks0;
+    if ((moved > 5 && ticks >= 10) || Date.now() > end) break;
+    await sleep(100);
+  }
   await guest.page.keyboard.up("ArrowRight");
-  const moved = (await probeChanges(guest.page)) - before;
-  check(moved > 5, `guest frames barely changed while holding ArrowRight (${moved} changes)`);
+  check(ticks >= 10, `the simulation did not advance while holding ArrowRight (${ticks} ticks)`);
+  check(moved > 5, `guest frames barely changed while holding ArrowRight (${moved} changes over ${ticks} sim ticks)`);
   await host.page.locator(".hud-scores table.hud-table").waitFor({ state: "attached" }).catch(() => {});
   return `both canvases render; ${moved} frame changes while holding Right`;
 }
