@@ -84,12 +84,29 @@ type Gesture =
   | { kind: "marquee"; a: Pt; b: Pt; keep: Ref[] }
   | { kind: "shapeMove"; start: Pt; startPx: Pt; base: Obj; bi: number; sel: number[]; clicked: number; collapse: boolean; moved: boolean }
   | { kind: "shapeMarquee"; a: Pt; b: Pt; keep: number[]; bi: number }
-  | { kind: "rect"; a: Pt; b: Pt; startPx: Pt; moved: boolean }
-  | { kind: "circle"; c: Pt; r: Pt; startPx: Pt; moved: boolean }
+  | { kind: "rect"; origin: Pt; anchor: Pt; p: Pt; startPx: Pt; moved: boolean }
+  | { kind: "circle"; origin: Pt; anchor: Pt; p: Pt; startPx: Pt; moved: boolean }
   | { kind: "pan"; p0: Pt; v0: View };
 
 function dist(a: Pt, b: Pt): number {
   return Math.hypot(a.x - b.x, a.y - b.y);
+}
+
+/** Snap a world value down or up to a grid step (no snapping when step <= 0). */
+function floorTo(v: number, step: number): number {
+  return step > 0 ? Math.floor(v / step) * step : v;
+}
+function ceilTo(v: number, step: number): number {
+  return step > 0 ? Math.ceil(v / step) * step : v;
+}
+
+/** The original's circle for a drag box with corners `anchor` and `p`: inscribed in the box (radius half the shorter side, at least MIN_RADIUS), centre pushed from the anchor towards the pointer. */
+function circleOf(anchor: Pt, p: Pt): { c: Pt; r: number } {
+  const r = Math.max(MIN_RADIUS, Math.min(Math.abs(p.x - anchor.x), Math.abs(p.y - anchor.y)) / 2);
+  return {
+    c: { x: anchor.x + Math.sign(p.x - anchor.x) * r, y: anchor.y + Math.sign(p.y - anchor.y) * r },
+    r,
+  };
 }
 
 function errText(err: unknown): string {
@@ -517,10 +534,10 @@ export class EditorController {
         this.selectDown(e, p, raw, tol, s);
         break;
       case "rect":
-        this.gesture = { kind: "rect", a: s, b: s, startPx: p, moved: false };
+        this.gesture = { kind: "rect", origin: raw, anchor: { x: floorTo(raw.x, this.snapStep()), y: floorTo(raw.y, this.snapStep()) }, p: s, startPx: p, moved: false };
         break;
       case "circle":
-        this.gesture = { kind: "circle", c: s, r: s, startPx: p, moved: false };
+        this.gesture = { kind: "circle", origin: raw, anchor: { x: floorTo(raw.x, this.snapStep()), y: floorTo(raw.y, this.snapStep()) }, p: s, startPx: p, moved: false };
         break;
       case "poly":
         if (this.poly.length >= 3 && dist(raw, this.poly[0]!) <= tol) this.finishPoly();
@@ -677,14 +694,14 @@ export class EditorController {
           if (dist(p, g.startPx) < DRAG_PX) return;
           g.moved = true;
         }
-        g.b = this.snap(this.worldOf(p));
+        Object.assign(g, this.dragBox(g.origin, g.anchor, this.worldOf(p)));
         break;
       case "circle":
         if (!g.moved) {
           if (dist(p, g.startPx) < DRAG_PX) return;
           g.moved = true;
         }
-        g.r = this.snap(this.worldOf(p));
+        Object.assign(g, this.dragBox(g.origin, g.anchor, this.worldOf(p)));
         break;
     }
     this.paint();
@@ -753,16 +770,18 @@ export class EditorController {
         this.notify();
         return;
       case "rect":
-        if (!g.moved) return this.tapCorner(g.a);
+        if (!g.moved) return this.tapCorner(this.snap(g.origin));
         this.pending = null;
-        if (Math.abs(g.b.x - g.a.x) < MIN_SIZE || Math.abs(g.b.y - g.a.y) < MIN_SIZE) return this.notify();
-        this.placeBox(g.a, g.b);
+        if (g.anchor.x === g.p.x || g.anchor.y === g.p.y) return this.notify();
+        this.placeBox(g.anchor, g.p);
         return;
-      case "circle":
-        if (!g.moved) return this.tapCentre(g.c);
+      case "circle": {
+        if (!g.moved) return this.tapCentre(this.snap(g.origin));
         this.pending = null;
-        this.placeCircle(g.c, Math.max(MIN_RADIUS, dist(g.c, g.r)));
+        const made = circleOf(g.anchor, g.p);
+        this.placeCircle(made.c, made.r);
         return;
+      }
     }
   }
 
@@ -1156,6 +1175,16 @@ export class EditorController {
     return { x: Math.round(p.x / step) * step, y: Math.round(p.y / step) * step };
   }
 
+  /** The original's box drag, per axis on the snap grid: `anchor` is the corner that stays put and `p` the moving one. The anchor is the start snapped down, or up once the pointer is below it (the box then runs from the start's ceiling). */
+  private dragBox(origin: Pt, anchor: Pt, ptr: Pt): { anchor: Pt; p: Pt } {
+    const step = this.snapStep();
+    const axis = (o: number, a: number, q: number) =>
+      q < a ? { a: ceilTo(o, step), p: floorTo(q, step) } : { a: floorTo(o, step), p: ceilTo(q, step) };
+    const x = axis(origin.x, anchor.x, ptr.x);
+    const y = axis(origin.y, anchor.y, ptr.y);
+    return { anchor: { x: x.a, y: y.a }, p: { x: x.p, y: y.p } };
+  }
+
   private size(): { w: number; h: number } {
     return { w: this.canvas.clientWidth, h: this.canvas.clientHeight };
   }
@@ -1172,8 +1201,11 @@ export class EditorController {
 
   private preview(): Preview | null {
     const g = this.gesture;
-    if (g?.kind === "rect") return { kind: "rect", a: g.a, b: g.b };
-    if (g?.kind === "circle") return { kind: "circle", c: g.c, r: g.r };
+    if (g?.kind === "rect" && g.moved) return { kind: "rect", a: g.anchor, b: g.p };
+    if (g?.kind === "circle" && g.moved) {
+      const { c, r } = circleOf(g.anchor, g.p);
+      return { kind: "circle", c, r: { x: c.x + r, y: c.y } };
+    }
     if (g?.kind === "marquee") return { kind: "rect", a: g.a, b: g.b };
     if (this.pending && this.activeTool === "rect") return { kind: "rect", a: this.pending, b: this.hover ?? this.pending };
     if (this.pending && this.activeTool === "circle") return { kind: "circle", c: this.pending, r: this.hover ?? this.pending };
