@@ -545,6 +545,11 @@ const CLUSTER_SECRET = "e2e-cluster-secret";
 const GEOIP_FIXTURE = path.resolve(CLIENT_DIR, "..", "crates", "server", "tests", "data", "geo-test.mmdb");
 
 function regionEnv(base, region, location) {
+  // The server runs geolocation-off without the database (a warning only): every room would then sit on the main
+  // server and no flags would render, failing far from the cause. Fail here, naming the fixture.
+  if (!existsSync(GEOIP_FIXTURE)) {
+    throw new Error(`GeoIP fixture missing: ${GEOIP_FIXTURE}; run the e2e from a checkout that has crates/server/tests/data`);
+  }
   return {
     NEOBOX_CLUSTER_SECRET: CLUSTER_SECRET,
     NEOBOX_REGION: region,
