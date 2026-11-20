@@ -842,24 +842,40 @@ async function phoneLandscapeTouch(s) {
     `touch controls run off the landscape screen (viewport ${vp.width}x${vp.height}, stick ${geom(stick)}, actions ${geom(actions)})`,
   );
 
+  // Holds a touch input until the frames show the move and the sim has advanced, for up to 10 s (see roomMatch):
+  // a loaded host paints fewer frames in a fixed window while the sim keeps ticking.
+  const holdUntilMoved = async (press) => {
+    const tick = () => page.evaluate(() => globalThis.__qaTick?.tick ?? -1);
+    const before = await probeChanges(page);
+    const ticks0 = await tick();
+    await press();
+    const end = Date.now() + 10_000;
+    let moved = 0;
+    let ticks = 0;
+    for (;;) {
+      moved = (await probeChanges(page)) - before;
+      ticks = (await tick()) - ticks0;
+      if ((moved > 5 && ticks >= 10) || Date.now() > end) break;
+      await sleep(100);
+    }
+    await send("touchEnd", []);
+    return { moved, ticks };
+  };
+
   // Thumb on the stick, slid right: the player moves, so the canvas keeps changing.
-  const beforeStick = await probeChanges(page);
-  await send("touchStart", [{ x: stick.x, y: stick.y }]);
-  await send("touchMove", [{ x: stick.x + stick.r * 0.8, y: stick.y }]);
-  await sleep(1000);
-  await send("touchEnd", []);
-  const moved = (await probeChanges(page)) - beforeStick;
-  check(moved > 5, `guest frames barely changed while holding the touch stick right (${moved} changes)`);
+  const stickHold = await holdUntilMoved(async () => {
+    await send("touchStart", [{ x: stick.x, y: stick.y }]);
+    await send("touchMove", [{ x: stick.x + stick.r * 0.8, y: stick.y }]);
+  });
+  check(stickHold.ticks >= 10, `the simulation did not advance while holding the touch stick (${stickHold.ticks} ticks)`);
+  check(stickHold.moved > 5, `guest frames barely changed while holding the touch stick right (${stickHold.moved} changes over ${stickHold.ticks} sim ticks)`);
 
   // Jump is a touch button of its own: holding it makes the player leap.
   const jump = await centre('.hud-touch[data-action="up"]');
-  const beforeJump = await probeChanges(page);
-  await send("touchStart", [{ x: jump.x, y: jump.y }]);
-  await sleep(1000);
-  await send("touchEnd", []);
-  const jumped = (await probeChanges(page)) - beforeJump;
-  check(jumped > 5, `guest frames barely changed while holding Jump (${jumped} changes)`);
-  return `stick right: ${moved} frame changes; Jump: ${jumped} frame changes`;
+  const jumpHold = await holdUntilMoved(() => send("touchStart", [{ x: jump.x, y: jump.y }]));
+  check(jumpHold.ticks >= 10, `the simulation did not advance while holding Jump (${jumpHold.ticks} ticks)`);
+  check(jumpHold.moved > 5, `guest frames barely changed while holding Jump (${jumpHold.moved} changes over ${jumpHold.ticks} sim ticks)`);
+  return `stick right: ${stickHold.moved} frame changes; Jump: ${jumpHold.moved} frame changes`;
 }
 
 async function latency(s) {
