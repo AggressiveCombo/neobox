@@ -198,7 +198,8 @@ async function holdViewport(context) {
 
 async function bootCase(s, base, renderer) {
   prepare(s, renderer);
-  const h = await s.open("boot");
+  // The product registers its service worker; the Scenario default ("block") makes Playwright log its own warning.
+  const h = await s.open("boot", { serviceWorkers: "allow" });
   await startPractice(h, base, renderer);
   // The webgl2 case hides navigator.gpu on purpose, so the app's WebGPU-unavailable notice is expected there.
   const all = warningsOf(s);
@@ -412,7 +413,8 @@ function sectionRetry(page, title) {
  */
 async function offlineWarmCase(s, base, cdp, engine) {
   prepare(s);
-  const host = await s.open("offline", { name: uniqueName("off") });
+  // The offline case needs the worker to serve the shell: with it blocked, navigator.serviceWorker.ready never resolves.
+  const host = await s.open("offline", { name: uniqueName("off"), serviceWorkers: "allow" });
   host.page.setDefaultTimeout(LOAD_TIMEOUT_MS);
   await host.page.goto(base);
   await menuName(host.page).waitFor();
