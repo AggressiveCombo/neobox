@@ -34,6 +34,8 @@ const STEP_DEG = 20;
 const SIN_STEP = Math.sin((STEP_DEG * Math.PI) / 180);
 /** Options turned past this from the front are on the far side of the cylinder and not drawn. */
 const FRONT_DEG = 90;
+/** Neighbours never fade below this opacity, so their text keeps WCAG AA contrast (the depth is the tilt and the curve). */
+const OPACITY_FLOOR = 0.65;
 /** Wheel travel that rolls one option. */
 const WHEEL_STEP_PX = 50;
 /** A pointer must move this far before it is a drag rather than a click. */
@@ -171,7 +173,7 @@ export function mountDrum(items: DrumItem[], label: string): Drum {
       const a = Math.abs(deg) / STEP_DEG;
       style.pointerEvents = "";
       style.transform = `translate3d(0, ${y.toFixed(2)}px, ${z.toFixed(2)}px) rotateX(${(-deg).toFixed(2)}deg) scale(${(1 - 0.08 * a).toFixed(3)})`;
-      style.opacity = (1 - 0.3 * a).toFixed(3);
+      style.opacity = Math.max(OPACITY_FLOOR, 1 - 0.3 * a).toFixed(3);
     }
   }
 
