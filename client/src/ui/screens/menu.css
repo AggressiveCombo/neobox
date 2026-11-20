@@ -575,8 +575,8 @@ button.home-privacy {
   }
 
   .drum {
-    --drum-pitch: 50px;
-    --drum-opt-h: 44px;
+    --drum-pitch: 56px;
+    --drum-opt-h: 48px;
     height: 200px;
   }
 }
