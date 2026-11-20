@@ -332,6 +332,15 @@ export class Overlay {
         }
       }
       const box = { left: l.x - l.w / 2, right: l.x + l.w / 2, top: l.y - l.h - crown, bottom: l.y };
+      // A label past the view's edge moves in (the view clips what it leaves out): on small cards the name stays whole.
+      const dx = box.left < 0 ? -box.left : box.right > cssW ? cssW - box.right : 0;
+      const dy = box.top < 0 ? -box.top : box.bottom > cssH ? cssH - box.bottom : 0;
+      l.x += dx;
+      l.y += dy;
+      box.left += dx;
+      box.right += dx;
+      box.top += dy;
+      box.bottom += dy;
       placed.push(box);
       drawn.push({ kind: "label", id: l.player.id, z: 1, box });
     }

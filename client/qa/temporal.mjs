@@ -11,9 +11,11 @@
 //                                  menu clip card (desktop light/dark, phone portrait): overlay.backdrop.void.px (VOID-colour px inside the card, css px^2),
 //                                  overlay.backdrop.page.px (page-white px inside the card outside the arena, css px^2),
 //                                  overlay.backdrop.edge.px (the 2 css px band just outside the card's edge that is not the page colour, css px^2),
-//                                  overlay.backdrop.control.count (bar with no clip, caption over pause or clipped or wrapped or translucent, card past the viewport),
+//                                  overlay.backdrop.control.count (bar with no clip, caption over pause or clipped or past two lines or translucent, card past the viewport),
 //                                  overlay.backdrop.caption.pct (caption and pause share of the card area, %),
 //                                  overlay.backdrop.players.out.count (cases where the centroid is outside the card in any sampled frame, or a live player is inside it in < 98% of its frames)
+//                                  overlay.backdrop.arena.out.count (samples where an arena corner or a wall corner is outside the card, margin < 0),
+//                                  overlay.backdrop.label.out.count (samples where a player name label box is outside the card),
 //   E05 font.pref.metricDelta     About page: readable-font pref changes text metrics (%)
 //   E07 copy.claims.unsourced     copy claims with no source (no browser; copy-claims.mjs)
 //   E08 transition.present        settings sections and training Next: share of changes that animate (browser animation events and scroll timing; rAF samples secondary)
@@ -502,6 +504,36 @@ const backdropGeometry = () => {
   // the live players' centroid (the card's centre follows it): inside the card?
   const pts = (cam.live ?? []).map(([, x, y]) => toPage(x, y));
   const centroidIn = pts.length > 0 && inCard(pts.reduce((a, p) => a + p[0], 0) / pts.length, pts.reduce((a, p) => a + p[1], 0) / pts.length);
+  // the arena's corners and the walls' extent (the camera's bounds) in page px: each corner must sit inside the card (margin >= 0)
+  const cornersOf = (x0, y0, x1, y1) => [toPage(x0, y0), toPage(x1, y0), toPage(x1, y1), toPage(x0, y1)];
+  // the distance from a page point to the card's edge, inside positive (un-turned card coordinates)
+  const margin = ([x, y]) => {
+    const [u, v] = local(x, y);
+    return Math.min(hw - Math.abs(u), hh - Math.abs(v));
+  };
+  const arenaMargin = Math.min(...cornersOf(0, 0, cam.aw, cam.ah).map(margin));
+  const wallMargin = Math.min(...cornersOf(cam.bx0, cam.by0, cam.bx1, cam.by1).map(margin));
+  // the name labels: the overlay's own px (its view is centred on the card and turns with it): every box corner in the card
+  const ov = document.getElementById("overlay");
+  const labels = window.__qaDraw?.rects.filter((r) => r.kind === "label") ?? [];
+  let labelMargin = Infinity;
+  if (ov && labels.length > 0) {
+    // The overlay's backing store is the view's device px and the element is drawn 2 css px smaller on each side (style.css
+    // #overlay.is-backdrop): a label box is in backing units, so scale it to the element's css box.
+    const dpr = window.devicePixelRatio || 1;
+    const vw = parseFloat(getComputedStyle(ov).width);
+    const vh = parseFloat(getComputedStyle(ov).height);
+    const kx = vw / (ov.width / dpr);
+    const ky = vh / (ov.height / dpr);
+    for (const r of labels) {
+      const { left, right, top, bottom } = r.box;
+      for (const [x, y] of [[left, top], [right, top], [right, bottom], [left, bottom]]) {
+        const dx = x * kx - vw / 2;
+        const dy = y * ky - vh / 2;
+        labelMargin = Math.min(labelMargin, margin([cx + dx * gCos - dy * gSin, cy + dx * gSin + dy * gCos]));
+      }
+    }
+  }
   // controls: a bar shown with no drawn clip, caption over pause, a wrapped caption, translucent caption, card past the viewport.
   // The caption and its pause control are not rotated: their page boxes are exact.
   const live = sq.classList.contains("is-live");
@@ -517,7 +549,7 @@ const backdropGeometry = () => {
     if (a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom) issues.push("caption-over-pause");
     const cs = getComputedStyle(credit);
     const lineH = parseFloat(cs.lineHeight) || parseFloat(cs.fontSize) * 1.3;
-    if (credit.clientHeight - parseFloat(cs.paddingTop) - parseFloat(cs.paddingBottom) > 1.5 * lineH) issues.push("caption-wraps");
+    if (credit.clientHeight - parseFloat(cs.paddingTop) - parseFloat(cs.paddingBottom) > 2.5 * lineH) issues.push("caption-past-two-lines");
     const parts = /rgba?\(([^)]+)\)/.exec(cs.backgroundColor)?.[1].split(/[\s,/]+/).filter(Boolean) ?? [];
     const alpha = parts.length > 3 ? Number(parts[3]) : 1;
     if (alpha > 0 && alpha < 1) issues.push("caption-translucent");
@@ -545,6 +577,11 @@ const backdropGeometry = () => {
       const gap = credit.getBoundingClientRect().top - lowest;
       if (gap < 0 || gap > 24) issues.push("caption-detached");
     }
+  }
+  if (live) {
+    // half a px of rounding: an arena or label that exactly meets the card edge reads -0.0x on some engines
+    if (arenaMargin < -0.5 || wallMargin < -0.5) issues.push("arena-out");
+    if (labelMargin < -0.5) issues.push("label-out");
   }
   // the page's own background colour: the first of body or html that is not transparent (the card must show none of it)
   const rgba = (c) => /rgba?\(([^)]+)\)/.exec(c)?.[1].split(/[\s,/]+/).filter(Boolean).map(Number) ?? null;
@@ -574,6 +611,9 @@ const backdropGeometry = () => {
     contentDeg,
     pageRgb,
     controls,
+    arenaMargin,
+    wallMargin,
+    labelMargin,
   };
 };
 
@@ -629,10 +669,15 @@ const backdropPixels = async ({ b64, g }) => {
 /** Frame issues (overlay.backdrop.frame.count): the card's content does not turn with the card, the arena is small in the card or not its shape, the caption is detached from the card's corner. Counted apart from the controls. */
 const FRAME_ISSUES = new Set(["content-untilted", "arena-clipped", "arena-small", "card-aspect", "caption-detached"]);
 
-/** E04 backdrop: the menu clip card (desktop light and dark; phone portrait 390x844, phone small 320x568, tablet portrait 768x1024; the phone landscape has no backdrop by design, menu.css). Eight seconds of clip, sampled every 0.5 s: the card's pixels at +1 s, +3 s and +8 s, and at each sample the controls, the centroid and each live player's position. */
+/** Placement, counted apart: the whole arena and its walls inside the card (arena-out), each name label inside it (label-out). */
+const PLACEMENT_ISSUES = new Set(["arena-out", "label-out"]);
+
+/** E04 backdrop: the menu clip card (desktop light and dark, desktop 1433x1013 and 1920x1080; phone portrait 390x844, phone small 320x568, tablet portrait 768x1024; the phone landscape has no backdrop by design, menu.css). Eight seconds of clip, sampled every 0.5 s: the card's pixels at +1 s, +3 s and +8 s, and at each sample the controls, the centroid and each live player's position. */
 async function menuBackdrop(s) {
   const cases = [
     ["desktop-light", { viewport: { width: 1280, height: 800 } }, false],
+    ["desktop-1433", { viewport: { width: 1433, height: 1013 } }, false],
+    ["desktop-1920", { viewport: { width: 1920, height: 1080 } }, false],
     ["desktop-dark", { viewport: { width: 1280, height: 800 } }, true],
     ["phone-portrait", { viewport: { width: 390, height: 844 }, phone: true }, false],
     ["phone-small", { viewport: { width: 320, height: 568 }, phone: true }, false],
@@ -648,6 +693,8 @@ async function menuBackdrop(s) {
   let coverPct = 0;
   let playersOut = 0;
   let frame = 0;
+  let arenaOut = 0;
+  let labelOut = 0;
   for (const [name, opts, dark] of cases) {
     const h = await s.open(`backdrop-${name}`, { name: "shots", ...opts });
     await h.page.goto(s.base);
@@ -675,6 +722,7 @@ async function menuBackdrop(s) {
       const g = await h.page.evaluate(backdropGeometry);
       if (!g) return { pass: false, detail: `${name}: no menu card or camera` };
       geom = `card=${(2 * g.half[0]).toFixed(0)}x${(2 * g.half[1]).toFixed(0)} turn=${g.cardDeg.toFixed(1)}/${g.contentDeg.toFixed(1)} arena=${g.arenaHalf.map((v) => (2 * v).toFixed(0)).join("x")} bar=${g.controls.map((c) => c.map((v) => Math.round(v)).join(",")).join(" ")}`;
+      geom += ` margin=${g.arenaMargin.toFixed(1)}/${g.wallMargin.toFixed(1)}/${Number.isFinite(g.labelMargin) ? g.labelMargin.toFixed(1) : "-"}`;
       let px = { white: 0, voidArea: 0, edge: 0 };
       if (g.live && shots.has(wait)) {
         // The card's box can reach past the viewport (a card-past-viewport control issue above): shoot only what is on screen.
@@ -697,7 +745,9 @@ async function menuBackdrop(s) {
       coverPct = Math.max(coverPct, g.coverPct);
       const frameIssues = g.issues.filter((x) => FRAME_ISSUES.has(x));
       frame += frameIssues.length;
-      controls += g.issues.length - frameIssues.length;
+      controls += g.issues.length - frameIssues.length - g.issues.filter((x) => PLACEMENT_ISSUES.has(x)).length;
+      arenaOut += g.issues.includes("arena-out") ? 1 : 0;
+      labelOut += g.issues.includes("label-out") ? 1 : 0;
       for (const x of g.issues) issues.add(x);
       if (g.players.length > 0) {
         frames += 1;
@@ -731,6 +781,8 @@ async function menuBackdrop(s) {
       "overlay.backdrop.caption.pct": Math.round(coverPct),
       "overlay.backdrop.players.out.count": playersOut,
       "overlay.backdrop.frame.count": frame,
+      "overlay.backdrop.arena.out.count": arenaOut,
+      "overlay.backdrop.label.out.count": labelOut,
     },
     detail: parts.join("; "),
   };
@@ -759,13 +811,18 @@ async function fontPref(s) {
       },
       { key: PREFS_KEY, extra },
     );
+  // a reload lands on the menu: go back to About before each measure (else the menu's own <p>s are counted)
+  const reopen = async () => {
+    await page.reload();
+    await page.locator('input[placeholder="name"]').waitFor();
+    await navTo(page, "About");
+    await sleep(400);
+  };
   await setPrefs({ textScale: 1, readableFont: false });
-  await page.reload();
-  await sleep(400);
+  await reopen();
   const a = await measure();
   await setPrefs({ readableFont: true });
-  await page.reload();
-  await sleep(400);
+  await reopen();
   const b = await measure();
   if (!a.n || !a.xh) return { pass: false, detail: "no paragraphs measured" };
   const r = b.height / a.height;

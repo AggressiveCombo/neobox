@@ -173,7 +173,8 @@ export function mountMenuClips(ctx: AppCtx, host: HTMLElement, onState?: (state:
     if (!p.shown) {
       p.shown = true;
       const caption = `${p.clip.map_name} · recorded by ${p.clip.recorder}`;
-      credit.textContent = caption;
+      // The credit span hides on coarse pointers (menu-clips.css); the title keeps the full caption.
+      credit.replaceChildren(h("span", { class: "menu-clip-map" }, p.clip.map_name), h("span", { class: "menu-clip-by" }, ` · recorded by ${p.clip.recorder}`));
       credit.title = caption;
       bar.hidden = false;
       setState("live");
