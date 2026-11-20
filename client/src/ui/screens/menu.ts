@@ -346,9 +346,10 @@ export const menuScreen: ScreenFactory = (ctx) => {
     if (overlay) overlay.style.clipPath = clipPath;
   }
 
-  const unmountClips = mountMenuClips(ctx, creditSlot, (on) => {
-    liveClip = on;
-    square.classList.toggle("is-live", on);
+  const unmountClips = mountMenuClips(ctx, creditSlot, (state) => {
+    liveClip = state === "live";
+    square.classList.toggle("is-live", state === "live");
+    square.classList.toggle("is-idle", state === "idle");
     fitView();
   });
   const resizeObserver = new ResizeObserver(() => fitView());

@@ -38,13 +38,18 @@ interface Playing {
   names: ReadonlyMap<number, string>;
   follow: number;
   tick: number;
+  /** Set once its first frame reached the screen: the card is live and shows the caption. */
+  shown: boolean;
 }
 
+export type ClipState = "loading" | "live" | "idle";
+
 /**
- * Start the background clip playback in `host`. `onPlaying` is told when a clip starts
- * and when it ends. Returns the cleanup function (stops it).
+ * Start the background clip playback in `host`. `onState` reports what the card shows: "loading" (blank, no clip
+ * frame yet), "live" (a clip is drawn, with its caption), "idle" (no clip can play: the brand tile). Returns the
+ * cleanup function (stops it).
  */
-export function mountMenuClips(ctx: AppCtx, host: HTMLElement, onPlaying?: (on: boolean) => void): () => void {
+export function mountMenuClips(ctx: AppCtx, host: HTMLElement, onState?: (state: ClipState) => void): () => void {
   let destroyed = false;
   let eng: Engine | null = null;
   let clips: ClipSummary[] = [];
@@ -57,6 +62,7 @@ export function mountMenuClips(ctx: AppCtx, host: HTMLElement, onPlaying?: (on: 
   /** The clip last drawn still while paused: it is drawn once, not every frame. */
   let frozenFor: Playing | null = null;
   let loading = false;
+  let state: ClipState = "loading";
   let rafId = 0;
   let last = 0;
   let retryTimer = 0;
@@ -107,7 +113,7 @@ export function mountMenuClips(ctx: AppCtx, host: HTMLElement, onPlaying?: (on: 
     }
     eng = engine;
     const follow = info.names.find(([, name]) => name === clip.recorder)?.[0] ?? info.players[0]?.[0] ?? -1;
-    return { clip, info, names: new Map(info.names), follow, tick: info.first };
+    return { clip, info, names: new Map(info.names), follow, tick: info.first, shown: false };
   }
 
   /**
@@ -139,26 +145,62 @@ export function mountMenuClips(ctx: AppCtx, host: HTMLElement, onPlaying?: (on: 
 
   function begin(next: Playing): void {
     playing = next;
-    onPlaying?.(true);
-    credit.textContent = `${next.clip.map_name} · recorded by ${next.clip.recorder}`;
-    bar.hidden = false;
+    // A card that showed nothing goes blank while the clip loads; a live card keeps its last frame until the next clip draws.
+    if (state === "idle") setState("loading");
+  }
+
+  /** Draw the clip's frame at its tick. The first frame that reaches the screen makes the card live and shows the caption. */
+  function draw(engine: Engine, p: Playing): boolean {
+    // null: a seek waits for keyframes not yet built; nothing is presented, so an empty buffer never shows as the clip.
+    if (engine.replayFrame(p.tick, p.follow) === null) return false;
+    if (!ctx.present(p.names, p.info.hz, false)) return false;
+    if (!p.shown) {
+      p.shown = true;
+      credit.textContent = `${p.clip.map_name} · recorded by ${p.clip.recorder}`;
+      bar.hidden = false;
+      setState("live");
+    }
+    return true;
+  }
+
+  function setState(next: ClipState): void {
+    if (next === state) return;
+    state = next;
+    onState?.(next);
+  }
+
+  /** Nothing can play (no clips, offline, every load failed): the card shows the brand tile. */
+  function showIdle(): void {
+    bar.hidden = true;
+    setState("idle");
   }
 
   function startNext(): void {
+    // A clip is playing (the online listener fired mid-clip): it finishes first.
+    if (loading || destroyed || playing) return;
     // Offline the clip list cannot load and would only log errors; the `online` listener starts it again.
-    if (loading || destroyed || !navigator.onLine) return;
+    if (!navigator.onLine) {
+      showIdle();
+      return;
+    }
     if (net.signal.aborted) net = new AbortController();
     loading = true;
     loadNext().then(
       (next) => {
         loading = false;
         if (destroyed) return;
-        if (next) begin(next);
-        else if (clips.length > 0) scheduleRetry();
+        if (next) {
+          begin(next);
+          return;
+        }
+        showIdle();
+        if (clips.length > 0) scheduleRetry();
       },
       () => {
         loading = false;
-        if (!destroyed) scheduleRetry();
+        if (destroyed) return;
+        showIdle();
+        scheduleRetry();
       },
     );
   }
@@ -188,11 +230,8 @@ export function mountMenuClips(ctx: AppCtx, host: HTMLElement, onPlaying?: (on: 
     }
     if (paused) {
       ctx.holdView();
-      if (frozenFor !== p) {
-        frozenFor = p;
-        eng.replayFrame(p.tick, p.follow);
-        ctx.present(p.names, p.info.hz, false);
-      }
+      // Held on one frame: drawn once, and again until it reaches the screen.
+      if (frozenFor !== p && draw(eng, p)) frozenFor = p;
       return;
     }
     frozenFor = null;
@@ -200,15 +239,13 @@ export function mountMenuClips(ctx: AppCtx, host: HTMLElement, onPlaying?: (on: 
     qaClip.tick = p.tick;
     qaClip.dtMs = dt;
     if (p.tick >= p.info.end) {
+      // The last frame stays up with its caption until the next clip's first frame (or the tile, when none plays).
       playing = null;
       qaClip.tick = -1;
-      bar.hidden = true;
-      onPlaying?.(false);
       startNext();
       return;
     }
-    eng.replayFrame(p.tick, p.follow);
-    ctx.present(p.names, p.info.hz, false);
+    draw(eng, p);
   }
 
   rafId = requestAnimationFrame(tick);

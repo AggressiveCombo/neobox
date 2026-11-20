@@ -1,9 +1,10 @@
 /* Caption and pause control for the clip playing behind the home screen (ui/menu-clips.ts).
-   They sit in the .menu-credit slot over the clip; only the button takes clicks. */
+   They sit in the .menu-credit slot over the clip; only the button takes clicks. The chips are opaque: a translucent
+   one shows the white platforms under it as grey strips. */
 .menu-clip-credit {
   margin: 0;
   padding: 4px 8px;
-  background: var(--hud);
+  background: #0a0a0a;
   color: var(--hud-ink);
   font-size: var(--step-small);
   line-height: 1.3;
@@ -32,7 +33,7 @@
   margin: 0;
   padding: 4px 8px;
   border: 0;
-  background: var(--hud);
+  background: #0a0a0a;
   color: var(--hud-ink);
   font: inherit;
   font-size: var(--step-small);

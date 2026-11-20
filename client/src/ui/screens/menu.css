@@ -231,27 +231,26 @@ button.home-account {
 .menu-square {
   position: absolute;
   inset: 0;
-  background: var(--brand-tile);
   transform: rotate(var(--angle, -18deg));
   display: grid;
   place-items: center;
   overflow: hidden;
 }
 
-/* Flat field: the mark sits in the middle, counter-rotated to stand upright. */
+/* No clip can play (menu.ts: is-idle): the brand tile, the mark in the middle, counter-rotated to stand upright. */
+.menu-square.is-idle {
+  background: var(--brand-tile);
+}
+
 .menu-square .mark {
   width: 34%;
   height: 34%;
   transform: rotate(calc(-1 * var(--angle, -18deg)));
-}
-
-/* Live: the clip shows through the square (menu.ts masks the GL view to it). */
-.menu-square.is-live {
-  background: transparent;
-}
-
-.menu-square.is-live .mark {
   opacity: 0;
+}
+
+.menu-square.is-idle .mark {
+  opacity: 1;
 }
 
 /* The clip credit, bottom-right of the art, over the clip. */
