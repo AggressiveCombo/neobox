@@ -62,8 +62,11 @@ async function menuHome(s) {
   check(await homeTop(page).getByRole("button", { name: "Mute music", exact: true }).count() === 1, "after unmute the label is not Mute music");
 
   // menu-fullscreen-btn: the button enters fullscreen and its label flips to Exit fullscreen.
+  const exit = homeTop(page).getByRole("button", { name: "Exit fullscreen", exact: true });
   await homeTop(page).getByRole("button", { name: "Fullscreen", exact: true }).click();
-  await homeTop(page).getByRole("button", { name: "Exit fullscreen", exact: true }).waitFor({ state: "visible" });
+  // A refused request fires no fullscreenchange: the menu toasts it and the label stays Fullscreen.
+  await exit.or(page.getByText("The browser did not change fullscreen.")).first().waitFor({ state: "visible" });
+  check(await exit.count() === 1, "the browser refused the Fullscreen request (menu toast shown); the label stayed Fullscreen");
   check(await page.evaluate(() => document.fullscreenElement !== null), "the page is not fullscreen after the Fullscreen click");
   await homeTop(page).getByRole("button", { name: "Exit fullscreen", exact: true }).click();
   await homeTop(page).getByRole("button", { name: "Fullscreen", exact: true }).waitFor({ state: "visible" });

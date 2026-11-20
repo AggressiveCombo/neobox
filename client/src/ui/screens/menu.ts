@@ -236,8 +236,8 @@ export const menuScreen: ScreenFactory = (ctx) => {
   function toggleFullscreen(): void {
     const request =
       document.fullscreenElement !== null ? document.exitFullscreen() : document.documentElement.requestFullscreen();
-    // The browser refuses without a user gesture or when the page is already in the state asked for.
-    request.catch(() => undefined);
+    // The label follows fullscreenchange, which a refused request never fires: say so instead of doing nothing.
+    request.catch(() => ctx.toast("The browser did not change fullscreen.", "error"));
   }
 
   function syncFullscreen(): void {
