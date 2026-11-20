@@ -828,8 +828,9 @@ async function kickLeavesInPlace(s) {
   const { g, name: guestName } = await joinGuest(s, code, roomName);
   const gp = g.page;
   const inRoom = () => rosterRows(h.page).filter({ hasText: guestName }).waitFor({ state: "visible" });
-  const cdp = await gp.context().newCDPSession(gp);
-  await cdp.send("Emulation.setCPUThrottlingRate", { rate: 20 });
+  // the CPU throttle is a Chromium-only CDP session: the other engines run the same kick unthrottled
+  const cdp = gp.context().browser()?.browserType().name() === "chromium" ? await gp.context().newCDPSession(gp) : null;
+  await cdp?.send("Emulation.setCPUThrottlingRate", { rate: 20 });
   try {
     await gp.evaluate(() => {
       window.__pops = 0;
@@ -849,10 +850,10 @@ async function kickLeavesInPlace(s) {
     await joinByInvite(g, s.base, code, roomName);
     await inRoom();
   } finally {
-    await cdp.send("Emulation.setCPUThrottlingRate", { rate: 1 }).catch(() => {});
-    await cdp.detach().catch(() => {});
+    await cdp?.send("Emulation.setCPUThrottlingRate", { rate: 1 }).catch(() => {});
+    await cdp?.detach().catch(() => {});
   }
-  return "kick under CPU throttle: no history traversal, the guest lands on the menu; a navigation started right after a kick is not cancelled";
+  return `kick${cdp ? " under CPU throttle" : ""}: no history traversal, the guest lands on the menu; a navigation started right after a kick is not cancelled`;
 }
 
 // ---------------------------------------------------------------- group 7: match commands, replay, map commands
