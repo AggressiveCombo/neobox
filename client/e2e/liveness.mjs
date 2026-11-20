@@ -1,8 +1,8 @@
 // Liveness: a link that goes silent while its socket stays open shows the reconnect banner within about 3 s,
 // and the match resumes when the link returns. A slow but live link shows no banner.
 // The blackhole and slow-link cases route each page's socket through Playwright's relay (every engine), so the
-// relay can drop traffic both ways. The offline case cuts the real socket with CDP network emulation (chromium),
-// with no routing at all.
+// relay can drop traffic both ways. The offline case cuts the real socket on chromium (CDP emulation, no routing); the
+// other engines hold the socket silent through the relay while context.setOffline is on, since setOffline leaves an open socket live.
 
 import { matchWithGuest, sleep } from "./lib.mjs";
 
@@ -116,15 +116,18 @@ const SPY = () => {
   };
 };
 
-/** Each page of the scenario gets a link. `spy` records socket closes instead of routing the socket. */
-function linked(s, { spy = false } = {}) {
+/**
+ * Each page of the scenario gets a link. `route` puts the page's socket through the relay; the close spy is always on,
+ * so the offline case checks closes on every engine.
+ */
+function linked(s, { route = true } = {}) {
   const openOrig = s.open.bind(s);
   s.open = async (label, opts) => {
     const h = await openOrig(label, opts);
     h.link = { hole: false, cond: null };
     await h.context.addInitScript(BANNER_WATCH);
-    if (spy) await h.context.addInitScript(SPY);
-    else await h.page.routeWebSocket(/.*/, relay(h.link));
+    await h.context.addInitScript(SPY);
+    if (route) await h.page.routeWebSocket(/.*/, relay(h.link));
     return h;
   };
   return s;
@@ -164,12 +167,27 @@ async function slowLink(s) {
   return "150 ms RTT, 50 ms jitter, 2% stalls: no banner over 8 s";
 }
 
-async function offlineCdp(s) {
+/**
+ * Cuts and restores the link. Chromium uses CDP network emulation, which also cuts the open socket and refuses new ones.
+ * The other engines' context.setOffline leaves an open WebSocket live (measured: no banner), so there the page's socket
+ * is held silent and refused by the relay while the context is offline, as blackhole does, plus the offline flag.
+ */
+async function linkSetter(s, host) {
+  if (s.env.browser.browserType().name() === "chromium") {
+    const cdp = await host.context.newCDPSession(host.page);
+    return (offline) =>
+      cdp.send("Network.emulateNetworkConditions", { offline, latency: 0, downloadThroughput: -1, uploadThroughput: -1 });
+  }
+  return async (offline) => {
+    host.link.hole = offline;
+    await host.context.setOffline(offline);
+  };
+}
+
+async function offlineLink(s) {
   const { host } = await matchWithGuest(s, { clipboard: false });
   const banner = host.page.locator(BANNER);
-  const cdp = await host.context.newCDPSession(host.page);
-  const setOffline = (offline) =>
-    cdp.send("Network.emulateNetworkConditions", { offline, latency: 0, downloadThroughput: -1, uploadThroughput: -1 });
+  const setOffline = await linkSetter(s, host);
   const t0 = Date.now();
   await setOffline(true);
   await banner.waitFor({ state: "visible", timeout: BANNER_MS + 6_000 });
@@ -192,11 +210,11 @@ async function offlineCdp(s) {
   for (let i = host.problems.length - 1; i >= 0; i--) {
     if (OFFLINE_CONSOLE_RE.test(host.problems[i])) host.problems.splice(i, 1);
   }
-  return `banner ${shownMs} ms after CDP offline (${early.length} liveness close before it); match back ${recoverMs} ms after online`;
+  return `banner ${shownMs} ms after going offline (${early.length} liveness close before it); match back ${recoverMs} ms after online`;
 }
 
 export const livenessScenarios = [
   { name: "liveness blackhole", run: (s) => blackhole(linked(s)) },
   { name: "liveness slow link", run: (s) => slowLink(linked(s)) },
-  { name: "liveness offline", run: (s) => offlineCdp(linked(s, { spy: true })), cdp: true },
+  { name: "liveness offline", run: (s) => offlineLink(linked(s, { route: s.env.browser.browserType().name() !== "chromium" })) },
 ];
