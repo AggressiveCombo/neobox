@@ -11,9 +11,11 @@ import { downloadMap, mapText, parseMap, readMapFile } from "../../editor/io";
 import { renderInspector } from "../../editor/inspector";
 import { emptyDoc, hexColor, type Obj } from "../../editor/schema";
 import { TEST_PLAY_DEFAULT_MODE, startTestPlay, type TestPlay } from "../../editor/testplay";
+import { engineLoader } from "../../engine-loader";
 import { GAME_MODES } from "../../protocol";
 import type { Screen } from "../../state";
 import { h } from "../dom";
+import { engineStatus, type EngineStatus } from "../engine-status";
 import { icon, type IconName } from "../icons";
 import { confirmDialog, field, openModal, seg, uid } from "../kit";
 import { VISIBILITY_LABELS, mapCode } from "../map-list";
@@ -51,6 +53,8 @@ export const editorScreen: ScreenFactory = (ctx) => {
   let originKnown = false;
   let destroyed = false;
   let starting = false;
+  /** The engine's loading or failure strip, shown while a test play waits for it. */
+  let engineUi: EngineStatus | null = null;
   let testing: TestPlay | null = null;
   let shownDoc: Obj | null = null;
   let shownSel = "";
@@ -613,15 +617,28 @@ export const editorScreen: ScreenFactory = (ctx) => {
   async function playTest(): Promise<void> {
     if (testing || starting || destroyed) return;
     starting = true;
+    testBtn.disabled = true;
+    testBtn.setAttribute("aria-busy", "true");
+    // The engine loads on first use: the strip shows its progress, or the failure with Try again, which resumes the play.
+    if (!engineLoader.ready) {
+      engineUi = engineStatus(() => void startPlay());
+      root.insertBefore(engineUi.el, layout);
+    }
+    await startPlay();
+  }
+
+  /** Starts the game once the engine is up; a failed engine keeps the request pending for Try again. */
+  async function startPlay(): Promise<void> {
     let started: TestPlay;
     try {
       started = await startTestPlay(ctx, ctrl.doc, Number(modeSelect.value), (failure) => stopTest(failure));
     } catch (err) {
+      if (destroyed || engineLoader.state.status === "failed") return;
+      endPlayWait();
       ctx.toast(`Could not start test play: ${errorText(err)}`, "error");
       return;
-    } finally {
-      starting = false;
     }
+    endPlayWait();
     if (destroyed) {
       started.destroy();
       return;
@@ -631,6 +648,16 @@ export const editorScreen: ScreenFactory = (ctx) => {
     ctrl.pause(true);
     root.className = "offline playing";
     root.replaceChildren(...started.nodes);
+  }
+
+  /** Test play is no longer waiting: the button is usable again and the engine strip goes. */
+  function endPlayWait(): void {
+    starting = false;
+    testBtn.disabled = false;
+    testBtn.removeAttribute("aria-busy");
+    engineUi?.destroy();
+    engineUi?.el.remove();
+    engineUi = null;
   }
 
   /** Back to editing. `failure` is set when the game stopped on an error. */
@@ -663,6 +690,7 @@ export const editorScreen: ScreenFactory = (ctx) => {
     },
     destroy() {
       destroyed = true;
+      endPlayWait();
       window.removeEventListener("beforeunload", onBeforeUnload);
       observer.disconnect();
       if (testing) {

@@ -979,6 +979,47 @@ async function matchEditorPanelAndMode(s) {
   return `inspector closes (canvas ${wideBefore} -> ${wideAfter} px) and reopens; test play in Team rounds runs with a dummy opponent`;
 }
 
+/**
+ * editor-testplay-pending: Test play waits for the engine download. The button is busy and the engine strip shows
+ * progress; a failed download keeps the play pending behind Try again, and Try again starts the game.
+ */
+async function matchEditorTestPlayPending(s) {
+  const h = await s.open("edwasm", { name: uniqueName("edw") });
+  const { page } = h;
+  let release = () => {};
+  const gate = new Promise((resolve) => {
+    release = resolve;
+  });
+  let first = true;
+  await page.route("**/neobox.wasm*", async (route) => {
+    if (!first) return route.continue();
+    first = false;
+    await gate;
+    await route.abort();
+  });
+  await page.goto(s.base);
+  await menuName(page).waitFor();
+  await navTo(page, "Map editor");
+  await page.locator("canvas.editor-canvas").waitFor({ state: "visible" });
+  const test = page.locator('button[aria-label="Test play"]');
+  await test.click();
+  await page.waitForFunction(() => document.querySelector('button[aria-label="Test play"]')?.disabled === true, null, { timeout: 300 });
+  const strip = page.locator(".engine-status");
+  await strip.getByText("Loading the game engine", { exact: false }).waitFor({ state: "visible" });
+  check(await test.getAttribute("aria-busy") === "true", "Test play is not busy while the engine loads");
+  release();
+  await strip.getByText("The game engine failed to load", { exact: false }).waitFor({ state: "visible" });
+  check(await test.isDisabled(), "Test play is enabled behind a failed engine download");
+  await strip.getByRole("button", { name: "Try again", exact: true }).click();
+  await page.locator(".offline.playing").waitFor();
+  check((await page.locator(".engine-status").count()) === 0, "the engine strip stayed up in the game");
+  await button(page.locator(".offline-top"), "Edit").click();
+  // The aborted download is this scenario's own doing: the browser logs the failed wasm request as a console error.
+  h.problems.splice(0, h.problems.length, ...h.problems.filter((p) => !/console error: .*neobox\.wasm/.test(p)));
+  await page.locator("canvas.editor-canvas").waitFor({ state: "visible" });
+  return "Test play is busy while the engine downloads; a failed download offers Try again, which starts the game";
+}
+
 /** postgame: a private room's signed-in host and guest see Game over with an XP line; Escape closes the host's; the room roster shows the level chip. */
 async function matchPostgame(s) {
   const user = await signedIn(s, "pg");
@@ -1045,5 +1086,6 @@ export const matchInvScenarios = [
   { name: "inv match editor guest", inv: ["editor-save-dialog (guest)"], run: matchEditorGuest },
   { name: "inv match editor inspector", inv: ["editor-inspector-shape"], run: matchEditorInspector },
   { name: "inv match editor panel and mode", inv: ["editor-inspector-close", "editor-testplay-mode"], run: matchEditorPanelAndMode },
+  { name: "inv match editor test play pending", inv: ["editor-testplay-pending"], run: matchEditorTestPlayPending },
   { name: "inv match postgame", inv: ["postgame"], run: matchPostgame },
 ];
