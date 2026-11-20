@@ -75,6 +75,9 @@ export const replayScreen: ScreenFactory = (ctx) => {
   let timeTickEl: HTMLElement | null = null;
   let board: Scoreboard | null = null;
   let speedSeg: { set(v: string): void } | null = null;
+  // Step and jump buttons by direction; they are disabled where a move would leave the replay (syncSteps).
+  let rewindBtns: HTMLButtonElement[] = [];
+  let forwardBtns: HTMLButtonElement[] = [];
   // Picker-view status line (rebuilt by showPicker).
   let pickerMsg: HTMLElement | null = null;
   /** A replay whose open waited on a failed engine; it opens once the engine recovers. */
@@ -148,6 +151,7 @@ export const replayScreen: ScreenFactory = (ctx) => {
     if (!info) return;
     tick = Math.min(info.end, Math.max(info.first, t));
     board?.clear();
+    syncSteps();
   }
 
   /** Seek to the pointer's place along the track. The track's first and last pixels map to the replay's start and end (a press at the far end reaches the end, not a tick short of it). */
@@ -195,6 +199,15 @@ export const replayScreen: ScreenFactory = (ctx) => {
   function syncControls(): void {
     if (playBtn) playBtn.replaceChildren(icon(playing ? "pause" : "play", 20), h("span", { class: "replay-play-label" }, playing ? "Pause" : "Play"));
     speedSeg?.set(String(speed));
+    syncSteps();
+  }
+
+  /** A step or jump past either end does nothing, so its button is disabled there. A playing replay can always move. */
+  function syncSteps(): void {
+    const atStart = !info || (!playing && tick <= info.first);
+    const atEnd = !info || (!playing && tick >= info.end);
+    for (const b of rewindBtns) b.disabled = atStart;
+    for (const b of forwardBtns) b.disabled = atEnd;
   }
 
   /** One rendered frame: advance the clock while playing, then draw. */
@@ -421,8 +434,12 @@ export const replayScreen: ScreenFactory = (ctx) => {
     );
     followSel.value = String(follow);
 
-    const stepBtn = (label: string, name: IconName, onclick: () => void): HTMLButtonElement =>
-      h("button", { type: "button", class: "replay-step-btn", "aria-label": label, title: label, onclick }, icon(name, 20));
+    const stepBtn = (label: string, name: IconName, onclick: () => void, edge?: "start" | "end"): HTMLButtonElement => {
+      const b = h("button", { type: "button", class: "replay-step-btn", "aria-label": label, title: label, onclick }, icon(name, 20));
+      if (edge === "start") rewindBtns.push(b);
+      if (edge === "end") forwardBtns.push(b);
+      return b;
+    };
     const speedGroup = seg(
       "Speed",
       SPEEDS.map((s) => ({ value: String(s), label: `${s}x` })),
@@ -466,6 +483,8 @@ export const replayScreen: ScreenFactory = (ctx) => {
       followSel,
     );
     board = createScoreboard();
+    rewindBtns = [];
+    forwardBtns = [];
     root.replaceChildren(
       h(
         "div",
@@ -483,10 +502,10 @@ export const replayScreen: ScreenFactory = (ctx) => {
           h(
             "div",
             { class: "replay-step", role: "group", "aria-label": "Jump and step" },
-            stepBtn("Back 5 s", "rotate-ccw", () => jump(-JUMP_SECONDS)),
-            stepBtn("Step back", "step-back", () => step(-1)),
-            stepBtn("Step forward", "step-forward", () => step(1)),
-            stepBtn("Forward 5 s", "rotate-cw", () => jump(JUMP_SECONDS)),
+            stepBtn("Back 5 s", "rotate-ccw", () => jump(-JUMP_SECONDS), "start"),
+            stepBtn("Step back", "step-back", () => step(-1), "start"),
+            stepBtn("Step forward", "step-forward", () => step(1), "end"),
+            stepBtn("Forward 5 s", "rotate-cw", () => jump(JUMP_SECONDS), "end"),
           ),
           speedGroup.el,
         ),
