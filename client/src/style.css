@@ -345,24 +345,19 @@ button,
   line-height: inherit;
 }
 
-/* Friends, privacy and settings (wide screens): Back sits on its own line and the title starts on the content column's
-   edge, the same edge as the body. Phones keep Back and the title in one row (below). */
+/* Privacy (wide screens): Back sits on its own line and the title starts on the content column's edge, the same edge as
+   the body. Phones keep Back and the title in one row (below). Settings and Friends keep Back and the title in one row on
+   every width, as Browse rooms does: the shared chrome must not move between pages (qa/motion.mjs chrome.pages). */
 @media (min-width: 601px) {
-  .friends-page .page-head,
-  .privacy .page-head,
-  .settings-page .page-head {
+  .privacy .page-head {
     flex-wrap: wrap;
   }
 
-  .friends-page .page-head h1,
-  .privacy .page-head h1,
-  .settings-page .page-head h1 {
+  .privacy .page-head h1 {
     flex: 1 1 100%;
   }
 
-  .friends-page .page-back,
-  .privacy .page-back,
-  .settings-page .page-back {
+  .privacy .page-back {
     /* Back's 18px padding would put its box inside the 16px edge gutter at 200% zoom; the icon sits on the edge instead. */
     margin-inline-start: 0;
     padding-inline-start: 0;

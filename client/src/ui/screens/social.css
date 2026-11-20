@@ -164,9 +164,10 @@
   gap: 8px;
 }
 
-/* The friends screen reads as one narrow column; with no friends yet, the add form and the empty note centre in the view. */
-.friends-page {
-  --page-column: 44rem;
+/* The friends screen reads as one narrow column: its content is 44rem wide on the shared page column, so the chrome stays
+   where Browse rooms puts it (qa/motion.mjs chrome.pages). With no friends yet, the add form and the empty note centre in the view. */
+.friends-page .page-inner > * {
+  max-width: 44rem;
 }
 
 .friends-page.is-empty .page-inner {
