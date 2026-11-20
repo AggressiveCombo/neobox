@@ -78,8 +78,15 @@ export const accountScreen: ScreenFactory = (ctx) => {
   let shownId: number | null | undefined;
 
   function say(text: string, error = false): void {
+    // The same message again (a repeated press on an invalid form) would look unchanged: flash the line so the press shows.
+    const again = text !== "" && status.textContent === text;
     status.textContent = text;
     status.classList.toggle("field-error", error);
+    if (again) {
+      status.classList.remove("is-repeat");
+      void status.offsetWidth;
+      status.classList.add("is-repeat");
+    }
   }
 
   /** Run one account action: a server error goes to the status line; success shows `ok`. */

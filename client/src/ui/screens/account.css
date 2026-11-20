@@ -37,6 +37,17 @@
   display: none;
 }
 
+/* A message said again (see say() in account.ts): it dims and comes back, so the press is visible. Lasts past the first QA sample. */
+.account-form .status.is-repeat {
+  animation: status-repeat 500ms linear;
+}
+
+@keyframes status-repeat {
+  from {
+    opacity: 0.3;
+  }
+}
+
 .account-submit {
   gap: 12px;
 }
