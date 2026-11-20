@@ -1,24 +1,11 @@
-/* Caption and pause control for the clip playing behind the home screen (ui/menu-clips.ts).
-   They sit in the .menu-credit slot over the clip; only the button takes clicks. The chips are opaque: a translucent
-   one shows the white platforms under it as grey strips. */
-.menu-clip-credit {
-  margin: 0;
-  padding: 4px 8px;
-  background: #0a0a0a;
-  color: var(--hud-ink);
-  font-size: var(--step-small);
-  line-height: 1.3;
-  pointer-events: none;
-  min-width: 0;
-  white-space: normal;
-  overflow-wrap: anywhere;
-}
-
+/* Caption and pause control for the clip playing behind the home screen (ui/menu-clips.ts). They sit in the
+   .menu-credit slot along the card's bottom edge, on one row: the caption truncates with an ellipsis (the full text is
+   its title), the pause control is an icon button named "Pause clip" (the name is sr-only text). Only the button takes
+   clicks. The chips are opaque: a translucent one shows the white platforms under it as grey strips. */
 .menu-clip-bar {
   display: flex;
   align-items: center;
-  flex-wrap: wrap;
-  gap: 8px;
+  gap: 6px;
   min-width: 0;
   max-width: 100%;
 }
@@ -27,22 +14,50 @@
   display: none;
 }
 
-/* The one control over the clip: a real button, so keyboard and screen readers reach it. */
-.menu-clip-pause {
-  flex: none;
+.menu-clip-credit {
+  flex: 0 1 auto;
+  min-width: 0;
   margin: 0;
-  padding: 4px 8px;
+  padding: 3px 8px;
+  background: #0a0a0a;
+  color: var(--hud-ink);
+  font-size: var(--step-small);
+  line-height: 1.3;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  pointer-events: none;
+}
+
+/* Compact: a 28px square with the icon; the chip stays opaque like the caption. */
+.menu-clip-pause {
+  position: relative;
+  flex: none;
+  display: inline-grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  margin: 0;
+  padding: 0;
   border: 0;
   background: #0a0a0a;
   color: var(--hud-ink);
-  font: inherit;
-  font-size: var(--step-small);
-  line-height: 1.3;
   cursor: pointer;
   pointer-events: auto;
 }
 
+/* A white ring: it shows on the dark chip and on the green clip alike. */
 .menu-clip-pause:focus-visible {
-  outline: 2px solid var(--hud-ink);
+  outline: 2px solid #ffffff;
   outline-offset: 2px;
+}
+
+/* The control's name: read by screen readers, not shown. */
+.menu-clip-pause-name {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
 }

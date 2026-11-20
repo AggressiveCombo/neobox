@@ -11,6 +11,7 @@ import { fetchPrecached } from "../precached";
 import { HttpError } from "../http-error";
 import { reducedMotion } from "./a11y";
 import { h, labelSwap, showLabel } from "./dom";
+import { icon } from "./icons";
 
 /** Clips per page; matches the server's page size, so a short page means the end. */
 const PAGE_SIZE = 10;
@@ -75,15 +76,26 @@ export function mountMenuClips(ctx: AppCtx, host: HTMLElement, onState?: (state:
 
   // The clip's caption and its pause control. The bar is hidden until a clip plays; the button is the only part that takes clicks.
   const credit = h("p", { class: "menu-clip-credit" });
+  // The icon shows the state; the sr-only name is the button's accessible name ("Pause clip" / "Play clip").
+  const pauseIcon = labelSwap([[icon("pause", 16)], [icon("play", 16)]], paused ? 1 : 0);
   const pauseLabel = labelSwap([["Pause clip"], ["Play clip"]], paused ? 1 : 0);
-  const pauseBtn = h("button", {
-    type: "button",
-    class: "menu-clip-pause",
-    onclick: () => {
-      paused = !paused;
-      showLabel(pauseLabel, paused ? 1 : 0);
+  const showPaused = (): void => {
+    showLabel(pauseIcon, paused ? 1 : 0);
+    showLabel(pauseLabel, paused ? 1 : 0);
+  };
+  const pauseBtn = h(
+    "button",
+    {
+      type: "button",
+      class: "menu-clip-pause",
+      onclick: () => {
+        paused = !paused;
+        showPaused();
+      },
     },
-  }, pauseLabel);
+    pauseIcon,
+    h("span", { class: "menu-clip-pause-name" }, pauseLabel),
+  );
   const bar = h("div", { class: "menu-clip-bar" }, credit, pauseBtn);
   bar.hidden = true;
   host.append(bar);
@@ -156,7 +168,9 @@ export function mountMenuClips(ctx: AppCtx, host: HTMLElement, onState?: (state:
     if (!ctx.present(p.names, p.info.hz, false)) return false;
     if (!p.shown) {
       p.shown = true;
-      credit.textContent = `${p.clip.map_name} · recorded by ${p.clip.recorder}`;
+      const caption = `${p.clip.map_name} · recorded by ${p.clip.recorder}`;
+      credit.textContent = caption;
+      credit.title = caption;
       bar.hidden = false;
       setState("live");
     }
@@ -226,7 +240,7 @@ export function mountMenuClips(ctx: AppCtx, host: HTMLElement, onState?: (state:
     if (reduce !== lastReduce) {
       lastReduce = reduce;
       paused = reduce;
-      showLabel(pauseLabel, paused ? 1 : 0);
+      showPaused();
     }
     if (paused) {
       ctx.holdView();
