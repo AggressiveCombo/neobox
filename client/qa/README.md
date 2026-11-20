@@ -95,6 +95,16 @@ Transition settle time (RUBRIC D20 `motion.transition.ms`): menu modal open and 
 - Outputs: `playfield-<engine>.{json,md}`; screenshots under `evidence/playfield-<engine>/`.
 - Self-tests (`QA_SELF_TEST`, use a separate `QA_OUT`; each must FAIL): `hud` (a fixed box over the local sprite before each HUD sample), `contrast` (sprite fill replaced by its background before the ratio), `camera` (a fake live player in the far corner of the in-view check), `feedback` (synthetic 5-tick delay, no browser).
 
+## mapcompat.mjs (camera framing on every map)
+
+- Command: `cd client && QA_OUT=<dir> node qa/mapcompat.mjs --dist <build dir>` (`QA_ENGINES=chromium` to limit). Env: `QA_MAPS` (';'-separated extra map JSON paths, e.g. a community map), `QA_CAM_MS` (6000, sampling time per map).
+- Maps: every compact map in the repo's `maps/`, plus `QA_MAPS`. Each is loaded as a map code (base64 of the deflated JSON, as Practice takes it) and played.
+- Ground truth: the camera's published view (`globalThis.__qaCam`: cx, cy, w, h, arena aw, ah), sampled every animation frame. The original clamps its view to the arena, so bodies below or beside the arena (digit drums, static ground) are not framed.
+- Rule per frame (1e-3 world units): on an axis whose arena is longer than the view, the view lies inside the arena; on an axis whose arena fits the base view (the map's `Screen width`, `set "3"`, and the aspect), the view is centred on the arena.
+- Cases: `camera.<map>`, one per map. Outputs: `mapcompat-<engine>.{json,md}`.
+- Self-test (`QA_SELF_TEST=bounds`, use a separate `QA_OUT`): each sample's view is moved one view height below the arena; each case must FAIL.
+- Scope: camera framing only. A map's render defects (e.g. the digit drums' draw order) are not checked here.
+
 ## robust.mjs
 
 Console and network health, slow network, disconnect and reconnect, offline window, reload, back navigation, resize, phone rotation, tab switch, two tabs of one account, and a bad room code.
