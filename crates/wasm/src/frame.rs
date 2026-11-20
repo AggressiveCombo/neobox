@@ -98,54 +98,389 @@ fn circle_points(cx: f64, cy: f64, r: f64, out: &mut Vec<[f32; 2]>) {
     }
 }
 
-fn area2(p: &[[f32; 2]]) -> f32 {
-    let mut a = 0.0;
-    for i in 0..p.len() {
-        let j = (i + 1) % p.len();
-        a += p[i][0] * p[j][1] - p[j][0] * p[i][1];
-    }
-    a
+/// Triangulates a ring exactly as PIXI fills it (legacy-654 `Us.triangulate`): reverse to earcut's winding, then
+/// earcut. Triangles are appended three points each; self-intersecting rings fill the way earcut fills them.
+fn triangulate(pts: &[[f32; 2]], out: &mut Vec<[f32; 2]>) {
+    let ring: Vec<[f64; 2]> = pts.iter().map(|p| [f64::from(p[0]), f64::from(p[1])]).collect();
+    let mut tris = Vec::new();
+    fill_ring(&ring, &mut tris);
+    out.extend(tris.iter().map(|p| [p[0] as f32, p[1] as f32]));
 }
 
-/// Ear-clipping triangulation (falls back to a fan for degenerate input).
-fn triangulate(pts: &[[f32; 2]], out: &mut Vec<[f32; 2]>) {
+/// Earcut 2.2 as bundled in PIXI legacy-654, for one ring without holes. Its hashed ear test only skips candidates,
+/// so the brute-force test here picks the same ears.
+const NIL: usize = usize::MAX;
+
+#[derive(Clone, Copy)]
+struct Node {
+    i: usize,
+    x: f64,
+    y: f64,
+    prev: usize,
+    next: usize,
+}
+
+struct Earcut {
+    v: Vec<Node>,
+    tris: Vec<[[f64; 2]; 3]>,
+}
+
+impl Earcut {
+    fn prev(&self, p: usize) -> usize {
+        self.v[p].prev
+    }
+
+    fn next(&self, p: usize) -> usize {
+        self.v[p].next
+    }
+
+    /// earcut's St(p, q, r): twice the signed area of p, q, r.
+    fn st(&self, p: usize, q: usize, r: usize) -> f64 {
+        let (p, q, r) = (self.v[p], self.v[q], self.v[r]);
+        (q.y - p.y) * (r.x - q.x) - (q.x - p.x) * (r.y - q.y)
+    }
+
+    fn equals(&self, p: usize, q: usize) -> bool {
+        self.v[p].x == self.v[q].x && self.v[p].y == self.v[q].y
+    }
+
+    fn copy(&mut self, p: usize) -> usize {
+        let n = self.v[p];
+        self.v.push(Node { prev: NIL, next: NIL, ..n });
+        self.v.len() - 1
+    }
+
+    /// earcut's wt: unlinks p (its own links are kept).
+    fn remove(&mut self, p: usize) {
+        let (a, b) = (self.v[p].prev, self.v[p].next);
+        self.v[b].prev = a;
+        self.v[a].next = b;
+    }
+
+    /// earcut's Ct: appends a node for point `i` after `last` (or starts the ring when `last` is NIL).
+    fn insert(&mut self, i: usize, pt: [f64; 2], last: usize) -> usize {
+        let n = self.v.len();
+        self.v.push(Node { i, x: pt[0], y: pt[1], prev: NIL, next: NIL });
+        if last == NIL {
+            self.v[n].prev = n;
+            self.v[n].next = n;
+        } else {
+            let nx = self.v[last].next;
+            self.v[n].next = nx;
+            self.v[n].prev = last;
+            self.v[nx].prev = n;
+            self.v[last].next = n;
+        }
+        n
+    }
+
+    /// earcut's dt (clockwise = true, no holes). Returns the last node built.
+    fn linked_list(&mut self, pts: &[[f64; 2]]) -> usize {
+        let n = pts.len();
+        let mut sum = 0.0;
+        let mut s = n - 1;
+        for o in 0..n {
+            sum += (pts[s][0] - pts[o][0]) * (pts[o][1] + pts[s][1]);
+            s = o;
+        }
+        let mut last = NIL;
+        if sum > 0.0 {
+            for o in 0..n {
+                last = self.insert(o, pts[o], last);
+            }
+        } else {
+            for o in (0..n).rev() {
+                last = self.insert(o, pts[o], last);
+            }
+        }
+        if last != NIL && self.equals(last, self.next(last)) {
+            self.remove(last);
+            last = self.next(last);
+        }
+        last
+    }
+
+    /// earcut's ft: drops duplicate and zero-area vertices, starting at `start`.
+    fn filter(&mut self, start: usize, end: usize) -> usize {
+        if start == NIL {
+            return NIL;
+        }
+        let mut end = if end == NIL { start } else { end };
+        let mut p = start;
+        loop {
+            let mut again = false;
+            let n = self.next(p);
+            if self.equals(p, n) || self.st(self.prev(p), p, n) == 0.0 {
+                self.remove(p);
+                p = self.prev(p);
+                end = p;
+                if p == self.next(p) {
+                    break;
+                }
+                again = true;
+            } else {
+                p = n;
+            }
+            if !again && p == end {
+                break;
+            }
+        }
+        end
+    }
+
+    /// earcut's pt: clips ears from the ring. Pass 0 is the plain clip; a stall moves to pass 1 (cure crossings) and
+    /// then pass 2 (split along a valid diagonal).
+    fn clip(&mut self, start: usize, pass: u8) {
+        if start == NIL {
+            return;
+        }
+        let mut ear = start;
+        let mut stop = start;
+        while self.prev(ear) != self.next(ear) {
+            let (a, h) = (self.prev(ear), self.next(ear));
+            if self.is_ear(ear) {
+                self.tris.push([self.coords(a), self.coords(ear), self.coords(h)]);
+                self.remove(ear);
+                ear = self.next(h);
+                stop = ear;
+            } else {
+                ear = h;
+                if ear == stop {
+                    match pass {
+                        0 => {
+                            let f = self.filter(ear, NIL);
+                            self.clip(f, 1);
+                        }
+                        1 => {
+                            let f = self.filter(ear, NIL);
+                            let c = self.cure(f);
+                            self.clip(c, 2);
+                        }
+                        _ => self.split(ear),
+                    }
+                    break;
+                }
+            }
+        }
+    }
+
+    fn coords(&self, p: usize) -> [f64; 2] {
+        [self.v[p].x, self.v[p].y]
+    }
+
+    /// earcut's _t: a convex corner with no other ring vertex inside its triangle.
+    fn is_ear(&self, ear: usize) -> bool {
+        let (a, b, c) = (self.prev(ear), ear, self.next(ear));
+        if self.st(a, b, c) >= 0.0 {
+            return false;
+        }
+        let (pa, pb, pc) = (self.v[a], self.v[b], self.v[c]);
+        let (l, r) = (pa.x.min(pb.x).min(pc.x), pa.x.max(pb.x).max(pc.x));
+        let (d, f) = (pa.y.min(pb.y).min(pc.y), pa.y.max(pb.y).max(pc.y));
+        let mut p = self.next(c);
+        while p != a {
+            let q = self.v[p];
+            if q.x >= l
+                && q.x <= r
+                && q.y >= d
+                && q.y <= f
+                && in_triangle(pa, pb, pc, q)
+                && self.st(self.prev(p), p, self.next(p)) >= 0.0
+            {
+                return false;
+            }
+            p = self.next(p);
+        }
+        true
+    }
+
+    /// earcut's mt: removes a self-crossing a-p, p-n, n-b when the diagonal lies inside the ring.
+    fn cure(&mut self, start: usize) -> usize {
+        let mut anchor = start;
+        let mut i = start;
+        loop {
+            let (n, o) = (self.prev(i), self.next(self.next(i)));
+            if !self.equals(n, o) && self.intersects(n, i, self.next(i), o) && self.inside(n, o) && self.inside(o, n) {
+                let nx = self.next(i);
+                self.tris.push([self.coords(n), self.coords(i), self.coords(o)]);
+                self.remove(i);
+                self.remove(nx);
+                i = o;
+                anchor = o;
+            }
+            i = self.next(i);
+            if i == anchor {
+                break;
+            }
+        }
+        self.filter(i, NIL)
+    }
+
+    /// earcut's Et: splits the ring at the first valid diagonal and clips both halves.
+    fn split(&mut self, start: usize) {
+        let mut s = start;
+        loop {
+            let mut a = self.next(self.next(s));
+            while a != self.prev(s) {
+                if self.v[s].i != self.v[a].i && self.valid_diagonal(s, a) {
+                    let h = self.split_at(s, a);
+                    let s2 = self.filter(s, self.next(s));
+                    let h2 = self.filter(h, self.next(h));
+                    self.clip(s2, 0);
+                    self.clip(h2, 0);
+                    return;
+                }
+                a = self.next(a);
+            }
+            s = self.next(s);
+            if s == start {
+                break;
+            }
+        }
+    }
+
+    /// earcut's At.
+    fn valid_diagonal(&self, a: usize, b: usize) -> bool {
+        if self.v[self.next(a)].i == self.v[b].i || self.v[self.prev(a)].i == self.v[b].i {
+            return false;
+        }
+        if self.crosses_ring(a, b) {
+            return false;
+        }
+        (self.inside(a, b)
+            && self.inside(b, a)
+            && self.middle_inside(a, b)
+            && (self.st(self.prev(a), a, self.prev(b)) != 0.0 || self.st(a, self.prev(b), b) != 0.0))
+            || (self.equals(a, b) && self.st(self.prev(a), a, self.next(a)) > 0.0 && self.st(self.prev(b), b, self.next(b)) > 0.0)
+    }
+
+    fn crosses_ring(&self, a: usize, b: usize) -> bool {
+        let mut r = a;
+        loop {
+            let rn = self.next(r);
+            let (ri, ni) = (self.v[r].i, self.v[rn].i);
+            if ri != self.v[a].i
+                && ni != self.v[a].i
+                && ri != self.v[b].i
+                && ni != self.v[b].i
+                && self.intersects(r, rn, a, b)
+            {
+                return true;
+            }
+            r = rn;
+            if r == a {
+                return false;
+            }
+        }
+    }
+
+    /// earcut's Dt: whether the diagonal from a toward b starts inside the ring.
+    fn inside(&self, a: usize, b: usize) -> bool {
+        let (pa, na) = (self.prev(a), self.next(a));
+        if self.st(pa, a, na) < 0.0 {
+            self.st(a, b, na) >= 0.0 && self.st(a, pa, b) >= 0.0
+        } else {
+            self.st(a, b, pa) < 0.0 || self.st(a, na, b) < 0.0
+        }
+    }
+
+    fn middle_inside(&self, a: usize, b: usize) -> bool {
+        let (mx, my) = ((self.v[a].x + self.v[b].x) / 2.0, (self.v[a].y + self.v[b].y) / 2.0);
+        let mut inside = false;
+        let mut r = a;
+        loop {
+            let rn = self.next(r);
+            let (r0, r1) = (self.v[r], self.v[rn]);
+            if (r0.y > my) != (r1.y > my) && r1.y != r0.y && mx < (r1.x - r0.x) * (my - r0.y) / (r1.y - r0.y) + r0.x {
+                inside = !inside;
+            }
+            r = rn;
+            if r == a {
+                return inside;
+            }
+        }
+    }
+
+    /// earcut's It: whether segment p1-q1 meets segment p2-q2 (touching counts).
+    fn intersects(&self, p1: usize, q1: usize, p2: usize, q2: usize) -> bool {
+        let n = sign(self.st(p1, q1, p2));
+        let o = sign(self.st(p1, q1, q2));
+        let s = sign(self.st(p2, q2, p1));
+        let a = sign(self.st(p2, q2, q1));
+        if n != o && s != a {
+            return true;
+        }
+        (n == 0 && self.on_segment(p1, p2, q1))
+            || (o == 0 && self.on_segment(p1, q2, q1))
+            || (s == 0 && self.on_segment(p2, p1, q2))
+            || (a == 0 && self.on_segment(p2, q1, q2))
+    }
+
+    /// earcut's Mt: whether q lies in the bounding box of p-r (collinear by the caller's check).
+    fn on_segment(&self, p: usize, q: usize, r: usize) -> bool {
+        let (p, q, r) = (self.v[p], self.v[q], self.v[r]);
+        q.x <= p.x.max(r.x) && q.x >= p.x.min(r.x) && q.y <= p.y.max(r.y) && q.y >= p.y.min(r.y)
+    }
+
+    /// earcut's Nt: splits at a-b. Returns the copy of b that starts the second ring.
+    fn split_at(&mut self, a: usize, b: usize) -> usize {
+        let r = self.copy(a);
+        let i = self.copy(b);
+        let (n, o) = (self.next(a), self.prev(b));
+        self.v[a].next = b;
+        self.v[b].prev = a;
+        self.v[r].next = n;
+        self.v[n].prev = r;
+        self.v[i].next = r;
+        self.v[r].prev = i;
+        self.v[o].next = i;
+        self.v[i].prev = o;
+        i
+    }
+}
+
+fn sign(x: f64) -> i32 {
+    if x > 0.0 {
+        1
+    } else if x < 0.0 {
+        -1
+    } else {
+        0
+    }
+}
+
+/// earcut's xt: point p inside (boundary included) triangle a, b, c.
+fn in_triangle(a: Node, b: Node, c: Node, p: Node) -> bool {
+    (c.x - p.x) * (a.y - p.y) >= (a.x - p.x) * (c.y - p.y)
+        && (a.x - p.x) * (b.y - p.y) >= (b.x - p.x) * (a.y - p.y)
+        && (b.x - p.x) * (c.y - p.y) >= (c.x - p.x) * (b.y - p.y)
+}
+
+/// Fills one ring the way PIXI does: reverse when the shoelace sum is positive (`Fs`), then earcut. Triangles go to
+/// `out`, three points each.
+fn fill_ring(pts: &[[f64; 2]], out: &mut Vec<[f64; 2]>) {
     let n = pts.len();
     if n < 3 {
         return;
     }
-    let mut idx: Vec<usize> = (0..n).collect();
-    if area2(pts) < 0.0 {
-        idx.reverse();
+    let mut pts = pts.to_vec();
+    let mut o = 0.0;
+    let mut prev = pts[n - 1];
+    for p in &pts {
+        o += (p[0] - prev[0]) * (p[1] + prev[1]);
+        prev = *p;
     }
-    let cross = |a: [f32; 2], b: [f32; 2], c: [f32; 2]| (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]);
-    let inside = |p: [f32; 2], a: [f32; 2], b: [f32; 2], c: [f32; 2]| cross(a, b, p) >= 0.0 && cross(b, c, p) >= 0.0 && cross(c, a, p) >= 0.0;
-    let mut guard = 0;
-    while idx.len() > 3 && guard < n * n {
-        guard += 1;
-        let m = idx.len();
-        let mut clipped = false;
-        for i in 0..m {
-            let (ia, ib, ic) = (idx[(i + m - 1) % m], idx[i], idx[(i + 1) % m]);
-            let (a, b, c) = (pts[ia], pts[ib], pts[ic]);
-            if cross(a, b, c) <= 0.0 {
-                continue;
-            }
-            if idx.iter().any(|&k| k != ia && k != ib && k != ic && inside(pts[k], a, b, c)) {
-                continue;
-            }
-            out.extend([a, b, c]);
-            idx.remove(i);
-            clipped = true;
-            break;
-        }
-        if !clipped {
-            break;
-        }
+    if o > 0.0 {
+        pts.reverse();
     }
-    if idx.len() >= 3 {
-        for i in 1..idx.len() - 1 {
-            out.extend([pts[idx[0]], pts[idx[i]], pts[idx[i + 1]]]);
-        }
+    let mut e = Earcut { v: Vec::with_capacity(n), tris: Vec::new() };
+    let last = e.linked_list(&pts);
+    if last == NIL || e.next(last) == e.prev(last) {
+        return;
+    }
+    e.clip(last, 0);
+    for t in &e.tris {
+        out.extend_from_slice(t);
     }
 }
 
@@ -811,6 +1146,82 @@ mod tests {
         assert_eq!(out.len(), 12);
         let total: f32 = out.chunks(3).map(|t| area2(t).abs() / 2.0).sum();
         assert!((total - 3.0).abs() < 1e-5);
+    }
+
+    fn area2(p: &[[f32; 2]]) -> f32 {
+        let mut a = 0.0;
+        for i in 0..p.len() {
+            let j = (i + 1) % p.len();
+            a += p[i][0] * p[j][1] - p[j][0] * p[i][1];
+        }
+        a
+    }
+
+    /// Ray-casting point-in-polygon test.
+    fn inside_ring(ring: &[[f32; 2]], p: [f32; 2]) -> bool {
+        let mut inside = false;
+        for i in 0..ring.len() {
+            let (a, b) = (ring[i], ring[(i + 1) % ring.len()]);
+            if (a[1] > p[1]) != (b[1] > p[1]) && p[0] < (b[0] - a[0]) * (p[1] - a[1]) / (b[1] - a[1]) + a[0] {
+                inside = !inside;
+            }
+        }
+        inside
+    }
+
+    /// The non-degenerate triangles cover the ring's area, and each one lies inside the ring.
+    fn assert_fills(ring: &[[f32; 2]]) {
+        let mut out = Vec::new();
+        triangulate(ring, &mut out);
+        let total: f32 = out.chunks(3).map(|t| area2(t).abs() / 2.0).sum();
+        let area = area2(ring).abs() / 2.0;
+        assert!((total - area).abs() < 1e-3 * area, "triangles cover {total}, polygon has {area}");
+        for t in out.chunks(3).filter(|t| area2(t) != 0.0) {
+            let c = [(t[0][0] + t[1][0] + t[2][0]) / 3.0, (t[0][1] + t[1][1] + t[2][1]) / 3.0];
+            assert!(inside_ring(ring, c), "triangle centroid {c:?} outside the polygon");
+        }
+    }
+
+    #[test]
+    fn concave_shapes_fill_their_area_without_spilling() {
+        let u = [[0.0, 0.0], [3.0, 0.0], [3.0, 2.0], [2.0, 2.0], [2.0, 1.0], [1.0, 1.0], [1.0, 2.0], [0.0, 2.0]];
+        let comb = [
+            [0.0, 0.0],
+            [5.0, 0.0],
+            [5.0, 2.0],
+            [4.0, 2.0],
+            [4.0, 1.0],
+            [3.0, 1.0],
+            [3.0, 2.0],
+            [2.0, 2.0],
+            [2.0, 1.0],
+            [1.0, 1.0],
+            [1.0, 2.0],
+            [0.0, 2.0],
+        ];
+        let mut clockwise = u;
+        clockwise.reverse();
+        for ring in [&u[..], &comb[..], &clockwise[..]] {
+            assert_fills(ring);
+        }
+    }
+
+    #[test]
+    fn db20xx_timer_glyph_fills_its_area() {
+        // one ring that touches itself (db20xx body 99, shape 10): earcut joins its pieces with bridges
+        let glyph = [
+            [10.4000, -9.3750], [10.4000, -8.0250], [11.9500, -8.0250], [11.9500, -9.3750], [11.7500, -9.3750], [11.7500, -9.2750],
+            [11.8500, -9.1750], [11.8500, -8.7750], [11.8000, -8.7250], [11.8500, -8.6750], [11.8500, -8.2250], [11.7500, -8.1250],
+            [11.3500, -8.1250], [11.2500, -8.2250], [11.7500, -8.2250], [11.7500, -8.6750], [11.3500, -8.6750], [11.3500, -8.2250],
+            [11.2500, -8.2250], [11.2500, -8.6750], [11.3000, -8.7250], [11.2500, -8.7750], [11.7500, -8.7750], [11.7500, -9.1750],
+            [11.3500, -9.1750], [11.3500, -8.7750], [11.2500, -8.7750], [11.2500, -9.1750], [11.3500, -9.2750], [11.7500, -9.2750],
+            [11.7500, -9.3750], [11.0000, -9.3750], [11.0000, -9.2750], [11.1000, -9.1750], [11.1000, -8.7750], [11.0500, -8.7250],
+            [11.1000, -8.6750], [11.1000, -8.2250], [11.0000, -8.1250], [10.6000, -8.1250], [10.5000, -8.2250], [11.0000, -8.2250],
+            [11.0000, -8.6750], [10.6000, -8.6750], [10.6000, -8.2250], [10.5000, -8.2250], [10.5000, -8.6750], [10.5500, -8.7250],
+            [10.5000, -8.7750], [11.0000, -8.7750], [11.0000, -9.1750], [10.6000, -9.1750], [10.6000, -8.7750], [10.5000, -8.7750],
+            [10.5000, -9.1750], [10.6000, -9.2750], [11.0000, -9.2750], [11.0000, -9.3750],
+        ];
+        assert_fills(&glyph);
     }
 
     #[test]
