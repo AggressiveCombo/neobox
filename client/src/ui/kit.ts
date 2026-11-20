@@ -203,7 +203,6 @@ export interface ModalOptions {
 interface ModalEntry {
   dialog: HTMLDialogElement;
   id: string;
-  silent: boolean;
   pushed: boolean;
 }
 /** Open modals, top last. Each one owns a history entry; Back closes the top one (popstate in app.ts closes the modals above it). */
@@ -264,11 +263,20 @@ export function openModal(opts: ModalOptions): { dialog: HTMLDialogElement; clos
     h("div", { class: "modal-body", tabindex: "0" }, ...opts.body),
     h("div", { class: "modal-actions" }, ...actions),
   );
-  const entry: ModalEntry = { dialog, id, silent: false, pushed: false };
+  const entry: ModalEntry = { dialog, id, pushed: false };
   // Close at once, so the page is interactive and focus is back where it was before the exit
   // animation runs; the closed dialog then fades out (style.css dialog.modal.is-closing).
   const close = (): void => {
-    if (dialog.open) dialog.close();
+    if (!dialog.open) return;
+    // The pop is asked for here, not in the close event (queued by the browser as a task): a navigation the user starts
+    // right after Close must not be overtaken by it. Closed from the page, the entry is still in history, so it is popped;
+    // left in place it would be a dead entry: Back would land on the screen the modal opened over. Page-side closes queue
+    // their pops one at a time (flushModalPops); screen changes made until they land wait (app.ts).
+    if (entry.pushed) {
+      deadEntries++;
+      flushModalPops();
+    }
+    dialog.close();
   };
   if (!opts.actions || opts.actions.length === 0) actions[0].addEventListener("click", close);
   dialog.addEventListener("cancel", (e) => {
@@ -283,13 +291,6 @@ export function openModal(opts: ModalOptions): { dialog: HTMLDialogElement; clos
     if (i >= 0) openStack.splice(i, 1);
     const u = unpushed.indexOf(entry);
     if (u >= 0) unpushed.splice(u, 1);
-    // Closed from the page rather than by Back: this modal's entry is still in history, so it is popped. Left in place it
-    // would be a dead entry: Back would land on the screen the modal opened over. Page-side closes queue their pops
-    // one at a time (flushModalPops); screen changes made until they land wait (app.ts).
-    if (entry.pushed && !entry.silent) {
-      deadEntries++;
-      flushModalPops();
-    }
     opts.onclose?.();
     if (reducedMotion()) {
       dialog.remove();
@@ -385,7 +386,6 @@ export function closeModalsAbove(id: string | null, inclusive = false): void {
   if (id !== null && at < 0) return;
   const from = id === null ? 0 : at + (inclusive ? 0 : 1);
   for (const m of pushed.slice(from).reverse()) {
-    m.silent = true;
     m.dialog.close();
   }
 }
