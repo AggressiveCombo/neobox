@@ -1155,6 +1155,15 @@ table.data .r {
 /* -------------------------------------------------- floating things */
 
 #toasts {
+  inset: auto;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  max-width: none;
+  max-height: none;
+  overflow: visible;
+  background: none;
+  color: inherit;
   position: fixed;
   left: 50%;
   bottom: calc(var(--toast-clear, 0px) + 24px + env(safe-area-inset-bottom));

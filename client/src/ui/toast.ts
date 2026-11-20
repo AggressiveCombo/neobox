@@ -14,7 +14,18 @@ const CLEAR_SELECTOR = ".editor-foot, .editor-float, .room-dock, .replay-dock, .
 
 const timers = new WeakMap<HTMLElement, number>();
 
+/**
+ * The host is a manual popover: a shown popover sits in the top layer, so each toast re-shows it on top of any open
+ * modal <dialog> (which would otherwise hide the toast). Browsers without the Popover API keep the plain z-index stack.
+ */
+function raise(host: HTMLElement): void {
+  if (!("showPopover" in host)) return;
+  if (host.matches(":popover-open")) host.hidePopover();
+  host.showPopover();
+}
+
 export function showToast(host: HTMLElement, text: string, kind: "info" | "error"): void {
+  raise(host);
   // The same message already on screen: restart its timer instead of stacking a copy.
   for (const el of host.children) {
     if (el instanceof HTMLElement && el.textContent === text && el.classList.contains(`toast-${kind}`) && !el.classList.contains("is-leaving")) {
