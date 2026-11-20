@@ -198,6 +198,22 @@ async function goOffline(h) {
 }
 
 /**
+ * Waits until the app's worker controls the page. On timeout it names the worker's registration state (installing, waiting,
+ * active, or none), so a worker whose install failed reads differently from one that is still installing.
+ */
+async function waitForController(page) {
+  try {
+    await page.waitForFunction(() => navigator.serviceWorker.controller !== null, null, { timeout: 60_000 });
+  } catch (err) {
+    const reg = await page.evaluate(async () => {
+      const r = await navigator.serviceWorker.getRegistration();
+      return r ? { installing: r.installing?.state ?? null, waiting: r.waiting?.state ?? null, active: r.active?.state ?? null } : null;
+    });
+    throw new Error(`no service worker controls the page after 60 s; registration ${JSON.stringify(reg)}: ${err.message.split("\n")[0]}`);
+  }
+}
+
+/**
  * Drops the host's socket while online, waits for the banner, then takes the network down so the reconnect cannot
  * finish and the banner stays. The order matters: offline first and then close(4000) leaves the close handshake waiting
  * for a server reply that never arrives, so no close event fires and the banner never shows (the flake).
@@ -305,7 +321,7 @@ export const STATES = [
     await h.page.goto(s.base);
     await menuName(h.page).waitFor();
     // The first visit installs the worker; activate claims the page, so wait until it controls the page.
-    await h.page.waitForFunction(() => navigator.serviceWorker.controller !== null, null, { timeout: 30_000 });
+    await waitForController(h.page);
     await goOffline(h);
     await h.page.reload();
     await menuName(h.page).waitFor();

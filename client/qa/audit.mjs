@@ -576,6 +576,7 @@ async function deadCase(s) {
   const phoneScope = phoneOf(s);
   let clicked = 0;
   for (const [vp, scope] of [
+  const stateFailed = []; // states that could not open: their controls are not scanned, so the verdict fails
     ["desktop", s],
     ["phone", phoneScope],
   ]) {
@@ -613,7 +614,13 @@ async function deadCase(s) {
         st.idle = idleMask(await idleFrames(h.page));
         idle[`${vp} ${id}`] = movingShare(st.idle);
       };
-      await open();
+      try {
+        await open();
+      } catch (err) {
+        // A state that cannot open is a failure of that state; the other states still scan, and the verdict fails on it.
+        stateFailed.push(`${vp} ${id}: ${firstLine(err)}`);
+        continue;
+      }
       console.error(`dead ${vp} ${id}: ${cur.controls.length} controls, ${new Date().toISOString().slice(11, 19)}`);
       for (const c of cur.controls) {
         const label = `${vp} ${id} "${c.name}"`;
@@ -772,8 +779,8 @@ async function deadCase(s) {
   }
   const phoneDead = dead.filter((d) => d.startsWith("phone ")).length;
   return {
-    pass: dead.length === 0 && unreachable.length === 0,
-    detail: `${dead.length} dead controls of ${clicked} clicked (desktop ${dead.length - phoneDead}, phone ${phoneDead}; ${dead.slice(0, 10).join("; ") || "none"}); ${invisible.length} invisible by design (reviewed); ${selectedNoop.length} already selected, no-op; ${external.length} external links counted as route effects; ${coveredElsewhere.length} behind a modal and scanned uncovered in a no-modal state; ${unreachable.length} only reachable behind a modal; ${skipped.length} skipped (${Object.entries(byReason).map(([k, v]) => `${k} ${v}`).join(", ") || "none"}); ${unclickable.length} not clickable`,
+    pass: dead.length === 0 && unreachable.length === 0 && stateFailed.length === 0,
+    detail: `${stateFailed.length} states failed to open (${stateFailed.slice(0, 3).join("; ") || "none"}); ${dead.length} dead controls of ${clicked} clicked (desktop ${dead.length - phoneDead}, phone ${phoneDead}; ${dead.slice(0, 10).join("; ") || "none"}); ${invisible.length} invisible by design (reviewed); ${selectedNoop.length} already selected, no-op; ${external.length} external links counted as route effects; ${coveredElsewhere.length} behind a modal and scanned uncovered in a no-modal state; ${unreachable.length} only reachable behind a modal; ${skipped.length} skipped (${Object.entries(byReason).map(([k, v]) => `${k} ${v}`).join(", ") || "none"}); ${unclickable.length} not clickable`,
     metrics: {
       "deadControl.count": dead.length,
       "deadControl.phone": phoneDead,
