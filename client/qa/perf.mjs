@@ -20,6 +20,7 @@ import {
   button,
   cdpOf,
   createRoom,
+  drumOption,
   heapSample,
   launchEngine,
   matchWithGuest,
@@ -29,6 +30,7 @@ import {
   outDir,
   percentile,
   rel,
+  rollDrum,
   runCleanups,
   selectedEngines,
   selfTestMode,
@@ -44,7 +46,6 @@ import {
   watchPage,
   writeIndex,
 } from "./lib-qa.mjs";
-import { drumOption, rollDrum } from "../e2e/lib.mjs";
 
 // Rubric D12 bands at the 9 level (section 3); a case passes when every banded metric it covers
 // meets them. Worst run counts (rubric section 1 rule 8).
@@ -64,16 +65,23 @@ const GATE = {
   // Continuous gestures (drag, pan, zoom) draw every event: one 60 Hz frame at normal CPU, two at 4x (as E12).
   gestureP95: 16.7,
   gesture4xP95: 33.4,
+  drumLive4xP95: 12,
+  drumOwn4xP95: 3,
+  frameThread4xP95: 16.7,
   inpMs: 200,
 };
 const RENDERERS = ["webgpu", "webgl2"];
 const FPS_MS = Number(process.env.QA_FPS_MS ?? 30000);
 const FRAME_RUNS = Number(process.env.QA_FRAME_RUNS ?? 3);
+const FRAME_TRACE_MS = 6000;
 const SOAK_MS = Number(process.env.QA_SOAK_MS ?? 600000);
 const SOAK_RUNS = Number(process.env.QA_SOAK_RUNS ?? 3);
 // Soak baseline and end: medians of SOAK_EDGE samples each, the baseline taken after SOAK_WARM_MS of JIT warm-up.
 const SOAK_WARM_MS = 60000;
 const SOAK_EDGE = 3;
+/** Fewest samples a soak may be judged on: 24 at SOAK_SAMPLE_MS (2 min of sampling) leaves SOAK_EDGE samples on each side of the warm-up and a slope fit over the rest. */
+const SOAK_MIN_SAMPLES = 24;
+const SOAK_SAMPLE_MS = 5000;
 const LOAD_RUNS = 3;
 const CPU_RATE = 4;
 // LCP is final at the first input or 10 s (Chrome definition, rubric D12); CLS counts 5 s after interactive.
@@ -332,17 +340,24 @@ async function frameCase(s, base, ctx, { kind, renderer, cpu }) {
   if (selfTestMode() === "jank") await page.evaluate(jankForever);
   await page.keyboard.down("ArrowRight");
   const runs = [];
+  const threadP95 = [];
   try {
-    for (let i = 0; i < FRAME_RUNS; i++) runs.push(frameMetrics(await frameSample(page, FPS_MS), displayHz));
+    for (let i = 0; i < FRAME_RUNS; i++) {
+      runs.push(frameMetrics(await frameSample(page, FPS_MS), displayHz));
+      // At 4x the main thread's per-frame time is traced over FRAME_TRACE_MS while the key keeps the player moving.
+      if (cdp) threadP95.push(percentile(await traceFrames(page, cdp, () => sleep(FRAME_TRACE_MS)), 95));
+    }
   } finally {
     await page.keyboard.up("ArrowRight").catch(() => undefined);
     if (cdp) await setCpu(cdp, 1).catch(() => undefined);
   }
   const file = await shot(page, path.join(outDir(), "evidence", `perf-${ctx.engine}`, `fps-${kind}-${renderer}${cpu ? "-cpu4x" : ""}.png`));
   const metrics = { ...worstOf(runs), kind, renderer, cpu4x: cpu, "perf.renderer": renderer };
+  if (threadP95.length) metrics["perf.frameThreadMs.p95"] = round(Math.max(...threadP95), 2);
   const problems = [];
   if (cpu) {
     if (metrics["perf.fps.median"] < GATE.fps4x) problems.push(`fps.median ${metrics["perf.fps.median"]} < ${GATE.fps4x} (4x)`);
+    if (metrics["perf.frameThreadMs.p95"] >= GATE.frameThread4xP95) problems.push(`frame thread p95 ${metrics["perf.frameThreadMs.p95"]} ms >= ${GATE.frameThread4xP95} (4x)`);
   } else if (metrics["perf.fps.pctDisplay"] < GATE.fpsPctDisplay) {
     problems.push(`fps.pctDisplay ${metrics["perf.fps.pctDisplay"]} < ${GATE.fpsPctDisplay}`);
   }
@@ -383,7 +398,7 @@ async function soakCase(s, base, { cpu }) {
     while (Date.now() - t0 < SOAK_MS) {
       const hs = await heapSample(cdp);
       points.push({ t: (Date.now() - t0) / 1000, heapMB: hs.heapMB, nodes: hs.nodes, listeners: hs.listeners });
-      await sleep(5000);
+      await sleep(SOAK_SAMPLE_MS);
       // Walk left and right so the player and its effects keep running.
       await h.page.keyboard.up(key);
       key = key === "ArrowRight" ? "ArrowLeft" : "ArrowRight";
@@ -417,6 +432,7 @@ async function soakCase(s, base, { cpu }) {
   };
   const problems = [];
   if (shortSoak) problems.push(`soak too short for a warm-up baseline and end samples (${points.length} samples)`);
+  if (points.length < SOAK_MIN_SAMPLES) problems.push(`soak has ${points.length} samples < ${SOAK_MIN_SAMPLES} (QA_SOAK_MS must be at least ${SOAK_MIN_SAMPLES * SOAK_SAMPLE_MS} ms)`);
   if (!Number.isFinite(perMin)) problems.push("slope not computable");
   else if (perMin > GATE.heapSlope) problems.push(`heap slope ${round(perMin, 3)} MB/min > ${GATE.heapSlope}`);
   if (!(endPct <= GATE.heapEndPct)) problems.push(`heap end-minus-start ${round(endPct, 1)}% > ${GATE.heapEndPct}%`);
@@ -587,6 +603,60 @@ async function editorActions(s, base, { cpu }) {
   return actionResult({ saveEditorMap: ms }, { cpu });
 }
 
+/**
+ * Drum roll (drum.roll): the home drum rolls five options down and five back from the keyboard, each step settled
+ * before the next, at 4x CPU. Two traces: the whole frame's main-thread time with the menu clip playing behind the
+ * drum (drumLive4xP95), and the same roll with the clip paused on its frame, which leaves the drum's own work and the
+ * style and layout it causes (drumOwn4xP95). The pause is the clip's own button; the clip is not paused for the first trace.
+ */
+async function drumRollCase(s, base) {
+  const { page } = await s.open("drum");
+  await page.goto(base);
+  await menuName(page).waitFor();
+  const cdp = await cdpOf(page);
+  const drum = page.getByRole("listbox", { name: "Destinations", exact: true });
+  await drum.waitFor();
+  await page.locator(".menu-clip-bar:not([hidden])").waitFor();
+  await drum.focus();
+  const roll = async (key) => {
+    for (let i = 0; i < 5; i++) {
+      await page.keyboard.press(key);
+      await drum.and(page.locator('[data-settled="true"]')).waitFor();
+    }
+  };
+  const rollBoth = async () => {
+    await roll("ArrowDown");
+    await roll("ArrowUp");
+  };
+  await setCpu(cdp, CPU_RATE);
+  let live;
+  let own;
+  try {
+    live = await traceFrames(page, cdp, rollBoth);
+    await page.locator(".menu-clip-pause").click();
+    await drum.focus();
+    own = await traceFrames(page, cdp, rollBoth);
+  } finally {
+    await setCpu(cdp, 1).catch(() => undefined);
+  }
+  const liveP95 = percentile(live, 95);
+  const ownP95 = percentile(own, 95);
+  const pass = liveP95 < GATE.drumLive4xP95 && ownP95 < GATE.drumOwn4xP95;
+  return {
+    pass,
+    metrics: {
+      cpu4x: true,
+      "drum.roll.frames": live.length,
+      "drum.roll.frameThreadMs.p95": round(liveP95, 2),
+      "drum.roll.frameThreadMs.max": round(Math.max(...live), 2),
+      "drum.roll.ownFrameThreadMs.p95": round(ownP95, 2),
+    },
+    detail: pass
+      ? `9-band: drum roll frame thread p95 < ${GATE.drumLive4xP95} ms with the clip live, drum own p95 < ${GATE.drumOwn4xP95} ms, at 4x`
+      : `drum roll frame thread p95 ${round(liveP95, 2)} ms (limit ${GATE.drumLive4xP95}), drum own p95 ${round(ownP95, 2)} ms (limit ${GATE.drumOwn4xP95}) at 4x`,
+  };
+}
+
 // Heavy surfaces on heavy content (rubric D12 ui.actionMs, rev8b): a surface a player can fill with large content is
 // measured with large content. Fixtures: the 1500-body stress map and a 4-minute two-player replay with both players
 // active (recorded once; qa/fixtures/README.md).
@@ -686,6 +756,66 @@ function mainThreadMs(events) {
     ms += (e.tdur * (Math.min(b, e.ts + e.dur) - Math.max(a, e.ts)) / e.dur) / 1000;
   }
   return ms;
+}
+
+/**
+ * Per-frame main-thread time (ms, thread clock) for the frames between two consecutive "qf" marks (one per animation
+ * frame): the main thread's RunTask events clipped to each frame's interval, scaled by their thread clock.
+ */
+function frameThreadMs(events) {
+  const main = new Set(events.filter((e) => e.ph === "M" && e.name === "thread_name" && e.args?.name === "CrRendererMain").map((e) => `${e.pid}:${e.tid}`));
+  const marks = events
+    .filter((e) => e.cat?.includes("blink.user_timing") && e.name === "qf")
+    .map((e) => e.ts)
+    .sort((a, b) => a - b);
+  const runs = events
+    .filter((e) => e.ph === "X" && e.name === "RunTask" && e.tdur !== undefined && main.has(`${e.pid}:${e.tid}`))
+    .sort((a, b) => a.ts - b.ts);
+  const frames = [];
+  let ri = 0;
+  for (let i = 0; i + 1 < marks.length; i++) {
+    const a = marks[i];
+    const b = marks[i + 1];
+    while (ri < runs.length && runs[ri].ts + runs[ri].dur <= a) ri++;
+    let ms = 0;
+    for (let j = ri; j < runs.length && runs[j].ts < b; j++) {
+      const e = runs[j];
+      const hi = Math.min(b, e.ts + e.dur);
+      const lo = Math.max(a, e.ts);
+      if (hi > lo) ms += (e.tdur * (hi - lo)) / e.dur / 1000;
+    }
+    frames.push(ms);
+  }
+  return frames;
+}
+
+/** Runs `act` under a trace with one rAF-marked "qf" per animation frame; returns frameThreadMs over the window. */
+async function traceFrames(page, cdp, act) {
+  const events = [];
+  const onData = (p) => events.push(...p.value);
+  cdp.on("Tracing.dataCollected", onData);
+  const done = new Promise((r) => cdp.once("Tracing.tracingComplete", r));
+  await cdp.send("Tracing.start", {
+    transferMode: "ReportEvents",
+    traceConfig: { recordMode: "recordAsMuchAsPossible", includedCategories: TRACE_CATS },
+  });
+  await sleep(50);
+  await page.evaluate(() => {
+    window.__qfOn = true;
+    const frame = () => {
+      performance.mark("qf");
+      if (window.__qfOn) requestAnimationFrame(frame);
+    };
+    requestAnimationFrame(frame);
+  });
+  await act();
+  await page.evaluate(() => {
+    window.__qfOn = false;
+  });
+  await cdp.send("Tracing.end");
+  await done;
+  cdp.off("Tracing.dataCollected", onData);
+  return frameThreadMs(events);
 }
 
 /** Seeded PRNG (LCG), so every run seeks the same points and picks the same bodies. */
@@ -800,13 +930,21 @@ async function stressEditorActions(s, base, { cpu }) {
   const { page } = await s.open("stress-editor");
   const canvas = await stressEditor(page, base);
   if (cpu) await setCpu(await cdpOf(page), CPU_RATE);
-  // openEditorMap: menu to the drawn stress map, ACTION_N times (the draft stays saved).
-  const openMs = [];
-  for (let i = 0; i < ACTION_N; i++) {
-    await page.goto(base);
-    await menuName(page).waitFor();
-    openMs.push(await timedSpan(page, () => navTo(page, "Map editor"), { css: "canvas.editor-canvas" }));
-  }
+  // openEditorMap: menu to the drawn stress map, ACTION_N times (the draft stays saved). The drum roll is untimed (rollDrum);
+  // the timed span is the click on the centred option to the drawn editor. Wall clock, then the same clicks on the thread clock.
+  const cdp = await cdpOf(page);
+  const openEditor = async (thread) => {
+    const ms = [];
+    for (let i = 0; i < ACTION_N; i++) {
+      await page.goto(base);
+      await menuName(page).waitFor();
+      await rollDrum(page, "Map editor");
+      ms.push(await timedSpan(page, () => drumOption(page, "Map editor").click(), { css: "canvas.editor-canvas" }, thread ? cdp : null));
+    }
+    return ms;
+  };
+  const openMs = await openEditor(false);
+  const openThreadMs = await openEditor(true);
   // editorSelect: alternate between bodies, so every click changes the selection; confirmed by the inspector naming it.
   const points = await bodyPoints(page, canvas, 4);
   const select = [];
@@ -914,7 +1052,16 @@ async function stressEditorActions(s, base, { cpu }) {
     await button(page.locator(".offline-top"), "Edit").click();
     await canvas.waitFor();
   }
-  return actionResult({ openEditorMap: openMs, editorSelect: select, editorDrag: drag, editorPan: pan, editorZoom: zoom, testPlayStart: testPlay }, { cpu });
+  const gated = actionResult({ openEditorMap: openMs, editorSelect: select, editorDrag: drag, editorPan: pan, editorZoom: zoom, testPlayStart: testPlay }, { cpu });
+  // openEditorMap is also judged on main-thread time: the wall span includes host descheduling and the click's Playwright round trip.
+  const threadP95 = percentile(openThreadMs, 95);
+  const threadPass = threadP95 < GATE.actionP95;
+  return {
+    ...gated,
+    pass: gated.pass && threadPass,
+    metrics: { ...gated.metrics, ...threadResult({ openEditorMap: openThreadMs }, { cpu }) },
+    detail: threadPass ? gated.detail : `${gated.detail}; ui.threadMs.p95.openEditorMap ${round(threadP95, 1)} >= ${GATE.actionP95} ms`,
+  };
 }
 
 /**
@@ -1156,6 +1303,15 @@ for (const engine of engines) {
         { browser, base },
       );
     }
+  // drum.roll: the home drum rolls five options down and five back at 4x CPU (rubric D12 drum roll; chromium CDP only).
+  await results.case(
+    "drum.roll.t3t4x",
+    async (s) => {
+      prepare(s, "webgpu");
+      return drumRollCase(s, base);
+    },
+    { browser, base },
+  );
   }
 
   results.save();
