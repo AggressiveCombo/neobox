@@ -282,6 +282,7 @@ button.home-account {
   --drum-pitch: 60px;
   --drum-opt-h: 52px;
   position: relative;
+  container-type: inline-size;
   height: 264px;
   overflow: hidden;
   touch-action: none;
@@ -334,6 +335,7 @@ button.home-account {
 
 .drum-label {
   min-width: 0;
+  line-height: 1.3;
   overflow: hidden;
   text-overflow: ellipsis;
 }
@@ -396,6 +398,42 @@ button.home-account {
   letter-spacing: 0.02em;
   line-height: 1.4;
   white-space: nowrap;
+}
+
+/* A narrow drum (a zoomed or narrow phone) keeps every label whole: the training badge becomes a dot outside the
+   flow, the label wraps to two lines, and at the narrowest the icon goes too. */
+@container (max-width: 300px) {
+  .drum-opt {
+    gap: 8px;
+    padding: 0 8px;
+  }
+
+  .home-badge {
+    position: absolute;
+    top: 4px;
+    right: 4px;
+    width: 6px;
+    height: 6px;
+    padding: 0;
+    font-size: 0;
+    border-radius: 50%;
+    background: currentColor;
+  }
+
+  .drum-label {
+    white-space: normal;
+  }
+}
+
+@container (max-width: 200px) {
+  .drum-opt {
+    gap: 0;
+    padding: 0 4px;
+  }
+
+  .drum-opt > svg.icon {
+    display: none;
+  }
 }
 
 /* Footer: one muted line, the makers above it. */
