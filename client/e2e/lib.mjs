@@ -62,6 +62,16 @@ window.onYouTubeIframeAPIReady();`;
 
 export const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+/**
+ * Cuts or restores a context's network. Offline, the context's routes go first: Firefox refuses a navigation that a
+ * context route sees while offline (NS_ERROR_OFFLINE), so the catch-all routes the scenarios install would fail the
+ * page's goto, which the worker otherwise serves.
+ */
+export async function setContextOffline(context, offline) {
+  if (offline) await context.unrouteAll({ behavior: "ignoreErrors" });
+  await context.setOffline(offline);
+}
+
 /** Waits until the locator's box is the same on two reads in a row (a transition has ended); returns that box. */
 export async function waitStable(locator, timeoutMs = STEP_TIMEOUT) {
   const deadline = Date.now() + timeoutMs;

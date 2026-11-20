@@ -4,7 +4,7 @@
 // relay can drop traffic both ways. The offline case cuts the real socket on chromium (CDP emulation, no routing); the
 // other engines hold the socket silent through the relay while context.setOffline is on, since setOffline leaves an open socket live.
 
-import { button, matchWithGuest, menuName, playFromMenu, sleep } from "./lib.mjs";
+import { button, matchWithGuest, menuName, playFromMenu, setContextOffline, sleep } from "./lib.mjs";
 
 const check = (ok, message) => {
   if (!ok) throw new Error(message);
@@ -180,7 +180,7 @@ async function linkSetter(s, host) {
   }
   return async (offline) => {
     host.link.hole = offline;
-    await host.context.setOffline(offline);
+    await setContextOffline(host.context, offline);
   };
 }
 

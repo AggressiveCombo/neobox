@@ -33,7 +33,7 @@ import {
   watchPage,
   writeIndex,
 } from "./lib-qa.mjs";
-import { joinByInvite, signedIn } from "../e2e/lib.mjs";
+import { joinByInvite, setContextOffline, signedIn } from "../e2e/lib.mjs";
 
 // Deliberate faults the instrument creates on purpose. Their failed requests are expected.
 let offline = false;
@@ -325,7 +325,7 @@ async function setNetworkOff(host, session, off) {
   if (session) {
     await session.send("Network.emulateNetworkConditions", { offline: off, latency: 0, downloadThroughput: -1, uploadThroughput: -1 });
   } else {
-    await host.context.setOffline(off);
+    await setContextOffline(host.context, off);
   }
 }
 

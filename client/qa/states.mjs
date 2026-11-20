@@ -21,6 +21,7 @@ import {
   playFromMenu,
   roomCode,
   roomTitle,
+  setContextOffline,
   signedIn,
   startMatch,
   uniqueName,
@@ -193,9 +194,7 @@ async function dropSockets(page) {
 /** Takes the handle's network down. Its console errors from then on are the state's own (audit.mjs `deliberate`). */
 async function goOffline(h) {
   h.offline = true;
-  // Offline there are no third-party requests left to strip. A context route blocks Firefox's offline reload that the worker serves, so it goes first.
-  await h.context.unrouteAll({ behavior: "ignoreErrors" });
-  await h.context.setOffline(true);
+  await setContextOffline(h.context, true);
 }
 
 /**
