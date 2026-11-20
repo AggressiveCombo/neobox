@@ -556,7 +556,8 @@ async function settingsReset(s) {
   const dlg = page.getByRole("dialog", { name: /Reset settings/ });
   await dlg.waitFor();
   await dlg.getByRole("button", { name: "Cancel", exact: true }).click();
-  await dlg.waitFor({ state: "detached" });
+  // A closed modal fades out for MODAL_CLOSE_MS before it leaves the DOM; role locators skip it at once, so wait on the element.
+  await page.locator("dialog.modal", { hasText: "Reset settings?" }).waitFor({ state: "detached" });
   check((await prefs(page)).volume === 0.3, "Cancel changed the volume");
   await button(page, "Reset to defaults").click();
   await page.getByRole("dialog", { name: /Reset settings/ }).getByRole("button", { name: "Reset everything", exact: true }).click();
