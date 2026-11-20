@@ -18,6 +18,7 @@ import {
   matchWithGuest,
   menuName,
   navTo,
+  drumOption,
   playFromMenu,
   roomCode,
   roomTitle,
@@ -242,7 +243,7 @@ export const STATES = [
   state("menu-user", {}, async (s) => signedIn(s, "user")),
   state("menu-news", { dialog: true }, async (s) => {
     const h = await guestHome(s);
-    await button(h.page, "News").click();
+    await navTo(h.page, "News");
     await h.page.getByRole("dialog").first().waitFor();
     return h;
   }),
@@ -353,7 +354,7 @@ export const STATES = [
     await h.context.addInitScript(() => localStorage.setItem("neobox.phoneSplashSeen", "1"));
     await h.page.goto(`${s.base}/AAAAAA`);
     await h.page.getByText("Room not found", { exact: true }).waitFor();
-    await button(h.page, "Browse rooms").waitFor();
+    await drumOption(h.page, "Browse rooms").waitFor();
     return h;
   }),
   state("error-api", {}, async (s) => {
@@ -624,13 +625,13 @@ export const STATES = [
   // Account and friends
   state("account-guest", {}, async (s) => {
     const h = await guestHome(s);
-    await h.page.locator(".home-account").click();
+    await navTo(h.page, "Profile");
     await h.page.locator(".account-form").waitFor();
     return h;
   }),
   state("account-user", {}, async (s) => {
     const h = await signedIn(s, "user");
-    await h.page.locator(".home-account").click();
+    await navTo(h.page, "Profile");
     await button(h.page, "Sign out").waitFor();
     return h;
   }),
@@ -638,7 +639,7 @@ export const STATES = [
     const h = await signedIn(s, "user");
     // A fresh phone device shows the welcome over the menu after sign-in; it covers the account button and the security summary.
     await dismissPhoneSplash(h.page);
-    await h.page.locator(".home-account").click();
+    await navTo(h.page, "Profile");
     await h.page.locator("details.account-security summary").click();
     return h;
   }),

@@ -62,6 +62,14 @@ async function tabTo(page, re, { max = 80, shift = false, scope = null } = {}) {
   return { ok: false, f: await focused(page), trail };
 }
 
+// Rolls the home drum to `label` from the keyboard: Tab to the Destinations listbox, then ArrowDown until the option is centred.
+async function drumByKeys(page, label) {
+  const toDrum = await tabTo(page, /^Destinations$/);
+  const opt = page.getByRole("option", { name: label, exact: true });
+  for (let k = 0; k < 24 && (await opt.getAttribute("aria-selected")) !== "true"; k += 1) await page.keyboard.press("ArrowDown");
+  return { ok: toDrum.ok && (await opt.getAttribute("aria-selected")) === "true", trail: toDrum.trail };
+}
+
 /**
  * Tab order of the menu over two full cycles. A cycle ends when focus leaves the page (BODY stop); the second cycle
  * must repeat the first one exactly. Returns the first cycle's stops and whether the second matched it.
@@ -126,7 +134,7 @@ async function runEngine(engine, base) {
     rec("menu.focusComputedIndicator", menu.complete && noRing.length === 0, { noComputedRing: noRing.map((f) => f.name) });
 
     await page.evaluate(() => { document.activeElement?.blur(); document.body.focus(); });
-    const toBrowse = await tabTo(page, /^Browse rooms$/);
+    const toBrowse = await drumByKeys(page, "Browse rooms");
     rec("menu.reachBrowse", toBrowse.ok, { trail: toBrowse.trail.slice(-6) });
     await page.keyboard.press("Enter");
     await page.getByRole("heading", { name: "Browse rooms", exact: true }).waitFor({ timeout: 8000 }).catch(() => {});
@@ -174,7 +182,7 @@ async function runEngine(engine, base) {
     // ---- K2: News modal focus trap and Escape restore
     await page.goto(base);
     await page.getByPlaceholder("name", { exact: true }).waitFor();
-    const toNews = await tabTo(page, /^News$/, { max: 40 });
+    const toNews = await drumByKeys(page, "News");
     rec("news.reach", toNews.ok, { trail: toNews.trail.slice(-4) });
     const newsTrigger = await focused(page);
     await page.keyboard.press("Enter");

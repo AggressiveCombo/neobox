@@ -168,13 +168,12 @@ async function snap(h, results, caseId, name) {
   return saved ? rel(saved) : null;
 }
 
-/** Waits for the menu to be ready and enters Training through its "Start here" call to action. */
+/** Waits for the menu to be ready and enters Training from the home drum. */
 async function enterTraining(page) {
   await menuName(page).waitFor({ timeout: 15000 });
-  const name = await clickCta(page, "menu");
-  if (!/Training/.test(name)) throw new Error(`menu call to action is "${name}", not Training`);
+  await navTo(page, "Training");
   await page.locator(".training-text").waitFor({ state: "attached", timeout: 15000 });
-  return name;
+  return "Training";
 }
 
 const lessonCount = (page) => page.locator(".training-count").textContent().then((t) => t?.trim() ?? "");

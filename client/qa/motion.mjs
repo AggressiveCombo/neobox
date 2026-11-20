@@ -48,7 +48,7 @@ import {
   uniqueName,
   writeIndex,
 } from "./lib-qa.mjs";
-import { ensureRoomMap, navTo, playFromMenu } from "../e2e/lib.mjs";
+import { drumOption, ensureRoomMap, navTo, playFromMenu, rollDrum } from "../e2e/lib.mjs";
 
 const mode = selfTestMode();
 const CHANGE = 0.005; // RUBRIC D20: change below 0.5% of region pixels
@@ -322,10 +322,10 @@ const PAGE_SEL = { scope: "#ui .page", head: ":scope > .page-head", back: ".page
 // `own` screens are full-screen tools or games with their own bar: their chrome is not compared with Browse rooms
 // at rest (a different layout by design); only travel is checked, against their own settled geometry.
 const CHROME_PAGES = [
-  { id: "browse", title: "Browse rooms", sel: PAGE_SEL, open: (p) => button(p, "Browse rooms").click() },
-  { id: "quick", title: "Quick play", sel: PAGE_SEL, open: (p) => button(p, "Quick play").click() },
+  { id: "browse", title: "Browse rooms", sel: PAGE_SEL, open: (p) => navTo(p, "Browse rooms") },
+  { id: "quick", title: "Quick play", sel: PAGE_SEL, open: (p) => navTo(p, "Quick play") },
   { id: "settings", title: "Settings", sel: PAGE_SEL, open: (p) => navTo(p, "Settings") },
-  { id: "account", title: "Account", sel: PAGE_SEL, open: (p) => p.locator(".home-account").click() },
+  { id: "account", title: "Account", sel: PAGE_SEL, open: (p) => navTo(p, "Profile") },
   { id: "library", title: "Library", sel: PAGE_SEL, open: (p) => navTo(p, "Library") },
   { id: "practice", title: "Practice", sel: PAGE_SEL, open: (p) => navTo(p, "Practice") },
   { id: "about", title: "About neobox", sel: PAGE_SEL, open: (p) => navTo(p, "About") },
@@ -416,11 +416,12 @@ const CASES = [
     run: async (s) => {
       const { page } = await openMenu(s, "news");
       const dialog = page.getByRole("dialog", { name: "Update news" });
+      await rollDrum(page, "News");
       return measure(page, {
         id: "ui.modal.open.news",
         limit: 300,
         liveSquare: true,
-        trigger: () => button(page, "News").evaluate((el) => el.click()),
+        trigger: () => drumOption(page, "News").evaluate((el) => el.click()),
         arrived: () => dialog.waitFor({ state: "visible", timeout: MAX_MS }),
       });
     },
@@ -431,7 +432,7 @@ const CASES = [
     run: async (s) => {
       const { page } = await openMenu(s, "newsclose");
       const dialog = page.getByRole("dialog", { name: "Update news" });
-      await button(page, "News").click();
+      await navTo(page, "News");
       await dialog.waitFor({ state: "visible" });
       await sleep(SETTLE_SETUP_MS);
       return measure(page, {
@@ -465,11 +466,12 @@ const CASES = [
     limit: 400,
     run: async (s) => {
       const { page } = await openMenu(s, "browse");
+      await rollDrum(page, "Browse rooms");
       return measure(page, {
         id: "scene.menu.browse",
         direct: true,
         limit: 400,
-        trigger: () => button(page, "Browse rooms").evaluate((el) => el.click()),
+        trigger: () => drumOption(page, "Browse rooms").evaluate((el) => el.click()),
         arrived: () => button(page, "New room").waitFor({ state: "visible", timeout: MAX_MS }),
       });
     },
