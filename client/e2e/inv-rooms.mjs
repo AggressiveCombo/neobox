@@ -4,14 +4,14 @@
 
 import os from "node:os";
 import { deflateSync } from "node:zlib";
-import { ADMIN_PASSWORD, PASSWORD, adminRoom, button, createRoom, dismissPhoneSplash, drumOption, freePort, ipIn, joinByInvite, matchWithGuest, menuName, navTo, playFromMenu, regionServers, roomCode, roomTitle, signedIn, sleep, startMatch, startServer, uniqueName } from "./lib.mjs";
+import { ADMIN_PASSWORD, PASSWORD, adminRoom, button, createRoom, dismissPhoneSplash, drumOption, freePort, gotoApp, ipIn, joinByInvite, matchWithGuest, menuName, navTo, playFromMenu, regionServers, roomCode, roomTitle, signedIn, sleep, startMatch, startServer, uniqueName } from "./lib.mjs";
 
 const check = (ok, message) => {
   if (!ok) throw new Error(message);
 };
 
 const goMenu = async (page, base) => {
-  await page.goto(base);
+  await gotoApp(page, base);
   await menuName(page).waitFor();
 };
 
@@ -172,7 +172,7 @@ const roomItem = (page, roomName) => page.locator('ul[aria-label="rooms"] li.roo
 /** A public room with a password, created from the create form. Returns its code. */
 async function createLockedRoom(h, base, roomName, password) {
   const { page } = h;
-  await page.goto(base);
+  await gotoApp(page, base);
   await menuName(page).waitFor();
   await playFromMenu(page, null);
   await button(page, "New room").click();
@@ -623,17 +623,17 @@ async function inviteLinks(s) {
   const code = await createRoom(host, s.base, roomName, { isPublic: true });
 
   const guest = await s.open("guest", { name: uniqueName("guest") });
-  await guest.page.goto(`${s.base}/${code}`);
+  await gotoApp(guest.page, `${s.base}/${code}`);
   await roomTitle(guest.page, roomName).waitFor();
   check(new URL(guest.page.url()).pathname === `/${code}`, `address is ${guest.page.url()}, expected /${code}`);
 
   const query = await s.open("query", { name: uniqueName("q") });
-  await query.page.goto(`${s.base}/?room=${code.toLowerCase()}`);
+  await gotoApp(query.page, `${s.base}/?room=${code.toLowerCase()}`);
   await roomTitle(query.page, roomName).waitFor();
   check(new URL(query.page.url()).pathname === `/${code}`, `?room= address is ${query.page.url()}, expected /${code}`);
 
   const bad = await s.open("bad", { name: uniqueName("bad") });
-  await bad.page.goto(`${s.base}/?room=zz!`);
+  await gotoApp(bad.page, `${s.base}/?room=zz!`);
   await menuName(bad.page).waitFor();
   check((await roomTitle(bad.page).count()) === 0, "a link with a bad room code opened a room");
   check(new URL(bad.page.url()).pathname === "/", `a bad code left the address at ${bad.page.url()}`);
@@ -650,7 +650,7 @@ async function regionRedirect(s) {
   const guest = await s.open("frguest", { name: uniqueName("frg"), ip: ipIn("198.51.100") });
   const sockets = [];
   guest.page.on("websocket", (ws) => sockets.push(ws.url()));
-  await guest.page.goto(`${s.base}/${code}`);
+  await gotoApp(guest.page, `${s.base}/${code}`);
   await roomTitle(guest.page, roomName).waitFor();
   const nodePort = new URL(s.env.nodeBase).port;
   check(sockets.some((url) => new URL(url).port === nodePort), `guest sockets ${JSON.stringify(sockets)} never reach the node port ${nodePort}`);
@@ -669,7 +669,7 @@ async function joinAnnounced(s) {
 async function lateJoinNotice(s) {
   const { code, roomName } = await matchWithGuest(s);
   const late = await s.open("late", { name: uniqueName("late") });
-  await late.page.goto(`${s.base}/${code}`);
+  await gotoApp(late.page, `${s.base}/${code}`);
   await late.page.locator(".hud-root").waitFor({ state: "visible" });
   await late.page.getByText("has joined the game").first().waitFor({ state: "visible" });
   return `late joiner: the match HUD opens with "has joined the game" (room ${roomName})`;
@@ -691,6 +691,7 @@ async function reconnectRoomNotice(s) {
     await gate;
     await route.continue();
   });
+  guest.reloading = true;
   await guest.page.reload();
   const didAsk = await Promise.race([requested.then(() => true), sleep(10_000).then(() => false)]);
   check(didAsk, "the reloaded page did not ask for the engine");
@@ -709,7 +710,7 @@ async function roomTabs(s) {
   const selected = async (tabs, name) => (await tabs.getByRole("tab", { name, exact: true }).getAttribute("aria-selected")) === "true";
 
   const guest = await s.open("guest", { name: uniqueName("guest"), phone: true });
-  await guest.page.goto(`${s.base}/${code}`);
+  await gotoApp(guest.page, `${s.base}/${code}`);
   await dismissPhoneSplash(guest.page);
   // Firefox's non-mobile phone context keeps the window size past the splash (see phoneSoloMatch in inv-match.mjs).
   await guest.page.setViewportSize({ width: 390, height: 844 });
@@ -726,7 +727,7 @@ async function roomTabs(s) {
   check(await selected(tabs, "Chat"), "Chat does not select on click");
 
   const tiny = await s.open("tiny", { name: uniqueName("tiny"), phone: true, viewport: { width: 320, height: 256 } });
-  await tiny.page.goto(`${s.base}/${code}`);
+  await gotoApp(tiny.page, `${s.base}/${code}`);
   await dismissPhoneSplash(tiny.page);
   // Firefox's non-mobile phone context keeps the window size past the splash (as for the guest above).
   await tiny.page.setViewportSize({ width: 320, height: 256 });
@@ -953,7 +954,7 @@ async function uploadApprovedMap(s, user, code, name) {
   await button(page, "Upload map").click();
   await page.locator("ul[aria-label=maps] li").filter({ hasText: name }).waitFor();
   const admin = await s.open("admin");
-  await admin.page.goto(`${s.base}/admin`);
+  await gotoApp(admin.page, `${s.base}/admin`);
   await admin.page.locator("#pw").fill(ADMIN_PASSWORD);
   await button(admin.page, "Log in").click();
   await admin.page.getByRole("heading", { name: "Map approvals" }).waitFor();

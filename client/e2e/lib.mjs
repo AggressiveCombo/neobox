@@ -536,7 +536,7 @@ export async function signUp(handle, base, name) {
 export async function signedIn(s, label, name = uniqueName(label), opts = {}) {
   const h = await s.open(label, opts);
   await signUp(h, s.base, name);
-  await h.page.goto(s.base);
+  await gotoApp(h.page, s.base);
   await menuName(h.page).waitFor();
   // the handle itself, not a copy: callers and listeners share it
   h.userName = name;
@@ -645,6 +645,23 @@ export async function rtcServer() {
   return { base: main.base, nodeBase: null, output: main.output, stop: main.stop };
 }
 
+/**
+ * Opens the app at `url` and waits for its own ready signal: the boot card hides once the first
+ * screen is mounted (client/src/app.ts). `goto`'s default `load` wait covers every subresource and
+ * a CPU-starved firefox runs past the 15 s step budget before the app is up.
+ */
+export async function gotoApp(page, url) {
+  await page.goto(url, { waitUntil: "commit", timeout: 60_000 });
+  await page.waitForFunction(
+    () => {
+      const boot = document.getElementById("boot");
+      return boot === null || boot.hidden;
+    },
+    null,
+    { timeout: 60_000 },
+  );
+}
+
 // ---------------------------------------------------------------- UI helpers
 
 export const menuName = (page) => page.getByPlaceholder("name", { exact: true });
@@ -743,7 +760,7 @@ export async function playFromMenu(page, name, { quick = false } = {}) {
 /** Creates a room from the menu. Returns its code. */
 export async function createRoom(h, base, roomName, { isPublic } = {}) {
   const { page } = h;
-  await page.goto(base);
+  await gotoApp(page, base);
   await menuName(page).waitFor();
   await playFromMenu(page, null);
   await button(page, "New room").click();
@@ -772,7 +789,7 @@ export async function roomCode(page) {
 
 /** Opens the room page directly from an invite URL (`origin/CODE`). */
 export async function joinByInvite(h, base, code, roomName) {
-  await h.page.goto(`${base}/${code}`);
+  await gotoApp(h.page, `${base}/${code}`);
   await roomTitle(h.page, roomName).waitFor();
 }
 
@@ -834,7 +851,7 @@ export async function matchWithGuest(s, { clipboard: wantClipboard = true, keepR
       if (url !== `${s.base}/${code}`) await sleep(100);
     }
     if (url !== `${s.base}/${code}`) throw new Error(`invite link is "${url}", expected ${s.base}/${code}`);
-    await guest.page.goto(url);
+    await gotoApp(guest.page, url);
   } else {
     await joinByInvite(guest, s.base, code, roomName);
   }
