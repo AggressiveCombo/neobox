@@ -2,7 +2,7 @@
 // of the gesture in progress. The canvas is sized to its CSS box times the
 // device pixel ratio (capped at 2) and drawn in CSS pixels.
 
-import { type Pt, bbox } from "./geom";
+import { type Pt } from "./geom";
 import {
   type BodyGeo,
   type Kind,
@@ -58,25 +58,11 @@ export function screenAt(v: View, w: number, h: number, p: Pt): Pt {
   return { x: w / 2 + (p.x - v.x) * v.scale, y: h / 2 + (p.y - v.y) * v.scale };
 }
 
-const FALLBACK_BOX = { minX: -400, minY: -225, maxX: 400, maxY: 225 };
 const MARKER_KINDS = ["spawn", "turret", "grapple", "cap"] as const;
 
-/** A view that shows every entity of the map (or a default arena when empty). */
-export function fitView(doc: Obj, w: number, h: number): View {
-  const pts: Pt[] = [];
-  for (const b of getList(doc, "body")) {
-    const bb = bodyBounds(b);
-    if (bb) pts.push({ x: bb.minX, y: bb.minY }, { x: bb.maxX, y: bb.maxY });
-  }
-  for (const kind of MARKER_KINDS) {
-    for (const o of getList(doc, kind)) pts.push({ x: num(o, "1", 0), y: num(o, "2", 0) });
-  }
-  for (const j of getList(doc, "joint")) pts.push(...jointAnchors(doc, j));
-  const b = pts.length ? bbox(pts) : FALLBACK_BOX;
-  const bw = Math.max(b.maxX - b.minX, 50);
-  const bh = Math.max(b.maxY - b.minY, 50);
-  const scale = clampScale(Math.min((w - 80) / bw, (h - 80) / bh));
-  return { x: (b.minX + b.maxX) / 2, y: (b.minY + b.maxY) / 2, scale };
+/** The editor's opening view, as the original's: the world origin at the canvas centre, `Screen width` map units across it. */
+export function fitView(doc: Obj, w: number): View {
+  return { x: 0, y: 0, scale: clampScale(w / num(asObj(doc.set), "3", 30)) };
 }
 
 const BG = "#0a0a0a";

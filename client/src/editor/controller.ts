@@ -453,7 +453,7 @@ export class EditorController {
   fit(): void {
     const { w, h } = this.size();
     if (w === 0 || h === 0) return;
-    this.view = fitView(this.doc, w, h);
+    this.view = fitView(this.doc, w);
     this.fitted = true;
   }
 
