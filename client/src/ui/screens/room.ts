@@ -570,6 +570,7 @@ export const roomScreen: ScreenFactory = (ctx: AppCtx) => {
         room.in_match,
         room.starting,
         st.account !== null,
+        st.reconnecting,
         activeTypers(),
         Array.from(relations),
         menuFor,
@@ -612,7 +613,7 @@ export const roomScreen: ScreenFactory = (ctx: AppCtx) => {
           { class: "room-team-pick" },
           seg(
             teams ? "Your team" : "Join or spectate",
-            teamActions.map((a) => ({ value: String(a.team), label: a.label })),
+            teamActions.map((a) => ({ value: String(a.team), label: a.label, disabled: st.reconnecting })),
             String(me?.team ?? ""),
             (v) => ctx.send({ t: "set_team", team: Number(v) }),
           ).el,
@@ -841,6 +842,7 @@ export const roomScreen: ScreenFactory = (ctx: AppCtx) => {
     if (sentHistory.length > SENT_LIMIT) sentHistory.shift();
     historyAt = -1;
     chatInput.value = "";
+    syncChatSend(st.reconnecting);
   };
 
   /** Enter sends; Up/Down recall earlier messages and return to the draft. */
@@ -867,6 +869,7 @@ export const roomScreen: ScreenFactory = (ctx: AppCtx) => {
         chatInput.value = draft;
       }
     }
+    syncChatSend(st.reconnecting);
   }
 
   // The original's map vote menu: Vote Up and Vote Down send the room's /upvote and /downvote commands.
@@ -1254,8 +1257,16 @@ export const roomScreen: ScreenFactory = (ctx: AppCtx) => {
     onkeydown: (e) => {
       if (e instanceof KeyboardEvent) chatKey(e);
     },
-    oninput: typingSignal,
+    oninput: () => {
+      typingSignal();
+      syncChatSend(st.reconnecting);
+    },
   });
+  const chatSend = h("button", { type: "button", class: "icon", "aria-label": "Send", title: "Send", disabled: true, onclick: sendChat }, icon("send", 18));
+  /** Send is off while the draft is empty (nothing to send) or the connection is being restored. */
+  const syncChatSend = (reconnecting: boolean): void => {
+    chatSend.disabled = reconnecting || chatInput.value.trim() === "";
+  };
   const chatPanel = h(
     "section",
     { class: "room-panel room-chat" },
@@ -1265,7 +1276,7 @@ export const roomScreen: ScreenFactory = (ctx: AppCtx) => {
       "div",
       { class: "room-chat-form" },
       chatInput,
-      h("button", { type: "button", class: "icon", "aria-label": "Send", title: "Send", onclick: sendChat }, icon("send", 18)),
+      chatSend,
     ),
   );
 
@@ -1321,7 +1332,7 @@ export const roomScreen: ScreenFactory = (ctx: AppCtx) => {
               "Save replay",
             )
           : null,
-        h("button", { type: "button", class: "room-btn quiet", "data-focus-key": "leave", onclick: leave }, icon("log-out", 16), "Leave"),
+        h("button", { type: "button", class: "room-btn quiet", "data-focus-key": "leave", disabled: st.reconnecting, onclick: leave }, icon("log-out", 16), "Leave"),
       ),
     ];
   }
@@ -1562,8 +1573,7 @@ export const roomScreen: ScreenFactory = (ctx: AppCtx) => {
       }
       renderChat();
       // The room's server-bound actions wait for the connection: they are disabled, not silently dropped, while it is restored.
-      const send = root.querySelector<HTMLButtonElement>('.room-chat-form button[aria-label="Send"]');
-      if (send) send.disabled = next.reconnecting;
+      syncChatSend(next.reconnecting);
     },
     destroy() {
       alive = false;

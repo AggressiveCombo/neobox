@@ -446,17 +446,22 @@ export function start(): Store<AppState> {
   });
 
   // Shown over every screen while the connection to a room is being restored.
+  const retry = h("button", { type: "button", onclick: () => retryNow() }, "Try again now");
   const banner = h(
     "div",
     { class: "reconnect-banner", role: "status", "aria-live": "polite" },
     h("span", null, "Connection lost. Reconnecting…"),
-    h("button", { type: "button", onclick: () => retryNow() }, "Try again now"),
+    retry,
     h("button", { type: "button", onclick: () => disconnect() }, "Leave"),
   );
   banner.hidden = true;
   document.body.prepend(banner);
   store.subscribe((state) => {
     banner.hidden = !state.reconnecting;
+    // An attempt in progress shows as one: the button reads "Retrying…" and is disabled until it settles.
+    const trying = state.connection === "connecting";
+    retry.disabled = trying;
+    retry.textContent = trying ? "Retrying…" : "Try again now";
   });
 
   function names(): ReadonlyMap<number, string> {
