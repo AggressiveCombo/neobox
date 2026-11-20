@@ -435,37 +435,56 @@ async function hudOverlap(s) {
   return { metrics: { "overlay.hud.overlap": total, "overlay.void.px": worstVoid }, detail: parts.join("; ") };
 }
 
-/** Page side of the menu backdrop: the card's corners, the arena bounds and the live players (css px), from the DOM and the menu camera. */
+/** Page side of the menu backdrop: the card's corners, the arena and the live players (css px), from the DOM and the menu camera. The card turns by its own transform (menu.css, --menu-angle); the content (#gl-host) turns by its transform, about the same centre. */
 const backdropGeometry = () => {
   const sq = document.querySelector(".menu-square");
   const gl = document.getElementById("gl-host");
   const cam = window.__qaCam;
   if (!sq || !gl || !cam || !(cam.w > 0)) return null;
-  const r = sq.getBoundingClientRect();
-  const theta = (parseFloat(sq.style.getPropertyValue("--angle")) * Math.PI) / 180;
+  // a transform's turn (deg) from its matrix; 0 with none
+  const turnDeg = (el) => {
+    const m = /matrix\(([^)]+)\)/.exec(getComputedStyle(el).transform);
+    if (!m) return 0;
+    const [a, b] = m[1].split(",").map(Number);
+    return (Math.atan2(b, a) * 180) / Math.PI;
+  };
+  const cardDeg = turnDeg(sq);
+  const contentDeg = turnDeg(gl);
+  const theta = (cardDeg * Math.PI) / 180;
   const cos = Math.cos(theta);
   const sin = Math.sin(theta);
-  const half = sq.offsetWidth / 2;
+  const gTheta = (contentDeg * Math.PI) / 180;
+  const gCos = Math.cos(gTheta);
+  const gSin = Math.sin(gTheta);
+  const r = sq.getBoundingClientRect();
+  // the turn is about the centre, which the bounding box keeps; the card's own size is its layout size
   const cx = r.left + r.width / 2;
   const cy = r.top + r.height / 2;
-  const gx = gl.getBoundingClientRect();
-  const k = gx.width / cam.w;
-  // world -> page px, the mapping of camera.ts (the GL view spans the camera's w by h)
-  const toPage = (wx, wy) => [gx.left + (wx - (cam.cx - cam.w / 2)) * k, gx.top + (wy - (cam.cy - cam.h / 2)) * k];
-  // the arena's edge inset by 1 CSS px (the page-white rule reads it)
-  const [ax0, ay0] = toPage(cam.bx0, cam.by0).map((v) => v + 1);
-  const [ax1, ay1] = toPage(cam.bx1, cam.by1).map((v) => v - 1);
-  const corners = [
-    [-1, -1],
-    [1, -1],
-    [1, 1],
-    [-1, 1],
-  ].map(([u, v]) => [cx + half * (u * cos - v * sin), cy + half * (u * sin + v * cos)]);
-  // a page point inside the rotated card (its card-local coordinates within the half side)
-  const inCard = (x, y) => {
+  const hw = sq.offsetWidth / 2;
+  const hh = sq.offsetHeight / 2;
+  // css px per world unit: the view is the card's rect, so the camera's w spans its width
+  const k = gl.offsetWidth / cam.w;
+  // world -> page px: the content's turn about the card's centre (camera.ts: the view is centred on the arena)
+  const toPage = (wx, wy) => {
+    const x = (wx - cam.cx) * k;
+    const y = (wy - cam.cy) * k;
+    return [cx + x * gCos - y * gSin, cy + x * gSin + y * gCos];
+  };
+  // a page point in the card's own turned coordinates, centred
+  const local = (x, y) => {
     const dx = x - cx;
     const dy = y - cy;
-    return Math.abs(dx * cos + dy * sin) <= half && Math.abs(-dx * sin + dy * cos) <= half;
+    return [dx * cos + dy * sin, -dx * sin + dy * cos];
+  };
+  const inCard = (x, y) => {
+    const [u, v] = local(x, y);
+    return Math.abs(u) <= hw && Math.abs(v) <= hh;
+  };
+  // the arena's half sides in css px (the arena is centred on the card)
+  const arenaHalf = [(cam.aw * k) / 2, (cam.ah * k) / 2];
+  const inArena = (x, y) => {
+    const [u, v] = local(x, y);
+    return Math.abs(u) <= arenaHalf[0] && Math.abs(v) <= arenaHalf[1];
   };
   // the page area of a box that lies inside the card (sampled on a 2 px grid)
   const areaInCard = (q) => {
@@ -499,11 +518,31 @@ const backdropGeometry = () => {
     const parts = /rgba?\(([^)]+)\)/.exec(cs.backgroundColor)?.[1].split(/[\s,/]+/).filter(Boolean) ?? [];
     const alpha = parts.length > 3 ? Number(parts[3]) : 1;
     if (alpha > 0 && alpha < 1) issues.push("caption-translucent");
-    coverPct = (100 * (areaInCard(a) + areaInCard(b))) / ((2 * half) * (2 * half));
+    coverPct = (100 * (areaInCard(a) + areaInCard(b))) / ((2 * hw) * (2 * hh));
   }
+  // the card's corners in page px: past the viewport?
+  const corners = [
+    [-hw, -hh],
+    [hw, -hh],
+    [hw, hh],
+    [-hw, hh],
+  ].map(([u, v]) => [cx + u * cos - v * sin, cy + u * sin + v * cos]);
   if (corners.some(([x, y]) => x < 0 || y < 0 || x > innerWidth || y > innerHeight)) issues.push("card-past-viewport");
-  // the whole arena inside the turned card: its four corners (camera.ts backdropCamera fits the arena to the card)
-  if ([[ax0, ay0], [ax1, ay0], [ax1, ay1], [ax0, ay1]].some(([x, y]) => !inCard(x, y))) issues.push("arena-clipped");
+  // the content turns with the card: the same angle, or the arena is drawn on another axis than the card's
+  if (Math.abs(contentDeg - cardDeg) > 0.5) issues.push("content-untilted");
+  if (live) {
+    // the arena fills the card's shorter side (camera.ts: the arena less BACKDROP_MARGIN per side) and the card has the arena's shape
+    const fill = hw <= hh ? cam.aw / cam.w : cam.ah / cam.h;
+    if (fill < 0.895) issues.push("arena-small");
+    if (Math.abs((hw / hh) / (cam.aw / cam.ah) - 1) > 0.01) issues.push("card-aspect");
+    if (arenaHalf[0] > hw + 0.5 || arenaHalf[1] > hh + 0.5) issues.push("arena-clipped");
+    // the caption hangs under the card's lowest corner, close to it
+    if (credit) {
+      const lowest = Math.max(...corners.map(([, y]) => y));
+      const gap = credit.getBoundingClientRect().top - lowest;
+      if (gap < 0 || gap > 24) issues.push("caption-detached");
+    }
+  }
   // the page's own background colour: the first of body or html that is not transparent (the card must show none of it)
   const rgba = (c) => /rgba?\(([^)]+)\)/.exec(c)?.[1].split(/[\s,/]+/).filter(Boolean).map(Number) ?? null;
   const pageRgb = [document.body, document.documentElement].map((e) => rgba(getComputedStyle(e).backgroundColor)).find((c) => c && (c.length < 4 || c[3] > 0)) ?? [255, 255, 255];
@@ -513,7 +552,11 @@ const backdropGeometry = () => {
     return [q.left - 2, q.top - 2, q.right + 2, q.bottom + 2];
   });
   // the caption and pause control stay off the arena: over it they hide part of the arena
-  if (live && controls.some(([l, t, r, b]) => l < ax1 && ax0 < r && t < ay1 && ay0 < b)) issues.push("control-over-arena");
+  const overArena = ([l, t, rr, b]) => {
+    for (let x = l; x <= rr; x += 2) for (let y = t; y <= b; y += 2) if (inArena(x, y)) return true;
+    return false;
+  };
+  if (live && controls.some(overArena)) issues.push("control-over-arena");
   return {
     live,
     issues,
@@ -522,8 +565,10 @@ const backdropGeometry = () => {
     centroidIn,
     clip: { x: r.left, y: r.top, w: r.width, h: r.height },
     theta,
-    half,
-    arena: [ax0, ay0, ax1, ay1],
+    half: [hw, hh],
+    arenaHalf,
+    cardDeg,
+    contentDeg,
     pageRgb,
     controls,
   };
@@ -543,7 +588,6 @@ const backdropPixels = async ({ b64, g }) => {
   const scale = img.width / g.shot.w;
   const cos = Math.cos(g.theta);
   const sin = Math.sin(g.theta);
-  const [ax0, ay0, ax1, ay1] = g.arena;
   const [pr, pg, pb] = g.pageRgb;
   const inRect = (x, y, [l, t, r, b]) => x >= l && x <= r && y >= t && y <= b;
   let page = 0;
@@ -556,9 +600,9 @@ const backdropPixels = async ({ b64, g }) => {
       const dy = y - (g.clip.y + g.clip.h / 2);
       const u = dx * cos + dy * sin;
       const v = -dx * sin + dy * cos;
-      if (Math.abs(u) > g.half - 2 || Math.abs(v) > g.half - 2) continue;
-      // the walls' antialiased outer edge sits on the arena's rect edge: geometry, so the 2 css px ring around the arena is not the page
-      if (x >= ax0 - 2 && x <= ax1 + 2 && y >= ay0 - 2 && y <= ay1 + 2) continue;
+      if (Math.abs(u) > g.half[0] - 2 || Math.abs(v) > g.half[1] - 2) continue;
+      // the walls' antialiased outer edge sits on the arena's edge: geometry, so the 2 css px ring around the arena is not the page
+      if (Math.abs(u) <= g.arenaHalf[0] + 2 && Math.abs(v) <= g.arenaHalf[1] + 2) continue;
       if (g.controls.some((c) => inRect(x, y, c))) continue;
       const i = (py * img.width + px) * 4;
       const [r, gr, b] = [data[i], data[i + 1], data[i + 2]];
@@ -568,6 +612,9 @@ const backdropPixels = async ({ b64, g }) => {
   }
   return { white: page / (scale * scale), voidArea: voidArea / (scale * scale) };
 };
+
+/** Frame issues (overlay.backdrop.frame.count): the card's content does not turn with the card, the arena is small in the card or not its shape, the caption is detached from the card's corner. Counted apart from the controls. */
+const FRAME_ISSUES = new Set(["content-untilted", "arena-clipped", "arena-small", "card-aspect", "caption-detached"]);
 
 /** E04 backdrop: the menu clip card (desktop light and dark; phone portrait 390x844, phone small 320x568, tablet portrait 768x1024; the phone landscape has no backdrop by design, menu.css). Eight seconds of clip, sampled every 0.5 s: the card's pixels at +1 s, +3 s and +8 s, and at each sample the controls, the centroid and each live player's position. */
 async function menuBackdrop(s) {
@@ -586,6 +633,7 @@ async function menuBackdrop(s) {
   let controls = 0;
   let coverPct = 0;
   let playersOut = 0;
+  let frame = 0;
   for (const [name, opts, dark] of cases) {
     const h = await s.open(`backdrop-${name}`, { name: "shots", ...opts });
     await h.page.goto(s.base);
@@ -611,7 +659,7 @@ async function menuBackdrop(s) {
       await sleep(500);
       const g = await h.page.evaluate(backdropGeometry);
       if (!g) return { pass: false, detail: `${name}: no menu card or camera` };
-      geom = `arena=${g.arena.map((v) => Math.round(v)).join(",")} bar=${g.controls.map((c) => c.map((v) => Math.round(v)).join(",")).join(" ")}`;
+      geom = `card=${(2 * g.half[0]).toFixed(0)}x${(2 * g.half[1]).toFixed(0)} turn=${g.cardDeg.toFixed(1)}/${g.contentDeg.toFixed(1)} arena=${g.arenaHalf.map((v) => (2 * v).toFixed(0)).join("x")} bar=${g.controls.map((c) => c.map((v) => Math.round(v)).join(",")).join(" ")}`;
       let px = { white: 0, voidArea: 0 };
       if (g.live && shots.has(wait)) {
         // The card's box can reach past the viewport (a card-past-viewport control issue above): shoot only what is on screen.
@@ -629,7 +677,9 @@ async function menuBackdrop(s) {
       casePage = Math.max(casePage, px.white);
       caseVoid = Math.max(caseVoid, px.voidArea);
       coverPct = Math.max(coverPct, g.coverPct);
-      controls += g.issues.length;
+      const frameIssues = g.issues.filter((x) => FRAME_ISSUES.has(x));
+      frame += frameIssues.length;
+      controls += g.issues.length - frameIssues.length;
       for (const x of g.issues) issues.add(x);
       if (g.players.length > 0) {
         frames += 1;
@@ -660,6 +710,7 @@ async function menuBackdrop(s) {
       "overlay.backdrop.control.count": controls,
       "overlay.backdrop.caption.pct": Math.round(coverPct),
       "overlay.backdrop.players.out.count": playersOut,
+      "overlay.backdrop.frame.count": frame,
     },
     detail: parts.join("; "),
   };
