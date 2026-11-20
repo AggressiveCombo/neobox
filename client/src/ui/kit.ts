@@ -5,7 +5,6 @@ import { h, type Child } from "./dom";
 import { icon, type IconName } from "./icons";
 import { reducedMotion } from "./a11y";
 
-const MODAL_CLOSE_MS = 140;
 /** What Tab can land on inside a modal. */
 const TAB_STOPS = 'a[href],button:not(:disabled),input:not(:disabled):not([type=hidden]),select:not(:disabled),textarea:not(:disabled),[tabindex]:not([tabindex="-1"])';
 
@@ -298,7 +297,10 @@ export function openModal(opts: ModalOptions): { dialog: HTMLDialogElement; clos
     }
     dialog.inert = true;
     dialog.classList.add("is-closing");
-    window.setTimeout(() => dialog.remove(), MODAL_CLOSE_MS);
+    // Removed when its exit animation ends. A timer raced it: the animation starts a frame after this event, so a timer of the animation's length removed the dialog before animationend fired.
+    dialog.addEventListener("animationend", (e) => {
+      if (e.target === dialog && e.animationName === "modal-out") dialog.remove();
+    });
   });
   document.body.appendChild(dialog);
   openStack.push(entry);
