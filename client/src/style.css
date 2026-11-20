@@ -1417,12 +1417,6 @@ dialog.modal:focus {
   animation: none;
 }
 
-/* Home tiles: no hover lift. */
-:root[data-motion="reduce"] button.home-row-btn:hover:not(:disabled) svg,
-:root[data-motion="reduce"] button.home-row-btn:hover:not(:disabled) .home-row-label {
-  transform: none;
-}
-
 /* ---------------------------------------------------------------- phone */
 
 @media (max-width: 600px) {

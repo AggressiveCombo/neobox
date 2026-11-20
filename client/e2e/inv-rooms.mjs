@@ -4,7 +4,7 @@
 
 import os from "node:os";
 import { deflateSync } from "node:zlib";
-import { ADMIN_PASSWORD, PASSWORD, adminRoom, button, createRoom, dismissPhoneSplash, freePort, ipIn, joinByInvite, matchWithGuest, menuName, navTo, playFromMenu, regionServers, roomCode, roomTitle, signedIn, sleep, startMatch, startServer, uniqueName } from "./lib.mjs";
+import { ADMIN_PASSWORD, PASSWORD, adminRoom, button, createRoom, dismissPhoneSplash, drumOption, freePort, ipIn, joinByInvite, matchWithGuest, menuName, navTo, playFromMenu, regionServers, roomCode, roomTitle, signedIn, sleep, startMatch, startServer, uniqueName } from "./lib.mjs";
 
 const check = (ok, message) => {
   if (!ok) throw new Error(message);
@@ -39,15 +39,15 @@ async function menuHome(s) {
   await goMenu(page, s.base);
   check(await menuName(page).isEditable(), "the guest name field is read-only");
   check(await page.getByText("Playing as", { exact: true }).isVisible(), "home does not say Playing as");
-  check(await button(page, "Quick play").isEnabled(), "Quick play is disabled");
-  check(await button(page, "Browse rooms").isEnabled(), "Browse rooms is disabled");
-  for (const name of ["News", "Mute music", "Fullscreen", "Sign in"]) {
+  check((await drumOption(page, "Quick play").getAttribute("aria-disabled")) !== "true", "Quick play is disabled");
+  check((await drumOption(page, "Browse rooms").getAttribute("aria-disabled")) !== "true", "Browse rooms is disabled");
+  for (const name of ["Mute music", "Fullscreen", "Sign in"]) {
     check(await homeTop(page).getByRole("button", { name, exact: true }).isVisible(), `header has no ${name} button`);
   }
 
   // menu-news-btn: News opens "Update news" (one entry per page); the unread dot clears; Escape closes it.
   check(await page.locator(".home-unread").isVisible(), "the unread dot is hidden before the first News open");
-  await homeTop(page).getByRole("button", { name: "News", exact: true }).click();
+  await navTo(page, "News");
   const news = page.getByRole("dialog", { name: "Update news", exact: true });
   await news.waitFor({ state: "visible" });
   check(/^1 of \d+$/.test((await news.locator(".news-count").textContent()) ?? ""), "news does not start at entry 1");
@@ -78,7 +78,7 @@ async function quickEmpty(s) {
     route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ meta: {}, maps: [] }) }),
   );
   await goMenu(page, s.base);
-  await button(page, "Quick play").click();
+  await playFromMenu(page, null, { quick: true });
   await page.getByRole("heading", { name: "Quick play", exact: true }).waitFor();
   await page.getByText("This server has no quick play.", { exact: true }).waitFor({ state: "visible" });
   return "empty rotation: This server has no quick play.";
@@ -90,7 +90,7 @@ async function quickError(s) {
   const { page } = h;
   await page.route("**/api/rotation", (route) => route.fulfill({ status: 500, contentType: "text/plain", body: "boom" }));
   await goMenu(page, s.base);
-  await button(page, "Quick play").click();
+  await playFromMenu(page, null, { quick: true });
   await page.getByRole("heading", { name: "Quick play", exact: true }).waitFor();
   await page.getByText("Could not load quick play. Try again later.", { exact: true }).waitFor({ state: "visible" });
   allowStatus500(h);
@@ -102,7 +102,7 @@ async function quickPage(s) {
   const h = await s.open("guest");
   const { page } = h;
   await goMenu(page, s.base);
-  await button(page, "Quick play").click();
+  await playFromMenu(page, null, { quick: true });
   await page.getByRole("heading", { name: "Quick play", exact: true }).waitFor();
   check(await quickName(page).isEditable(), "quick name field is read-only for a guest");
   for (const title of ["Sweaty Bois", "Team Madness"]) {
@@ -134,7 +134,7 @@ async function quickWaiting(s) {
   const h = await s.open("guest");
   const { page } = h;
   await goMenu(page, s.base);
-  await button(page, "Quick play").click();
+  await playFromMenu(page, null, { quick: true });
   await page.getByRole("heading", { name: "Quick play", exact: true }).waitFor();
   await quickName(page).fill(uniqueName("quick"));
   // A lone quick play starts within milliseconds of the join, so the loader can be gone before a poll sees it: record it in the DOM.
@@ -191,6 +191,7 @@ async function browseEmpty(s) {
   const { page } = h;
   await openBrowse(page, s.base, name);
   for (const label of ["Refresh", "New room"]) {
+    await button(page, label).waitFor({ state: "visible" });
     check(await button(page, label).isVisible(), `Browse has no ${label} button`);
   }
   check(await codeField(page).isVisible(), "Browse has no Room code field");
@@ -469,8 +470,13 @@ async function roomDock(s) {
   await g.page.locator("footer.room-dock").getByText("Waiting for host to start", { exact: true }).waitFor({ state: "visible" });
   await dock.getByRole("button", { name: "Start", exact: true }).click();
   await button(page, "Abort start").waitFor({ state: "visible" });
-  check(await dock.getByText("Match starting", { exact: true }).isVisible(), "the dock does not say Match starting");
-  check(await dock.getByRole("button", { name: "Start", exact: true }).isDisabled(), "Start is enabled while starting");
+  // The server gives a one-second countdown, and the match starts when it ends; read the dock in one round trip, then click at once.
+  const dockState = await dock.evaluate((d) => ({
+    starting: [...d.querySelectorAll("*")].some((el) => el.childElementCount === 0 && el.textContent.trim() === "Match starting"),
+    startDisabled: [...d.querySelectorAll("button")].find((b) => b.textContent.trim() === "Start")?.disabled,
+  }));
+  check(dockState.starting, "the dock does not say Match starting");
+  check(dockState.startDisabled === true, "Start is enabled while starting");
   await button(page, "Abort start").click();
   await button(page, "Abort start").waitFor({ state: "hidden" });
   check(await page.locator(".hud-leave").count() === 0, "the match started after Abort start");

@@ -1,8 +1,7 @@
-// Home: the first screen. The wordmark, the name field, the two ways in (Quick play for a
-// match now, Browse rooms for everything else), the destinations as an icon index, and the
-// recorded match clips playing inside a giant turned square (the GL view is masked to the
-// square). With no clip the square is a flat field with the mark. Signed-in accounts play
-// under their account name.
+// Home: the first screen. The wordmark, the name field, the destinations as a drum (Quick play and
+// Browse rooms first, then every other place), and the recorded match clips playing inside a giant
+// turned square (the GL view is masked to the square). With no clip the square is a flat field with
+// the mark. Signed-in accounts play under their account name.
 
 import { lastAccountName, listMakers, refreshAccount } from "../../account";
 import { fetchStats } from "../../api";
@@ -13,18 +12,19 @@ import { prefs } from "../../prefs";
 import { type Account, type AppState, type Screen } from "../../state";
 import { local } from "../../storage";
 import { NAME_STORAGE_KEY, TRAINING_SEEN_KEY } from "../../storage-keys";
-import { type Child, h } from "../dom";
+import { h } from "../dom";
 import { type IconName, icon } from "../icons";
 import { avatar } from "../kit";
 import { mountMenuClips } from "../menu-clips";
 import { hasUnreadNews, openNews } from "../news";
 import { REPO_URL } from "./about";
+import { type DrumItem, mountDrum } from "./menu-drum";
 
 const STATS_REFRESH_MS = 10_000;
 /** Tilt of the home square, degrees. */
 const SQUARE_ANGLE = -18;
 
-/** The destinations, in index order. The description is the button's tooltip. */
+/** The destinations, in drum order. The description is the hint shown while the option is centred. */
 const DESTINATIONS: { label: string; screen: Screen; icon: IconName; desc: string }[] = [
   { label: "Training", screen: "training", icon: "dumbbell", desc: "Learn the moves against dummies that never attack." },
   { label: "Practice", screen: "practice", icon: "swords", desc: "Play alone on a built-in or pasted map, offline." },
@@ -169,14 +169,6 @@ export const menuScreen: ScreenFactory = (ctx) => {
   const leadEl = h("span", { class: "home-name-lead" }, "Playing as");
   const pencil = icon("pencil", 16);
 
-  const quickBtn = h(
-    "button",
-    { type: "button", class: "primary big home-quick", onclick: () => store.set({ screen: "quick" }) },
-    icon("zap", 22),
-    "Quick play",
-  );
-  const browseBtn = h("button", { type: "submit", class: "big home-browse" }, icon("door-open", 22), "Browse rooms");
-
   const accountBtn = h("button", {
     type: "button",
     class: "home-tool home-account quiet",
@@ -198,11 +190,6 @@ export const menuScreen: ScreenFactory = (ctx) => {
   }
 
   const unreadMark = h("span", { class: "home-unread", "aria-hidden": "true", hidden: !hasUnreadNews() });
-  const newsBtn = toolButton("newspaper", "News", () => {
-    openNews();
-    unreadMark.hidden = !hasUnreadNews();
-  });
-  newsBtn.append(unreadMark);
   const muteBtn = toolButton("volume-2", "Mute music", () => prefs.set({ musicMuted: !prefs.value.musicMuted }));
   const fullscreenBtn = toolButton("maximize", "Fullscreen", () => toggleFullscreen());
   fullscreenBtn.hidden = !document.fullscreenEnabled;
@@ -211,7 +198,7 @@ export const menuScreen: ScreenFactory = (ctx) => {
   function sync(): void {
     const problem = nameProblem(nameInput.value);
     const shown = nameTouched ? problem : null;
-    browseBtn.disabled = problem !== null;
+    drum.setDisabled("browse", problem !== null);
     nameError.textContent = shown ?? "";
     nameError.hidden = shown === null;
     nameInput.setAttribute("aria-invalid", String(shown !== null));
@@ -386,31 +373,44 @@ export const menuScreen: ScreenFactory = (ctx) => {
       nameInput,
       pencil,
     ),
-    h("div", { class: "home-actions" }, quickBtn, browseBtn),
   );
 
   // The training badge marks the first visit only; choosing Training dismisses it for good.
   const trainingBadge = h("span", { class: "home-badge", "aria-hidden": "true", hidden: readFlag(TRAINING_SEEN_KEY) }, "Start here");
-  const rows = DESTINATIONS.map((d) => {
-    const children: Child[] = [icon(d.icon, 22), h("span", { class: "home-row-label" }, d.label)];
-    if (d.screen === "training") children.push(trainingBadge);
-    return h(
-      "button",
-      {
-        type: "button",
-        class: "home-row-btn",
-        title: d.desc,
-        onclick: () => {
+  // Every destination, in drum order: Quick play and Browse rooms first, Profile and News last.
+  const items: DrumItem[] = [
+    { id: "quick", label: "Quick play", icon: "zap", hint: "Jump into a match now.", run: () => store.set({ screen: "quick" }) },
+    { id: "browse", label: "Browse rooms", icon: "door-open", hint: "Pick a room to join, or start one.", run: () => go() },
+    ...DESTINATIONS.map(
+      (d): DrumItem => ({
+        id: d.screen,
+        label: d.label,
+        icon: d.icon,
+        hint: d.desc,
+        extra: d.screen === "training" ? trainingBadge : undefined,
+        run: () => {
           if (d.screen === "training") {
             writeFlag(TRAINING_SEEN_KEY);
             trainingBadge.hidden = true;
           }
           store.set({ screen: d.screen });
         },
+      }),
+    ),
+    { id: "account", label: "Profile", icon: "user", hint: "Your account and your level.", run: () => store.set({ screen: "account" }) },
+    {
+      id: "news",
+      label: "News",
+      icon: "newspaper",
+      hint: "What has changed in neobox.",
+      extra: unreadMark,
+      run: () => {
+        openNews();
+        unreadMark.hidden = !hasUnreadNews();
       },
-      ...children,
-    );
-  });
+    },
+  ];
+  const drum = mountDrum(items, "Destinations");
 
   sync();
   syncMute();
@@ -433,7 +433,7 @@ export const menuScreen: ScreenFactory = (ctx) => {
   const el = h(
     "main",
     { class: "page home" },
-    h("header", { class: "home-top" }, offlineChip, h("div", { class: "home-tools" }, accountBtn, newsBtn, muteBtn, fullscreenBtn)),
+    h("header", { class: "home-top" }, offlineChip, h("div", { class: "home-tools" }, accountBtn, muteBtn, fullscreenBtn)),
     h(
       "div",
       { class: "home-copy enter" },
@@ -444,7 +444,7 @@ export const menuScreen: ScreenFactory = (ctx) => {
       accountLine,
       status,
     ),
-    h("nav", { class: "home-index", "aria-label": "more" }, ...rows),
+    h("nav", { class: "home-index", "aria-label": "more" }, drum.listbox, drum.hint),
     // After the index: the art's clip control is the last stop before the footer, as it is visually on phones (order 3)
     // and in reading order on wide screens (right column). Grid areas and flex order place it, not the DOM.
     art,
@@ -488,6 +488,7 @@ export const menuScreen: ScreenFactory = (ctx) => {
       resizeObserver.disconnect();
       unmountClips();
       setMask("");
+      drum.destroy();
       el.remove();
     },
   };

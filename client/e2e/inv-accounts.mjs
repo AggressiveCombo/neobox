@@ -40,6 +40,8 @@ function expectStatuses(statuses, run) {
 }
 
 const goMenu = async (page, base) => {
+  // Closing a modal pops its history entry asynchronously; a goto issued before that lands is aborted.
+  await page.waitForFunction(() => !history.state?.modal);
   await page.goto(base);
   await menuName(page).waitFor();
 };
@@ -201,7 +203,7 @@ async function menuButtons(s) {
   await goMenu(page, s.base);
   const dot = page.locator(".home-unread");
   check(await dot.isVisible(), "unread news dot not shown before opening News");
-  await page.getByRole("button", { name: "News", exact: true }).click();
+  await navTo(page, "News");
   const news = page.getByRole("dialog", { name: "Update news", exact: false });
   await news.waitFor();
   check(await news.getByText("1 of 6", { exact: false }).isVisible(), "news modal not paged 1 of 6");
@@ -820,7 +822,7 @@ async function aboutAndPrivacy(s) {
   check(await page.getByText("Electronic music / chiptune 3", { exact: false }).first().isVisible(), "chiptune credit missing");
   check(await page.getByRole("link", { name: /^Source page for /u }).evaluateAll((as) => as.some((a) => a.href.includes("opengameart.org"))), "OpenGameArt source link missing");
   check(await page.getByText("CC0", { exact: false }).first().isVisible(), "CC0 licence missing");
-  await button(page, "News").click();
+  await page.getByRole("button", { name: "News", exact: true }).click();
   const news = page.getByRole("dialog", { name: "Update news", exact: false });
   await news.waitFor();
   await page.keyboard.press("Escape");

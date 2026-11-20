@@ -13,6 +13,7 @@ import {
   menuName,
   measureFirstChange,
   navTo,
+  drumOption,
   waitStable,
   PASSWORD,
   playFromMenu,
@@ -83,8 +84,8 @@ async function menu(s) {
   const { page } = h;
   await page.goto(s.base);
   await menuName(page).waitFor();
-  check(await button(page, "Quick play").isVisible(), "Quick play button not visible");
-  check(await button(page, "Browse rooms").isVisible(), "Browse rooms button not visible");
+  check(await drumOption(page, "Quick play").isVisible(), "Quick play option not visible");
+  check(await drumOption(page, "Browse rooms").isVisible(), "Browse rooms option not visible");
   const links = ["Training", "Library", "Friends", "Practice", "Replay", "Map editor", "Settings", "About"];
   for (const link of links) {
     await navTo(page, link);
@@ -474,7 +475,7 @@ async function quickPlay(s) {
   const fresh = await s.open("fresh", { name: uniqueName("qf") });
   await fresh.page.goto(s.base);
   await menuName(fresh.page).fill(uniqueName("qf"));
-  await button(fresh.page, "Quick play").click();
+  await playFromMenu(fresh.page, null, { quick: true });
   await fresh.page.getByRole("heading", { name: "Quick play", exact: true }).waitFor();
   // the original's cards: players online and a rotation carousel that steps through the maps
   const card = fresh.page.locator(".quick-card", { hasText: "Sweaty Bois" });
@@ -615,7 +616,7 @@ async function news(s) {
   await page.goto(s.base);
   await menuName(page).waitFor();
   await page.getByText(/\d+ players? online/).waitFor();
-  await page.getByRole("button", { name: /News/ }).click();
+  await navTo(page, "News");
   const dialog = page.getByRole("dialog");
   await dialog.waitFor();
   await page.keyboard.press("Escape");

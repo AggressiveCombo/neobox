@@ -646,16 +646,51 @@ export function button(scope, name) {
   return scope.getByRole("button", { name, exact: true });
 }
 
-/** Clicks a menu link (Library, Friends, Practice, Replay, Map editor, Settings, About). */
+/** The home destinations drum (menu-drum.ts): one option per destination, in the "Destinations" listbox. */
+export function drumOption(page, label) {
+  return page.getByRole("listbox", { name: "Destinations", exact: true }).getByRole("option", { name: label, exact: true });
+}
+
+/**
+ * Rolls the home destinations drum until `label` is centred: the shortest way round, from the keyboard. Untimed.
+ */
+export async function rollDrum(page, label) {
+  const drum = page.getByRole("listbox", { name: "Destinations", exact: true });
+  await drum.waitFor();
+  const { labels, front } = await drum.evaluate((box) => {
+    const opts = [...box.querySelectorAll('[role="option"]')];
+    return {
+      labels: opts.map((o) => o.querySelector(".drum-label").textContent),
+      front: opts.findIndex((o) => o.getAttribute("aria-selected") === "true"),
+    };
+  });
+  const want = labels.indexOf(label);
+  if (want < 0) throw new Error(`no home destination "${label}"`);
+  const n = labels.length;
+  let steps = (((want - front) % n) + n) % n;
+  if (steps > n / 2) steps -= n;
+  if (steps !== 0) {
+    await drum.focus();
+    for (let k = 0; k < Math.abs(steps); k += 1) await page.keyboard.press(steps > 0 ? "ArrowDown" : "ArrowUp");
+  }
+  // The drum has rolled once it reports settled: options are then still and clickable.
+  await drum.and(page.locator('[data-settled="true"]')).waitFor();
+}
+
+/**
+ * Opens a home destination: rolls the drum to it, then clicks the centred option. Clicking a neighbour only rolls it;
+ * the click on the centred option opens it.
+ */
 export async function navTo(page, label) {
-  await button(page.getByRole("navigation", { name: "more", exact: true }), label).click();
+  await rollDrum(page, label);
+  await drumOption(page, label).click();
 }
 
 /** Plays from the menu: fills the guest name when needed, then Quick play or Browse rooms. */
 export async function playFromMenu(page, name, { quick = false } = {}) {
   const input = menuName(page);
   if (name && !(await input.getAttribute("readonly"))) await input.fill(name);
-  await button(page, quick ? "Quick play" : "Browse rooms").click();
+  await navTo(page, quick ? "Quick play" : "Browse rooms");
 }
 
 /** Creates a room from the menu. Returns its code. */
