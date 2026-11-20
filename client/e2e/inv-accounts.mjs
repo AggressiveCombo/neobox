@@ -724,6 +724,7 @@ async function storageAndSync(s) {
   // privacy notice lists the local keys the client writes
   await goMenu(gp, s.base);
   await gp.getByRole("button", { name: "Privacy", exact: true }).click();
+  await gp.getByText("Training badge", { exact: false }).first().waitFor();
   const priv = await gp.locator("body").innerText();
   check(priv.includes("the phone welcome") && priv.includes("Training badge"), "privacy notice does not list phoneSplashSeen/hintSeen");
 
