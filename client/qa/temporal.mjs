@@ -562,12 +562,14 @@ const backdropPixels = async ({ b64, g }) => {
   return { white: page / (scale * scale), voidArea: voidArea / (scale * scale) };
 };
 
-/** E04 backdrop: the menu clip card (desktop light and dark, phone portrait; the phone landscape has no backdrop by design, menu.css). Eight seconds of clip, sampled every 0.5 s: the card's pixels at +1 s, +3 s and +8 s, and at each sample the controls, the centroid and each live player's position. */
+/** E04 backdrop: the menu clip card (desktop light and dark; phone portrait 390x844, phone small 320x568, tablet portrait 768x1024; the phone landscape has no backdrop by design, menu.css). Eight seconds of clip, sampled every 0.5 s: the card's pixels at +1 s, +3 s and +8 s, and at each sample the controls, the centroid and each live player's position. */
 async function menuBackdrop(s) {
   const cases = [
     ["desktop-light", { viewport: { width: 1280, height: 800 } }, false],
     ["desktop-dark", { viewport: { width: 1280, height: 800 } }, true],
     ["phone-portrait", { viewport: { width: 390, height: 844 }, phone: true }, false],
+    ["phone-small", { viewport: { width: 320, height: 568 }, phone: true }, false],
+    ["tablet-portrait", { viewport: { width: 768, height: 1024 } }, false],
   ];
   // the samples that are screenshotted: +1 s, +3 s and +8 s of the clip
   const shots = new Set([1000, 3000, 8000]);
@@ -584,11 +586,15 @@ async function menuBackdrop(s) {
     if (opts.phone) await dismissPhoneSplash(h.page);
     await h.page.locator('.drum[data-settled="true"]').waitFor();
     await h.page.locator(".menu-square.is-live").waitFor({ timeout: 20000 }).catch(() => {});
+    // a short phone (320x568) lays the card below the fold: scroll it into view, the samples are of what the screen shows
+    await h.page.evaluate(() => document.querySelector(".menu-square")?.scrollIntoView({ block: "center" }));
+    await sleep(300);
     // per sampled frame with live players: the centroid's flag, and each live player's flag (inside the card or not)
     let frames = 0;
     let centroidIn = 0;
     const perPlayer = new Map();
     const issues = new Set();
+    let geom = "";
     const pixels = [];
     let live = true;
     let casePage = 0;
@@ -598,6 +604,7 @@ async function menuBackdrop(s) {
       await sleep(500);
       const g = await h.page.evaluate(backdropGeometry);
       if (!g) return { pass: false, detail: `${name}: no menu card or camera` };
+      geom = `arena=${g.arena.map((v) => Math.round(v)).join(",")} bar=${g.controls.map((c) => c.map((v) => Math.round(v)).join(",")).join(" ")}`;
       let px = { white: 0, voidArea: 0 };
       if (g.live && shots.has(wait)) {
         // The card's box can reach past the viewport (a card-past-viewport control issue above): shoot only what is on screen.
@@ -636,7 +643,7 @@ async function menuBackdrop(s) {
     const out = !(frames > 0 && centroidPct >= 100 && minInsidePct >= 98);
     playersOut += out ? 1 : 0;
     if (!live) controls += 1;
-    parts.push(`${name} live=${live} frames=${frames} centroid=${centroidPct.toFixed(0)}% minPlayer=${minInsidePct.toFixed(0)}%${out ? " OUT" : ""} ${pixels.join(" ")}${issues.size ? ` ${[...issues].join(",")}` : ""}${live ? "" : " NO-LIVE-CLIP"}`);
+    parts.push(`${name} live=${live} frames=${frames} centroid=${centroidPct.toFixed(0)}% minPlayer=${minInsidePct.toFixed(0)}%${out ? " OUT" : ""} ${pixels.join(" ")} ${geom}${issues.size ? ` ${[...issues].join(",")}` : ""}${live ? "" : " NO-LIVE-CLIP"}`);
     await h.page.close().catch(() => {});
   }
   return {
