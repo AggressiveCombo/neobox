@@ -232,28 +232,33 @@ impl ReplayRecorder {
     }
 }
 
-/// A seek checkpoint not yet checked against the simulation (see [`ReplayPlayer`]).
+/// A seek checkpoint of the file (see [`ReplayPlayer`]).
 struct Pending {
+    /// position in `Replay::checkpoints`
+    index: usize,
     tick: u32,
     hash: u64,
-    state: State,
+    /// the state, decoded and checked by a seek (the build checks the others as it passes them)
+    state: Option<State>,
 }
 
-/// The checkpoints of a recording, decoded and checked: ascending ticks inside the recording, each state matching its hash. `None` when any fails.
-fn decode_checkpoints(list: &[Checkpoint], first: u32, end: u32) -> Option<VecDeque<Pending>> {
+/// Where a seek starts from (see [`ReplayPlayer::restore_point`]). `Checkpoint` indexes `ReplayPlayer::checkpoints`.
+#[derive(Clone, Copy)]
+enum Restore {
+    Checkpoint(usize),
+    Keyframe(usize),
+}
+
+/// The checkpoints of a recording: ascending ticks inside the recording. Their states are decoded on use. `None` when the ticks are not.
+fn pending_checkpoints(list: &[Checkpoint], first: u32, end: u32) -> Option<VecDeque<Pending>> {
     let mut out = VecDeque::with_capacity(list.len());
     let mut last = first;
-    for c in list {
+    for (index, c) in list.iter().enumerate() {
         if c.tick <= last || c.tick >= end {
             return None;
         }
-        let bytes = B64.decode(&c.state).ok()?;
-        let state = decode_state(&bytes).ok()?;
-        if checksum(&state) != c.hash {
-            return None;
-        }
         last = c.tick;
-        out.push_back(Pending { tick: c.tick, hash: c.hash, state });
+        out.push_back(Pending { index, tick: c.tick, hash: c.hash, state: None });
     }
     Some(out)
 }
@@ -261,9 +266,10 @@ fn decode_checkpoints(list: &[Checkpoint], first: u32, end: u32) -> Option<VecDe
 /// Plays a recording: steps forward tick by tick and seeks anywhere.
 ///
 /// A seek starts from the nearest earlier state it has: a checkpoint from the file, else a keyframe.
+/// A checkpoint is decoded and checked the first time a seek starts from it.
 /// [`ReplayPlayer::build_keyframes`] simulates the keyframes from the start (every [`KEYFRAME_INTERVAL`] ticks)
-/// and checks each checkpoint as it passes it. Until then checkpoints are unverified: a seek may show
-/// a wrong frame, and a mismatch drops every checkpoint.
+/// and checks each checkpoint against the simulation as it passes it. A checkpoint whose state matches its hash can still
+/// be wrong, which only the build sees: a seek may show a wrong frame until then. A failed check drops every checkpoint.
 pub struct ReplayPlayer {
     pub replay: Replay,
     sim: Sim,
@@ -314,8 +320,8 @@ impl ReplayPlayer {
             events.push(t.events);
         }
         let end = first + count;
-        // a checkpoint set that fails the checks is dropped whole
-        let (checkpoints, failed) = match decode_checkpoints(&replay.checkpoints, first, end) {
+        // a checkpoint set with ticks out of order or outside the recording is dropped whole
+        let (checkpoints, failed) = match pending_checkpoints(&replay.checkpoints, first, end) {
             Some(c) => (c, false),
             None => (VecDeque::new(), !replay.checkpoints.is_empty()),
         };
@@ -386,9 +392,9 @@ impl ReplayPlayer {
     /// holds the states at `tick - 1` and `tick` (the interpolation pair).
     pub fn seek(&mut self, tick: u32) {
         let tick = tick.clamp(self.first, self.end);
-        let (rt, rs) = self.restore_point(tick);
-        let restore = (tick < self.tick || rt > self.tick).then(|| (rt, rs.clone()));
-        if let Some((rt, s)) = restore {
+        let (rt, from) = self.restore_point(tick);
+        if tick < self.tick || rt > self.tick {
+            let s = self.restore_state(from).clone();
             self.tick = rt;
             self.prev = s.clone();
             self.state = s;
@@ -399,7 +405,7 @@ impl ReplayPlayer {
     }
 
     /// Whether a seek to `tick` must wait for the build: it would step more than two intervals from where it starts, and the build has work left.
-    pub fn seek_waits(&self, tick: u32) -> bool {
+    pub fn seek_waits(&mut self, tick: u32) -> bool {
         let tick = tick.clamp(self.first, self.end);
         let (rt, _) = self.restore_point(tick);
         let from = if tick < self.tick || rt > self.tick { rt } else { self.tick };
@@ -407,15 +413,44 @@ impl ReplayPlayer {
     }
 
     /// The state a seek to `tick` starts from, at or before `tick - 1`: the last checkpoint, else the last keyframe.
-    fn restore_point(&self, tick: u32) -> (u32, &State) {
+    /// A checkpoint is decoded and checked here on first use (see [`ReplayPlayer::verify_checkpoint`]).
+    fn restore_point(&mut self, tick: u32) -> (u32, Restore) {
         let before = tick.saturating_sub(1).max(self.first);
         let n = self.checkpoints.partition_point(|c| c.tick <= before);
-        if n > 0 {
-            let c = &self.checkpoints[n - 1];
-            return (c.tick, &c.state);
+        if n > 0 && self.verify_checkpoint(n - 1) {
+            return (self.checkpoints[n - 1].tick, Restore::Checkpoint(n - 1));
         }
-        let k = &self.keyframes[self.keyframes.partition_point(|k| k.0 <= before) - 1];
-        (k.0, &k.1)
+        let k = self.keyframes.partition_point(|k| k.0 <= before) - 1;
+        (self.keyframes[k].0, Restore::Keyframe(k))
+    }
+
+    fn restore_state(&self, from: Restore) -> &State {
+        match from {
+            Restore::Checkpoint(i) => self.checkpoints[i].state.as_ref().expect("verified by restore_point"),
+            Restore::Keyframe(k) => &self.keyframes[k].1,
+        }
+    }
+
+    /// Decodes checkpoint `i` (once) and checks its state against its hash. A bad encoding or a mismatch
+    /// drops every checkpoint and sets `failed`. Returns whether checkpoint `i` is usable.
+    fn verify_checkpoint(&mut self, i: usize) -> bool {
+        if self.checkpoints[i].state.is_some() {
+            return true;
+        }
+        let hash = self.checkpoints[i].hash;
+        let c = &self.replay.checkpoints[self.checkpoints[i].index];
+        let state = B64.decode(&c.state).ok().and_then(|b| decode_state(&b).ok()).filter(|s| checksum(s) == hash);
+        match state {
+            Some(s) => {
+                self.checkpoints[i].state = Some(s);
+                true
+            }
+            None => {
+                self.checkpoints.clear();
+                self.failed = true;
+                false
+            }
+        }
     }
 
     /// Whether the build has work left: checkpoints to check, or keyframes still to keep.
@@ -664,12 +699,13 @@ mod tests {
     }
 
     #[test]
-    fn a_checkpoint_that_does_not_match_its_hash_is_dropped_on_open() {
+    fn a_checkpoint_that_does_not_match_its_hash_is_dropped_when_a_seek_reaches_it() {
         let (hashes, mut source) = recording(900, 0x9e37_79b9_7f4a_7c15u64, true);
         source.checkpoints[1].hash ^= 1;
         let mut player = ReplayPlayer::new(source).unwrap();
-        assert!(player.checkpoints_failed(), "the whole set is dropped at decode");
+        assert!(!player.checkpoints_failed(), "a checkpoint is checked when a seek starts from it");
         assert!(player.seek_waits(430), "seeks step from the keyframes again");
+        assert!(player.checkpoints_failed(), "the whole set is dropped");
         while !player.build_keyframes(100) {}
         check_seeks(&mut player, &hashes, &[430, 61, 300, 899, 1, 0, 600]);
     }
