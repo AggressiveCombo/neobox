@@ -29,6 +29,8 @@ const CASES = [
   { id: "parity.box", panTool: "Box", pan: "right", tool: "Box", drags: FIXTURE.boxes },
   { id: "pan.ctrl.box", panTool: "Box", pan: "ctrl", tool: "Box", drags: FIXTURE.boxes },
   { id: "pan.ctrl.select", panTool: "Select", pan: "ctrl", tool: "Circle", drags: FIXTURE.circles.slice(0, 1) },
+  { id: "pan.right.box", panTool: "Box", pan: "right", tool: "Box", drags: FIXTURE.boxes },
+  { id: "pan.right.select", panTool: "Select", pan: "right", tool: "Circle", drags: FIXTURE.circles.slice(0, 1) },
 ];
 
 const engines = selectedEngines();
