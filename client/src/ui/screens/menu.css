@@ -389,8 +389,8 @@ button.home-account {
   flex: none;
   margin-left: auto;
   padding: 1px 5px;
-  background: var(--accent);
-  color: var(--accent-ink);
+  background: var(--surface-2);
+  color: var(--ink);
   font-size: 0.6875rem;
   font-weight: 600;
   letter-spacing: 0.02em;
