@@ -42,8 +42,13 @@ export interface AppCtx {
   toast(text: string, kind?: "info" | "error"): void;
   /** Connect if needed, say hello with `name`, then show the room browser. */
   play(name: string): void;
-  /** Join a room by code (connects with the saved name first, or asks for a name on the menu). */
-  joinRoom(code: string): void;
+  /**
+   * Join a room by code, with its password if it has one. The room's pending state shows at once; the server's answer
+   * follows (connects first with the saved name when needed).
+   */
+  joinRoom(code: string, password?: string | null): void;
+  /** Give up the join or room list still pending (Back or Cancel): returns to where the join was started. */
+  cancelJoin(): void;
   /** Quick play: find a room of mode `queue` (`qp_1`, ...), skipping quick-play rooms already visited. */
   quickPlay(queue: string): void;
   /** Close the connection and return to the main menu. */

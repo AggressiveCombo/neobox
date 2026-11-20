@@ -901,3 +901,44 @@ button.room-menu-item[aria-checked="true"] {
     min-height: 48px;
   }
 }
+
+/* A join waiting for the server: a pulsing dot, the room's name and Cancel. */
+.room-screen .room-joining {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  margin: 24px auto;
+  padding: 16px;
+  max-width: 480px;
+  color: var(--ink);
+}
+
+.room-screen .room-joining-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--accent);
+  animation: room-joining-pulse 1s ease-in-out infinite;
+}
+
+.room-screen .room-joining-text {
+  margin: 0;
+  flex: 1;
+}
+
+@keyframes room-joining-pulse {
+  0%,
+  100% {
+    opacity: 0.3;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .room-screen .room-joining-dot {
+    animation: none;
+  }
+}

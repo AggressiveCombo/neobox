@@ -52,6 +52,12 @@ export interface Account {
   xp: number;
 }
 
+/**
+ * What a screen shows while the server has not answered yet: the room list being loaded (`error` set when the
+ * connection failed), or a room being joined. Set when the player acts, so the screen moves at once.
+ */
+export type Pending = { kind: "list"; error: string | null } | { kind: "room"; code: string } | null;
+
 export interface AppState {
   screen: Screen;
   name: string;
@@ -90,6 +96,10 @@ export interface AppState {
   editorForRoom: boolean;
   /** A refusal or removal from the server, shown on the browser until dismissed (e.g. kicked from a room). */
   notice: string | null;
+  /** What the screen shows until the server answers (see Pending). */
+  pending: Pending;
+  /** Browse row whose password field is open. Kept when its join is refused, so the field stays for another try. */
+  openRoom: string | null;
 }
 
 export type Listener<T> = (state: T, prev: T) => void;
@@ -139,5 +149,7 @@ export function initialState(): AppState {
     typing: {},
     editorForRoom: false,
     notice: null,
+    pending: null,
+    openRoom: null,
   };
 }

@@ -73,13 +73,26 @@ export const browserScreen: ScreenFactory = (ctx) => {
   const { store } = ctx;
 
   let rooms: RoomInfo[] = store.state.rooms;
-  /** Code of the locked room whose password field is open. */
-  let pendingCode: string | null = null;
+  // The locked room whose password field is open is the store's openRoom: a refused join leaves it open.
   let hideFull = false;
 
   const roomList = h("ul", { class: "room-table", "aria-label": "rooms" });
   const emptyHint = h("p", { class: "empty" });
   const total = h("p", { class: "muted num room-total", role: "status" });
+  /** The room list while it loads: a skeleton of rows, or the refusal that stopped it, with Try again. */
+  const loadingBox = h(
+    "div",
+    { class: "room-loading", role: "status", "aria-label": "Loading rooms" },
+    h("ul", { class: "room-skeleton", "aria-hidden": "true" }, ...Array.from({ length: 6 }, () => h("li", { class: "room-skel" }))),
+    h("p", { class: "muted" }, "Loading rooms…"),
+  );
+  const errorText = h("p", { class: "room-error-text" });
+  const errorBox = h(
+    "div",
+    { class: "room-error", role: "alert" },
+    errorText,
+    h("button", { type: "button", class: "primary", onclick: () => retryList() }, icon("refresh-cw", 18), "Try again"),
+  );
   /** Each listed room's row by code, with the key it was built from: a row is rebuilt only when what it shows changes. */
   const rowCache = new Map<string, { key: string; el: HTMLLIElement }>();
 
@@ -220,7 +233,7 @@ export const browserScreen: ScreenFactory = (ctx) => {
         onsubmit: (e: Event) => {
           e.preventDefault();
           if (input.value === "") return;
-          ctx.send({ t: "join_room", room: code, password: input.value });
+          ctx.joinRoom(code, input.value);
         },
       },
       h("h2", null, `Room ${code} needs a password`),
@@ -274,7 +287,7 @@ export const browserScreen: ScreenFactory = (ctx) => {
         onsubmit: (e: Event) => {
           e.preventDefault();
           if (input.value === "") return;
-          ctx.send({ t: "join_room", room: room.code, password: input.value });
+          ctx.joinRoom(room.code, input.value);
         },
       },
       input,
@@ -284,13 +297,18 @@ export const browserScreen: ScreenFactory = (ctx) => {
 
   function onRoomClick(room: RoomInfo): void {
     if (room.password) {
-      pendingCode = pendingCode === room.code ? null : room.code;
-      renderRooms();
-      if (pendingCode !== null) roomList.querySelector<HTMLInputElement>(".join-password")?.focus();
+      store.set({ openRoom: store.state.openRoom === room.code ? null : room.code });
+      if (store.state.openRoom !== null) roomList.querySelector<HTMLInputElement>(".join-password")?.focus();
       return;
     }
-    pendingCode = null;
+    store.set({ openRoom: null });
     ctx.joinRoom(room.code);
+  }
+
+  /** Try the list again: the connection is opened once more with the saved name. */
+  function retryList(): void {
+    store.set({ pending: { kind: "list", error: null } });
+    ctx.play(store.state.name);
   }
 
   /** Flag image of the host's country; the name is the alt text and tooltip. */
@@ -300,7 +318,7 @@ export const browserScreen: ScreenFactory = (ctx) => {
   }
 
   function roomItem(room: RoomInfo): HTMLLIElement {
-    const open = room.password && pendingCode === room.code;
+    const open = room.password && store.state.openRoom === room.code;
     const row = h(
       "button",
       {
@@ -364,7 +382,7 @@ export const browserScreen: ScreenFactory = (ctx) => {
     const focusKey = active instanceof HTMLElement ? active.dataset.focusKey : undefined;
     const items: HTMLLIElement[] = [];
     for (const room of shown) {
-      const key = JSON.stringify([room, pendingCode === room.code, store.state.country]);
+      const key = JSON.stringify([room, store.state.openRoom === room.code, store.state.country]);
       const cached = rowCache.get(room.code);
       if (cached !== undefined && cached.key === key) {
         items.push(cached.el);
@@ -396,21 +414,29 @@ export const browserScreen: ScreenFactory = (ctx) => {
       const next = rowCache.get(owner.dataset.code ?? "")?.el;
       next?.querySelector<HTMLElement>(`[data-focus-key="${focusKey}"]`)?.focus({ preventScroll: true });
     }
-    total.textContent = shown.length === rooms.length ? `${rooms.length} open` : `${shown.length} of ${rooms.length} open`;
+    const busy = store.state.pending?.kind === "list";
+    // Refresh and New room need the server: while the list loads (or has failed) they wait for it.
+    refreshBtn.disabled = busy;
+    newRoomBtn.disabled = busy;
+    total.textContent = busy ? "" : shown.length === rooms.length ? `${rooms.length} open` : `${shown.length} of ${rooms.length} open`;
     emptyHint.textContent =
       rooms.length === 0
         ? "No open rooms right now. Create one and invite friends."
         : "No rooms match. Clear the search or show full rooms.";
-    emptyHint.hidden = shown.length > 0;
+    emptyHint.hidden = busy || shown.length > 0;
+    roomList.hidden = busy;
+    const failure = store.state.pending?.kind === "list" ? store.state.pending.error : null;
+    loadingBox.hidden = !busy || failure !== null;
+    errorBox.hidden = failure === null;
+    errorText.textContent = failure ?? "";
   }
 
+  const refreshBtn = h("button", { type: "button", onclick: () => ctx.send({ t: "list_rooms" }) }, icon("refresh-cw", 18), "Refresh");
+  const newRoomBtn = h("button", { type: "button", class: "primary", onclick: () => openCreateRoom() }, icon("plus", 18), "New room");
   const head = pageHead({
     title: "Browse rooms",
     back: () => ctx.disconnect(),
-    actions: [
-      h("button", { type: "button", onclick: () => ctx.send({ t: "list_rooms" }) }, icon("refresh-cw", 18), "Refresh"),
-      h("button", { type: "button", class: "primary", onclick: () => openCreateRoom() }, icon("plus", 18), "New room"),
-    ],
+    actions: [refreshBtn, newRoomBtn],
   });
 
   const roomsSection = h(
@@ -437,6 +463,8 @@ export const browserScreen: ScreenFactory = (ctx) => {
     ),
     roomList,
     emptyHint,
+    loadingBox,
+    errorBox,
   );
 
   const el = page("browser", head, noticeSlot, codeForm, inviteSlot, roomsSection);
@@ -448,7 +476,7 @@ export const browserScreen: ScreenFactory = (ctx) => {
   return {
     el,
     update(state, prev) {
-      if (state.rooms !== prev.rooms || state.country !== prev.country) {
+      if (state.rooms !== prev.rooms || state.country !== prev.country || state.pending !== prev.pending || state.openRoom !== prev.openRoom) {
         rooms = state.rooms;
         renderRooms();
       }

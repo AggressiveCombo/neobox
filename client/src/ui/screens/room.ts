@@ -1151,6 +1151,15 @@ export const roomScreen: ScreenFactory = (ctx: AppCtx) => {
   const header = h("header", { class: "room-header" });
   const notice = h("p", { class: "room-notice", role: "status" });
   const startNotice = h("div", { class: "room-starting", role: "status" });
+  // A join waiting for the server's answer: the room's name and a Cancel that returns to the browser (or the menu).
+  const joiningText = h("p", { class: "room-joining-text" });
+  const joining = h(
+    "section",
+    { class: "room-joining", role: "status", "aria-live": "polite" },
+    h("span", { class: "room-joining-dot", "aria-hidden": "true" }),
+    joiningText,
+    h("button", { type: "button", onclick: () => ctx.cancelJoin() }, "Cancel"),
+  );
   const startButton = h("button", { type: "button", class: "room-btn primary", onclick: () => void start() }, icon("play", 16), "Start");
   const dockStatus = h("p", { class: "room-dock-status", role: "status" });
   const dock = h("footer", { class: "room-dock", "aria-label": "Match controls" }, dockStatus, h("div", { class: "room-dock-actions" }, startButton));
@@ -1290,7 +1299,7 @@ export const roomScreen: ScreenFactory = (ctx: AppCtx) => {
     h("div", { class: "room-col room-col-chat" }, chatPanel),
   );
   // The tabs, header, notice and sections scroll together; the tabs come first so the phone's sticky switch is always in view (320x256 zoomed: the header above it hid them under the dock) and DOM order matches the layout. The dock sits outside the scroller so it never covers content.
-  const content = h("main", { class: "room-content" }, tabBar, header, notice, startNotice, main);
+  const content = h("main", { class: "room-content" }, tabBar, header, notice, startNotice, joining, main);
   const root = h("div", { class: "room-screen", "data-tab": "players" }, content, dock);
 
   // The sticky tabs cover the scroller's top edge. Their height feeds scroll-margin in room.css, so focus scrolling keeps the focused control clear of them.
@@ -1456,6 +1465,10 @@ export const roomScreen: ScreenFactory = (ctx: AppCtx) => {
   function renderRoom(): void {
     const room = st.room;
     const inNotice = room !== null && room.in_match && !st.inMatch;
+    const joinCode = st.pending?.kind === "room" ? st.pending.code : null;
+    joining.hidden = joinCode === null;
+    joiningText.textContent = joinCode === null ? "" : `Joining room ${joinCode}…`;
+    tabBar.hidden = room === null;
     header.hidden = room === null;
     main.hidden = room === null;
     dock.hidden = room === null;
@@ -1562,6 +1575,7 @@ export const roomScreen: ScreenFactory = (ctx: AppCtx) => {
       bannerSpace();
       if (next.account !== prev.account) void loadFriends();
       if (
+        next.pending !== prev.pending ||
         next.room !== prev.room ||
         next.myId !== prev.myId ||
         next.inMatch !== prev.inMatch ||

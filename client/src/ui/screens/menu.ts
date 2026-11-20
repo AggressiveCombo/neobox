@@ -224,8 +224,11 @@ export const menuScreen: ScreenFactory = (ctx) => {
     attempted = true;
     store.set({ name, intent: null });
     // Offline there is nothing to connect to: the offline page for Browse takes over, and its Retry connects.
-    if (navigator.onLine) ctx.play(name);
-    else store.set({ screen: "browse" });
+    if (navigator.onLine) {
+      // The browser opens at once with its loading state; the server's welcome and room list fill it in.
+      store.set({ screen: "browse", pending: { kind: "list", error: null } });
+      ctx.play(name);
+    } else store.set({ screen: "browse" });
   }
 
   function syncMute(): void {

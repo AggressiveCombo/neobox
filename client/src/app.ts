@@ -14,7 +14,7 @@ import { Net, type CloseNotice, type NetStatus } from "./net";
 import { NAME_RE, PROTOCOL_VERSION, type ClientMsg, type MatchStart, type RoomState, type ServerMsg } from "./protocol";
 import { createRenderer, type Renderer } from "./render";
 import { Overlay } from "./render/overlay";
-import { CHAT_LIMIT, Store, initialState, type AppState, type ChatLine, type Screen } from "./state";
+import { CHAT_LIMIT, Store, initialState, type AppState, type ChatLine, type Pending, type Screen } from "./state";
 import { NAME_STORAGE_KEY, SEAT_STORAGE_KEY } from "./storage-keys";
 import { local, session } from "./storage";
 import { aboutScreen } from "./ui/screens/about";
@@ -157,8 +157,10 @@ export function start(): Store<AppState> {
   let failureSaid = false;
   let mapsP: Promise<BuiltinMap[]> | null = null;
   let pendingName: string | null = null;
-  /** Room to join once the server has welcomed us (invite links, friends). */
-  let pendingJoin: string | null = null;
+  /** Room to join once the server has welcomed us (invite links, friends), with the password it was given. */
+  let pendingJoin: { room: string; password: string | null } | null = null;
+  /** The screen a join was started from: Back or Cancel on its pending state returns there. */
+  let joinFrom: Screen = "browse";
   /** The room we are in and its resume token (from `joined`); kept across a dropped connection. */
   let roomCode: string | null = null;
   let resumeToken: string | null = null;
@@ -307,6 +309,7 @@ export function start(): Store<AppState> {
     toast,
     play,
     joinRoom,
+    cancelJoin: () => abandonJoin(joinFrom),
     quickPlay,
     disconnect,
     roomMap: () => {
@@ -419,6 +422,11 @@ export function start(): Store<AppState> {
   store.subscribe((state, prev) => {
     if (state.screen !== mounted) mount(state.screen);
     current?.update(state, prev);
+  });
+  // The open row's password field belongs to the browser: it closes when another screen shows or a room is entered.
+  store.subscribe((state, prev) => {
+    if (state.openRoom === null) return;
+    if ((state.screen !== "browse" && state.screen !== "room") || (state.room !== null && state.room !== prev.room)) store.set({ openRoom: null });
   });
 
   // The main menu plays its track; a match plays the in-match playlist; the other
@@ -654,7 +662,7 @@ export function start(): Store<AppState> {
   }
 
   /** Back to `screen` (the main menu by default), forgetting the room and any reconnect in progress. */
-  function resetToMenu(screen: Screen = "menu"): void {
+  function resetToMenu(screen: Screen = "menu", pending: Pending = null): void {
     stopReconnect();
     pendingMatch = null;
     roomCode = null;
@@ -664,6 +672,7 @@ export function start(): Store<AppState> {
     saveSeat();
     store.set({
       screen,
+      pending,
       myId: null,
       serverName: "",
       rooms: [],
@@ -703,6 +712,7 @@ export function start(): Store<AppState> {
       typing: {},
       editorForRoom: false,
       screen: next,
+      pending: null,
     });
     if (server !== null) connectServer(null, null);
     else net.send({ t: "list_rooms" });
@@ -803,15 +813,18 @@ export function start(): Store<AppState> {
           return;
         }
         const queue = store.state.intent;
-        store.set({ serverName: msg.server, screen: queue === null ? "browse" : "quick", intent: null });
+        // A join in progress keeps its screen: the room screen shows its pending state until the room answers.
+        const joining = store.state.pending?.kind === "room";
+        store.set({ serverName: msg.server, screen: queue !== null ? "quick" : joining ? store.state.screen : "browse", intent: null });
         // The offline page for Browse waits on this welcome: mount the list now that the socket is open.
         if (offlineShown) mount(store.state.screen);
         net.send({ t: "list_rooms" });
         if (pendingJoin !== null) {
           // A join on a game server resumes this tab's seat (see joinRoom): if that fails, the server is gone.
           resuming = server !== null;
-          sendJoin(pendingJoin, null);
+          const join = pendingJoin;
           pendingJoin = null;
+          sendJoin(join.room, join.password);
         } else if (queue !== null) {
           quickPlay(queue);
         }
@@ -838,7 +851,15 @@ export function start(): Store<AppState> {
           }
           return;
         }
-        if (msg.code === "wrong_password" && joinAttempt !== null) store.set({ invite: joinAttempt });
+        // A list still loading shows the refusal on the browser (with Try again); a join leaves the room screen for the browser.
+        const waiting = store.state.pending;
+        if (waiting?.kind === "list") {
+          store.set({ pending: { kind: "list", error: msg.message } });
+          return;
+        }
+        if (waiting?.kind === "room") store.set({ pending: null, screen: "browse" });
+        // A refused join from a locked row keeps the row's field open; any other refused join asks for the password in the invite slot.
+        if (msg.code === "wrong_password" && joinAttempt !== null && store.state.openRoom !== joinAttempt) store.set({ invite: joinAttempt });
         // Quick play found a room that filled up or closed meanwhile: skip it and look again (from home).
         if (matching !== null && roomCode === null && (msg.code === "room_full" || msg.code === "room_not_found")) {
           if (joinAttempt !== null) quickVisited.add(joinAttempt.toUpperCase());
@@ -865,7 +886,7 @@ export function start(): Store<AppState> {
         return;
       }
       case "rooms":
-        store.set({ rooms: msg.rooms, country: msg.country });
+        store.set({ rooms: msg.rooms, country: msg.country, pending: store.state.pending?.kind === "room" ? store.state.pending : null });
         return;
       case "redirect":
         // Another server hosts what we asked for: leave our room here and connect there.
@@ -885,6 +906,7 @@ export function start(): Store<AppState> {
           room: msg.room,
           chat,
           invite: null,
+          pending: null,
           screen: keep ? store.state.screen : "room",
         });
         return;
@@ -1043,6 +1065,14 @@ export function start(): Store<AppState> {
         return;
       }
     }
+    // A list still loading, or a join in progress, cannot finish now: back to the browser, which says why the list did not load.
+    const waiting = store.state.pending;
+    if (waiting !== null) {
+      pendingJoin = null;
+      const error = waiting.kind === "list" && waiting.error !== null ? waiting.error : notice?.text || "Could not reach the server.";
+      resetToMenu("browse", { kind: "list", error });
+      return;
+    }
     // Offline, Browse stays where it is: its offline page says so, and Retry reconnects. Other screens go to the menu.
     const offlineBrowse = !navigator.onLine && store.state.screen === "browse";
     // The browser draws its notice panel only on its own screen. A notice still pending here (the kick that the
@@ -1069,20 +1099,23 @@ export function start(): Store<AppState> {
   }
 
   /**
-   * Join room `code`. A room we hold a seat in lives on that seat's server, any other on the home server
-   * (which redirects to the right one). Connects first when needed; the welcome then sends the join.
+   * Join room `code` (with `password` if it needs one). The screen moves to the room's pending state at once; the
+   * server answers later. A room we hold a seat in lives on that seat's server, any other on the home server (which
+   * redirects to the right one). Connects first when needed; the welcome then sends the join.
    */
-  function joinRoom(code: string): void {
+  function joinRoom(code: string, password: string | null = null): void {
     if (!navigator.onLine) {
       toast("You are offline: rooms need the server.", "error");
       return;
     }
+    if (store.state.room === null) joinFrom = store.state.screen === "browse" ? "browse" : "menu";
+    store.set({ pending: { kind: "room", code }, screen: "room", invite: null });
     const target = seat(code)?.server ?? null;
     if (net.status === "open" && store.state.serverName !== "" && server === target) {
-      sendJoin(code, null);
+      sendJoin(code, password);
       return;
     }
-    pendingJoin = code;
+    pendingJoin = { room: code, password };
     let name = store.state.account?.name ?? (store.state.name || local.getItem(NAME_STORAGE_KEY) || "");
     // A first visit has no name yet: join as a guest, as the menu offers one.
     if (!NAME_RE.test(name)) name = guestName();
@@ -1093,6 +1126,22 @@ export function start(): Store<AppState> {
     }
     store.set({ name });
     connectServer(target, null);
+  }
+
+  /**
+   * Give up the pending join or list (Back, or Cancel): the connection is replaced, so the server forgets the join,
+   * and the screen moves to `next`. Browse reconnects home for its list; any other screen disconnects.
+   */
+  function abandonJoin(next: Screen): void {
+    pendingJoin = null;
+    resuming = false;
+    if (next === "browse") {
+      store.set({ screen: "browse", pending: { kind: "list", error: null }, openRoom: null });
+      connectServer(null, null);
+      return;
+    }
+    disconnect();
+    if (next !== "menu") store.set({ screen: next });
   }
 
   /** Find a quick-play room of mode `queue`, skipping the quick-play rooms this page has been in. */
@@ -1107,6 +1156,7 @@ export function start(): Store<AppState> {
     pendingName = null;
     pendingJoin = null;
     matching = null;
+    store.set({ pending: null });
     net.close();
     resetToMenu();
   }
@@ -1165,8 +1215,9 @@ export function start(): Store<AppState> {
       // Back to the screen this one was entered from: the entry below is that screen.
       history.back();
     } else if (wasRoom) {
-      // Leaving the room's screens for another: the room's entry becomes that screen (no dead room entry).
-      history.replaceState({ screen: state.screen, prev: cur.prev }, "", url);
+      // Leaving the room's screens for another: the room's entry becomes that screen (no dead room entry). A kick leaves
+      // in place, so the entry keeps no back link: a close that follows the kick pushes its screen, never traverses.
+      history.replaceState({ screen: state.screen, prev: leavingInPlace ? null : cur.prev }, "", url);
     } else {
       history.pushState({ screen: state.screen, prev: prev.screen }, "", url);
     }
@@ -1203,10 +1254,13 @@ export function start(): Store<AppState> {
       const s = store.state;
       let target: Screen = nav.screen === "match" && !s.inMatch ? "room" : nav.screen;
       if ((target === "room" || target === "match") && s.room === null) target = "browse";
-      if ((target === "browse" || target === "quick" || target === "room" || target === "match") && s.serverName === "") target = "menu";
+      if ((target === "browse" || target === "quick" || target === "room" || target === "match") && s.serverName === "" && target !== s.screen) target = "menu";
       if (target !== s.screen) {
-        // Back out of the room's screens leaves the room, as its Leave button does.
-        if (roomCode !== null && !inRoomScreen(target, s.editorForRoom)) {
+        // A join or list still pending is abandoned on Back: its answer must not land on the screen Back went to.
+        if (s.pending !== null) {
+          abandonJoin(target);
+        } else if (roomCode !== null && !inRoomScreen(target, s.editorForRoom)) {
+          // Back out of the room's screens leaves the room, as its Leave button does.
           net.send({ t: "leave_room" });
           leaveRoom(target);
         } else {

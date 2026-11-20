@@ -362,3 +362,47 @@ button.room-row {
     padding: 0 8px 12px;
   }
 }
+
+/* The room list while it loads: skeleton rows that shimmer; reduced motion keeps them still. */
+.room-skeleton {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.room-skel {
+  height: 52px;
+  border-radius: 6px;
+  background: linear-gradient(90deg, var(--surface-2) 25%, var(--line) 50%, var(--surface-2) 75%) 0 0 / 200% 100%;
+  animation: room-skel-shimmer 1.2s var(--ease) infinite;
+}
+
+@keyframes room-skel-shimmer {
+  from {
+    background-position: 100% 0;
+  }
+  to {
+    background-position: -100% 0;
+  }
+}
+
+.room-error {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  padding: 16px 0;
+}
+
+.room-error-text {
+  margin: 0;
+  color: var(--ink);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .room-skel {
+    animation: none;
+  }
+}
