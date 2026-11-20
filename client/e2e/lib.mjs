@@ -48,6 +48,8 @@ const STEP_TIMEOUT = 15_000;
 const FONT_ABORT_RE = /downloadable font: download failed .*status=2152398850\b/;
 /** YouTube's jukebox embed logs rejected third-party cookies; only that message from a YouTube-origin file is noise. */
 const YOUTUBE_COOKIE_RE = /Cookie .* has been rejected/;
+/** Firefox's report of a WebSocket closed by a page load that had not finished (a reload right after a match joins). */
+const RELOAD_SOCKET_RE = /^The connection to wss?:\/\/\S+ was interrupted while the page was loading\.$/;
 const YOUTUBE_ORIGIN_RE = /^https:\/\/(www\.)?youtube\.com\//;
 /** A stand-in for YouTube's IFrame API: `YT.Player` reports ready on the next tick and has no-op controls. */
 const YOUTUBE_API_STUB = `window.YT = { Player: function (el, opts) {
@@ -438,12 +440,14 @@ export class Scenario {
     }
     const page = await context.newPage();
     page.setDefaultTimeout(STEP_TIMEOUT);
-    const handle = { label, context, page, ip, problems: [], allowedDialogs: new Set() };
+    const handle = { label, context, page, ip, problems: [], allowedDialogs: new Set(), reloading: false };
     page.on("pageerror", (err) => handle.problems.push(`${label}: page error: ${err.message}`));
     page.on("console", (msg) => {
       if (msg.type() !== "error") return;
       // The font abort is the browser's own, not the page's: only that exact status is ignored.
       if (FONT_ABORT_RE.test(msg.text())) return;
+      // A reload the scenario asked for closes the open socket mid-load; Firefox reports that close as a console error.
+      if (handle.reloading && RELOAD_SOCKET_RE.test(msg.text())) return;
       const url = msg.location().url ?? "";
       if (YOUTUBE_COOKIE_RE.test(msg.text()) && YOUTUBE_ORIGIN_RE.test(url)) return;
       handle.problems.push(`${label}: console error: ${msg.text()}${url ? ` (${url})` : ""}`);
