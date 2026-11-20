@@ -16,7 +16,10 @@
 //                                  overlay.backdrop.players.out.count (cases where the centroid is outside the card in any sampled frame, or a live player is inside it in < 98% of its frames)
 //                                  overlay.backdrop.arena.out.count (samples where an arena corner or a wall corner is outside the card, margin < 0),
 //                                  overlay.backdrop.label.out.count (samples where a player name label box is outside the card),
-//   E05 font.pref.metricDelta     About page: readable-font pref changes text metrics (%)
+//   E05 font.pref.metricDelta     About page: readable-font pref keeps the text's x-height (%, gated <= 6);
+//                                  font.pref.layout.problems: About and Settings > Accessibility with the readable font on: reflow problems
+//                                  (overflow, clipped text, overlap, off-screen) and visible buttons lost, counted vs the default font (gated 0);
+//                                  font.pref.heightDelta: About paragraph block height change (%, info only)
 //   E07 copy.claims.unsourced     copy claims with no source (no browser; copy-claims.mjs)
 //   E08 transition.present        settings sections and training Next: share of changes that animate (browser animation events and scroll timing; rAF samples secondary)
 //   E09 scroll.target.offset      settings nav: section lands at the scroll target (px)
@@ -40,6 +43,7 @@ import { Results, QA_DIR, dismissPhoneSplash, launchEngine, median, navTo, perce
 import { stateById } from "./states.mjs";
 import { runCopyClaims, loadRegister } from "./copy-claims.mjs";
 import { validateRecord } from "./thresholds.mjs";
+import { domMeasure, reflowDetails, reflowIssues } from "./metrics.mjs";
 
 const KEYS = ["ArrowLeft", "ArrowRight", "ArrowUp", "KeyX", "KeyZ", "KeyC", "KeyV"];
 const PREFS_KEY = "neobox.prefs"; // src/storage-keys.ts
@@ -797,12 +801,20 @@ async function fontPref(s) {
       const height = ps.reduce((a, p) => a + p.getBoundingClientRect().height, 0);
       let xh = 0;
       if (ps[0]) {
+        // x-height at 1000 px, scaled to the paragraph's font size: integer-px canvas measures round small changes away
+        const cs = getComputedStyle(ps[0]);
         const c = document.createElement("canvas").getContext("2d");
-        c.font = getComputedStyle(ps[0]).font;
-        xh = c.measureText("x").actualBoundingBoxAscent;
+        c.font = `${cs.fontStyle} ${cs.fontWeight} 1000px ${cs.fontFamily}`;
+        xh = (c.measureText("x").actualBoundingBoxAscent / 1000) * parseFloat(cs.fontSize);
       }
       return { height, xh, n: ps.length };
     });
+  const buttons = () =>
+    page.evaluate(() =>
+      [...document.querySelectorAll("button")]
+        .filter((b) => b.offsetParent !== null && b.getBoundingClientRect().width > 0)
+        .map((b) => b.textContent.trim() || b.getAttribute("aria-label") || ""),
+    );
   const setPrefs = (extra) =>
     page.evaluate(
       ({ key, extra }) => {
@@ -818,17 +830,62 @@ async function fontPref(s) {
     await navTo(page, "About");
     await sleep(400);
   };
+  // Layout guard on the current page, with the readable font on: reflow problems (overflow, clipped text, overlap,
+  // off-screen) plus buttons that were visible before the font changed and are not now.
+  const layout = async (before) => {
+    const dom = await page.evaluate(domMeasure, { profile: "mouse", fit: false, notch: null, expectTheme: null, forced: false });
+    const gone = lostLabels(before, await buttons());
+    return { issues: reflowIssues(dom) + gone.length, detail: [...reflowDetails(dom), ...gone.map((l) => `button not visible: "${l}"`)] };
+  };
+  // Labels of `before` with no match left in `after` (one match per label).
+  const lostLabels = (before, after) => {
+    const left = [...after];
+    return before.filter((label) => {
+      const i = left.indexOf(label);
+      if (i < 0) return true;
+      left.splice(i, 1);
+      return false;
+    });
+  };
   await setPrefs({ textScale: 1, readableFont: false });
   await reopen();
   const a = await measure();
+  const aboutButtons = await buttons();
   await setPrefs({ readableFont: true });
   await reopen();
+  if (process.env.QA_SELF_TEST === "fontbig") await page.addStyleTag({ content: ':root[data-font="readable"] p{font-size:200%}' });
+  if (process.env.QA_SELF_TEST === "fontclip") {
+    await page.evaluate(() => {
+      const p = [...document.querySelectorAll("p")].find((x) => x.offsetParent !== null && x.textContent.trim());
+      p.style.height = "1em";
+      p.style.overflow = "hidden";
+    });
+  }
+  await sleep(300);
+  const applied = await page.evaluate(() => document.documentElement.dataset.font === "readable");
+  if (!applied) return { pass: false, detail: "readable font not applied on About" };
   const b = await measure();
+  const about = await layout(aboutButtons);
+  // Settings > Accessibility: the switch is flipped in the page, then the page is measured with the font on.
+  await setPrefs({ readableFont: false });
+  await page.reload();
+  await page.locator('input[placeholder="name"]').waitFor();
+  await navTo(page, "Settings");
+  await page.locator(".settings-nav-item").filter({ hasText: "Accessibility" }).click();
+  await sleep(400);
+  const settingsButtons = await buttons();
+  await page.getByRole("switch", { name: /^Readable font/ }).check();
+  await sleep(400);
+  const settingsOn = await page.evaluate(() => document.documentElement.dataset.font === "readable");
+  const settings = settingsOn ? await layout(settingsButtons) : { issues: 1, detail: ["readable font not applied on Settings"] };
   if (!a.n || !a.xh) return { pass: false, detail: "no paragraphs measured" };
-  const r = b.height / a.height;
-  const xr = b.xh / a.xh;
-  const delta = Number((Math.max(Math.abs(r - 1), Math.abs(xr - 1)) * 100).toFixed(2));
-  return { metrics: { "font.pref.metricDelta": delta }, detail: `height ${a.height.toFixed(1)}->${b.height.toFixed(1)} xh ${a.xh}->${b.xh}` };
+  const delta = Number((Math.abs(b.xh / a.xh - 1) * 100).toFixed(2));
+  const heightDelta = Number(((b.height / a.height - 1) * 100).toFixed(1));
+  const problems = [...about.detail.map((d) => `about ${d}`), ...settings.detail.map((d) => `settings ${d}`)];
+  return {
+    metrics: { "font.pref.metricDelta": delta, "font.pref.layout.problems": about.issues + settings.issues, "font.pref.heightDelta": heightDelta },
+    detail: `x-height ${a.xh.toFixed(2)}->${b.xh.toFixed(2)}px; height ${a.height.toFixed(1)}->${b.height.toFixed(1)} (${heightDelta}%, info); about ${about.issues} layout, settings ${settings.issues} layout${problems.length ? `: ${problems.join(" | ")}` : ""}`,
+  };
 }
 
 /**

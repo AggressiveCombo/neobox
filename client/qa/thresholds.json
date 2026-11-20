@@ -46,6 +46,7 @@
   "scroll.target.offset": { "max": 8, "runner": true },
   "transition.present": { "min": 1, "runner": true },
   "font.pref.metricDelta": { "max": 6, "runner": true },
+  "font.pref.layout.problems": { "max": 0, "runner": true },
   "copy.claims.unsourced": { "max": 0, "runner": true },
   "overlay.hud.overlap": { "max": 0, "runner": true },
   "overlay.backdrop.page.px": { "max": 0, "runner": true },
