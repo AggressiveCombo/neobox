@@ -383,7 +383,14 @@ async function networkOffCase(s, cdp) {
     .then(() => true, () => false);
   const recoverMs = Date.now() - back;
   const hud = await host.page.locator(".hud-leave").isVisible();
-  const pass = cut > 0 && shownAt !== null && shownAt <= BANNER_BUDGET_MS && heldToEnd && gone && hud;
+  const failed = [
+    cut > 0 ? null : "no open socket to cut (not exercised)",
+    shownAt !== null && shownAt <= BANNER_BUDGET_MS ? null : `banner shown after ${shownAt ?? "never"} ms (budget ${BANNER_BUDGET_MS})`,
+    heldToEnd ? null : "banner hidden during the offline hold",
+    gone ? null : "banner still visible after the network returned",
+    hud ? null : "HUD leave control not visible after recovery",
+  ].filter((f) => f !== null);
+  const pass = failed.length === 0;
   return {
     pass,
     metrics: {
@@ -393,11 +400,7 @@ async function networkOffCase(s, cdp) {
       "offline.recoverMs": gone ? recoverMs : null,
       "offline.hudBack": hud,
     },
-    detail: pass
-      ? undefined
-      : cut === 0
-        ? "not exercised: no open socket to cut"
-        : `banner after ${shownAt ?? "never"} ms, recovered: ${gone}; timeline ${JSON.stringify(timeline)}`,
+    detail: pass ? undefined : `failed: ${failed.join("; ")}; timeline ${JSON.stringify(timeline)}`,
   };
 }
 
