@@ -290,6 +290,7 @@ export const settingsScreen: ScreenFactory = (ctx) => {
     touchSelects[slot] = select;
     return h("label", { class: "touch-slot" }, h("span", { class: "field-label" }, TOUCH_POSITIONS[slot]), select);
   });
+  const resetLayout = h("button", { type: "button", class: "quiet", onclick: () => prefs.set({ touchLayout: DEFAULT_TOUCH_LAYOUT }) }, icon("rotate-ccw", 18), "Default layout");
   const touchLayout = h(
     "div",
     { class: "touch-layout" },
@@ -299,7 +300,7 @@ export const settingsScreen: ScreenFactory = (ctx) => {
     h(
       "div",
       { class: "settings-group" },
-      h("button", { type: "button", class: "quiet", onclick: () => prefs.set({ touchLayout: DEFAULT_TOUCH_LAYOUT }) }, icon("rotate-ccw", 18), "Default layout"),
+      resetLayout,
     ),
   );
 
@@ -311,6 +312,7 @@ export const settingsScreen: ScreenFactory = (ctx) => {
   function syncColor(): void {
     const color = prefs.value.color;
     colorSwatch.hidden = color === null;
+    autoColor.setAttribute("aria-pressed", String(color === null));
     if (color !== null) colorSwatch.style.background = cssHex(color);
     colorNote.textContent = color === null ? "The server picks a colour until you choose one." : "Your colour in rooms.";
   }
@@ -556,6 +558,8 @@ export const settingsScreen: ScreenFactory = (ctx) => {
       touchSelects[slot].value = action;
       touchCells[slot].replaceChildren(icon(TOUCH_BUTTONS[action].icon, 18));
     }
+    // Nothing to reset when every button already has its default action.
+    resetLayout.disabled = TOUCH_SLOTS.every((slot) => p.touchLayout[slot] === DEFAULT_TOUCH_LAYOUT[slot]);
     filterProfanity.set(p.filterProfanity);
     syncColor();
   }
@@ -572,7 +576,7 @@ export const settingsScreen: ScreenFactory = (ctx) => {
     const el = h(
       "section",
       { class: "panel settings-section", "aria-labelledby": `settings-${id}-title`, "data-section": id },
-      h("h2", { id: `settings-${id}-title` }, name ? icon(name, 22) : null, title),
+      h("h2", { id: `settings-${id}-title`, tabindex: "-1" }, name ? icon(name, 22) : null, title),
       hint ? h("p", { class: "field-hint" }, hint) : null,
       ...content,
       h("div", { class: "settings-group" }, h("button", { type: "button", class: "quiet", onclick: () => resetSection(id, title) }, icon("rotate-ccw", 18), `Reset ${title.toLowerCase()} to defaults`)),
@@ -581,23 +585,42 @@ export const settingsScreen: ScreenFactory = (ctx) => {
     return el;
   }
 
+  const navItems = new Map<SectionId, HTMLElement>();
   const sectionNav = h(
     "nav",
     { class: "settings-nav", "aria-label": "Settings sections" },
-    SECTIONS.map(({ id, label, icon: name }, i) =>
-      h(
+    SECTIONS.map(({ id, label, icon: name }, i) => {
+      const item = h(
         "button",
         {
           type: "button",
           class: "quiet settings-nav-item",
           // The first section's top would stop short of the page top (its scroll margin); the page itself goes there.
-          onclick: () => (i === 0 ? el : bodies.get(id))?.scrollIntoView({ block: "start", behavior: reducedMotion() ? "auto" : "smooth" }),
+          onclick: () => {
+            (i === 0 ? el : bodies.get(id))?.scrollIntoView({ block: "start", behavior: reducedMotion() ? "auto" : "smooth" });
+            // Focus moves to the heading jumped to, so a jump to the section already in view still has an effect.
+            bodies.get(id)?.querySelector("h2")?.focus({ preventScroll: true });
+          },
         },
         icon(name, 18),
         label,
-      ),
-    ),
+      );
+      if (i === 0) item.setAttribute("aria-current", "location"); // the page opens at the top, where the first section is
+      navItems.set(id, item);
+      return item;
+    }),
   );
+  // The nav marks the section being read: the last one whose top has reached the top of the view, the first before any has.
+  function markCurrentSection(): void {
+    if (!el.isConnected) return;
+    let current: SectionId = SECTIONS[0].id;
+    for (const { id } of SECTIONS) if ((bodies.get(id)?.getBoundingClientRect().top ?? Infinity) <= 160) current = id;
+    for (const [id, item] of navItems) {
+      if (id === current) item.setAttribute("aria-current", "location");
+      else item.removeAttribute("aria-current");
+    }
+  }
+  window.addEventListener("scroll", markCurrentSection, { capture: true, passive: true });
 
   const el = page(
     "settings-page",
@@ -690,6 +713,7 @@ export const settingsScreen: ScreenFactory = (ctx) => {
     },
     destroy() {
       destroyed = true;
+      window.removeEventListener("scroll", markCurrentSection, { capture: true });
       stopCapture();
       closePicker?.();
       unsubscribe();
