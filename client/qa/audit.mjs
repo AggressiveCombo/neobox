@@ -701,7 +701,15 @@ async function deadCase(s) {
         const page = h.page;
         const url = page.url();
         // Scroll is reset first: a control that only scrolls to a section (settings nav) would read as dead when that section is already in view.
-        await page.evaluate(() => document.querySelectorAll("*").forEach((e) => { if (e.scrollTop) e.scrollTop = 0; if (e.scrollLeft) e.scrollLeft = 0; }));
+        // The reset moves the page, so the selection the control shows now (a nav's aria-current follows the scroll, a frame later) is read again.
+        await page.evaluate(
+          () =>
+            new Promise((done) => {
+              document.querySelectorAll("*").forEach((e) => { if (e.scrollTop) e.scrollTop = 0; if (e.scrollLeft) e.scrollLeft = 0; });
+              requestAnimationFrame(() => done());
+            }),
+        );
+        c.selected = (await page.evaluate(HARVEST)).find((f) => f.name === c.name)?.selected ?? c.selected;
         clicked += 1;
         let k = c.i;
         let base = null;
