@@ -232,6 +232,7 @@ export const practiceScreen: ScreenFactory = (ctx) => {
     const code = setup.code.value.trim();
     if (!code) {
       setup.status.textContent = "Paste a map code first.";
+      setup.code.focus();
       setup.status.classList.add("offline-error");
       return;
     }
