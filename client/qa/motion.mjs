@@ -348,7 +348,7 @@ const CHROME_PAGES = [
   },
 ];
 
-/** Back to the menu from a page: its Back control (or `leave`), then the menu's name field. */
+/** Back to the menu from a page: its Back control (or `leave`), then the menu's destination drum. */
 async function backToMenu(page, leave) {
   if (leave) await leave(page);
   else {
@@ -356,7 +356,7 @@ async function backToMenu(page, leave) {
     if (await back.count()) await back.first().click();
     else await button(page, "Back").first().click();
   }
-  await page.locator(".home-name-input").waitFor({ state: "visible", timeout: MAX_MS });
+  await drumOption(page, "Browse rooms").waitFor({ state: "visible", timeout: MAX_MS });
   await sleep(CHROME_SETTLE_MS);
 }
 
