@@ -63,8 +63,6 @@ const SILENT_MS = 2_500;
 const PROBE_GRACE_MS = 1_500;
 /** A socket still connecting after this long is abandoned. */
 const CONNECT_MS = 8_000;
-/** A tick this late means the page was frozen or throttled, so the silence before it is not the network's. */
-const FREEZE_MS = 1_500;
 /** Tags of the app-level ping and its pong (crates/net protocol.rs). */
 const C_PING = 2;
 const S_PONG = 0x82;
@@ -116,7 +114,7 @@ export class Net {
     this.connectStarted = now;
     this.pings = [];
     this.lastPing = Number.NEGATIVE_INFINITY;
-    this.watch = window.setInterval(() => this.watchTick(ws), LIVE_TICK_MS);
+    this.watch = window.setInterval(() => this.tick(ws), LIVE_TICK_MS);
     ws.onopen = () => {
       if (this.ws === ws) {
         this.lastInbound = performance.now();
@@ -245,6 +243,19 @@ export class Net {
     cur.pc.close();
   }
 
+  /** One liveness tick of `ws`. A tick later than its interval means the page stalled (a busy main thread, throttled
+   * timers), and a frame that arrived meanwhile may still be queued behind that stall: the stall is not the network's
+   * silence, so only the lateness past the interval is taken back. */
+  private tick(ws: WebSocket): void {
+    const now = performance.now();
+    const late = now - this.lastTick - LIVE_TICK_MS;
+    if (late > 0) {
+      this.lastInbound = Math.min(now, this.lastInbound + late);
+      this.connectStarted = Math.min(now, this.connectStarted + late);
+    }
+    this.watchTick(ws);
+  }
+
   /** One liveness check of `ws`: the connect deadline, the silence limit, and a ping on a quiet link. */
   private watchTick(ws: WebSocket): void {
     if (this.ws !== ws) {
@@ -252,10 +263,6 @@ export class Net {
       return;
     }
     const now = performance.now();
-    if (now - this.lastTick > FREEZE_MS) {
-      this.lastInbound = now;
-      this.connectStarted = now;
-    }
     this.lastTick = now;
     if (ws.readyState === WebSocket.CONNECTING) {
       if (now - this.connectStarted > CONNECT_MS) this.abandon(ws);

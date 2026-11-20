@@ -348,11 +348,17 @@ impl Session {
 
     fn binary(&self, b: &[u8]) {
         let Ok(frame) = ClientFrame::decode(b) else { return };
-        if let Some((r, id)) = &self.room {
-            let _ = r.tx.send(RoomCmd::Frame { player: *id, frame, out: self.out.clone() });
-        } else if let ClientFrame::Ping { client_time } = frame {
-            let pong = ServerFrame::Pong { client_time, server_tick: 0, tick_phase: 0.0 }.encode();
-            let _ = self.out.send(Out::WsBinary(pong));
+        match frame {
+            // answered here, never by the room actor: a busy room must not make a healthy link look silent
+            ClientFrame::Ping { client_time } => {
+                let pong = ServerFrame::Pong { client_time, server_tick: 0, tick_phase: 0.0 }.encode();
+                let _ = self.out.send(Out::WsBinary(pong));
+            }
+            frame => {
+                if let Some((r, id)) = &self.room {
+                    let _ = r.tx.send(RoomCmd::Frame { player: *id, frame, out: self.out.clone() });
+                }
+            }
         }
     }
 
@@ -525,6 +531,8 @@ pub(crate) mod tests {
     use crate::hub::Config;
     use futures_util::StreamExt;
     use std::net::SocketAddr;
+    use crate::room::RoomSummary;
+    use std::sync::Mutex;
     use tokio_tungstenite::tungstenite::Message as ClientMsg;
 
     /// A hub with an empty store and the real `/ws` route on a free local port.
@@ -604,6 +612,35 @@ pub(crate) mod tests {
                 assert_eq!(ServerFrame::decode(&b).unwrap(), ServerFrame::Pong { client_time: 1.5, server_tick: 0, tick_phase: 0.0 });
             }
             other => panic!("expected a WebSocket pong, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn liveness_pong_does_not_wait_for_a_busy_room() {
+        // a room actor whose queue is never read: the pong still goes out at once, so a busy room cannot starve liveness
+        let (hub, _) = start().await;
+        let (out_tx, mut out_rx) = mpsc::unbounded_channel::<Out>();
+        let (rtc_tx, _rtc_rx) = mpsc::unbounded_channel::<Vec<u8>>();
+        let (room_tx, _room_rx) = mpsc::unbounded_channel::<RoomCmd>();
+        let room = RoomHandle { tx: room_tx, summary: Arc::new(Mutex::new(RoomSummary::default())) };
+        let s = Session {
+            hub,
+            info: None,
+            room: Some((room, 1)),
+            out: out_tx,
+            stats: Arc::new(ConnStats::default()),
+            ip: "127.0.0.1".parse().unwrap(),
+            conn_id: 1,
+            account: None,
+            presence: None,
+            rtc_in: rtc_tx,
+        };
+        s.binary(&ClientFrame::Ping { client_time: 2.5 }.encode());
+        match out_rx.try_recv() {
+            Ok(Out::WsBinary(b)) => {
+                assert_eq!(ServerFrame::decode(&b).unwrap(), ServerFrame::Pong { client_time: 2.5, server_tick: 0, tick_phase: 0.0 });
+            }
+            other => panic!("expected a pong while the room is busy, got {other:?}"),
         }
     }
 }

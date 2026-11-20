@@ -1556,18 +1556,8 @@ impl Room {
 
     fn frame(&mut self, id: u32, frame: ClientFrame) {
         match frame {
-            ClientFrame::Ping { client_time } => {
-                let (tick, phase) = match &self.game {
-                    Some(g) => {
-                        let to_next = g.next_tick.saturating_duration_since(Instant::now()).as_secs_f64();
-                        (g.m.tick, (1.0 - to_next * self.tick_hz).clamp(0.0, 1.0))
-                    }
-                    None => (0, 0.0),
-                };
-                if let Some(p) = self.player(id) {
-                    p.send(Out::WsBinary(ServerFrame::Pong { client_time, server_tick: tick, tick_phase: phase }.encode()));
-                }
-            }
+            // pings are answered by the connection (conn.rs binary), never queued behind the room
+            ClientFrame::Ping { .. } => {}
             ClientFrame::Input(f) => {
                 let Some(g) = self.game.as_mut() else { return };
                 let Some(p) = self.players.iter_mut().find(|p| p.id == id) else { return };
