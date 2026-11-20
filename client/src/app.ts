@@ -241,6 +241,9 @@ export function start(): Store<AppState> {
     const fb = engine?.framebuffer();
     if (!fb) return null;
     ensureRenderer(chrome);
+    // The renderer is created asynchronously: until it exists nothing is drawn, so the view stays hidden and the caller
+    // is told nothing was shown (a clip's first frame would otherwise go live as an empty page-colour square).
+    if (!renderer) return null;
     const scene = readScene(fb);
     scene.localKeys = input.mask();
     const local = computeCamera(scene, findLocal(scene));
