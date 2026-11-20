@@ -839,7 +839,10 @@ export function start(): Store<AppState> {
         }
         // A join from the list was refused: the browser keeps the cause on screen until it is dismissed.
         if (msg.code === "room_full" && roomCode === null) {
-          store.set({ notice: "The room is full. Pick another room from the list.", screen: "browse" });
+          const full = "The room is full. Pick another room from the list.";
+          // The panel already shows this text after a repeat refusal: a toast shows the click was answered.
+          if (store.state.notice === full) toast(full, "error");
+          store.set({ notice: full, screen: "browse" });
           return;
         }
         toast(msg.message, "error");

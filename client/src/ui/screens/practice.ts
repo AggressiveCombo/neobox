@@ -155,6 +155,8 @@ export const practiceScreen: ScreenFactory = (ctx) => {
   function restart(): void {
     try {
       begin();
+      // From the start frame the restarted game looks the same, so the toast is what confirms the click.
+      ctx.toast("Restarted.");
     } catch (err) {
       showSetup(`Could not restart: ${errText(err)}`);
     }
