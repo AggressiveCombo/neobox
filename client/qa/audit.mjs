@@ -60,7 +60,7 @@ const FIXTURE_NAME = /^(room|pw|host|guest|user)[a-z0-9]{6,8}(?![a-z])|^Actions 
 const DEAD_SCREENS = process.env.QA_DEAD_SCREENS ? process.env.QA_DEAD_SCREENS.split(",").map((s) => s.trim()) : selfTestMode() === "dead" ? [STATES[0].id] : STATES.map((st) => st.id);
 const TOKEN_SCREENS = ["menu-anon", "settings-controls", "library-grid", "room-host"];
 const TOKEN_THEMES = ["light", "dark"];
-const ROLES = ["primary", "hero", "big", "secondary", "danger", "ghost", "link", "name", "icon", "ink", "block", "chrome", "tile", "seg", "tab"];
+const ROLES = ["primary", "hero", "big", "secondary", "danger", "ghost", "link", "name", "icon", "clip", "ink", "block", "chrome", "tile", "seg", "tab"];
 const PROPS = ["fontSize", "radius", "padding", "color"];
 const MODE_CASE = { placeholder: "copy", inventory: "coverage", dead: "dead", tokens: "tokens", persist: "persist" };
 const ONLY = (process.env.QA_ONLY ?? "copy,coverage,dead,tokens,persist,accountSync").split(",").map((s) => s.trim());
@@ -154,6 +154,7 @@ const TOKENS = () => {
     if (c.contains("room-profile-link")) return "name"; // a player's name as a button: body text, no padding
     if (c.contains("big")) return c.contains("primary") ? "hero" : "big"; // 64px action at --step-lead; hero is the filled one
     if (c.contains("icon")) return "icon"; // square glyph button with an aria-label, no text
+    if (c.contains("menu-clip-pause")) return "clip"; // 28 px icon button on the menu's clip backdrop: no padding, its own ink
     if (c.contains("seg-option")) return "seg"; // option of a segmented control, --control high
     if (c.contains("tab")) return "tab"; // tab of a tablist, --control high, underlined when selected
     if (c.contains("ink")) return "ink"; // solid ink fill
@@ -176,6 +177,8 @@ const TOKENS = () => {
       radius: cs.borderTopLeftRadius,
       padding: [cs.paddingTop, cs.paddingRight, cs.paddingBottom, cs.paddingLeft].join(" "),
       color: selected ? null : cs.color,
+      // What the element is, for the evidence: its classes and text, so a value that drifts can be traced to its control.
+      who: `${el.tagName.toLowerCase()}.${[...el.classList].join(".")} "${(el.textContent || el.getAttribute("aria-label") || "").trim().slice(0, 24)}"`,
     });
   }
   const body = [];
@@ -486,6 +489,7 @@ async function tokensCase(s) {
   const sets = {};
   const bodySizes = new Set();
   const counts = {};
+  const examples = {}; // "prop.role=value" -> the first element that has the value
   for (const theme of TOKEN_THEMES) sets[theme] = {};
   for (const id of TOKEN_SCREENS) {
     const h = await stateById(id).prepare(s);
@@ -511,6 +515,7 @@ async function tokensCase(s) {
             const key = `${prop}.${r.role}`;
             sets[theme][key] ??= new Set();
             sets[theme][key].add(r[prop]);
+            examples[`${key}=${r[prop]}`] ??= r.who;
           }
         }
         for (const v of body) bodySizes.add(v);
@@ -530,7 +535,7 @@ async function tokensCase(s) {
     }
   }
   metrics["tokens.distinct.fontSize.body"] = bodySizes.size;
-  const file = writeEvidence("tokens", { perTheme: Object.fromEntries(Object.entries(perTheme).map(([k, v]) => [k, v])), body: [...bodySizes], roleSamples: counts });
+  const file = writeEvidence("tokens", { perTheme: Object.fromEntries(Object.entries(perTheme).map(([k, v]) => [k, v])), body: [...bodySizes], roleSamples: counts, examples });
   const multi = ROLES.flatMap((role) => PROPS.map((prop) => `${prop}.${role}`)).filter((key) => metrics[`tokens.distinct.${key}`] > 1);
   const pass = multi.length === 0 && bodySizes.size <= 6;
   return {
