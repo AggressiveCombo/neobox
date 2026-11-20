@@ -262,7 +262,7 @@ class WebGpuRenderer implements Renderer {
 
   draw(scene: Scene, cam: Camera): void {
     const { device, geo } = this;
-    geo.build(scene);
+    geo.build(scene, cam.fill);
     this.uploadVertices();
 
     const xf = worldXf(cam);

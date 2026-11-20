@@ -60,6 +60,8 @@ export interface Camera {
   h: number;
   /** Live opponents outside the view (player ids), drawn as edge indicators. */
   away: readonly number[];
+  /** The world rectangle the background must cover past the arena (backdrop only); absent when the view needs none. */
+  fill?: Bounds;
 }
 
 /**
@@ -70,7 +72,7 @@ let lastCentre: { x: number; y: number } | null = null;
 /** Player a spectator follows; -1 none. Only used while the viewer has no local player. */
 let spectateId = -1;
 /** QA hook (client/qa/playfield.mjs): the view the last computed frame was drawn with. The game never reads it. */
-const qaView: { cx: number; cy: number; w: number; h: number; aw: number; ah: number; bx0: number; by0: number; bx1: number; by1: number; tick: number; follow: number; away: readonly number[] } = {
+const qaView: { cx: number; cy: number; w: number; h: number; aw: number; ah: number; bx0: number; by0: number; bx1: number; by1: number; tick: number; follow: number; away: readonly number[]; live: readonly (readonly [number, number, number])[] } = {
   cx: 0,
   cy: 0,
   w: 0,
@@ -84,6 +86,7 @@ const qaView: { cx: number; cy: number; w: number; h: number; aw: number; ah: nu
   tick: -1,
   follow: -1,
   away: [],
+  live: [],
 };
 Object.assign(globalThis, { __qaCam: qaView });
 
@@ -95,6 +98,10 @@ export function publishBackdrop(cam: Camera, arenaW: number, arenaH: number): vo
   qaView.h = cam.h;
   qaView.aw = arenaW;
   qaView.ah = arenaH;
+  qaView.bx0 = 0;
+  qaView.by0 = 0;
+  qaView.bx1 = arenaW;
+  qaView.by1 = arenaH;
   qaView.away = cam.away;
 }
 
@@ -207,24 +214,44 @@ function axisCentre(l: number, lo: number, hi: number, len: number, a: number, b
   return q >= hi - len / 2 && q <= lo + len / 2 ? q : p;
 }
 
-/** The menu card's bounding box spans the arena's shorter side less this margin on each side: the arena's boundary walls (one world unit thick, on the arena edge) stay out of the card's corners. */
+/** The arena's fit inside the turned card keeps this share of the card's side free on each side, so the arena's boundary walls (one world unit thick, on the arena edge) stay clear of the card's edges. */
 const BACKDROP_MARGIN = 1 / 16;
 
+/** The gap (CSS px) kept between the arena's bottom edge and the caption bar's top edge. */
+const BACKDROP_BAR_GAP = 8;
+
 /**
- * Backdrop camera (the main menu's clip). The view is the whole window at its own scale, placed so the menu square's
- * bounding box `box` (window CSS px; the turned square lies inside it) spans the arena's shorter side less BACKDROP_MARGIN
- * on each side. The turned square then shows arena only: no walls, no VOID, no page colour. Fixed on the arena's centre
- * with the box's centre on screen, so the clip holds still from its first frame (no follow, no zoom).
+ * Backdrop camera (the main menu's clip). The card is the menu square `box`: its unturned side `side` (window CSS px),
+ * its turn `angle` (degrees), and `bar`: the caption bar's top edge, in CSS px below the card's centre (0 when there is
+ * no bar below the centre). The view is centred on the arena's centre and scaled so the whole arena fits inside the
+ * turned square, less BACKDROP_MARGIN per side, and its bottom edge stays BACKDROP_BAR_GAP above the bar. `fill` is the
+ * turned square's world bounding box: the backdrop's background covers it, so the card shows the map's own background
+ * past the arena (no page colour, no void). Fixed on the arena's centre: no follow, no zoom, so the clip holds still from
+ * its first frame.
+ * Also publishes the live players' ids and world positions to the QA hook (qaView.live).
  */
-export function backdropCamera(scene: Scene, box: { cx: number; cy: number; side: number }, winW: number, winH: number): Camera {
-  const short = Math.min(scene.arenaW, scene.arenaH);
-  const k = (short * (1 - 2 * BACKDROP_MARGIN)) / box.side;
+export function backdropCamera(scene: Scene, box: { cx: number; cy: number; side: number; angle: number; bar: number }, winW: number, winH: number): Camera {
+  const rad = (box.angle * Math.PI) / 180;
+  const c = Math.abs(Math.cos(rad));
+  const s = Math.abs(Math.sin(rad));
+  const hw = scene.arenaW / 2;
+  const hh = scene.arenaH / 2;
+  // The arena's half-extent along the turned square's own axes; the square's half side must hold it, less the margin.
+  const need = Math.max(hw * c + hh * s, hw * s + hh * c);
+  const kFit = (2 * need) / ((1 - 2 * BACKDROP_MARGIN) * box.side);
+  // The arena is axis-aligned on screen: its bottom edge is hh / k CSS px below the centre, and must clear the bar.
+  const kBar = box.bar > BACKDROP_BAR_GAP ? hh / (box.bar - BACKDROP_BAR_GAP) : 0;
+  const k = Math.max(kFit, kBar);
+  const reach = (box.side * k * (c + s)) / 2;
+  const live = liveSprites(scene);
+  qaView.live = live.map((p) => [p.id, p.x, p.y] as const);
   return {
-    cx: scene.arenaW / 2 + (winW / 2 - box.cx) * k,
-    cy: scene.arenaH / 2 + (winH / 2 - box.cy) * k,
+    cx: hw + (winW / 2 - box.cx) * k,
+    cy: hh + (winH / 2 - box.cy) * k,
     w: winW * k,
     h: winH * k,
     away: [],
+    fill: { x0: hw - reach, y0: hh - reach, x1: hw + reach, y1: hh + reach },
   };
 }
 

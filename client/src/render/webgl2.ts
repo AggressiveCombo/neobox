@@ -92,7 +92,7 @@ class WebGl2Renderer implements Renderer {
 
   draw(scene: Scene, cam: Camera): void {
     const { gl, geo } = this;
-    geo.build(scene);
+    geo.build(scene, cam.fill);
     this.uploadVertices();
     const xf = worldXf(cam);
     gl.clear(gl.COLOR_BUFFER_BIT);

@@ -262,11 +262,19 @@ export function start(): Store<AppState> {
     lastPresent = performance.now();
   };
 
-  /** The menu clip's window in CSS px: the bounding box of the turned square (ui/screens/menu.ts), else the whole window. */
-  function menuBox(): { cx: number; cy: number; side: number } {
-    const r = document.querySelector(".menu-square")?.getBoundingClientRect();
-    if (r && r.width > 0) return { cx: r.left + r.width / 2, cy: r.top + r.height / 2, side: r.width };
-    return { cx: window.innerWidth / 2, cy: window.innerHeight / 2, side: Math.min(window.innerWidth, window.innerHeight) };
+  /** The menu clip's window in CSS px: the turned square (ui/screens/menu.ts) with its unturned side and turn, else the whole window. `bar` is the caption bar's top edge below the centre (0 when no bar shows). */
+  function menuBox(): { cx: number; cy: number; side: number; angle: number; bar: number } {
+    const el = document.querySelector<HTMLElement>(".menu-square");
+    if (el && el.offsetWidth > 0) {
+      const r = el.getBoundingClientRect();
+      const cy = r.top + r.height / 2;
+      // The turn is set by ui/screens/menu.ts (SQUARE_ANGLE) as --angle; no turn when it is absent.
+      const angle = parseFloat(getComputedStyle(el).getPropertyValue("--angle")) || 0;
+      const bar = document.querySelector<HTMLElement>(".menu-clip-bar:not([hidden])");
+      const barTop = bar ? bar.getBoundingClientRect().top - cy : 0;
+      return { cx: r.left + r.width / 2, cy, side: el.offsetWidth, angle, bar: barTop };
+    }
+    return { cx: window.innerWidth / 2, cy: window.innerHeight / 2, side: Math.min(window.innerWidth, window.innerHeight), angle: 0, bar: 0 };
   }
 
   const wasm: WasmTools = {

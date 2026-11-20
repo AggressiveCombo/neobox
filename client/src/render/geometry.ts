@@ -5,7 +5,7 @@
 
 import type { PlayerRec, Scene } from "../frame";
 import { FLAG_AIR_JUMP, FLAG_BAT, FLAG_DASH, FLAG_FROZEN, FLAG_GHOST, FLAG_LOCAL, FLAG_PUSHING, FLAG_TELEPORT } from "../frame";
-import { backdropBounds, findLocal } from "../camera";
+import { backdropBounds, findLocal, type Bounds } from "../camera";
 import { TEAM_BLUE, TEAM_FFA, TEAM_RED, TEAM_SPECTATOR } from "../protocol";
 import { prefs, type Palette } from "../prefs";
 import { BIT } from "../input";
@@ -222,20 +222,26 @@ export class Geometry {
     return this.used * WORDS_PER_VERTEX;
   }
 
-  /** Rebuild every vertex for `scene`. Reads scene.view fresh; keeps no views of the frame buffer. */
-  build(scene: Scene): void {
+  /** Rebuild every vertex for `scene`. Reads scene.view fresh; keeps no views of the frame buffer. `fill` widens the backdrop past the arena. */
+  build(scene: Scene, fill?: Bounds): void {
     this.used = 0;
-    this.putBackground(scene);
+    this.putBackground(scene, fill);
     this.copyWorld(scene);
     this.putPlayers(scene);
   }
 
-  /** The backdrop covers the playable bounds (arena united with the map geometry): gradient over the arena's height, edge colours beyond it. */
-  private putBackground(scene: Scene): void {
+  /** The backdrop covers the playable bounds (arena united with the map geometry and `fill`): gradient over the arena's height, edge colours beyond it. */
+  private putBackground(scene: Scene, fill: Bounds | undefined): void {
     this.reserve(BACKGROUND_VERTICES);
     const top = packRgba(scene.bgTop, 1);
     const bottom = packRgba(scene.bgBottom, 1);
     const b = backdropBounds(scene);
+    if (fill) {
+      b.x0 = Math.min(b.x0, fill.x0);
+      b.y0 = Math.min(b.y0, fill.y0);
+      b.x1 = Math.max(b.x1, fill.x1);
+      b.y1 = Math.max(b.y1, fill.y1);
+    }
     const h = Math.max(0, scene.arenaH);
     this.background.first = this.used;
     this.putBand(b.x0, b.y0, b.x1, 0, top, top);

@@ -253,12 +253,13 @@ button.home-account {
   opacity: 1;
 }
 
-/* The clip credit, bottom-right of the art, over the clip. */
+/* The clip credit, under the card: the turned square's lowest corner reaches 0.63 of its side below the centre (the
+   art's box ends at 0.5), so the credit starts 0.14 of the side plus a gap below the box. It never covers the arena. */
 .menu-credit {
   position: absolute;
   left: 10%;
   right: 10%;
-  bottom: 14%;
+  top: calc(114% + 8px);
   transform: rotate(0deg);
   pointer-events: none;
 }
@@ -481,6 +482,8 @@ button.home-privacy {
     order: 3;
     width: min(44vw, 22vh);
     align-self: center;
+    /* The clip caption hangs under the card (.menu-credit): this keeps the footer clear of it. */
+    margin-bottom: 64px;
   }
 
   .home-foot {
