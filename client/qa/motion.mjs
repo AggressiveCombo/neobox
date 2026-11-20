@@ -17,9 +17,9 @@
 // motion.samples (screenshots taken), motion.sample.ms (median interval between samples),
 // motion.cssEnd.ms (in-page cross-check: longest remaining finite CSS animation or transition at the
 // trigger, from document.getAnimations), motion.masked.px (idle-animated pixels excluded).
-// Scene cases (scene.*) time the transition directly: trigger click -> last screen-in/screen-out
-// animationend on the page clock (style.css: screen-in 240 ms, screen-out 160 ms). Their
-// motion.screenshot.ms is the screenshot settle, a diagnostic only.
+// Direct cases (scene.* and the modal opens) time the transition on the page clock: trigger click -> last end of
+// its animations (scene: screen-in/screen-out, style.css 240/160 ms; modal open: the dialog's appear and backdrop
+// fade-in, 220 ms each). Their motion.screenshot.ms is the screenshot settle, a diagnostic only.
 // motion.chromeShift.px (shared chrome vs Browse rooms at rest) and motion.chromeTravel.px (chrome travel
 // in flight), from chrome.pages.
 //
@@ -159,29 +159,42 @@ function median(xs) {
   return sorted[Math.floor(sorted.length / 2)];
 }
 
-// Scene timer (direct, no screenshots): the first click after arming sets the start; the screen-in and screen-out
-// animations that follow record their end times on the page's clock.
+// Animation timer (direct, no screenshots): the first click or key press after arming sets the start; the animations
+// that end after it record their end times on the page's clock. `SETTLE[required]` lists the keys whose last end is the
+// settle, and `required` must have ended: a scene change (screen-in, screen-out; style.css), a modal open (the open
+// dialog's appear and its ::backdrop fade-in) or a modal close (the closing dialog's modal-out). Toasts also use
+// `appear`, so only the dialog's own animations count.
+const SETTLE = { "screen-in": ["screen-in", "screen-out"], modal: ["modal"], "modal-out": ["modal-out"] };
 const SCENE_ARM = () => {
   window.__qaScene = { start: null, ends: [] };
   if (window.__qaSceneOn) return;
   window.__qaSceneOn = true;
-  document.addEventListener("click", () => {
+  const start = () => {
     if (window.__qaScene.start === null) window.__qaScene.start = performance.now();
-  }, true);
+  };
+  document.addEventListener("click", start, true);
+  document.addEventListener("keydown", start, true);
   document.addEventListener("animationend", (e) => {
-    if (e.animationName === "screen-in" || e.animationName === "screen-out") window.__qaScene.ends.push({ name: e.animationName, t: e.timeStamp });
+    const dialog = e.target instanceof Element && e.target.matches("dialog.modal[open]");
+    const closing = e.target instanceof Element && e.target.matches("dialog.modal.is-closing");
+    let key = null;
+    if (e.animationName === "screen-in" || e.animationName === "screen-out") key = e.animationName;
+    else if (dialog && e.animationName === "appear") key = "modal";
+    else if (dialog && e.animationName === "fade-in" && e.pseudoElement === "::backdrop") key = "modal";
+    else if (closing && e.animationName === "modal-out") key = "modal-out";
+    if (key) window.__qaScene.ends.push({ key, t: e.timeStamp });
   }, true);
 };
-// Settle time of the armed scene change, or null while the screen-in animation has not ended.
-const SCENE_END = () => {
+// Settle time of the armed change, or null while its required animation has not ended.
+const SCENE_END = ([required, keys]) => {
   const s = window.__qaScene;
-  if (!s || s.start === null || !s.ends.some((e) => e.name === "screen-in")) return null;
-  return Math.round(Math.max(...s.ends.map((e) => e.t)) - s.start);
+  if (!s || s.start === null || !s.ends.some((e) => e.key === required)) return null;
+  return Math.round(Math.max(...s.ends.filter((e) => keys.includes(e.key)).map((e) => e.t)) - s.start);
 };
-async function sceneEnd(page) {
+async function sceneEnd(page, required) {
   const until = Date.now() + MAX_MS;
   for (;;) {
-    const ms = await page.evaluate(SCENE_END);
+    const ms = await page.evaluate(SCENE_END, [required, SETTLE[required]]);
     if (ms !== null || Date.now() > until) return ms;
     await sleep(20);
   }
@@ -236,10 +249,10 @@ async function measure(page, { id, limit, trigger, arrived, liveSquare = false, 
   if (res.error && !direct) {
     return { pass: false, detail: `${id}: ${res.error} (${diffs.length} samples)`, metrics };
   }
-  // A scene change is timed from the trigger click to its last screen animation ending (style.css: screen-in 240 ms,
-  // screen-out 160 ms). The screenshot settle is a diagnostic only: its sampling cost is the host's, not the transition's.
-  const ms = direct ? await sceneEnd(page) : res.ms;
-  if (ms === null) return { pass: false, detail: `${id}: no screen-in animation ended after the trigger`, metrics };
+  // A direct case is timed from the trigger click to the end of its animations (scene: screen-in/screen-out; modal:
+  // the dialog's appear and backdrop fade-in). The screenshot settle is a diagnostic only: its sampling cost is the host's.
+  const ms = direct ? await sceneEnd(page, direct) : res.ms;
+  if (ms === null) return { pass: false, detail: `${id}: no ${direct} animation ended after the trigger`, metrics };
   metrics["motion.transition.ms"] = ms;
   if (direct) metrics["motion.screenshot.ms"] = res.error ? null : res.ms;
   // The destination must be there: a transition that settles on the wrong screen fails.
@@ -420,6 +433,7 @@ const CASES = [
       return measure(page, {
         id: "ui.modal.open.news",
         limit: 300,
+        direct: "modal",
         liveSquare: true,
         trigger: () => drumOption(page, "News").evaluate((el) => el.click()),
         arrived: () => dialog.waitFor({ state: "visible", timeout: MAX_MS }),
@@ -438,6 +452,7 @@ const CASES = [
       return measure(page, {
         id: "ui.modal.close.news",
         limit: 300,
+        direct: "modal-out",
         liveSquare: true,
         trigger: () => page.keyboard.press("Escape"),
         arrived: () => dialog.waitFor({ state: "detached", timeout: MAX_MS }),
@@ -456,6 +471,7 @@ const CASES = [
       return measure(page, {
         id: "ui.modal.open.createRoom",
         limit: 300,
+        direct: "modal",
         trigger: () => button(page, "New room").evaluate((el) => el.click()),
         arrived: () => form.waitFor({ state: "visible", timeout: MAX_MS }),
       });
@@ -469,7 +485,7 @@ const CASES = [
       await rollDrum(page, "Browse rooms");
       return measure(page, {
         id: "scene.menu.browse",
-        direct: true,
+        direct: "screen-in",
         limit: 400,
         trigger: () => drumOption(page, "Browse rooms").evaluate((el) => el.click()),
         arrived: () => button(page, "New room").waitFor({ state: "visible", timeout: MAX_MS }),
@@ -486,7 +502,7 @@ const CASES = [
       const lobby = button(page, "Start");
       return measure(page, {
         id: "scene.browse.room",
-        direct: true,
+        direct: "screen-in",
         limit: 400,
         trigger: () => button(page, "Create room").evaluate((el) => el.click()),
         arrived: () => lobby.waitFor({ state: "visible", timeout: MAX_MS }),
@@ -506,7 +522,7 @@ const CASES = [
       const hud = page.locator(".hud-leave");
       return measure(page, {
         id: "scene.room.match",
-        direct: true,
+        direct: "screen-in",
         limit: 400,
         trigger: () => button(page, "Start").evaluate((el) => el.click()),
         arrived: () => hud.waitFor({ state: "visible", timeout: MAX_MS }),
