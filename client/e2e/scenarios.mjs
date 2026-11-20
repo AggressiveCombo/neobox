@@ -655,6 +655,31 @@ async function clips(s) {
   return "clip recorded and played behind the menu";
 }
 
+/**
+ * The menu mounts after the page began to leave: it starts no clip list request. WebKit cancels a request still in flight at
+ * navigation commit and reports it as a page error, so the request is not sent at all once the page is leaving.
+ */
+async function clipsLeaveQuietly(s) {
+  const h = await s.open("clip-leaver");
+  const { page } = h;
+  await page.goto(s.base);
+  await menuName(page).waitFor();
+  await navTo(page, "Settings");
+  let requests = 0;
+  const count = (req) => {
+    if (new URL(req.url()).pathname === "/api/clips") requests += 1;
+  };
+  page.on("request", count);
+  await page.evaluate(() => window.dispatchEvent(new Event("beforeunload")));
+  // a DOM click, not a pointer or key press: those count as the user acting and end the leave
+  await back(page).evaluate((el) => el.click());
+  await menuName(page).waitFor();
+  await sleep(500);
+  page.off("request", count);
+  check(requests === 0, `the menu sent ${requests} clip list request(s) after the page began to leave`);
+  return "no clip request once the page began to leave";
+}
+
 /** Jukebox: a pasted YouTube link becomes a suggestion; the host plays it for the room. */
 async function jukebox(s) {
   const roomName = uniqueName("jb");
@@ -1387,6 +1412,7 @@ export const scenarios = [
   { name: "training", run: training },
   { name: "news", run: news },
   { name: "clips", run: clips },
+  { name: "clips leave quietly", run: clipsLeaveQuietly },
   { name: "replay", run: replay },
   { name: "practice", run: practice },
   { name: "phone", run: phone },

@@ -3,6 +3,7 @@
 // /api/clips; failures carry the server's `error` text.
 
 import type { AppCtx } from "./ctx";
+import { pageFetch } from "./page-leave";
 import { HttpError } from "./http-error";
 
 /** Seconds of play a clip keeps: the end of the match. */
@@ -20,7 +21,7 @@ export interface ClipSummary {
 }
 
 async function clipRequest(path: string, init?: RequestInit): Promise<Response> {
-  const res = await fetch(path, init);
+  const res = await pageFetch(path, init);
   if (res.ok) return res;
   const body = (await res.json().catch(() => null)) as { error?: unknown } | null;
   throw typeof body?.error === "string" ? new Error(body.error) : new HttpError(res.status);

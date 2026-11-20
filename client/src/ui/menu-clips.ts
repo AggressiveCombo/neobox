@@ -67,12 +67,8 @@ export function mountMenuClips(ctx: AppCtx, host: HTMLElement, onState?: (state:
   let rafId = 0;
   let last = 0;
   let retryTimer = 0;
-  // Aborted when the page leaves (beforeunload, then pagehide) and when the menu closes: a fetch the page abandons
-  // mid-navigation rejects with a page error in WebKit, so it is cancelled first, in the page, and its rejection is handled below.
-  let net = new AbortController();
-  const abortLoads = () => net.abort();
-  window.addEventListener("beforeunload", abortLoads);
-  window.addEventListener("pagehide", abortLoads);
+  // One controller per mount, aborted when the menu closes. Page-leave fetches (pageFetch) also stop at beforeunload.
+  const net = new AbortController();
 
   // The clip's caption and its pause control. The bar is hidden until a clip plays; the button is the only part that takes clicks.
   const credit = h("p", { class: "menu-clip-credit" });
@@ -197,7 +193,6 @@ export function mountMenuClips(ctx: AppCtx, host: HTMLElement, onState?: (state:
       showIdle();
       return;
     }
-    if (net.signal.aborted) net = new AbortController();
     loading = true;
     loadNext().then(
       (next) => {
@@ -269,8 +264,6 @@ export function mountMenuClips(ctx: AppCtx, host: HTMLElement, onState?: (state:
   return () => {
     window.removeEventListener("online", startNext);
     destroyed = true;
-    window.removeEventListener("beforeunload", abortLoads);
-    window.removeEventListener("pagehide", abortLoads);
     net.abort();
     cancelAnimationFrame(rafId);
     window.clearTimeout(retryTimer);
