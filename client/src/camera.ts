@@ -207,14 +207,18 @@ function axisCentre(l: number, lo: number, hi: number, len: number, a: number, b
   return q >= hi - len / 2 && q <= lo + len / 2 ? q : p;
 }
 
+/** The menu card's bounding box spans the arena's shorter side less this margin on each side: the arena's boundary walls (one world unit thick, on the arena edge) stay out of the card's corners. */
+const BACKDROP_MARGIN = 1 / 16;
+
 /**
- * Backdrop camera (the main menu's clip). The view is the whole window at its own scale, placed so the arena's
- * shorter side spans the menu square's bounding box `box` (window CSS px; the turned square lies inside it) with 4%
- * to spare. The turned square then shows arena only: no VOID, no page colour. Fixed on the arena's centre with the
- * box's centre on screen, so the clip holds still from its first frame (no follow, no zoom).
+ * Backdrop camera (the main menu's clip). The view is the whole window at its own scale, placed so the menu square's
+ * bounding box `box` (window CSS px; the turned square lies inside it) spans the arena's shorter side less BACKDROP_MARGIN
+ * on each side. The turned square then shows arena only: no walls, no VOID, no page colour. Fixed on the arena's centre
+ * with the box's centre on screen, so the clip holds still from its first frame (no follow, no zoom).
  */
 export function backdropCamera(scene: Scene, box: { cx: number; cy: number; side: number }, winW: number, winH: number): Camera {
-  const k = Math.min(scene.arenaW, scene.arenaH) / (box.side * 1.04);
+  const short = Math.min(scene.arenaW, scene.arenaH);
+  const k = (short * (1 - 2 * BACKDROP_MARGIN)) / box.side;
   return {
     cx: scene.arenaW / 2 + (winW / 2 - box.cx) * k,
     cy: scene.arenaH / 2 + (winH / 2 - box.cy) * k,
