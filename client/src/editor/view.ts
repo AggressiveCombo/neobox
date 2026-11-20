@@ -8,6 +8,7 @@ import {
   type Kind,
   type Ref,
   bodyBounds,
+  bodyById,
   bodyGeo,
   bodyXf,
   getList,
@@ -91,10 +92,13 @@ function gridStep(scale: number): number {
 }
 
 /**
- * The static layer of the last drawn view, rendered LAYER_MARGIN CSS px past each edge of the canvas: the grid, the frame and
- * the bodies below `first`, the lowest moving body (the body count when none moves), in one opaque bitmap. A frame blits it,
- * then draws the bodies from `first` up and every joint live, in the order of a rest frame. Markers are drawn on every frame;
- * a selection change blits the layer, and a pan blits it shifted, redrawing only once the view has moved more than the margin.
+ * The static layers of the last drawn view, rendered LAYER_MARGIN CSS px past each edge of the canvas. The bodies are cut
+ * at the moving ones: `runs[j]` holds the static bodies between moving body `moving[j - 1]` and `moving[j]` in a bitmap.
+ * The first run is opaque and also holds the grid and the frame; the last also holds the joints that touch no moving body.
+ * A run with no bodies is null, except the first and the last. A drag frame blits each run, then draws the moving body
+ * after it live, so bodies and joints come in the order of a rest frame, which draws every body and then every joint.
+ * Markers and the selection are drawn on every frame; a selection change blits the layers, and a pan blits them shifted,
+ * redrawing only once the view has moved more than the margin.
  */
 interface Layer {
   target: HTMLCanvasElement;
@@ -105,8 +109,8 @@ interface Layer {
   dpr: number;
   scopeBi: number;
   skip: readonly number[];
-  first: number;
-  base: HTMLCanvasElement;
+  moving: readonly number[];
+  runs: readonly (HTMLCanvasElement | null)[];
 }
 let layer: Layer | null = null;
 /** CSS px drawn past each canvas edge, so a pan of up to this much reuses the layer. */
@@ -121,7 +125,8 @@ let lastChange = -Infinity;
 let settleTimer: number | undefined;
 /** Set while the settle timer draws: the gesture is over, so the layer is redrawn. */
 let settling = false;
-let baseScratch: HTMLCanvasElement | null = null;
+/** Reused canvases of the layer runs, by run index. */
+const runScratch: HTMLCanvasElement[] = [];
 const NO_SKIP: readonly number[] = [];
 
 /** Draw body `i` when its bounds meet the canvas; (ox, oy) is the map origin in CSS px and k the px per unit. */
@@ -142,46 +147,71 @@ function sizedCanvas(reuse: HTMLCanvasElement | null, pw: number, ph: number): H
   return el;
 }
 
-/** The lowest index in `skip` that names a body, or `bodyCount` when none does. */
-function firstMoving(bodyCount: number, skip: readonly number[]): number {
-  let first = bodyCount;
-  for (const i of skip) if (i >= 0 && i < first) first = i;
-  return first;
+/** The indices of the moving bodies in `skip` that name a body, ascending and without repeats. */
+function movingBodies(bodyCount: number, skip: readonly number[]): number[] {
+  const set = new Set<number>();
+  for (const i of skip) if (i >= 0 && i < bodyCount) set.add(i);
+  return [...set].sort((a, b) => a - b);
 }
 
-/** Every joint, grouped by kind as drawJoints draws them, at the joint alpha of the scope. */
-function drawAllJoints(c: CanvasRenderingContext2D, doc: Obj, S: (p: Pt) => Pt, scopeBi: number): void {
+/** Draw joints at the joint alpha of the scope: all of them, or only the live ones of a drag. */
+function drawJointSet(c: CanvasRenderingContext2D, doc: Obj, joints: readonly Obj[], S: (p: Pt) => Pt, scopeBi: number): void {
   c.globalAlpha = scopeBi >= 0 ? 0.3 : 1;
-  drawJoints(c, doc, getList(doc, "joint"), S);
+  drawJoints(c, doc, joints, S);
   c.globalAlpha = 1;
 }
 
-/** Draw the static layer for this view: the canvas's device size plus LAYER_MARGIN on each side, same centre. */
+/** Most moving bodies a drag keeps runs for: each one costs a canvas, so a larger selection is drawn live. */
+const MAX_MOVING_LAYERS = 4;
+
+/**
+ * Draw the static runs for this view: the canvases' device size plus LAYER_MARGIN on each side, same centre. Null when
+ * there are more moving bodies than MAX_MOVING_LAYERS.
+ */
 function renderLayer(target: HTMLCanvasElement, doc: Obj, view: View, w: number, h: number, dpr: number, scopeBi: number, skip: readonly number[]): Layer | null {
-  // The layer is a larger viewport on the same centre, so every drawing helper works on it unchanged.
+  const bodies = getList(doc, "body");
+  const moving = movingBodies(bodies.length, skip);
+  if (moving.length > MAX_MOVING_LAYERS) return null;
+  // The layers are a larger viewport on the same centre, so every drawing helper works on them unchanged.
   const lw = w + 2 * LAYER_MARGIN;
   const lh = h + 2 * LAYER_MARGIN;
-  const base = sizedCanvas(baseScratch, Math.round(lw * dpr), Math.round(lh * dpr));
-  baseScratch = base;
-  const c = base.getContext("2d");
-  if (!c) return null;
-  c.setTransform(dpr, 0, 0, dpr, 0, 0);
-  c.clearRect(0, 0, lw, lh);
-  c.fillStyle = BG;
-  c.fillRect(0, 0, lw, lh);
-  const bodies = getList(doc, "body");
-  const first = firstMoving(bodies.length, skip);
+  const pw = Math.round(lw * dpr);
+  const ph = Math.round(lh * dpr);
   const S = (p: Pt): Pt => screenAt(view, lw, lh, p);
-  drawGrid(c, view, lw, lh);
-  drawFrame(c, doc, S);
   const k = view.scale;
   const ox = lw / 2 - view.x * k;
   const oy = lh / 2 - view.y * k;
-  for (let i = 0; i < first; i++) {
-    const b = bodies[i];
-    if (b) drawBodyAt(c, b, i, scopeBi, ox, oy, k, lw, lh);
+  const fixed = splitJoints(doc, skip).fixed;
+  const runs: (HTMLCanvasElement | null)[] = [];
+  for (let j = 0; j <= moving.length; j++) {
+    const first = j === 0;
+    const last = j === moving.length;
+    const from = first ? 0 : moving[j - 1]! + 1;
+    const to = last ? bodies.length : moving[j]!;
+    if (!first && !last && from >= to) {
+      runs.push(null);
+      continue;
+    }
+    const canvas = sizedCanvas(runScratch[j] ?? null, pw, ph);
+    runScratch[j] = canvas;
+    const c = canvas.getContext("2d");
+    if (!c) return null;
+    c.setTransform(dpr, 0, 0, dpr, 0, 0);
+    c.clearRect(0, 0, lw, lh);
+    if (first) {
+      c.fillStyle = BG;
+      c.fillRect(0, 0, lw, lh);
+      drawGrid(c, view, lw, lh);
+      drawFrame(c, doc, S);
+    }
+    for (let i = from; i < to; i++) {
+      const b = bodies[i];
+      if (b) drawBodyAt(c, b, i, scopeBi, ox, oy, k, lw, lh);
+    }
+    if (last) drawJointSet(c, doc, fixed, S, scopeBi);
+    runs.push(canvas);
   }
-  return { target, doc, view: { ...view }, w, h, dpr, scopeBi, skip, first, base };
+  return { target, doc, view: { ...view }, w, h, dpr, scopeBi, skip, moving, runs };
 }
 
 /** Draw the whole map and the scene's overlays onto `canvas`. */
@@ -238,8 +268,9 @@ export function drawMap(canvas: HTMLCanvasElement, doc: Obj, view: View, scene: 
   } else if (!exact) layer = renderLayer(canvas, layerDoc, view, w, h, dpr, scopeBi, skip);
   c.setTransform(1, 0, 0, 1, 0, 0);
   c.clearRect(0, 0, pw, ph);
-  // A static layer is blitted: in a gesture it is moved and scaled (approx), otherwise copied 1:1 at whole device pixels.
+  // A run is blitted: in a gesture it is moved and scaled (approx), otherwise copied 1:1 at whole device pixels.
   const blit = (src: HTMLCanvasElement): void => {
+    c.setTransform(1, 0, 0, 1, 0, 0);
     if (approx) {
       const lw = (w + 2 * LAYER_MARGIN) * ratio;
       const lh = (h + 2 * LAYER_MARGIN) * ratio;
@@ -250,25 +281,34 @@ export function drawMap(canvas: HTMLCanvasElement, doc: Obj, view: View, scene: 
       const sy = exact ? shiftY : 0;
       c.drawImage(src, Math.round((sx - LAYER_MARGIN) * dpr), Math.round((sy - LAYER_MARGIN) * dpr));
     }
+    c.setTransform(dpr, 0, 0, dpr, 0, 0);
   };
   if (layer && approx) {
     c.fillStyle = BG;
     c.fillRect(0, 0, pw, ph);
   }
-  if (layer) blit(layer.base);
-  c.setTransform(dpr, 0, 0, dpr, 0, 0);
-
   const S = (p: Pt): Pt => screenAt(view, w, h, p);
   const k = view.scale;
   const ox = w / 2 - view.x * k;
   const oy = h / 2 - view.y * k;
   const bodies = getList(doc, "body");
-  // The bodies from the layer's first moving body up are drawn live, in index order, as a rest frame draws them.
-  for (let i = layer ? layer.first : 0; i < bodies.length; i++) {
+  const drawLive = (i: number): void => {
     const b = bodies[i];
     if (b) drawBodyAt(c, b, i, scopeBi, ox, oy, k, w, h);
+  };
+  c.setTransform(dpr, 0, 0, dpr, 0, 0);
+  if (layer) {
+    // Each run is blitted, then the moving body after it is drawn live: bodies in index order, as a rest frame draws them.
+    for (let j = 0; j <= layer.moving.length; j++) {
+      const run = layer.runs[j];
+      if (run) blit(run);
+      if (j < layer.moving.length) drawLive(layer.moving[j]!);
+    }
+    drawJointSet(c, doc, splitJoints(doc, skip).live, S, scopeBi);
+  } else {
+    for (let i = 0; i < bodies.length; i++) drawLive(i);
+    drawJointSet(c, doc, getList(doc, "joint"), S, scopeBi);
   }
-  drawAllJoints(c, doc, S, scopeBi);
   for (const kind of MARKER_KINDS) {
     for (const o of getList(doc, kind)) drawMarker(c, kind, screenAt(view, w, h, { x: num(o, "1", 0), y: num(o, "2", 0) }));
   }
@@ -417,6 +457,31 @@ function drawJoints(c: CanvasRenderingContext2D, doc: Obj, joints: readonly Obj[
     }
     c.fill();
   }
+}
+
+/**
+ * Joints split by whether an end sits on one of `skip`'s bodies: those are drawn live with the moving bodies,
+ * the rest are static and cached in the last run.
+ */
+function splitJoints(doc: Obj, skip: readonly number[]): { fixed: Obj[]; live: Obj[] } {
+  const joints = getList(doc, "joint");
+  if (skip.length === 0) return { fixed: joints, live: [] };
+  const bodies = getList(doc, "body");
+  const moved = new Set<Obj>();
+  for (const i of skip) {
+    const b = bodies[i];
+    if (b) moved.add(b);
+  }
+  const fixed: Obj[] = [];
+  const live: Obj[] = [];
+  for (const j of joints) {
+    const touches = [num(j, "7", -1), num(j, "8", -1)].some((id) => {
+      const b = id < 0 ? null : bodyById(doc, id);
+      return b !== null && moved.has(b);
+    });
+    (touches ? live : fixed).push(j);
+  }
+  return { fixed, live };
 }
 
 function drawMarker(c: CanvasRenderingContext2D, kind: (typeof MARKER_KINDS)[number], p: Pt): void {
