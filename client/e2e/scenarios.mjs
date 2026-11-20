@@ -1061,7 +1061,8 @@ async function editorLeave(s) {
   await back(page).click();
   await dialog.waitFor();
   await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
-  await dialog.waitFor({ state: "detached" });
+  // A closed modal fades out for MODAL_CLOSE_MS before it leaves the DOM; role locators skip it at once, so wait on the element.
+  await page.locator("dialog.modal", { hasText: "Leave without saving?" }).waitFor({ state: "detached" });
   await canvas.waitFor({ state: "visible" });
   await back(page).click();
   await dialog.waitFor();
