@@ -172,7 +172,7 @@ export function mountDrum(items: DrumItem[], label: string): Drum {
       const z = radius * (Math.cos(rad) - 1);
       const a = Math.abs(deg) / STEP_DEG;
       style.pointerEvents = "";
-      style.transform = `translate3d(0, ${y.toFixed(2)}px, ${z.toFixed(2)}px) rotateX(${(-deg).toFixed(2)}deg) scale(${(1 - 0.08 * a).toFixed(3)})`;
+      style.transform = `translate3d(0, ${y.toFixed(2)}px, ${z.toFixed(2)}px) rotateX(${(-deg / 2).toFixed(2)}deg)`;
       style.opacity = Math.max(OPACITY_FLOOR, 1 - 0.3 * a).toFixed(3);
     }
   }
