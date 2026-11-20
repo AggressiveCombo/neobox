@@ -458,8 +458,8 @@ async function timedClick(page, trigger, confirm) {
 /** Continuous gestures: each event must be drawn within a frame budget, not the 300 ms action budget (rubric rev8c). */
 const GESTURES = new Set(["editorDrag", "editorPan", "editorZoom"]);
 
-/** ui.actionMs.p95.<action> per action: p95 over ACTION_N samples, every run kept (rubric D12); gestures use the frame gate. */
-function actionResult(samples, { cpu }) {
+/** ui.actionMs.p95.<action> per action: p95 over ACTION_N samples, every run kept (rubric D12); gestures use the frame gate. `gated: false` reports the samples only. */
+function actionResult(samples, { cpu, gated = true }) {
   const sfx = cpu ? ".cpu4x" : "";
   const metrics = { cpu4x: cpu };
   const problems = [];
@@ -470,6 +470,7 @@ function actionResult(samples, { cpu }) {
     metrics[key] = round(p95, 0);
     metrics[`${key}.n`] = ms.length;
     metrics[`${key}.runs`] = ms.map((v) => round(v, 0));
+    if (!gated) continue;
     if (ms.length < ACTION_N) problems.push(`${action} n=${ms.length} < ${ACTION_N}`);
     // Actions pass strictly under their band (< 300 ms); gestures pass at or under their frame budget.
     const within = GESTURES.has(action) ? p95 <= gate : p95 < gate;
@@ -590,6 +591,7 @@ async function editorActions(s, base, { cpu }) {
 const FIXTURES = path.join(import.meta.dir, "fixtures");
 const STRESS_MAP = readFileSync(path.join(FIXTURES, "stress-map.json"), "utf8");
 const LONG_REPLAY = path.join(FIXTURES, "active-4min.nbreplay");
+const LONG_REPLAY_NO_CHECKPOINTS = path.join(FIXTURES, "active-4min-nocheckpoints.nbreplay");
 const DRAFT_KEY = "neobox.editor.draft";
 
 /**
@@ -631,8 +633,8 @@ function seeded(seed) {
   return () => ((x = (x * 1664525 + 1013904223) >>> 0) / 2 ** 32);
 }
 
-/** openReplay and seekReplay: open the long replay from the Replay page (to its first frame), then seek to seeded points. */
-async function replayActions(s, base, { cpu }) {
+/** openReplay and seekReplay on one replay file: open it from the Replay page (to its first frame), then seek to seeded points. */
+async function replayRuns(s, base, { cpu, file }) {
   const { page } = await s.open("replay");
   await page.goto(base);
   await menuName(page).waitFor();
@@ -643,7 +645,7 @@ async function replayActions(s, base, { cpu }) {
   for (let i = 0; i < ACTION_N; i++) {
     await navTo(page, "Replay");
     const input = page.locator('input[type="file"]').first();
-    open.push(await timedSpan(page, () => input.setInputFiles(LONG_REPLAY), viewSel));
+    open.push(await timedSpan(page, () => input.setInputFiles(file), viewSel));
     await button(page.locator(".offline-top"), "Close").click();
     await view.waitFor({ state: "hidden" });
     await page.goto(base);
@@ -651,7 +653,7 @@ async function replayActions(s, base, { cpu }) {
   }
   // seekReplay: the seek bar set to a seeded tick; confirmed when the tick readout shows that tick (drawn per frame).
   await navTo(page, "Replay");
-  await page.locator('input[type="file"]').first().setInputFiles(LONG_REPLAY);
+  await page.locator('input[type="file"]').first().setInputFiles(file);
   await view.waitFor();
   const playLabel = page.locator(".replay-play-label");
   if (/Pause/.test((await playLabel.textContent()) ?? "")) await playLabel.click();
@@ -663,7 +665,22 @@ async function replayActions(s, base, { cpu }) {
     const target = Math.floor(rnd() * maxTick);
     seekMs.push(await timedSpan(page, () => seek.fill(String(target)), { css: ".replay-tick", text: `tick ${target}$` }));
   }
-  return actionResult({ openReplay: open, seekReplay: seekMs }, { cpu });
+  return { openReplay: open, seekReplay: seekMs };
+}
+
+/**
+ * openReplay and seekReplay on the checkpointed replay (gated). The same match recorded before checkpoints existed is
+ * timed too (reported as openReplay.noCheckpoints and seekReplay.noCheckpoints, not gated): its seeks wait on the
+ * background keyframe build.
+ */
+async function replayActions(s, base, { cpu }) {
+  const gated = actionResult(await replayRuns(s, base, { cpu, file: LONG_REPLAY }), { cpu });
+  const plain = await replayRuns(s, base, { cpu, file: LONG_REPLAY_NO_CHECKPOINTS });
+  const reported = actionResult(
+    { "openReplay.noCheckpoints": plain.openReplay, "seekReplay.noCheckpoints": plain.seekReplay },
+    { cpu, gated: false },
+  );
+  return { ...gated, metrics: { ...gated.metrics, ...reported.metrics } };
 }
 
 /** Opens the Map editor on the stress map draft; returns the canvas. */
