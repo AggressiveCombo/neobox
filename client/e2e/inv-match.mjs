@@ -910,13 +910,15 @@ async function matchEditorInspector(s) {
     await offX.waitFor({ state: "visible" });
   };
   await selectBody();
-  await offX.fill("7.5");
+  // The offsets move the shape in map units: at the opening zoom (Screen width across the canvas) 7.5 units is about
+  // 200px, past the 160px box, so the reselect click at the centre would miss it. Small offsets keep it under the pointer.
+  await offX.fill("1.5");
   await offX.press("Enter");
-  await offY.fill("3");
-  // A canvas press blurs the field (its change commits the 3), then clears the selection.
+  await offY.fill("0.5");
+  // A canvas press blurs the field (its change commits the 0.5), then clears the selection.
   await page.mouse.click(box.x + 5, box.y + 5);
   await selectBody();
-  const want = { x: "7.5", y: "3" };
+  const want = { x: "1.5", y: "0.5" };
   let got = {};
   for (let i = 0; i < 30; i++) {
     got = { x: await offX.inputValue(), y: await offY.inputValue() };
