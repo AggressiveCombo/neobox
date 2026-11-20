@@ -41,6 +41,7 @@ import { matchInvScenarios } from "./inv-match.mjs";
 import { accountsInvScenarios } from "./inv-accounts.mjs";
 import { roomsInvScenarios } from "./inv-rooms.mjs";
 import { serverInvScenarios } from "./inv-server.mjs";
+import { transitionScenarios } from "./transition.mjs";
 import { writeFileSync, mkdtempSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -1405,5 +1406,6 @@ export const scenarios = [
   ...accountsInvScenarios,
   ...roomsInvScenarios,
   ...serverInvScenarios,
+  ...transitionScenarios,
   ...livenessScenarios,
 ];

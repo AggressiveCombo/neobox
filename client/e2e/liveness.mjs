@@ -120,7 +120,7 @@ const SPY = () => {
  * Each page of the scenario gets a link. `route` puts the page's socket through the relay; the close spy is always on,
  * so the offline case checks closes on every engine.
  */
-function linked(s, { route = true } = {}) {
+export function linked(s, { route = true } = {}) {
   const openOrig = s.open.bind(s);
   s.open = async (label, opts) => {
     const h = await openOrig(label, opts);
