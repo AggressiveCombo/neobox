@@ -878,6 +878,31 @@ async function aboutAndPrivacy(s) {
   return "about text and links, about news link, privacy sections";
 }
 
+/** A colour picker closed with Escape, then a navigation at once: the picker's history pop must not cancel that navigation. */
+async function modalCloseThenNavigate(s) {
+  const h = await s.open("modalnav");
+  const { page } = h;
+  await goMenu(page, s.base);
+  await navTo(page, "Settings");
+  await section(page, "Display");
+  // Chromium: the page is CPU-throttled only around the close and its navigation, so the close runs late, after the
+  // navigation has started (the mechanism in kit.ts close()). The rest of each round runs at full speed.
+  const cdp = page.context().browser()?.browserType().name() === "chromium" ? await page.context().newCDPSession(page) : null;
+  const throttle = (rate) => cdp?.send("Emulation.setCPUThrottlingRate", { rate });
+  for (let i = 0; i < 8; i++) {
+    await button(page, "Choose colour").click();
+    await page.getByRole("radiogroup", { name: "Colour", exact: true }).waitFor();
+    await throttle(50);
+    await page.keyboard.press("Escape");
+    await page.goto(s.base, { waitUntil: "commit" });
+    await throttle(1);
+    await menuName(page).waitFor();
+    await navTo(page, "Settings");
+    await section(page, "Display");
+  }
+  return "a navigation right after a modal closed with Escape is not cancelled by the modal's history pop";
+}
+
 export const accountsInvScenarios = [
   { name: "inv accounts guest sign-in", inv: ["account-signed-out", "menu-account-btn", "acct-empty-password", "acct-name-bad", "acct-pw-short", "acct-taken", "acct-login-wrong-password"], run: expectStatuses([400, 401, 409], guestSignIn) },
   { name: "inv accounts create and sign out", inv: ["account-create", "account-signed-in", "account-signout"], run: accountCreateAndSignOut },
@@ -898,4 +923,5 @@ export const accountsInvScenarios = [
   { name: "inv accounts platform", inv: ["plat-dark", "plat-reduced-motion", "plat-touch-capable", "plat-coarse-buttons", "plat-css-coarse"], run: platform },
   { name: "inv accounts platform matrix", inv: ["plat-css-600", "plat-css-900", "plat-css-landscape"], run: platformMatrix },
   { name: "inv accounts about and privacy", inv: ["about-page", "about-news-link", "privacy-page"], run: aboutAndPrivacy },
+  { name: "inv accounts modal escape then navigate", inv: ["colour-modal-escape-then-navigate"], run: modalCloseThenNavigate },
 ];

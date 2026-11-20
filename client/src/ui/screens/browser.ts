@@ -66,6 +66,9 @@ function clampMaxPlayers(input: HTMLInputElement): number {
   return clamped;
 }
 
+/** The create-room form's values until a room is created. Kept in memory, so a connection drop that closes the modal keeps them. */
+const createDraft = { name: "", password: "", max: DEFAULT_MAX_PLAYERS, isPublic: true };
+
 export const browserScreen: ScreenFactory = (ctx) => {
   const { store } = ctx;
 
@@ -118,7 +121,7 @@ export const browserScreen: ScreenFactory = (ctx) => {
   const noticeSlot = h("div", { class: "browser-notice-slot" });
   const inviteSlot = h("div", { class: "invite-slot" });
 
-  /** The create-room form in a modal: fresh fields each time it opens; Create room submits them. */
+  /** The create-room form in a modal: it opens with the draft (what was typed since the last room was created). */
   function openCreateRoom(): void {
     const roomName = h("input", {
       type: "text",
@@ -126,23 +129,38 @@ export const browserScreen: ScreenFactory = (ctx) => {
       placeholder: "Optional",
       autocomplete: "off",
       "aria-label": "room name",
+      value: createDraft.name,
+      oninput: () => {
+        createDraft.name = roomName.value;
+      },
     });
     const roomPassword = h("input", {
       type: "password",
       placeholder: "Optional",
       autocomplete: "new-password",
+      value: createDraft.password,
+      oninput: () => {
+        createDraft.password = roomPassword.value;
+      },
     });
     const maxInput = h("input", {
       type: "number",
       min: ROOM_MIN_PLAYERS,
       max: ROOM_MAX_PLAYERS,
       step: 1,
-      value: DEFAULT_MAX_PLAYERS,
+      value: createDraft.max,
       onchange: () => {
-        clampMaxPlayers(maxInput);
+        createDraft.max = clampMaxPlayers(maxInput);
       },
     });
-    const isPublic = h("input", { type: "checkbox", role: "switch", checked: true });
+    const isPublic = h("input", {
+      type: "checkbox",
+      role: "switch",
+      checked: createDraft.isPublic,
+      onchange: () => {
+        createDraft.isPublic = isPublic.checked;
+      },
+    });
 
     const form = h(
       "form",
@@ -159,6 +177,7 @@ export const browserScreen: ScreenFactory = (ctx) => {
             max_players: clampMaxPlayers(maxInput),
             public: isPublic.checked,
           });
+          Object.assign(createDraft, { name: "", password: "", max: DEFAULT_MAX_PLAYERS, isPublic: true });
           modal.close();
         },
       },

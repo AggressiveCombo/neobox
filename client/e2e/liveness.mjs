@@ -4,7 +4,7 @@
 // relay can drop traffic both ways. The offline case cuts the real socket on chromium (CDP emulation, no routing); the
 // other engines hold the socket silent through the relay while context.setOffline is on, since setOffline leaves an open socket live.
 
-import { matchWithGuest, sleep } from "./lib.mjs";
+import { button, matchWithGuest, menuName, playFromMenu, sleep } from "./lib.mjs";
 
 const check = (ok, message) => {
   if (!ok) throw new Error(message);
@@ -213,8 +213,32 @@ async function offlineLink(s) {
   return `banner ${shownMs} ms after going offline (${early.length} liveness close before it); match back ${recoverMs} ms after online`;
 }
 
+/** A drop while Create room is open: the modal closes with a "Connection lost." toast, and the typed name is there again after reconnecting. */
+async function dropClosesCreateRoom(s) {
+  const h = await s.open("drop");
+  const page = h.page;
+  await page.goto(s.base);
+  await menuName(page).waitFor();
+  await playFromMenu(page, null);
+  await button(page, "New room").click();
+  const name = page.getByLabel("room name", { exact: true });
+  await name.waitFor();
+  await name.fill("Drop draft");
+  h.link.hole = true;
+  await page.locator(".toast-error", { hasText: "Connection lost." }).waitFor({ timeout: BANNER_MS + 6_000 });
+  await name.waitFor({ state: "hidden", timeout: 5_000 });
+  h.link.hole = false;
+  await playFromMenu(page, null);
+  await button(page, "New room").click();
+  const again = page.getByLabel("room name", { exact: true });
+  await again.waitFor();
+  check((await again.inputValue()) === "Drop draft", "the typed room name did not survive the drop");
+  return "the drop closed Create room with a Connection lost toast; the typed name is still there when Create room reopens";
+}
+
 export const livenessScenarios = [
   { name: "liveness blackhole", run: (s) => blackhole(linked(s)) },
   { name: "liveness slow link", run: (s) => slowLink(linked(s)) },
   { name: "liveness offline", run: (s) => offlineLink(linked(s, { route: s.env.browser.browserType().name() !== "chromium" })) },
+  { name: "liveness drop closes create room", run: (s) => dropClosesCreateRoom(linked(s)) },
 ];

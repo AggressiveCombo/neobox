@@ -245,6 +245,12 @@ function flushModalPops(): void {
   popInFlight = true;
   history.go(-n);
 }
+/** Closes a modal's dialog and takes it out of the accessibility tree and focus order at once: it fades out (is-closing) for a while. */
+function retire(dialog: HTMLDialogElement): void {
+  dialog.inert = true;
+  dialog.setAttribute("aria-hidden", "true");
+  dialog.close();
+}
 
 /**
  * A modal <dialog> on the ground colour. Escape and a click on the scrim close
@@ -275,7 +281,7 @@ export function openModal(opts: ModalOptions): { dialog: HTMLDialogElement; clos
       deadEntries++;
       flushModalPops();
     }
-    dialog.close();
+    retire(dialog);
   };
   if (!opts.actions || opts.actions.length === 0) actions[0].addEventListener("click", close);
   dialog.addEventListener("cancel", (e) => {
@@ -295,7 +301,6 @@ export function openModal(opts: ModalOptions): { dialog: HTMLDialogElement; clos
       dialog.remove();
       return;
     }
-    dialog.inert = true;
     dialog.classList.add("is-closing");
     // Removed when its exit animation ends. A timer raced it: the animation starts a frame after this event, so a timer of the animation's length removed the dialog before animationend fired.
     dialog.addEventListener("animationend", (e) => {
@@ -388,7 +393,7 @@ export function closeModalsAbove(id: string | null, inclusive = false): void {
   if (id !== null && at < 0) return;
   const from = id === null ? 0 : at + (inclusive ? 0 : 1);
   for (const m of pushed.slice(from).reverse()) {
-    m.dialog.close();
+    retire(m.dialog);
   }
 }
 
