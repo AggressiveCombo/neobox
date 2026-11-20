@@ -23,6 +23,9 @@ export const {
   matchWithGuest,
   menuName,
   navTo,
+  drumOption,
+  rollDrum,
+  NavError,
   onCleanup,
   probeChanges,
   resolveChromium,
@@ -256,10 +259,12 @@ export class Results {
     const t0 = Date.now();
     const s = new Scenario(label, { base, browser });
     let out = {};
+    let navError = false;
     let error = null;
     try {
       out = (await fn(s)) ?? {};
     } catch (err) {
+      if (err instanceof NavError) navError = true;
       error = err instanceof Error ? err.message : String(err);
     }
     const unignored = s.problems().filter((p) => !ignore.some((re) => re.test(p)));
@@ -283,7 +288,7 @@ export class Results {
     await s.close(); // free this case's pages; live game loops from earlier cases starve later ones
     const rec = {
       id,
-      verdict: isInfo ? "info" : pass ? "pass" : "fail",
+      verdict: isInfo ? "info" : navError ? "nav-error" : pass ? "pass" : "fail",
       detail: [error, out.detail].filter(Boolean).join("; ") || undefined,
       metrics: { ...out.metrics, "net.abortedMedia": netAborted.length, "net.abortedOther": netAbortedOther.length },
       problems: problems.length ? problems : undefined,
@@ -356,14 +361,16 @@ export function writeIndex() {
   const runs = files.map((f) => JSON.parse(readFileSync(path.join(dir, f), "utf8")));
   const rows = [];
   let fails = 0;
+  let navErrors = 0;
   for (const run of runs) {
     for (const c of run.cases) {
       if (c.verdict === "fail") fails++;
+      if (c.verdict === "nav-error") navErrors++;
       rows.push({ instrument: run.instrument, engine: run.engine, selfTest: run.selfTest, ...c });
     }
   }
-  writeFileSync(path.join(dir, "summary.json"), `${JSON.stringify({ runs: runs.length, fails, rows }, null, 2)}\n`);
-  const lines = ["# QA summary (perf, robust, input)", "", `${runs.length} runs, ${rows.length} cases, ${fails} failing.`, ""];
+  writeFileSync(path.join(dir, "summary.json"), `${JSON.stringify({ runs: runs.length, fails, navErrors, rows }, null, 2)}\n`);
+  const lines = ["# QA summary (perf, robust, input)", "", `${runs.length} runs, ${rows.length} cases, ${fails} failing, ${navErrors} nav-error (not counted as failing).`, ""];
   lines.push("| instrument | engine | self-test | case | verdict | detail |");
   lines.push("| --- | --- | --- | --- | --- | --- |");
   for (const r of rows) {

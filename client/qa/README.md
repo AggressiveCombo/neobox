@@ -7,6 +7,7 @@ Headless browser instruments for the neobox client. Each one drives the built cl
 - Browsers start only through `launchEngine(name)` in `client/e2e/lib.mjs`. It mutes every context (firefox gets a null audio device). Do not call `chromium.launch` / `firefox.launch` / `webkit.launch` directly.
 - Headless only. Port 8080 is never used (`startServer` picks a free port with a fresh DB).
 - Capabilities differ by engine. CDP-only features (network/CPU throttling, heap, raw WebSocket where noted, long tasks, CLS) run on chromium only. Elsewhere they record `N/A` with the probe value.
+- Reaching a home destination is part of the drum (`navTo` in `client/e2e/lib.mjs`). When the drum cannot reach or open a destination, the helper throws `NavError`, and `Results.case` records the case as `nav-error`, not `fail`. A `nav-error` is not a product verdict: the case never reached the feature under test. Investigate every one before the run counts. `writeIndex` counts them apart from failing cases.
 
 ### Environment variables
 
@@ -22,7 +23,7 @@ Headless browser instruments for the neobox client. Each one drives the built cl
 
 ### Output layout
 
-- `<QA_OUT>/<instrument>-<engine>.json` and `.md`: one record per case (`pass`, `fail`, `info`, metrics, detail, evidence paths).
+- `<QA_OUT>/<instrument>-<engine>.json` and `.md`: one record per case (`pass`, `fail`, `nav-error`, `info`, metrics, detail, evidence paths).
 - `<QA_OUT>/evidence/<instrument>-<engine>/`: screenshots and JSON dumps referenced by the records.
 - Self-test runs overwrite the same files, so use a separate `QA_OUT` for them.
 

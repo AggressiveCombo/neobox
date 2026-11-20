@@ -93,7 +93,7 @@ for (const engine of engines) {
         const { page } = await s.open(c.id);
         await page.goto(s.base);
         await lib.menuName(page).waitFor();
-        await lib.button(page, "Map editor").click();
+        await lib.navTo(page, "Map editor");
         const canvas = page.locator("canvas.editor-canvas");
         await canvas.waitFor({ state: "visible" });
         await sleep(800);

@@ -662,29 +662,51 @@ export function drumOption(page, label) {
 }
 
 /**
+ * A home destination the drum could not reach or open. A navigation error, not a product failure: qa instruments
+ * report it as `nav-error` (client/qa/lib-qa.mjs, Results.case). Every drum helper below throws it.
+ */
+export class NavError extends Error {
+  constructor(label, cause) {
+    super(`navigation to "${label}" failed: ${cause instanceof Error ? cause.message.split("\n")[0] : String(cause)}`, { cause });
+    this.name = "NavError";
+  }
+}
+
+/** Runs one drum step; a failure in it is a NavError for `label`. */
+async function drumStep(label, step) {
+  try {
+    await step();
+  } catch (err) {
+    throw new NavError(label, err);
+  }
+}
+
+/**
  * Rolls the home destinations drum until `label` is centred: the shortest way round, from the keyboard. Untimed.
  */
-export async function rollDrum(page, label) {
-  const drum = page.getByRole("listbox", { name: "Destinations", exact: true });
-  await drum.waitFor();
-  const { labels, front } = await drum.evaluate((box) => {
-    const opts = [...box.querySelectorAll('[role="option"]')];
-    return {
-      labels: opts.map((o) => o.querySelector(".drum-label").textContent),
-      front: opts.findIndex((o) => o.getAttribute("aria-selected") === "true"),
-    };
+export function rollDrum(page, label) {
+  return drumStep(label, async () => {
+    const drum = page.getByRole("listbox", { name: "Destinations", exact: true });
+    await drum.waitFor();
+    const { labels, front } = await drum.evaluate((box) => {
+      const opts = [...box.querySelectorAll('[role="option"]')];
+      return {
+        labels: opts.map((o) => o.querySelector(".drum-label").textContent),
+        front: opts.findIndex((o) => o.getAttribute("aria-selected") === "true"),
+      };
+    });
+    const want = labels.indexOf(label);
+    if (want < 0) throw new Error(`no home destination "${label}"`);
+    const n = labels.length;
+    let steps = (((want - front) % n) + n) % n;
+    if (steps > n / 2) steps -= n;
+    if (steps !== 0) {
+      await drum.focus();
+      for (let k = 0; k < Math.abs(steps); k += 1) await page.keyboard.press(steps > 0 ? "ArrowDown" : "ArrowUp");
+    }
+    // The drum has rolled once it reports settled: options are then still and clickable.
+    await drum.and(page.locator('[data-settled="true"]')).waitFor();
   });
-  const want = labels.indexOf(label);
-  if (want < 0) throw new Error(`no home destination "${label}"`);
-  const n = labels.length;
-  let steps = (((want - front) % n) + n) % n;
-  if (steps > n / 2) steps -= n;
-  if (steps !== 0) {
-    await drum.focus();
-    for (let k = 0; k < Math.abs(steps); k += 1) await page.keyboard.press(steps > 0 ? "ArrowDown" : "ArrowUp");
-  }
-  // The drum has rolled once it reports settled: options are then still and clickable.
-  await drum.and(page.locator('[data-settled="true"]')).waitFor();
 }
 
 /**
@@ -693,7 +715,7 @@ export async function rollDrum(page, label) {
  */
 export async function navTo(page, label) {
   await rollDrum(page, label);
-  await drumOption(page, label).click();
+  await drumStep(label, () => drumOption(page, label).click());
 }
 
 /** Plays from the menu: fills the guest name when needed, then Quick play or Browse rooms. */
