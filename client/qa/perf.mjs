@@ -601,7 +601,8 @@ const DRAFT_KEY = "neobox.editor.draft";
  * its text). The time ends in the frame that first shows it, read in the page, so Playwright's polling (which waits on
  * a busy main thread) is not counted. t0 is read in the page just before the action; the self-test busy time runs there.
  */
-async function timedSpan(page, act, { css, text = null }) {
+async function timedSpan(page, act, { css, text = null }, cdp = null) {
+  if (cdp) return threadSpan(page, cdp, act, { css, text });
   const busy = selfTestMode() === "action" ? BUSY_MS : 0;
   const t0 = await page.evaluate(
     ({ busy, css, text }) => {
@@ -627,6 +628,64 @@ async function timedSpan(page, act, { css, text = null }) {
   return (await page.evaluate(() => window.__qaSeen)) - t0;
 }
 
+/** Trace categories that carry the main thread's RunTask events and the span marks (threadSpan). */
+const TRACE_CATS = ["devtools.timeline", "disabled-by-default-devtools.timeline", "blink.user_timing"];
+
+/**
+ * Main-thread CPU time (ms) of one trigger-to-confirmation span, from a trace of that span: the thread clock (`tdur`)
+ * of the main thread's RunTask events, clipped to the span's `tt-start` and `tt-seen` marks. Unlike the page clock it
+ * leaves out time the thread is descheduled under host load. Reported beside the page-clock actions (ui.threadMs).
+ */
+async function threadSpan(page, cdp, act, { css, text = null }) {
+  const events = [];
+  const onData = (p) => events.push(...p.value);
+  cdp.on("Tracing.dataCollected", onData);
+  const done = new Promise((r) => cdp.once("Tracing.tracingComplete", r));
+  await cdp.send("Tracing.start", {
+    transferMode: "ReportEvents",
+    traceConfig: { recordMode: "recordAsMuchAsPossible", includedCategories: TRACE_CATS },
+  });
+  await sleep(50);
+  await page.evaluate(
+    ({ css, text }) => {
+      const re = text === null ? null : new RegExp(text);
+      window.__qaTraceSeen = false;
+      const check = () => {
+        const el = [...document.querySelectorAll(css)].find((e) => e.getClientRects().length > 0 && (re === null || re.test(e.textContent ?? "")));
+        if (el) {
+          performance.mark("tt-seen");
+          window.__qaTraceSeen = true;
+        } else requestAnimationFrame(check);
+      };
+      requestAnimationFrame(check);
+      performance.mark("tt-start");
+    },
+    { css, text },
+  );
+  await act();
+  await page.waitForFunction(() => window.__qaTraceSeen === true, null, { timeout: 60000 });
+  await cdp.send("Tracing.end");
+  await done;
+  cdp.off("Tracing.dataCollected", onData);
+  return mainThreadMs(events);
+}
+
+/** Thread-clock ms of the main thread's RunTask events inside the span between the tt-start and tt-seen marks. */
+function mainThreadMs(events) {
+  const main = new Set(events.filter((e) => e.ph === "M" && e.name === "thread_name" && e.args?.name === "CrRendererMain").map((e) => `${e.pid}:${e.tid}`));
+  const marks = events.filter((e) => e.cat?.includes("blink.user_timing") && (e.name === "tt-start" || e.name === "tt-seen"));
+  const a = marks.filter((e) => e.name === "tt-start").pop()?.ts;
+  const b = marks.filter((e) => e.name === "tt-seen").pop()?.ts;
+  if (a === undefined || b === undefined) throw new Error("trace span marks missing");
+  let ms = 0;
+  for (const e of events) {
+    if (e.ph !== "X" || e.name !== "RunTask" || e.tdur === undefined || !main.has(`${e.pid}:${e.tid}`)) continue;
+    if (e.ts + e.dur <= a || e.ts >= b) continue;
+    ms += (e.tdur * (Math.min(b, e.ts + e.dur) - Math.max(a, e.ts)) / e.dur) / 1000;
+  }
+  return ms;
+}
+
 /** Seeded PRNG (LCG), so every run seeks the same points and picks the same bodies. */
 function seeded(seed) {
   let x = seed >>> 0;
@@ -634,18 +693,19 @@ function seeded(seed) {
 }
 
 /** openReplay and seekReplay on one replay file: open it from the Replay page (to its first frame), then seek to seeded points. */
-async function replayRuns(s, base, { cpu, file }) {
+async function replayRuns(s, base, { cpu, file, thread = false }) {
   const { page } = await s.open("replay");
   await page.goto(base);
   await menuName(page).waitFor();
-  if (cpu) await setCpu(await cdpOf(page), CPU_RATE);
+  const cdp = await cdpOf(page);
+  if (cpu) await setCpu(cdp, CPU_RATE);
   const view = page.locator(".offline.playing.replay-view");
   const viewSel = { css: ".offline.playing.replay-view" };
   const open = [];
   for (let i = 0; i < ACTION_N; i++) {
     await navTo(page, "Replay");
     const input = page.locator('input[type="file"]').first();
-    open.push(await timedSpan(page, () => input.setInputFiles(file), viewSel));
+    open.push(await timedSpan(page, () => input.setInputFiles(file), viewSel, thread ? cdp : null));
     await button(page.locator(".offline-top"), "Close").click();
     await view.waitFor({ state: "hidden" });
     await page.goto(base);
@@ -663,7 +723,7 @@ async function replayRuns(s, base, { cpu, file }) {
   const seekMs = [];
   for (let i = 0; i < ACTION_N; i++) {
     const target = Math.floor(rnd() * maxTick);
-    seekMs.push(await timedSpan(page, () => seek.fill(String(target)), { css: ".replay-tick", text: `tick ${target}$` }));
+    seekMs.push(await timedSpan(page, () => seek.fill(String(target)), { css: ".replay-tick", text: `tick ${target}$` }, thread ? cdp : null));
   }
   return { openReplay: open, seekReplay: seekMs };
 }
@@ -675,12 +735,27 @@ async function replayRuns(s, base, { cpu, file }) {
  */
 async function replayActions(s, base, { cpu }) {
   const gated = actionResult(await replayRuns(s, base, { cpu, file: LONG_REPLAY }), { cpu });
+  const traced = await replayRuns(s, base, { cpu, file: LONG_REPLAY, thread: true });
   const plain = await replayRuns(s, base, { cpu, file: LONG_REPLAY_NO_CHECKPOINTS });
   const reported = actionResult(
     { "openReplay.noCheckpoints": plain.openReplay, "seekReplay.noCheckpoints": plain.seekReplay },
     { cpu, gated: false },
   );
-  return { ...gated, metrics: { ...gated.metrics, ...reported.metrics } };
+  const threadMs = threadResult({ openReplay: traced.openReplay, seekReplay: traced.seekReplay }, { cpu });
+  return { ...gated, metrics: { ...gated.metrics, ...reported.metrics, ...threadMs } };
+}
+
+/** ui.threadMs.p95.<action>: main-thread CPU time per sample (threadSpan), reported beside the page-clock actions; not gated. */
+function threadResult(samples, { cpu }) {
+  const sfx = cpu ? ".cpu4x" : "";
+  const metrics = {};
+  for (const [action, ms] of Object.entries(samples)) {
+    const key = `ui.threadMs.p95.${action}${sfx}`;
+    metrics[key] = round(percentile(ms, 95), 0);
+    metrics[`${key}.n`] = ms.length;
+    metrics[`${key}.runs`] = ms.map((v) => round(v, 0));
+  }
+  return metrics;
 }
 
 /** Opens the Map editor on the stress map draft; returns the canvas. */
