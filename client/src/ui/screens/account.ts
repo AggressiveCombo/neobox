@@ -3,7 +3,7 @@
 // actions behind a Security disclosure. Signing in or out re-opens the live connection
 // so the server knows the identity.
 
-import { applyAccount, changePassword, deleteAccount, errorText, login, logout, register, returnScreen } from "../../account";
+import { applyAccount, changePassword, deleteAccount, errorText, login, register, returnScreen, signOutAccount } from "../../account";
 import type { AppCtx, ScreenFactory } from "../../ctx";
 import { guestXp, levelOf, xpForLevel } from "../../levels";
 import { MAX_NAME_LEN, NAME_RE } from "../../protocol";
@@ -266,7 +266,7 @@ export const accountScreen: ScreenFactory = (ctx) => {
 
   function signOut(): void {
     void act(async () => {
-      await logout();
+      await signOutAccount(ctx);
       applyAccount(ctx, null);
     }, "Signed out.");
   }

@@ -2,7 +2,7 @@
 // DOM only; it sits over the render canvases and enables pointer events only on
 // interactive elements (see hud.css).
 
-import { applyAccount, errorText, logout } from "../../account";
+import { applyAccount, errorText, signOutAccount } from "../../account";
 import type { AppCtx, HudFactory } from "../../ctx";
 import { cycleSpectate, spectatedId } from "../../camera";
 import { recordClip } from "../../clips";
@@ -429,7 +429,7 @@ export const hudScreen: HudFactory = (ctx) => {
 
   async function signOut(): Promise<void> {
     try {
-      await logout();
+      await signOutAccount(ctx);
       applyAccount(ctx, null);
       setMenu(false);
     } catch (err) {

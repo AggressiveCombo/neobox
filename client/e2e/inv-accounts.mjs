@@ -134,6 +134,45 @@ async function accountCreateAndSignOut(s) {
   return `created ${name}, account page, signed out`;
 }
 
+/** A settings save in flight at sign-out must reach the server before the session ends. The save is held in flight. */
+async function signOutWithPendingSave(s) {
+  const h = await s.open("maker");
+  const { page } = h;
+  const name = uniqueName("mk");
+  let releasePut;
+  const held = new Promise((r) => {
+    releasePut = r;
+  });
+  let logoutSent = false;
+  await page.route("**/api/account/prefs", async (route) => {
+    if (route.request().method() !== "PUT") return route.continue();
+    await held;
+    return route.continue();
+  });
+  await page.route("**/api/account/logout", async (route) => {
+    logoutSent = true;
+    return route.continue();
+  });
+  const putSent = page.waitForRequest((r) => r.url().endsWith("/api/account/prefs") && r.method() === "PUT");
+  await goMenu(page, s.base);
+  await menuAccount(page).click();
+  await accountForm(page).getByLabel("name", { exact: true }).fill(name);
+  await page.getByLabel("password", { exact: true }).fill(PASSWORD);
+  await button(page, "Create account").click();
+  await page.getByText("Account created.", { exact: true }).waitFor();
+  await goMenu(page, s.base);
+  await page.getByRole("button", { name: /^Account, Level 1$/ }).click();
+  await page.getByText("Sign out", { exact: false }).first().waitFor();
+  await putSent;
+  await button(page, "Sign out").click();
+  await page.waitForTimeout(500);
+  check(!logoutSent, "logout was sent while a save was in flight");
+  releasePut();
+  await page.getByText("Signed out.", { exact: true }).waitFor();
+  check((await page.getByText("settings not saved", { exact: false }).count()) === 0, "a save was refused after sign-out");
+  return `signed out with the save in flight: logout waited, no refused save`;
+}
+
 async function loginLimit(s) {
   const h = await s.open("limit", { ip: ipIn("203.0.113") });
   const { page } = h;
@@ -841,6 +880,7 @@ async function aboutAndPrivacy(s) {
 export const accountsInvScenarios = [
   { name: "inv accounts guest sign-in", inv: ["account-signed-out", "menu-account-btn", "acct-empty-password", "acct-name-bad", "acct-pw-short", "acct-taken", "acct-login-wrong-password"], run: expectStatuses([400, 401, 409], guestSignIn) },
   { name: "inv accounts create and sign out", inv: ["account-create", "account-signed-in", "account-signout"], run: accountCreateAndSignOut },
+  { name: "inv accounts sign out with a pending save", inv: ["account-create", "account-signed-in", "account-signout"], run: signOutWithPendingSave },
   { name: "inv accounts login limit", inv: ["acct-login-limit"], run: expectStatuses([401, 429], loginLimit) },
   { name: "inv accounts security and delete", inv: ["acct-pw-wrong-change", "acct-pw-short-change", "acct-change-password-collapsed", "acct-delete-wrong", "acct-delete-wrong-password"], run: expectStatuses([400, 401, 403], accountSecurity) },
   { name: "inv accounts menu buttons", inv: ["menu-news-btn", "news-modal", "menu-mute-btn", "menu-fullscreen-btn", "menu-clips"], run: menuButtons },

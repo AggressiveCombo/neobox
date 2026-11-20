@@ -81,8 +81,6 @@ export const register = (name: string, password: string, remember: boolean): Pro
 export const login = (name: string, password: string, remember: boolean): Promise<Account> =>
   startSession("/api/account/login", name, password, remember);
 
-export const logout = (): Promise<void> => request<void>("POST", "/api/account/logout");
-
 export const changePassword = (old: string, next: string): Promise<void> =>
   request<void>("POST", "/api/account/password", { old, new: next, remember: local.getItem(REMEMBER_KEY) === "1" });
 
@@ -254,6 +252,8 @@ let pushTimer: Timer | undefined;
 let pulling: Promise<void> = Promise.resolve();
 /** True while server prefs are being applied, so the subscription does not echo them back. */
 let applying = false;
+/** The last save started: a sign-out waits for it before it ends the session. */
+let saving: Promise<void> = Promise.resolve();
 
 function queuePush(ctx: AppCtx): void {
   if (ctx.store.state.account === null) return;
@@ -261,7 +261,7 @@ function queuePush(ctx: AppCtx): void {
   clearTimeout(pushTimer);
   pushTimer = setTimeout(() => {
     pushTimer = undefined;
-    void pushPrefs(ctx, false);
+    saving = pushPrefs(ctx, false);
   }, PUSH_DELAY_MS);
 }
 
@@ -282,6 +282,20 @@ async function pushPrefs(ctx: AppCtx, keepalive: boolean): Promise<void> {
   } catch (err) {
     ctx.toast(`settings not saved to your account: ${errorText(err)}`, "error");
   }
+}
+
+/**
+ * End the session. A save still queued or in flight goes out first: one that reaches the server after the logout is
+ * refused (401) and reported as an error for an account the player just left.
+ */
+export async function signOutAccount(ctx: AppCtx): Promise<void> {
+  if (pushTimer !== undefined) {
+    clearTimeout(pushTimer);
+    pushTimer = undefined;
+    saving = pushPrefs(ctx, false);
+  }
+  await saving;
+  await request<void>("POST", "/api/account/logout");
 }
 
 /** On sign-in the server's copy wins when it has one; otherwise this device's copy is uploaded. */
