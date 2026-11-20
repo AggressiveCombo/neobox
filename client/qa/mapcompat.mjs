@@ -7,6 +7,8 @@
 //   - an axis whose arena is longer than the view: the view lies inside the arena on that axis;
 //   - an axis whose arena fits the base view (the map's Screen width, set "3", and its height by the aspect): the view
 //     is centred on the arena on that axis.
+//   - the camera's clamp bounds (bx0..by1, published by camera.ts) are the arena itself: map geometry past the arena
+//     (the timer drums under the floor) must not widen them, or the view can frame it (the 54defca bug).
 // Maps: every compact map JSON in the repo's maps/ directory, plus the ';'-separated paths in QA_MAPS (e.g. a community map).
 // The map is loaded as a map code (base64 of the deflated JSON, as Practice > Map code > Use code takes it).
 //
@@ -57,7 +59,7 @@ async function sampleCamera(page, ms, act) {
         const t0 = performance.now();
         const frame = () => {
           const c = globalThis.__qaCam;
-          if (c && c.w > 0) out.push({ cx: c.cx, cy: c.cy, w: c.w, h: c.h, aw: c.aw, ah: c.ah, tick: c.tick });
+          if (c && c.w > 0) out.push({ cx: c.cx, cy: c.cy, w: c.w, h: c.h, aw: c.aw, ah: c.ah, tick: c.tick, bx0: c.bx0, by0: c.by0, bx1: c.bx1, by1: c.by1 });
           if (performance.now() - t0 < dur) requestAnimationFrame(frame);
           else resolve(out);
         };
@@ -93,6 +95,9 @@ function judge(samples, baseWidth) {
     const aspect = s.w / s.h;
     const baseH = baseWidth / aspect;
     const bad = [];
+    // The camera's clamp bounds must be the arena: a bounds box past it (map geometry under the floor) lets the view frame it.
+    // Written as "not within EPS" so a missing or NaN bounds field fails rather than passing.
+    if (!(Math.abs(s.bx0) <= EPS && Math.abs(s.by0) <= EPS && Math.abs(s.bx1 - s.aw) <= EPS && Math.abs(s.by1 - s.ah) <= EPS)) bad.push("bounds");
     if (s.w <= s.aw) {
       minLeft = Math.min(minLeft, s.cx - s.w / 2);
       if (s.cx - s.w / 2 < -EPS || s.cx + s.w / 2 > s.aw + EPS) bad.push("x");
