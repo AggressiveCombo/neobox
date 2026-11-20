@@ -401,8 +401,9 @@ button.home-account {
 }
 
 /* A narrow drum (a zoomed or narrow phone) keeps every label whole: the training badge becomes a dot outside the
-   flow, the label wraps to two lines, and at the narrowest the icon goes too. */
-@container (max-width: 300px) {
+   flow, the label wraps to two lines, and at the narrowest the icon goes too. The threshold is 340px, not less:
+   at 200% text a 300-340px drum still gave "Training" 105px, so the "Start here" text chip is the first to go. */
+@container (max-width: 340px) {
   .drum-opt {
     gap: 8px;
     padding: 0 8px;
