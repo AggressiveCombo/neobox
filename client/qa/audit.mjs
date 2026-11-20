@@ -8,7 +8,7 @@
 //   tokens.distinct.<fontSize|radius|padding|color>.<primary|secondary|danger|ghost|link>
 //                                distinct computed values per role at rest, max over light and dark
 //   tokens.distinct.fontSize.body  distinct font sizes of text elements across the sampled screens
-//   deadControl.count            visible controls that change nothing (no DOM, request or route) in 1 s
+//   deadControl.count            clicked controls with no visible change in 1 s (pixels, request, route, download, sound or focus), desktop + phone
 //   persist.roundTrip            fraction of the DEFAULT_PREFS keys (read from src/prefs.ts) that survive a reload after
 //                                being set through the settings UI
 //   persist.accountSync          signed-in prefs (theme, textScale) pulled by a second context (info)
@@ -22,7 +22,7 @@
 //      dead, tokens, persist, accountSync).
 // Self-test: QA_SELF_TEST=<mode> injects a known defect into the measured path and runs only the
 //   case for it; the verdict must be fail. Modes: placeholder (copy), inventory (coverage),
-//   dead (dead controls), tokens (stray button with its own radius/size), persist (wipes
+//   dead (dead controls: a control whose click only flips an attribute), tokens (stray button with its own radius/size), persist (wipes
 //   neobox.prefs before reload). Use a separate QA_OUT so the baseline files are not overwritten.
 // INVENTORY is read from QA_INVENTORY or the session local/INVENTORY.md.
 // Output: <QA_OUT>/audit-<engine>.{json,md}; evidence under <QA_OUT>/evidence/audit-<engine>/.
@@ -31,6 +31,7 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { PNG } from "pngjs";
 import { PASSWORD, Results, button, launchEngine, menuName, navTo, outDir, rel, runCleanups, selectedEngines, selfTestMode, sleep, startServer, writeIndex } from "./lib-qa.mjs";
 import { signedIn } from "../e2e/lib.mjs";
 import { scenarios } from "../e2e/scenarios.mjs";
@@ -56,7 +57,7 @@ const EXPECT = {
 const DEAD_SKIP = /\b(sign out|log out|delete account|report|kick|ban|forfeit|quit|block|unfriend|disband|revoke)\b/i;
 // Names the harness generates as fixture data (room, player, password, map, roster rows): user content, not product controls.
 const FIXTURE_NAME = /^(room|pw|host|guest|user)[a-z0-9]{6,8}(?![a-z])|^Actions for guest[a-z0-9]+|^map[a-z0-9]{5,9} by [a-z0-9]+ \d+ votes ?\d+ plays$/;
-const DEAD_SCREENS = process.env.QA_DEAD_SCREENS ? process.env.QA_DEAD_SCREENS.split(",").map((s) => s.trim()) : STATES.map((st) => st.id);
+const DEAD_SCREENS = process.env.QA_DEAD_SCREENS ? process.env.QA_DEAD_SCREENS.split(",").map((s) => s.trim()) : selfTestMode() === "dead" ? [STATES[0].id] : STATES.map((st) => st.id);
 const TOKEN_SCREENS = ["menu-anon", "settings-controls", "library-grid", "room-host"];
 const TOKEN_THEMES = ["light", "dark"];
 const ROLES = ["primary", "hero", "big", "secondary", "danger", "ghost", "link", "name", "icon", "ink", "block", "chrome", "tile", "seg", "tab"];
@@ -67,7 +68,7 @@ const ONLY = (process.env.QA_ONLY ?? "copy,coverage,dead,tokens,persist,accountS
 const INJECT = {
   placeholder: { tag: "p", text: "Welcome to undefined", pos: "top:0;left:0" },
   inventory: { tag: "button", text: "Qa mystery control", pos: "top:0;left:0" },
-  dead: { tag: "button", text: "Qa dead control", pos: "bottom:0;right:0" },
+  dead: { tag: "button", text: "Qa dead control", pos: "bottom:0;right:0", flip: true },
   tokens: { tag: "button", text: "Qa stray", pos: "top:0;right:0", css: "font-size:13px;border-radius:2px;padding:1px 2px" },
 };
 
@@ -125,8 +126,8 @@ const HARVEST = () => {
       name: name || "(unnamed)",
       href: el.tagName === "A" ? el.href : null,
       disabled: el.disabled === true || el.getAttribute("aria-disabled") === "true",
-      // The active tab or current page: clicking it changes nothing by design.
-      selected: el.getAttribute("aria-selected") === "true" || (el.getAttribute("aria-current") ?? "false") !== "false",
+      // The active tab, page or tool: clicking it changes nothing by design (editor tools mark the active one with aria-pressed).
+      selected: el.getAttribute("aria-selected") === "true" || el.getAttribute("aria-pressed") === "true" || (el.getAttribute("aria-current") ?? "false") !== "false",
       // Something else sits on the control's centre (an open modal): it cannot be clicked from here.
       covered: !!top && !el.contains(top) && !top.contains(el),
     };
@@ -155,7 +156,6 @@ const TOKENS = () => {
     if (c.contains("icon")) return "icon"; // square glyph button with an aria-label, no text
     if (c.contains("seg-option")) return "seg"; // option of a segmented control, --control high
     if (c.contains("tab")) return "tab"; // tab of a tablist, --control high, underlined when selected
-    if (c.contains("home-row-btn")) return "tile"; // menu tile: 14px label under square art, padding sized to the art
     if (c.contains("ink")) return "ink"; // solid ink fill
     if (c.contains("primary")) return "primary";
     if (c.contains("danger")) return "danger";
@@ -185,30 +185,164 @@ const TOKENS = () => {
   }
   return { roles, body };
 };
-const INSTALL_MUTATION = () => {
-  window.__qaMut = 0;
-  new MutationObserver((records) => {
-    window.__qaMut += records.length;
-  }).observe(document.body, { subtree: true, childList: true, attributes: true, characterData: true });
-};
-// Visible state beyond the DOM: scroll offsets (a nav link that scrolls a section is a working control) and a 64x64 pixel
-// digest of each canvas (the map editor draws its view on canvas; zoom changes no DOM).
-const EFFECT_STATE = () => {
-  const scrolls = [...document.querySelectorAll("*")].filter((e) => e.scrollTop || e.scrollLeft).map((e) => `${e.scrollTop},${e.scrollLeft}`);
-  const digest = (c) => {
-    if (c.width === 0 || c.height === 0) return "";
-    const t = document.createElement("canvas");
-    t.width = 64;
-    t.height = 64;
-    const ctx = t.getContext("2d", { willReadFrequently: true });
-    ctx.drawImage(c, 0, 0, 64, 64);
-    let s = 0;
-    for (const v of ctx.getImageData(0, 0, 64, 64).data) s = (s * 31 + v) | 0;
-    return String(s);
+// Probes for the dead-control scan. A visible change is read from screenshots (frame, changedPixels); the page hooks record
+// only what a screenshot cannot show: a sound request, a request the click causes, and the focus move a player sees.
+const SOUND_HOOK = () => {
+  if (window.__qaSoundHooked) return;
+  window.__qaSoundHooked = true;
+  window.__qaSound = 0;
+  // The interface's own press feedback (a click, hover, switch or tab tick) plays on every button, so it is not what a control does.
+  const PRESS_TICK = new Set(["click", "pointerover", "change"]);
+  const count = () => {
+    if (!PRESS_TICK.has(window.event?.type)) window.__qaSound += 1;
   };
-  const fields = [...document.querySelectorAll("input,select,textarea")].map((e) => (e.type === "checkbox" || e.type === "radio" ? `${e.checked}` : e.value));
-  return JSON.stringify([window.scrollX, window.scrollY, scrolls, fields, [...document.querySelectorAll("canvas")].map(digest)]);
+  const play = HTMLMediaElement.prototype.play;
+  HTMLMediaElement.prototype.play = function (...a) {
+    count();
+    return play.apply(this, a);
+  };
+  // OscillatorNode and AudioBufferSourceNode inherit start() from AudioScheduledSourceNode.
+  const Source = window.AudioScheduledSourceNode;
+  if (Source) {
+    const start = Source.prototype.start;
+    Source.prototype.start = function (...a) {
+      count();
+      return start.apply(this, a);
+    };
+  }
 };
+// The requests a click causes: a fetch, an XHR send, or a text WebSocket send made while that click's event dispatch
+// runs, or in the promise jobs it queues. The flag ends with the dispatch (the window's bubble listener, the last one
+// the event reaches), and a timer clears it as a backstop when a handler stops propagation. Timers, pings and binary
+// input frames are never sent inside a click dispatch, so they never credit a click.
+const NET_HOOK = () => {
+  if (window.__qaNetHooked) return;
+  window.__qaNetHooked = true;
+  window.__qaNet = 0;
+  let inClick = false;
+  window.addEventListener("click", () => {
+    inClick = true;
+    setTimeout(() => {
+      inClick = false;
+    }, 0);
+  }, true);
+  window.addEventListener("click", () => {
+    inClick = false;
+  });
+  const credit = () => {
+    if (inClick) window.__qaNet += 1;
+  };
+  const fetchFn = window.fetch;
+  window.fetch = function (...a) {
+    credit();
+    return fetchFn.apply(this, a);
+  };
+  const xhrSend = XMLHttpRequest.prototype.send;
+  XMLHttpRequest.prototype.send = function (...a) {
+    credit();
+    return xhrSend.apply(this, a);
+  };
+  const wsSend = WebSocket.prototype.send;
+  WebSocket.prototype.send = function (data) {
+    if (typeof data === "string") credit();
+    return wsSend.call(this, data);
+  };
+};
+const ARM = () => {
+  window.__qaFocus0 = document.activeElement;
+  window.__qaSound = 0;
+  window.__qaNet = 0;
+};
+const EFFECTS = () => {
+  const a = document.activeElement;
+  return {
+    url: location.href,
+    sound: window.__qaSound,
+    net: window.__qaNet,
+    focus: a !== window.__qaFocus0 && a !== document.body && a.matches(":focus-visible"),
+  };
+};
+const PIXEL_DELTA = 24; // summed RGB difference that makes one pixel changed (the threshold motion.mjs pixelDelta uses)
+const PIXEL_MIN = 40; // changed pixels that make a frame changed: anti-aliasing and a blinking caret stay below this
+const IDLE_FRAMES = 4; // frames read at a state's open, IDLE_GAP_MS apart: pixels that move at rest are masked out
+const IDLE_GAP_MS = 250;
+const SAMPLE_MS = [340, 510, 680, 850, 1000]; // frames after a click, the last at 1 s; the first that shows an effect ends the wait
+// Controls whose effect is invisible by design. Each rule names the reason it was reviewed; a matching dead verdict is
+// listed as invisible, not counted as dead. Empty until a reviewed case needs one.
+const INVISIBLE = [];
+
+/** One viewport frame: the PNG bytes and the decoded pixels. The caret is hidden so a blinking cursor is not a change. */
+async function frame(page) {
+  const buf = await page.screenshot({ caret: "hide" });
+  return { buf, img: PNG.sync.read(buf) };
+}
+const differs = (a, b, p) => {
+  const i = p * 4;
+  return Math.abs(a.data[i] - b.data[i]) + Math.abs(a.data[i + 1] - b.data[i + 1]) + Math.abs(a.data[i + 2] - b.data[i + 2]) > PIXEL_DELTA;
+};
+/** Pixels that changed between two frames, outside the mask. Frames of different sizes differ everywhere. */
+function changedPixels(a, b, mask) {
+  if (a.width !== b.width || a.height !== b.height) return Infinity;
+  let n = 0;
+  for (let p = 0; p < a.width * a.height; p++) if (!mask[p] && differs(a, b, p)) n++;
+  return n;
+}
+/** Pixels that move while a screen idles (the menu arena, a spinner): every pixel that differs between two idle frames. */
+function idleMask(frames) {
+  const mask = new Uint8Array(frames[0].img.width * frames[0].img.height);
+  for (let k = 1; k < frames.length; k++) {
+    for (let p = 0; p < mask.length; p++) if (differs(frames[k - 1].img, frames[k].img, p)) mask[p] = 1;
+  }
+  return mask;
+}
+/** IDLE_FRAMES frames of a screen at rest, for idleMask. */
+async function idleFrames(page) {
+  const frames = [];
+  for (let k = 0; k < IDLE_FRAMES; k++) {
+    if (k > 0) await sleep(IDLE_GAP_MS);
+    frames.push(await frame(page));
+  }
+  return frames;
+}
+
+/** The first gesture on a page unlocks audio (sound files load, the menu music starts), so a neutral key press does that before the scan reads a control. The menu's recorded clip moves in bursts no idle window can mask, so it is paused here (not counted, not clicked again): what moves on a frozen screen is the control's effect. */
+async function warmUp(h) {
+  await h.page.keyboard.press("ScrollLock");
+  await requestsQuiet(h);
+  const pause = h.page.getByRole("button", { name: "Pause clip" });
+  // The clip bar shows once its list loads: a screen without one waits out the timeout and skips the pause.
+  await pause.first().waitFor({ state: "visible", timeout: 3000 }).then(() => pause.first().click({ timeout: 3000 }), () => undefined);
+  await requestsQuiet(h);
+}
+/** Waits until no request has left the page for 800 ms (or 6 s at most). */
+async function requestsQuiet(h) {
+  let seen = -1;
+  let quiet = 0;
+  for (let t = 0; t < 30 && quiet < 4; t++) {
+    await sleep(200);
+    if (h.reqs === seen) quiet += 1;
+    else {
+      quiet = 0;
+      seen = h.reqs;
+    }
+  }
+}
+const movingShare = (mask) => `${((mask.reduce((n, v) => n + v, 0) / mask.length) * 100).toFixed(1)}%`;
+/** Two frames IDLE_GAP_MS apart show no change outside the idle mask: the screen is at rest, so a click's change is its own. */
+async function atRest(page, mask) {
+  const a = await frame(page);
+  await sleep(IDLE_GAP_MS);
+  return changedPixels(a.img, (await frame(page)).img, mask) < PIXEL_MIN;
+}
+/** Writes a dead control's screenshot into the evidence folder; returns its relative path. */
+function writeShot(name, buf) {
+  const file = path.join(outDir(), "evidence", `audit-${engine}`, "dead", `${name}.png`);
+  mkdirSync(path.dirname(file), { recursive: true });
+  writeFileSync(file, buf);
+  return rel(file);
+}
+/** The same scenario with every prepare() on a phone viewport: the scan covers desktop and phone. */
+const phoneOf = (s) => Object.assign(Object.create(s), { open: (label, o = {}) => s.open(label, { ...o, phone: true }) });
 
 let engine = "";
 let memo = null;
@@ -226,10 +360,12 @@ async function inject(page) {
   const spec = INJECT[selfTestMode()];
   if (!spec) return;
   await page.evaluate(
-    ({ tag, text, pos, css = "" }) => {
+    ({ tag, text, pos, css = "", flip = false }) => {
       const el = document.createElement(tag);
       el.textContent = text;
       el.style.cssText = `position:fixed;${pos};z-index:9999;background:#fff;color:#000;${css}`;
+      // A click that only flips an attribute: a DOM change with nothing visible. The dead-control scan must count it dead.
+      if (flip) el.addEventListener("click", () => document.documentElement.setAttribute("data-qa-flip", String(Date.now())));
       document.body.append(el);
     },
     spec,
@@ -419,173 +555,225 @@ async function settledHarvest(page) {
 
 async function deadCase(s) {
   const dead = [];
+  const deadShots = []; // before and after frames of each dead control, as evidence files
   const skipped = [];
   const unclickable = [];
-  const worked = []; // controls whose click produced an effect, with the effect kinds (the per-control verification)
+  const worked = []; // controls whose click produced an effect, with the kinds that showed it
   const external = []; // off-origin hrefs with a valid URL: a route effect, counted without a click
   const selectedNoop = []; // already-selected controls: activating one changed nothing and raised no error
+  const invisible = []; // no effect, but listed in INVISIBLE with its reviewed reason
   const unreachable = []; // controls only ever covered by a modal
   const coveredElsewhere = []; // behind a modal in one state, uncovered in a no-modal state
-  const reachable = new Set(); // names some no-modal state shows uncovered
-  const behindModal = []; // covered controls, resolved after every state is scanned
+  const reachable = new Set(); // "vp|name": a no-modal state shows the control uncovered
+  const behindModal = []; // covered controls, resolved once every state of both viewports is scanned
+  const idle = {}; // per "vp state": share of pixels that move at rest (masked out of every change)
+  const phoneScope = phoneOf(s);
   let clicked = 0;
-  for (const id of DEAD_SCREENS) {
-    let cur = null;
-    const release = async () => {
-      if (!cur) return;
-      await closeHandle(cur.h);
-      await closeSeeds(s, cur.from, cur.h);
-    };
-    const open = async () => {
-      await release();
-      const from = s.handles.length;
-      const h = track(await stateById(id).prepare(s));
-      await inject(h.page);
-      const controls = await settledHarvest(h.page);
-      // A state with no modal shows the base controls; only those count as reachable behind a modal.
-      if (!stateById(id).dialog) for (const c of controls) if (!c.covered) reachable.add(c.name);
-      await h.page.evaluate(INSTALL_MUTATION);
-      // Errors raised by a click: a selected control must activate without any.
-      const errors = [];
-      h.page.on("pageerror", (err) => errors.push(err.message));
-      h.page.on("console", (msg) => {
-        if (msg.type() === "error") errors.push(msg.text());
-      });
-      cur = { h, controls, dirty: false, from, errors };
-    };
-    await open();
-    console.error(`dead ${id}: ${cur.controls.length} controls, ${new Date().toISOString().slice(11, 19)}`);
-    for (const c of cur.controls) {
-      const label = `${id} "${c.name}"`;
-      if (c.disabled) {
-        skipped.push(`${label} (disabled: not operable)`);
-        continue;
-      }
-      if (FIXTURE_NAME.test(c.name)) {
-        skipped.push(`${label} (fixture data: harness-generated name)`);
-        continue;
-      }
-      if (DEAD_SKIP.test(c.name)) {
-        skipped.push(`${label} (destructive: leaves the fixture)`);
-        continue;
-      }
-      // An off-origin href with a valid URL navigates the app away: a route effect, counted without clicking.
-      if (c.href && offSite(c.href, s.base)) {
-        external.push(label);
-        worked.push(`${label}: route (external href ${new URL(c.href).origin}, not clicked)`);
-        continue;
-      }
-      // Behind the state's modal: resolved after every state, once it is known whether a no-modal state shows the control.
-      if (c.covered) {
-        behindModal.push({ label, name: c.name });
-        continue;
-      }
-      if (cur.dirty) {
-        await open();
-        if (!cur.controls.some((f) => f.name === c.name)) {
-          unclickable.push(`${label}: screen did not return to the same controls`);
+  for (const [vp, scope] of [
+    ["desktop", s],
+    ["phone", phoneScope],
+  ]) {
+    for (const id of DEAD_SCREENS) {
+      let cur = null;
+      const release = async () => {
+        if (!cur) return;
+        await closeHandle(cur.h);
+        await closeSeeds(s, cur.from, cur.h);
+      };
+      const open = async () => {
+        await release();
+        const from = s.handles.length;
+        const h = track(await stateById(id).prepare(scope));
+        await inject(h.page);
+        await warmUp(h);
+        const controls = await settledHarvest(h.page);
+        // A state with no modal shows the base controls; only those count as reachable behind a modal.
+        if (!stateById(id).dialog) for (const c of controls) if (!c.covered) reachable.add(`${vp}|${c.name}`);
+        await h.page.evaluate(SOUND_HOOK);
+        await h.page.evaluate(NET_HOOK);
+        const st = { h, controls, dirty: false, from, errors: [], downloads: 0, popups: 0, idle: null };
+        cur = st;
+        // What a click can do that a frame does not show: an error, a download, a new window, a network request it causes.
+        h.page.on("pageerror", (err) => st.errors.push(err.message));
+        h.page.on("console", (msg) => {
+          if (msg.type() === "error") st.errors.push(msg.text());
+        });
+        h.page.on("download", () => {
+          st.downloads += 1;
+        });
+        h.page.context().on("page", () => {
+          st.popups += 1;
+        });
+        st.idle = idleMask(await idleFrames(h.page));
+        idle[`${vp} ${id}`] = movingShare(st.idle);
+      };
+      await open();
+      console.error(`dead ${vp} ${id}: ${cur.controls.length} controls, ${new Date().toISOString().slice(11, 19)}`);
+      for (const c of cur.controls) {
+        const label = `${vp} ${id} "${c.name}"`;
+        if (c.disabled) {
+          skipped.push(`${label} (disabled: not operable)`);
           continue;
         }
-      }
-      // A re-render since the last click can drop a control without a navigation; reopen the state and look again before calling it unclickable.
-      const hasControl = async () => (await cur.h.page.evaluate(HARVEST)).some((f) => f.name === c.name);
-      if (!(await hasControl())) {
-        await open();
-        if (!(await hasControl())) {
-          const now = (await cur.h.page.evaluate(HARVEST)).map((f) => f.name);
-          unclickable.push(`${label}: control "${c.name}" is no longer on screen after reopening the state [${now.length} on screen: ${now.slice(0, 4).join(" | ")}]`);
+        if (FIXTURE_NAME.test(c.name)) {
+          skipped.push(`${label} (fixture data: harness-generated name)`);
           continue;
         }
-      }
-      const h = cur.h;
-      const page = h.page;
-      const url = page.url();
-      // Scroll is reset first: a control that only scrolls to a section (settings nav) would read as dead when that section is already in view.
-      await page.evaluate(() => document.querySelectorAll("*").forEach((e) => { if (e.scrollTop) e.scrollTop = 0; if (e.scrollLeft) e.scrollLeft = 0; }));
-      const before = await page.evaluate(EFFECT_STATE);
-      h.reqs = 0;
-      cur.errors.length = 0;
-      clicked += 1;
-      let k = c.i;
-      try {
-        // Re-tag and re-find the control by name: a re-render since open() can move or drop data-qa-i. A click that
-        // cannot reach its tagged element (a re-render replaced it) is retried on a fresh harvest, up to 3 tries.
-        for (let attempt = 1; ; attempt++) {
-          const fresh = await settledHarvest(page);
-          await page.evaluate(() => {
-            window.__qaMut = 0; // the re-tag itself is a DOM mutation; it is not the click's effect
-          });
-          k = fresh[c.i]?.name === c.name ? c.i : fresh.findIndex((f) => f.name === c.name);
-          if (k < 0) throw new Error(`control "${c.name}" is no longer on screen`);
-          try {
-            await page.locator(`[data-qa-i="${k}"]`).click({ timeout: 3000 });
-            break;
-          } catch (err) {
-            if (attempt >= 3) throw err;
-            await sleep(300);
+        if (DEAD_SKIP.test(c.name)) {
+          skipped.push(`${label} (destructive: leaves the fixture)`);
+          continue;
+        }
+        // An off-origin href with a valid URL navigates the app away: a route effect, counted without a click.
+        if (c.href && offSite(c.href, s.base)) {
+          external.push(label);
+          worked.push(`${label}: route (external href ${new URL(c.href).origin}, not clicked)`);
+          continue;
+        }
+        // Behind the state's modal: resolved after every state, once it is known whether a no-modal state shows the control.
+        if (c.covered) {
+          behindModal.push({ vp, label, name: c.name });
+          continue;
+        }
+        if (cur.dirty || !(await atRest(cur.h.page, cur.idle))) {
+          await open();
+          if (!cur.controls.some((f) => f.name === c.name)) {
+            unclickable.push(`${label}: screen did not return to the same controls`);
+            continue;
           }
         }
-        // Up to 1 s for any effect (DOM mutation, request, navigation, state change); stop early once one shows.
-        let mut = 0;
-        let moved = false;
-        let changed = false;
-        for (let t = 0; t < 10 && !(mut || h.reqs || moved || changed); t++) {
-          await sleep(100);
-          mut = await page.evaluate(() => window.__qaMut);
-          moved = page.url() !== url;
-          changed = (await page.evaluate(EFFECT_STATE)) !== before;
+        // A re-render since the last click can drop a control without a navigation; reopen the state and look again before calling it unclickable.
+        const hasControl = async () => (await cur.h.page.evaluate(HARVEST)).some((f) => f.name === c.name);
+        if (!(await hasControl())) {
+          await open();
+          if (!(await hasControl())) {
+            const now = (await cur.h.page.evaluate(HARVEST)).map((f) => f.name);
+            unclickable.push(`${label}: control "${c.name}" is no longer on screen after reopening the state [${now.length} on screen: ${now.slice(0, 4).join(" | ")}]`);
+            continue;
+          }
         }
-        const noop = mut === 0 && h.reqs === 0 && !moved && !changed;
-        if (c.selected && cur.errors.length) {
-          dead.push(`${label} (error on activation: ${cur.errors[0]})`);
-          cur.dirty = true;
-        } else if (noop) {
-          if (c.selected) selectedNoop.push(label);
-          else dead.push(label);
-        } else {
-          worked.push(`${label}: ${[mut && "DOM", h.reqs && "request", moved && "route", changed && "state"].filter(Boolean).join(", ")}`);
-          // Reopen only when the click navigated or changed the control list; a toggle keeps the page (reopening after each one made the scan too slow).
-          cur.dirty = moved || !sameControls(cur.controls, await settledHarvest(page));
+        const st = cur;
+        const h = st.h;
+        const page = h.page;
+        const url = page.url();
+        // Scroll is reset first: a control that only scrolls to a section (settings nav) would read as dead when that section is already in view.
+        await page.evaluate(() => document.querySelectorAll("*").forEach((e) => { if (e.scrollTop) e.scrollTop = 0; if (e.scrollLeft) e.scrollLeft = 0; }));
+        clicked += 1;
+        let k = c.i;
+        let base = null;
+        let last = null;
+        let kinds = [];
+        let moving = false;
+        try {
+          // Re-find the control by name (a re-render since open() can move or drop data-qa-i). Hover, then the before frame, then the click; a click that cannot reach its element is retried on a fresh harvest, up to 3 tries.
+          let t0 = 0;
+          for (let attempt = 1; ; attempt++) {
+            const fresh = await settledHarvest(page);
+            k = fresh[c.i]?.name === c.name ? c.i : fresh.findIndex((f) => f.name === c.name);
+            if (k < 0) throw new Error(`control "${c.name}" is no longer on screen`);
+            const target = page.locator(`[data-qa-i="${k}"]`);
+            try {
+              // The pointer rests on the control first, so its hover style is in the before frame and not in the click's effect.
+              await target.hover({ timeout: 3000 });
+              await sleep(300);
+              base = await frame(page);
+              await page.evaluate(ARM);
+              st.errors.length = 0;
+              st.downloads = 0;
+              st.popups = 0;
+              t0 = Date.now();
+              await target.click({ timeout: 3000 });
+              break;
+            } catch (err) {
+              if (attempt >= 3) throw err;
+              await sleep(300);
+            }
+          }
+          // Frames up to 1 s after the click; the first one that shows an effect ends the wait.
+          let prev = null;
+          for (const at of SAMPLE_MS) {
+            await sleep(Math.max(0, t0 + at - Date.now()));
+            const fx = await page.evaluate(EFFECTS);
+            prev = last;
+            last = await frame(page);
+            // Still moving at the last sample: the screen is not settled, so the next control reopens it.
+            moving = prev !== null && changedPixels(prev.img, last.img, st.idle) >= PIXEL_MIN;
+            kinds = [
+              changedPixels(base.img, last.img, st.idle) >= PIXEL_MIN && "pixels",
+              fx.net > 0 && "request",
+              (fx.url !== url || st.popups > 0) && "route",
+              st.downloads > 0 && "download",
+              fx.sound > 0 && "sound",
+              fx.focus && "focus",
+            ].filter(Boolean);
+            if (kinds.length) break;
+          }
+          const moved = kinds.includes("route");
+          if (c.selected && st.errors.length) {
+            dead.push(`${label} (error on activation: ${st.errors[0]})`);
+            st.dirty = true;
+          } else if (kinds.length === 0) {
+            if (c.selected) selectedNoop.push(label);
+            else {
+              const rule = INVISIBLE.find((r) => r.name.test(c.name));
+              if (rule) invisible.push(`${label}: ${rule.reason}`);
+              else {
+                dead.push(label);
+                const n = dead.length;
+                deadShots.push({
+                  label,
+                  before: writeShot(`${vp}-${id}-${n}-before`, base.buf),
+                  after: writeShot(`${vp}-${id}-${n}-after`, last.buf),
+                });
+              }
+            }
+          } else {
+            worked.push(`${label}: ${kinds.join(", ")}`);
+            // Reopen only when the click navigated, changed the control list, or is still animating; a toggle keeps the page (reopening after each one made the scan too slow).
+            st.dirty = moving || moved || !sameControls(st.controls, await settledHarvest(page));
+          }
+        } catch (err) {
+          // What sits on top of the control's centre point (a modal or overlay blocks the click; the harness should say so).
+          const cover = await page
+            .evaluate((i) => {
+              const el = document.querySelector(`[data-qa-i="${i}"]`);
+              if (!el) return "no element";
+              const r = el.getBoundingClientRect();
+              const top = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
+              return top && top !== el && !el.contains(top) ? `covered by <${top.tagName.toLowerCase()} class="${top.className}">` : "not covered";
+            }, k)
+            .catch((e) => `cover probe failed: ${firstLine(e)}`);
+          unclickable.push(`${label}: ${firstLine(err)} [${cover}]`);
+          st.dirty = true;
         }
-      } catch (err) {
-        // What sits on top of the control's centre point (a modal or overlay blocks the click; the harness should say so).
-        const cover = await page
-          .evaluate((i) => {
-            const el = document.querySelector(`[data-qa-i="${i}"]`);
-            if (!el) return "no element";
-            const r = el.getBoundingClientRect();
-            const top = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
-            return top && top !== el && !el.contains(top) ? `covered by <${top.tagName.toLowerCase()} class="${top.className}">` : "not covered";
-          }, k)
-          .catch((e) => `cover probe failed: ${firstLine(e)}`);
-        unclickable.push(`${label}: ${firstLine(err)} [${cover}]`);
-        cur.dirty = true;
       }
+      await release();
     }
-    await release();
   }
   pruneInduced(s);
   // A control under a modal is covered elsewhere when a state with no modal shows it uncovered; otherwise it is only reachable behind a modal.
   for (const b of behindModal) {
-    if (reachable.has(b.name)) coveredElsewhere.push(b.label);
+    if (reachable.has(`${b.vp}|${b.name}`)) coveredElsewhere.push(b.label);
     else unreachable.push(`${b.label}: only reachable behind a modal`);
   }
-  const file = writeEvidence("dead-controls", { dead, skipped, unclickable, unreachable, worked, selectedNoop, external, coveredElsewhere });
+  const file = writeEvidence("dead-controls", { dead, deadShots, skipped, unclickable, unreachable, worked, selectedNoop, external, coveredElsewhere, invisible, idle });
   // Skip classes (the reason in each "(...)" suffix), so a skip count is never read without its reason.
   const byReason = {};
-  for (const s of skipped) {
-    const reason = s.slice(s.lastIndexOf("(") + 1, -1);
+  for (const sk of skipped) {
+    const reason = sk.slice(sk.lastIndexOf("(") + 1, -1);
     byReason[reason] = (byReason[reason] ?? 0) + 1;
   }
+  const phoneDead = dead.filter((d) => d.startsWith("phone ")).length;
   return {
     pass: dead.length === 0 && unreachable.length === 0,
-    detail: `${dead.length} dead controls of ${clicked} clicked (${dead.slice(0, 10).join("; ") || "none"}); ${selectedNoop.length} already selected, no-op; ${external.length} external links counted as route effects; ${coveredElsewhere.length} behind a modal and scanned uncovered in a no-modal state; ${unreachable.length} only reachable behind a modal; ${skipped.length} skipped (${Object.entries(byReason).map(([k, v]) => `${k} ${v}`).join(", ") || "none"}); ${unclickable.length} not clickable`,
+    detail: `${dead.length} dead controls of ${clicked} clicked (desktop ${dead.length - phoneDead}, phone ${phoneDead}; ${dead.slice(0, 10).join("; ") || "none"}); ${invisible.length} invisible by design (reviewed); ${selectedNoop.length} already selected, no-op; ${external.length} external links counted as route effects; ${coveredElsewhere.length} behind a modal and scanned uncovered in a no-modal state; ${unreachable.length} only reachable behind a modal; ${skipped.length} skipped (${Object.entries(byReason).map(([k, v]) => `${k} ${v}`).join(", ") || "none"}); ${unclickable.length} not clickable`,
     metrics: {
       "deadControl.count": dead.length,
+      "deadControl.phone": phoneDead,
       "deadControl.clicked": clicked,
       "deadControl.skipped": skipped.length,
       "deadControl.unclickable": unclickable.length,
       "deadControl.worked": worked.length,
+      "deadControl.invisible": invisible.length,
       "deadControl.selectedNoop": selectedNoop.length,
       "deadControl.external": external.length,
       "deadControl.coveredElsewhere": coveredElsewhere.length,

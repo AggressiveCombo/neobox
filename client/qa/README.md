@@ -95,16 +95,6 @@ Transition settle time (RUBRIC D20 `motion.transition.ms`): menu modal open and 
 - Outputs: `playfield-<engine>.{json,md}`; screenshots under `evidence/playfield-<engine>/`.
 - Self-tests (`QA_SELF_TEST`, use a separate `QA_OUT`; each must FAIL): `hud` (a fixed box over the local sprite before each HUD sample), `contrast` (sprite fill replaced by its background before the ratio), `camera` (a fake live player in the far corner of the in-view check), `feedback` (synthetic 5-tick delay, no browser).
 
-## mapcompat.mjs (camera framing on every map)
-
-- Command: `cd client && QA_OUT=<dir> node qa/mapcompat.mjs --dist <build dir>` (`QA_ENGINES=chromium` to limit). Env: `QA_MAPS` (';'-separated extra map JSON paths, e.g. a community map), `QA_CAM_MS` (6000, sampling time per map).
-- Maps: every compact map in the repo's `maps/`, plus `QA_MAPS`. Each is loaded as a map code (base64 of the deflated JSON, as Practice takes it) and played.
-- Ground truth: the camera's published view (`globalThis.__qaCam`: cx, cy, w, h, arena aw, ah), sampled every animation frame. The original clamps its view to the arena, so bodies below or beside the arena (digit drums, static ground) are not framed.
-- Rule per frame (1e-3 world units): on an axis whose arena is longer than the view, the view lies inside the arena; on an axis whose arena fits the base view (the map's `Screen width`, `set "3"`, and the aspect), the view is centred on the arena.
-- Cases: `camera.<map>`, one per map. Outputs: `mapcompat-<engine>.{json,md}`.
-- Self-test (`QA_SELF_TEST=bounds`, use a separate `QA_OUT`): each sample's view is moved one view height below the arena; each case must FAIL.
-- Scope: camera framing only. A map's render defects (e.g. the digit drums' draw order) are not checked here.
-
 ## robust.mjs
 
 Console and network health, slow network, disconnect and reconnect, offline window, reload, back navigation, resize, phone rotation, tab switch, two tabs of one account, and a bad room code.
@@ -159,9 +149,9 @@ Inventory coverage, copy placeholders, design token spread, dead controls and pr
 - Engines: `QA_ENGINES` (default all three).
 - Cases: `QA_ONLY=copy,coverage,dead,tokens,persist,accountSync` (default all). Keys: `coverage.inventory.missing`, `copy.placeholderHits`, `tokens.distinct.<fontSize|radius|padding|color>.<role>`, `tokens.distinct.fontSize.body`, `deadControl.count`, `persist.roundTrip`, `persist.accountSync` (info).
 - Pass rules: coverage and copy pass at 0; tokens pass when every role/property has one value and body font sizes are <= 6; dead controls pass at 0; persist passes at 1.0.
-- Self-test (`QA_SELF_TEST`): `placeholder` (copy), `inventory` (coverage), `dead` (dead controls), `tokens` (stray button with its own radius/size), `persist` (wipes `neobox.prefs` before reload). Each runs only its own case and must FAIL.
+- Self-test (`QA_SELF_TEST`): `placeholder` (copy), `inventory` (coverage), `dead` (dead controls: a control whose click only flips an attribute), `tokens` (stray button with its own radius/size), `persist` (wipes `neobox.prefs` before reload). Each runs only its own case and must FAIL.
 - Persist selectors (radiogroups by aria-label, `label.check` switches, `.settings-nav-item`) are checked against `src/ui/screens/settings.ts`. `accountSync` is info only.
-- The dead-control scan covers desktop only (by design); copy and coverage cover desktop and phone.
+- Dead controls (`deadControl.count`, RUBRIC D14): a click is alive only when a player can see, hear or use the result within 1 s: a visible change of the viewport (changed pixels after the screen's own motion is masked out, read from screenshots at 340 to 1000 ms), a navigation, a request the click causes (a fetch, an XHR send, or a text WebSocket send made while that click's event dispatch runs, or in the promise jobs it queues; timers, pings, presence polls and binary input frames never credit a click), a download, a sound, or a focus move to a focus-visible control. A DOM, attribute or state change with nothing on screen is dead. Each state runs desktop and phone. Before the first click the screen is warmed up: the menu's recorded clip is paused so its motion is not read as an effect. A click runs only on a screen at rest (two frames 250 ms apart, no change outside the idle mask); a screen that is moving or was changed by the previous click is reopened first, so a toggle such as Pause clip / Play clip cannot leave the next control clicked on a moving screen. Skipped controls name their reason; a control whose effect is invisible by design goes in `INVISIBLE` with a reason and is reported as invisible, not dead.
 
 ## capture.mjs (library) and sweep.mjs (CLI)
 
