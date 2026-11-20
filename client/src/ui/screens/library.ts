@@ -412,8 +412,9 @@ export const libraryScreen: ScreenFactory = (ctx) => {
     const up = map.my_vote === 1;
     const down = map.my_vote === -1;
     const starred = map.favourite === true;
-    // the server refuses votes on your own map
-    const voteTitle = own ? "You can't vote on your own map" : undefined;
+    // the server refuses votes on your own map; a guest has to sign in first
+    const voteOff = own || store.state.account === null;
+    const voteTitle = own ? "You can't vote on your own map" : voteOff ? "Sign in to vote." : undefined;
     info.replaceChildren(
       h("p", { class: "map-byline" }, `by ${map.author}`, map.pick ? h("span", { class: "chip" }, icon("award", 14), "Staff pick") : null),
       ...(own ? [h("p", { class: "map-state" }, mapState(map))] : []),
@@ -427,7 +428,7 @@ export const libraryScreen: ScreenFactory = (ctx) => {
           {
             type: "button",
             "aria-pressed": up ? "true" : "false",
-            disabled: own,
+            disabled: voteOff,
             title: voteTitle,
             onclick: () => void vote(map, 1),
           },
@@ -439,7 +440,7 @@ export const libraryScreen: ScreenFactory = (ctx) => {
           {
             type: "button",
             "aria-pressed": down ? "true" : "false",
-            disabled: own,
+            disabled: voteOff,
             title: voteTitle,
             onclick: () => void vote(map, -1),
           },
