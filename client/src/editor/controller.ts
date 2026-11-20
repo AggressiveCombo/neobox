@@ -519,7 +519,7 @@ export class EditorController {
       this.paint();
       return;
     }
-    if (e.button === 1 || e.button === 2 || (e.button === 0 && this.spaceDown)) {
+    if (e.button === 1 || e.button === 2 || (e.button === 0 && (this.spaceDown || e.ctrlKey))) {
       this.gesture = { kind: "pan", p0: p, v0: { ...this.view } };
       return;
     }
@@ -1166,7 +1166,7 @@ export class EditorController {
   }
 
   private snapStep(): number {
-    return num(asObj(this.doc.set), "4", 1);
+    return num(asObj(this.doc.set), "4", 0.5);
   }
 
   private snap(p: Pt): Pt {

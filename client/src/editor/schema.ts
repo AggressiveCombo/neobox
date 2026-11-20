@@ -154,7 +154,7 @@ export const CAP_DEFAULTS: Obj = { "3": 3, "4": -1, "5": -1, "6": -1, "7": 120, 
 
 export const SETTINGS_DEFAULTS: Obj = {
   "3": 30,
-  "4": 1,
+  "4": 0.5,
   "5": 1,
   "7": 0,
   "8": 0,
