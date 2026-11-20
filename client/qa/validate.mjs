@@ -534,6 +534,20 @@ const FIXTURES = [
     keys: ["net.failed"],
     html: doc(main(`<p>Requests a missing resource</p>`)) + `<script>fetch("${NET_HOST}/x").catch(function(){})</script>`,
   },
+  {
+    name: "orientation.locked",
+    keys: ["orientation.locked"],
+    row: TOUCH_ROW,
+    rotate: true,
+    html: doc(main(`<h1>Portrait only fixture</h1><button style="min-width:48px;min-height:48px">Continue</button>`), "@media (orientation: landscape){body{display:none}}"),
+  },
+  {
+    name: "orientation.clean",
+    keys: [],
+    row: TOUCH_ROW,
+    rotate: true,
+    html: doc(main(`<h1>Rotating fixture</h1><button style="min-width:48px;min-height:48px">Continue</button>`)),
+  },
 ];
 
 const arg = (name, fallback) => {
@@ -541,6 +555,35 @@ const arg = (name, fallback) => {
   return i >= 0 && process.argv[i + 1] ? process.argv[i + 1] : fallback;
 };
 const engines = arg("engines", "chromium").split(",").map((s) => s.trim());
+
+/**
+ * Whether the page follows a rotation to landscape and back: 1 when portrait, landscape or the return to portrait
+ * shows no content (the orientation.mjs rule), else 0. The viewport is restored to the row afterwards.
+ */
+async function orientationLocked(page, row) {
+  const shown = () =>
+    page.evaluate(() => {
+      const vw = innerWidth;
+      const vh = innerHeight;
+      return [...document.querySelectorAll("button, a[href], input, select, textarea, canvas, h1, h2, p")].filter((el) => {
+        const r = el.getBoundingClientRect();
+        if (r.width < 2 || r.height < 2 || r.right <= 0 || r.bottom <= 0 || r.left >= vw || r.top >= vh) return false;
+        const cs = getComputedStyle(el);
+        return cs.visibility !== "hidden" && cs.display !== "none" && cs.opacity !== "0";
+      }).length;
+    });
+  const settle = async (w, h) => {
+    await page.setViewportSize({ width: w, height: h });
+    await page.waitForFunction(([vw, vh]) => innerWidth === vw && innerHeight === vh, [w, h], { timeout: 5000 }).catch(() => undefined);
+    await nextFrames(page);
+  };
+  const portrait = await shown();
+  await settle(row.H, row.W);
+  const landscape = await shown();
+  await settle(row.W, row.H);
+  const back = await shown();
+  return portrait === 0 || landscape === 0 || back === 0 ? 1 : 0;
+}
 
 /** Measures one fixture on a fresh context and returns { failures, record }. */
 async function runFixture(browser, fixture) {
@@ -567,6 +610,7 @@ async function runFixture(browser, fixture) {
       expectTheme: fixture.expectTheme ?? "light",
       evidenceDir,
     });
+    if (fixture.rotate) m.metrics["orientation.locked"] = await orientationLocked(page, row);
     const evidence = evidenceDir ? readdirSync(evidenceDir) : [];
     const record = { fit: fixture.fit ?? false, metrics: m.metrics, details: m.details, evidence };
     return { failures: validateRecord(record), record };
