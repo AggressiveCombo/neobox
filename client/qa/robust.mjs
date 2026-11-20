@@ -517,10 +517,11 @@ async function blipCase(s, cdp) {
 }
 
 /**
- * The link stays down past the reconnect deadline: every attempt fails, so the host is taken back to the menu and
- * told the room could not be reached.
+ * The server stays unreachable past the reconnect deadline while the network is up: every attempt fails, so the host
+ * is taken back to the menu and told the room could not be reached. Offline, the app waits for the network instead
+ * (networkOffCase).
  */
-async function giveUpCase(s, cdp) {
+async function giveUpCase(s) {
   prepare(s);
   trackSockets = true;
   gateSockets = true;
@@ -533,7 +534,6 @@ async function giveUpCase(s, cdp) {
   }
   const { host } = pair;
   const banner = host.page.locator(".reconnect-banner");
-  const session = cdp ? await host.context.newCDPSession(host.page) : null;
   offline = true;
   blockSockets = true;
   let cut = 0;
@@ -542,7 +542,6 @@ async function giveUpCase(s, cdp) {
   let menu = false;
   try {
     cut = await dropSockets(host.page);
-    await setNetworkOff(host, session, true);
     shown = await banner.waitFor({ state: "visible", timeout: BANNER_BUDGET_MS }).then(() => true, () => false);
     gaveUp = await host.page
       .getByText(GIVE_UP_TEXT, { exact: true })
@@ -550,7 +549,6 @@ async function giveUpCase(s, cdp) {
       .then(() => true, () => false);
     menu = await menuName(host.page).isVisible();
   } finally {
-    await setNetworkOff(host, session, false);
     blockSockets = false;
     offline = false;
   }
@@ -861,7 +859,7 @@ for (const engine of engines) {
   await runCase(results, "reconnect.match", (s) => reconnectCase(s), noisy);
   await runCase(results, "net.offline20s.match", (s) => networkOffCase(s, cdp), noisy);
   await runCase(results, "net.blip4s.room", (s) => blipCase(s, cdp), noisy);
-  await runCase(results, "net.giveUp60s.room", (s) => giveUpCase(s, cdp), noisy);
+  await runCase(results, "net.giveUp60s.room", (s) => giveUpCase(s), noisy);
   await runCase(results, "offline.warm.j", (s) => offlineWarmCase(s, base, cdp, engine), { ...noisy, ignore: [CONSOLE_OFFLINE, OFFLINE_FETCH_NOISE] });
   const dying = await startServer();
   await runCase(results, "reconnect.givenUp.server", (s) => serverStopCase(s, dying), { ...noisy, base: dying.base });
