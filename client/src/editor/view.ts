@@ -60,9 +60,10 @@ export function screenAt(v: View, w: number, h: number, p: Pt): Pt {
 
 const MARKER_KINDS = ["spawn", "turret", "grapple", "cap"] as const;
 
-/** The editor's opening view, as the original's: the world origin at the canvas centre, `Screen width` map units across it. */
+/** The editor's opening view: the game's default view (`frameOf`), `Screen width` map units across the canvas. */
 export function fitView(doc: Obj, w: number): View {
-  return { x: 0, y: 0, scale: clampScale(w / num(asObj(doc.set), "3", 30)) };
+  const f = frameOf(doc);
+  return { x: f.cx, y: f.cy, scale: clampScale(w / f.width) };
 }
 
 const BG = "#0a0a0a";
@@ -285,18 +286,21 @@ function drawGrid(c: CanvasRenderingContext2D, v: View, w: number, h: number): v
 }
 
 /**
- * The game's default view: centred on the arena middle and held inside it (camera.ts
- * clampAxis). A view wider than the arena stays centred on it; the frame marks what a
- * player would see on spawn, in world units (the y axis points down, as in the game).
+ * The game's default view (camera.ts clampAxis): centred on the arena middle and held inside
+ * it; a view wider than the arena stays centred on it. Map units; the y axis points down.
  */
-function drawFrame(c: CanvasRenderingContext2D, doc: Obj, S: (p: Pt) => Pt): void {
+function frameOf(doc: Obj): { cx: number; cy: number; width: number; height: number } {
   const set = asObj(doc.set);
   const width = num(set, "3", 30);
   const height = width / EDITOR_VIEW_ASPECT;
   const arenaW = num(set, "15", 0);
   const arenaH = num(set, "16", 0);
-  const cx = clampAxis(arenaW / 2, width, arenaW);
-  const cy = clampAxis(arenaH / 2, height, arenaH);
+  return { cx: clampAxis(arenaW / 2, width, arenaW), cy: clampAxis(arenaH / 2, height, arenaH), width, height };
+}
+
+/** The frame marks what a player would see on spawn, in world units. */
+function drawFrame(c: CanvasRenderingContext2D, doc: Obj, S: (p: Pt) => Pt): void {
+  const { cx, cy, width, height } = frameOf(doc);
   const a = S({ x: cx - width / 2, y: cy - height / 2 });
   const b = S({ x: cx + width / 2, y: cy + height / 2 });
   const x = Math.round(a.x) + 0.5;
