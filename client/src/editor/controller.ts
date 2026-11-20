@@ -685,8 +685,13 @@ export class EditorController {
       case "marquee": {
         g.b = this.worldOf(p);
         const inside = refsIn(this.doc, g.a, g.b);
-        this.selection = [...g.keep, ...inside.filter((r) => !g.keep.some((k) => sameRef(k, r)))];
-        this.notify();
+        const next = [...g.keep, ...inside.filter((r) => !g.keep.some((k) => sameRef(k, r)))];
+        // Notify only when the selection changes: most moves of a box-select keep it, and each notify repaints the editor's chrome.
+        const changed = next.length !== this.selection.length || next.some((r, i) => !sameRef(r, this.selection[i]!));
+        if (changed) {
+          this.selection = next;
+          this.notify();
+        }
         break;
       }
       case "rect":
