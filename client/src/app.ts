@@ -446,23 +446,30 @@ export function start(): Store<AppState> {
   });
 
   // Shown over every screen while the connection to a room is being restored.
+  const bannerText = h("span", null, "Connection lost. Reconnecting…");
   const retry = h("button", { type: "button", onclick: () => retryNow() }, "Try again now");
   const banner = h(
     "div",
     { class: "reconnect-banner", role: "status", "aria-live": "polite" },
-    h("span", null, "Connection lost. Reconnecting…"),
+    bannerText,
     retry,
     h("button", { type: "button", onclick: () => disconnect() }, "Leave"),
   );
   banner.hidden = true;
   document.body.prepend(banner);
-  store.subscribe((state) => {
-    banner.hidden = !state.reconnecting;
-    // An attempt in progress shows as one: the button reads "Retrying…" and is disabled until it settles.
-    const trying = state.connection === "connecting";
-    retry.disabled = trying;
+  // An attempt in progress shows as one: the button reads "Retrying…" and is disabled until it settles. Offline, no attempt
+  // can succeed, so the button stays off and the banner says why; the online and offline events resync it.
+  const syncBanner = (): void => {
+    banner.hidden = !store.state.reconnecting;
+    const trying = store.state.connection === "connecting";
+    const offline = !navigator.onLine;
+    retry.disabled = trying || offline;
     retry.textContent = trying ? "Retrying…" : "Try again now";
-  });
+    bannerText.textContent = offline ? "You are offline. Reconnecting when the network returns…" : "Connection lost. Reconnecting…";
+  };
+  store.subscribe(syncBanner);
+  window.addEventListener("online", syncBanner);
+  window.addEventListener("offline", syncBanner);
 
   function names(): ReadonlyMap<number, string> {
     const room = store.state.room;
@@ -935,7 +942,7 @@ export function start(): Store<AppState> {
 
   /** Open a fresh socket for the resume. A stalled attempt is replaced; nothing happens while the link is up. */
   function connectForResume(): void {
-    if (net.status === "open") return;
+    if (net.status === "open" || !navigator.onLine) return;
     switching = true;
     try {
       net.connect(socketUrl());
@@ -948,6 +955,8 @@ export function start(): Store<AppState> {
   function scheduleReconnect(): void {
     if (reconnectTimer !== null) window.clearTimeout(reconnectTimer);
     reconnectTimer = null;
+    // Offline, a socket fails at once and only fills the console: wait for the online event (retryNow), which resumes.
+    if (!navigator.onLine) return;
     if (performance.now() - reconnectSince >= RECONNECT_GIVE_UP_MS) {
       if (server !== null) {
         serverGone();
