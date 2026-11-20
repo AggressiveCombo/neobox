@@ -8,6 +8,7 @@ import {
   type Kind,
   type Ref,
   bodyBounds,
+  bodyById,
   bodyGeo,
   bodyXf,
   getList,
@@ -160,6 +161,9 @@ function renderLayer(target: HTMLCanvasElement, doc: Obj, view: View, w: number,
   getList(doc, "body").forEach((b, i) => {
     if (!skipped.has(i)) drawBodyAt(c, b, i, scopeBi, ox, oy, k, lw, lh);
   });
+  c.globalAlpha = scopeBi >= 0 ? 0.3 : 1;
+  drawJoints(c, doc, splitJoints(doc, skip).fixed, S);
+  c.globalAlpha = 1;
   return { target, doc, view: { ...view }, w, h, dpr, scopeBi, skip, bitmap };
 }
 
@@ -243,7 +247,7 @@ export function drawMap(canvas: HTMLCanvasElement, doc: Obj, view: View, scene: 
     if (b) drawBodyAt(c, b, i, scopeBi, ox, oy, k, w, h);
   }
   c.globalAlpha = scopeBi >= 0 ? 0.3 : 1;
-  for (const j of getList(doc, "joint")) drawJoint(c, doc, j, S);
+  drawJoints(c, doc, splitJoints(doc, skip).live, S);
   for (const kind of MARKER_KINDS) {
     for (const o of getList(doc, kind)) drawMarker(c, kind, screenAt(view, w, h, { x: num(o, "1", 0), y: num(o, "2", 0) }));
   }
@@ -356,26 +360,67 @@ function drawBody(c: CanvasRenderingContext2D, geo: BodyGeo, invisible: boolean,
   c.globalAlpha = 1;
 }
 
-function drawJoint(c: CanvasRenderingContext2D, doc: Obj, j: Obj, S: (p: Pt) => Pt): void {
-  const [a, b] = jointAnchors(doc, j);
-  const kind = num(j, "5", 0);
-  const colour = JOINT_COLOUR[kind] ?? JOINT_COLOUR[0];
-  const pa = S(a);
-  const pb = S(b);
-  c.strokeStyle = colour;
-  c.fillStyle = colour;
-  c.lineWidth = kind === 2 ? 3 : 1.5;
-  c.setLineDash(kind === 0 ? [6, 4] : []);
-  c.beginPath();
-  c.moveTo(pa.x, pa.y);
-  c.lineTo(pb.x, pb.y);
-  c.stroke();
-  c.setLineDash([]);
-  for (const p of [pa, pb]) {
+/**
+ * Joints grouped by kind: each kind is one stroke and one fill, so a frame costs a few canvas calls
+ * rather than several per joint.
+ */
+function drawJoints(c: CanvasRenderingContext2D, doc: Obj, joints: readonly Obj[], S: (p: Pt) => Pt): void {
+  const groups = new Map<number, { segs: Pt[]; ends: Pt[] }>();
+  for (const j of joints) {
+    const [a, b] = jointAnchors(doc, j);
+    const kind = num(j, "5", 0);
+    let g = groups.get(kind);
+    if (!g) groups.set(kind, (g = { segs: [], ends: [] }));
+    const pa = S(a);
+    const pb = S(b);
+    g.segs.push(pa, pb);
+    g.ends.push(pa, pb);
+  }
+  for (const [kind, g] of groups) {
+    const colour = JOINT_COLOUR[kind] ?? JOINT_COLOUR[0];
+    c.strokeStyle = colour;
+    c.fillStyle = colour;
+    c.lineWidth = kind === 2 ? 3 : 1.5;
+    c.setLineDash(kind === 0 ? [6, 4] : []);
     c.beginPath();
-    c.arc(p.x, p.y, 3, 0, TAU);
+    for (let i = 0; i < g.segs.length; i += 2) {
+      c.moveTo(g.segs[i]!.x, g.segs[i]!.y);
+      c.lineTo(g.segs[i + 1]!.x, g.segs[i + 1]!.y);
+    }
+    c.stroke();
+    c.setLineDash([]);
+    c.beginPath();
+    for (const p of g.ends) {
+      c.moveTo(p.x + 3, p.y);
+      c.arc(p.x, p.y, 3, 0, TAU);
+    }
     c.fill();
   }
+}
+
+/**
+ * Joints split by whether an end sits on one of `skip`'s bodies: those are drawn live with the moving bodies,
+ * the rest are static and cached in the layer.
+ */
+function splitJoints(doc: Obj, skip: readonly number[]): { fixed: Obj[]; live: Obj[] } {
+  const joints = getList(doc, "joint");
+  if (skip.length === 0) return { fixed: joints, live: [] };
+  const bodies = getList(doc, "body");
+  const moved = new Set<Obj>();
+  for (const i of skip) {
+    const b = bodies[i];
+    if (b) moved.add(b);
+  }
+  const fixed: Obj[] = [];
+  const live: Obj[] = [];
+  for (const j of joints) {
+    const touches = [num(j, "7", -1), num(j, "8", -1)].some((id) => {
+      const b = id < 0 ? null : bodyById(doc, id);
+      return b !== null && moved.has(b);
+    });
+    (touches ? live : fixed).push(j);
+  }
+  return { fixed, live };
 }
 
 function drawMarker(c: CanvasRenderingContext2D, kind: (typeof MARKER_KINDS)[number], p: Pt): void {
