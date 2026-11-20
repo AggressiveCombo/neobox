@@ -133,8 +133,13 @@ export class Overlay {
 
   /** Backing-store size in device pixels. */
   resize(widthPx: number, heightPx: number): void {
-    this.canvas.width = Math.max(1, Math.round(widthPx));
-    this.canvas.height = Math.max(1, Math.round(heightPx));
+    const w = Math.max(1, Math.round(widthPx));
+    const h = Math.max(1, Math.round(heightPx));
+    // Assigning width or height resets the 2D backing store even to the same value: resizeAll runs on every mount and every
+    // screen-in end, so only a real change may reallocate it.
+    if (w === this.canvas.width && h === this.canvas.height) return;
+    this.canvas.width = w;
+    this.canvas.height = h;
   }
 
   /** The game view's rect in window CSS px (the canvas covers it). */
