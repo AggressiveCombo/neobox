@@ -105,8 +105,19 @@ export function isProse(text) {
   return (t.match(/[A-Za-z]{3,}/g) ?? []).length >= 2;
 }
 
+/** A CSS value written to an element's style (`style.transform = "..."`, `style.setProperty(name, "...")`): not copy. */
+function isStyleValue(node) {
+  const p = node.parent;
+  if (ts.isBinaryExpression(p) && p.operatorToken.kind === ts.SyntaxKind.EqualsToken && p.right === node) {
+    const target = p.left;
+    return ts.isPropertyAccessExpression(target) && (/(^|\.)style$/.test(target.expression.getText()) || target.name.text === "cssText");
+  }
+  return ts.isCallExpression(p) && p.arguments.includes(node) && /\.setProperty$/.test(p.expression.getText());
+}
+
 function isCodeLiteral(node) {
   const p = node.parent;
+  if (isStyleValue(node)) return true;
   if (ts.isImportDeclaration(p) || ts.isExportDeclaration(p) || ts.isLiteralTypeNode(p) || ts.isCaseClause(p)) return true;
   if (ts.isPropertyAssignment(p) && p.name === node) return true;
   if (ts.isElementAccessExpression(p) && p.argumentExpression === node) return true;
@@ -148,10 +159,8 @@ function tsStrings(file, src) {
       const line = sf.getLineAndCharacterOfPosition(node.getStart(sf)).line + 1;
       out.push({ line, text, thresholds: [...new Set(thresholds)] });
     };
-    if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) {
-      if (!isCodeLiteral(node)) add(node.text);
-    } else if (ts.isTemplateExpression(node)) {
-      add(node.head.text + node.templateSpans.map((s) => `{}${s.literal.text}`).join(""));
+    if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node) || ts.isTemplateExpression(node)) {
+      if (!isCodeLiteral(node)) add(ts.isTemplateExpression(node) ? node.head.text + node.templateSpans.map((s) => `{}${s.literal.text}`).join("") : node.text);
     } else if (ts.isJsxText(node)) {
       add(decodeEntities(node.getText(sf)).replace(/\s+/g, " ").trim());
     }

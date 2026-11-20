@@ -1142,6 +1142,21 @@
           { "file": "crates/sim/src/player.rs", "contains": "&& p.eo.air_jump" }
         ]
       }
+    },
+    {
+      "id": "replay-seek-data-mismatch",
+      "text": "This replay's seek data didn't match, so seeking is slower",
+      "basis": "code",
+      "source": { "file": "client/src/ui/screens/replay.ts" },
+      "truth": {
+        "check": "A failed checkpoint check drops every checkpoint and sets failed; a seek then starts from a keyframe, not a checkpoint.",
+        "value": true,
+        "evidence": [
+          { "file": "crates/net/src/replay.rs", "contains": "self.checkpoints.clear();" },
+          { "file": "crates/net/src/replay.rs", "contains": "self.failed = true;" },
+          { "file": "crates/net/src/replay.rs", "contains": "(self.keyframes[k].0, Restore::Keyframe(k))" }
+        ]
+      }
     }
   ]
 }
