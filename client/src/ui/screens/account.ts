@@ -116,10 +116,12 @@ export const accountScreen: ScreenFactory = (ctx) => {
       const who = name.value.trim();
       if (!NAME_RE.test(who)) {
         say(NAME_ERROR, true);
+        name.focus();
         return null;
       }
       if (password.value === "") {
         say("Enter a password.", true);
+        password.focus();
         return null;
       }
       return { name: who, password: password.value };
