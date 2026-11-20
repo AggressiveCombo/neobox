@@ -682,7 +682,9 @@ async function deadCase(s) {
               st.downloads = 0;
               st.popups = 0;
               t0 = Date.now();
-              await target.click({ timeout: 3000 });
+              // A hold-type control (the phone ability buttons) acts while held: press it 400 ms so its effect shows in the sample window.
+              const hold = await target.evaluate((el) => (el.classList.contains("hud-touch") ? 400 : 0));
+              await target.click({ timeout: 3000, delay: hold });
               break;
             } catch (err) {
               if (attempt >= 3) throw err;
