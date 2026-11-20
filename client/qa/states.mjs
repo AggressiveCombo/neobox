@@ -356,7 +356,7 @@ export const STATES = [
     await h.context.addInitScript(() => localStorage.setItem("neobox.phoneSplashSeen", "1"));
     await h.page.goto(`${s.base}/AAAAAA`);
     await h.page.getByText("Room not found", { exact: true }).waitFor();
-    await drumOption(h.page, "Browse rooms").waitFor();
+    await button(h.page, "Browse rooms").waitFor();
     return h;
   }),
   state("error-api", {}, async (s) => {
