@@ -266,7 +266,10 @@ function playfieldInit(cfg) {
     const pts = snap.live.map((p) => ({ id: p.id, x: p.x, y: p.y }));
     // Self-test: a fake player one view width beyond the view's right and bottom edges, which the check must fail.
     if (acc.selfTest === "camera") pts.push({ id: -1, x: cam.cx + cam.w, y: cam.cy + cam.h });
-    const out = pts.filter((p) => !inside(p));
+    // Past the arena edge (a fall, a blast zone) nothing frames the player: the original's view stays inside its arena
+    // (mapcompat.mjs), so such a player is out of view there too. Only players inside the arena must be in view.
+    const inArena = (p) => p.x >= 0 && p.x <= snap.arenaW && p.y >= 0 && p.y <= snap.arenaH;
+    const out = pts.filter((p) => !inside(p) && (p.id === -1 || inArena(p)));
     const localOut = snap.localLive && out.some((p) => p.id === snap.localId);
     const unindicated = out.filter((p) => p.id !== snap.localId && !cam.away.includes(p.id));
     acc.camFrames++;
