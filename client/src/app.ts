@@ -616,8 +616,16 @@ export function start(): Store<AppState> {
   }
 
   // Practice, training, the test play and the replay build their controls after their screen mounts: resize when a layer or a bar or panel over the arena enters or leaves.
+  // A panel that grows in place (the replay scoreboard fills its rows after mount) moves the edge the view is fitted to: observe each one's size too.
+  const clearSizes = new ResizeObserver((entries) => {
+    for (const e of entries) if (!e.target.isConnected) clearSizes.unobserve(e.target);
+    scheduleResize();
+  });
   new MutationObserver((records) => {
-    if (records.some((r) => [...r.addedNodes, ...r.removedNodes].some((n) => n instanceof Element && (n.matches(".hud-touch-layer, .playfield-clear") || n.querySelector(".hud-touch-layer, .playfield-clear"))))) scheduleResize();
+    if (records.some((r) => [...r.addedNodes, ...r.removedNodes].some((n) => n instanceof Element && (n.matches(".hud-touch-layer, .playfield-clear") || n.querySelector(".hud-touch-layer, .playfield-clear"))))) {
+      for (const el of document.querySelectorAll<HTMLElement>(".playfield-clear")) clearSizes.observe(el);
+      scheduleResize();
+    }
   }).observe(uiRoot, { childList: true, subtree: true });
 
   /** This tab's seat, kept in sessionStorage so a page reload rejoins the same slot on the same server. */

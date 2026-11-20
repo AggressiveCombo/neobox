@@ -396,7 +396,8 @@ async function cameraDrift(s) {
  * in css px. The first 500 ms of the game view are skipped: the camera still holds the previous screen's pose there.
  */
 const voidPx = () => {
-  const all = window.__qaTrace.frames.filter((x) => x.play && x.w > 0 && Number.isFinite(x.bx0));
+  const frames = window.__qaTrace.frames;
+  const all = frames.filter((x) => x.play && x.w > 0 && Number.isFinite(x.bx0));
   const t0 = all.length ? all[0].t : 0;
   const f = all.filter((x) => x.t >= t0 + 500);
   const gl = document.getElementById("gl-host") ?? document.querySelector("canvas");
@@ -406,7 +407,8 @@ const voidPx = () => {
     const out = Math.max(0, x.bx0 - (x.cx - x.w / 2), x.cx + x.w / 2 - x.bx1, x.by0 - (x.cy - x.h / 2), x.cy + x.h / 2 - x.by1);
     worst = Math.max(worst, (out * css) / x.w);
   }
-  return { n: f.length, px: Number(worst.toFixed(2)) };
+  const last = frames.length ? frames[frames.length - 1].t : 0;
+  return { n: f.length, px: Number(worst.toFixed(2)), total: frames.length, playN: all.length, playFirst: all.length ? Math.round(all[0].t) : null, last: Math.round(last), now: Math.round(performance.now()) };
 };
 
 /** E04: the replay and the practice run: the opaque panels over the game view, and the void past the playable bounds. */
@@ -416,11 +418,16 @@ async function hudOverlap(s) {
   let worstVoid = 0;
   for (const id of ["replay-loaded", "practice-running"]) {
     const h = await stateById(id).prepare(traced(s));
+    // The game view is drawn once the renderer exists (app.ts ensureRenderer, async), so the camera can publish after
+    // .offline.playing. Settle from the first live camera frame: voidPx reads frames 500 ms after it. A view that never
+    // draws (frozen render) times out here and fails.
+    const live = await h.page.waitForFunction(() => window.__qaTrace.frames.some((x) => x.play && x.w > 0), null, { timeout: 20000 }).then(() => true, () => false);
+    if (!live) return { pass: false, detail: `${id}: no camera frames within 20 s` };
     await sleep(600);
     const r = await h.page.evaluate(overlapPanels);
     if (r.n < 0) return { pass: false, detail: `${id}: no game view` };
     const v = await h.page.evaluate(voidPx);
-    if (!v.n) return { pass: false, detail: `${id}: no camera frames` };
+    if (!v.n) return { pass: false, detail: `${id}: no camera frames (trace ${v.total} frames, ${v.playN} playing with bounds, first ${v.playFirst} ms, last ${v.last} ms, now ${v.now} ms)` };
     total += r.n;
     worstVoid = Math.max(worstVoid, v.px);
     parts.push(`${id}=${r.n}${r.names.length ? ` [${r.names.join(" ")}]` : ""} void=${v.px}`);
