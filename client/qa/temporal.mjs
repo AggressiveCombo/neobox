@@ -8,9 +8,11 @@
 //   E03 motion.fullFlash.count    replay Close: unmasked, game-less runs of the GL view that last <= 150 ms (rAF sampler)
 //   E04 overlay.hud.overlap       replay and practice: opaque panels (any position) over the game view, each >= 1% of it (count);
 //                                  overlay.void.px: how far a game-view frame reaches past the playable bounds (px)
-//                                  menu clip card (desktop light/dark, phone portrait): overlay.backdrop.void.px (card corners past the arena, px),
-//                                  overlay.backdrop.page.px (page-white pixels inside the card outside the arena, css px^2),
-//                                  overlay.backdrop.control.count (bar with no clip, caption over pause or clipped or translucent, card past the viewport)
+//                                  menu clip card (desktop light/dark, phone portrait): overlay.backdrop.void.px (VOID-colour px inside the card, css px^2),
+//                                  overlay.backdrop.page.px (page-white px inside the card outside the arena, css px^2),
+//                                  overlay.backdrop.control.count (bar with no clip, caption over pause or clipped or wrapped or translucent, card past the viewport),
+//                                  overlay.backdrop.caption.pct (caption and pause share of the card area, %),
+//                                  overlay.backdrop.players.out.count (cases where the centroid is outside the card in any sampled frame, or a live player is inside it in < 98% of its frames)
 //   E05 font.pref.metricDelta     About page: readable-font pref changes text metrics (%)
 //   E07 copy.claims.unsourced     copy claims with no source (no browser; copy-claims.mjs)
 //   E08 transition.present        settings sections and training Next: share of changes that animate (browser animation events and scroll timing; rAF samples secondary)
@@ -426,7 +428,7 @@ async function hudOverlap(s) {
   return { metrics: { "overlay.hud.overlap": total, "overlay.void.px": worstVoid }, detail: parts.join("; ") };
 }
 
-/** Page side of the menu backdrop: the card's corners and the arena bounds (css px), from the DOM and the menu camera. */
+/** Page side of the menu backdrop: the card's corners, the arena bounds and the live players (css px), from the DOM and the menu camera. */
 const backdropGeometry = () => {
   const sq = document.querySelector(".menu-square");
   const gl = document.getElementById("gl-host");
@@ -434,6 +436,8 @@ const backdropGeometry = () => {
   if (!sq || !gl || !cam || !(cam.w > 0)) return null;
   const r = sq.getBoundingClientRect();
   const theta = (parseFloat(sq.style.getPropertyValue("--angle")) * Math.PI) / 180;
+  const cos = Math.cos(theta);
+  const sin = Math.sin(theta);
   const half = sq.offsetWidth / 2;
   const cx = r.left + r.width / 2;
   const cy = r.top + r.height / 2;
@@ -441,38 +445,84 @@ const backdropGeometry = () => {
   const k = gx.width / cam.w;
   // world -> page px, the mapping of camera.ts (the GL view spans the camera's w by h)
   const toPage = (wx, wy) => [gx.left + (wx - (cam.cx - cam.w / 2)) * k, gx.top + (wy - (cam.cy - cam.h / 2)) * k];
-  const [ax0, ay0] = toPage(cam.bx0 + 1, cam.by0 + 1);
-  const [ax1, ay1] = toPage(cam.bx1 - 1, cam.by1 - 1);
+  // the arena's edge inset by 1 CSS px (the page-white rule reads it)
+  const [ax0, ay0] = toPage(cam.bx0, cam.by0).map((v) => v + 1);
+  const [ax1, ay1] = toPage(cam.bx1, cam.by1).map((v) => v - 1);
   const corners = [
     [-1, -1],
     [1, -1],
     [1, 1],
     [-1, 1],
-  ].map(([u, v]) => [cx + half * (u * Math.cos(theta) - v * Math.sin(theta)), cy + half * (u * Math.sin(theta) + v * Math.cos(theta))]);
-  let outside = 0;
-  for (const [x, y] of corners) outside = Math.max(outside, ax0 - x, x - ax1, ay0 - y, y - ay1, 0);
-  // controls: a bar shown with no drawn clip, caption over pause, clipped text, translucent caption, card past the viewport
+  ].map(([u, v]) => [cx + half * (u * cos - v * sin), cy + half * (u * sin + v * cos)]);
+  // a page point inside the rotated card (its card-local coordinates within the half side)
+  const inCard = (x, y) => {
+    const dx = x - cx;
+    const dy = y - cy;
+    return Math.abs(dx * cos + dy * sin) <= half && Math.abs(-dx * sin + dy * cos) <= half;
+  };
+  // the page area of a box that lies inside the card (sampled on a 2 px grid)
+  const areaInCard = (q) => {
+    let n = 0;
+    for (let x = q.left + 1; x < q.right; x += 2) for (let y = q.top + 1; y < q.bottom; y += 2) if (inCard(x, y)) n += 1;
+    return 4 * n;
+  };
+  const players = (cam.live ?? []).map(([id, x, y]) => {
+    const [px, py] = toPage(x, y);
+    return { id, inside: inCard(px, py) };
+  });
+  // the live players' centroid (the card's centre follows it): inside the card?
+  const pts = (cam.live ?? []).map(([, x, y]) => toPage(x, y));
+  const centroidIn = pts.length > 0 && inCard(pts.reduce((a, p) => a + p[0], 0) / pts.length, pts.reduce((a, p) => a + p[1], 0) / pts.length);
+  // controls: a bar shown with no drawn clip, caption over pause, a wrapped caption, translucent caption, card past the viewport.
+  // The caption and its pause control are not rotated: their page boxes are exact.
   const live = sq.classList.contains("is-live");
   const bar = document.querySelector(".menu-clip-bar");
   const credit = document.querySelector(".menu-clip-credit");
   const pause = document.querySelector(".menu-clip-pause");
   const issues = [];
+  let coverPct = 0;
   if (bar && !bar.hidden && bar.getBoundingClientRect().width > 0 && !live) issues.push("bar-without-clip");
   if (credit && pause && live) {
     const a = credit.getBoundingClientRect();
     const b = pause.getBoundingClientRect();
     if (a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom) issues.push("caption-over-pause");
-    if (credit.scrollWidth > credit.clientWidth + 1 || credit.scrollHeight > credit.clientHeight + 1) issues.push("caption-clipped");
-    const bg = getComputedStyle(credit).backgroundColor;
-    const parts = /rgba?\(([^)]+)\)/.exec(bg)?.[1].split(/[\s,/]+/).filter(Boolean) ?? [];
+    const cs = getComputedStyle(credit);
+    const lineH = parseFloat(cs.lineHeight) || parseFloat(cs.fontSize) * 1.3;
+    if (credit.clientHeight - parseFloat(cs.paddingTop) - parseFloat(cs.paddingBottom) > 1.5 * lineH) issues.push("caption-wraps");
+    const parts = /rgba?\(([^)]+)\)/.exec(cs.backgroundColor)?.[1].split(/[\s,/]+/).filter(Boolean) ?? [];
     const alpha = parts.length > 3 ? Number(parts[3]) : 1;
     if (alpha > 0 && alpha < 1) issues.push("caption-translucent");
+    coverPct = (100 * (areaInCard(a) + areaInCard(b))) / ((2 * half) * (2 * half));
   }
   if (corners.some(([x, y]) => x < 0 || y < 0 || x > innerWidth || y > innerHeight)) issues.push("card-past-viewport");
-  return { live, outside: Number(outside.toFixed(2)), issues, clip: { x: r.left, y: r.top, w: r.width, h: r.height }, theta, half, arena: [ax0, ay0, ax1, ay1] };
+  // the whole arena inside the turned card: its four corners (camera.ts backdropCamera fits the arena to the card)
+  if ([[ax0, ay0], [ax1, ay0], [ax1, ay1], [ax0, ay1]].some(([x, y]) => !inCard(x, y))) issues.push("arena-clipped");
+  // the page's own background colour: the first of body or html that is not transparent (the card must show none of it)
+  const rgba = (c) => /rgba?\(([^)]+)\)/.exec(c)?.[1].split(/[\s,/]+/).filter(Boolean).map(Number) ?? null;
+  const pageRgb = [document.body, document.documentElement].map((e) => rgba(getComputedStyle(e).backgroundColor)).find((c) => c && (c.length < 4 || c[3] > 0)) ?? [255, 255, 255];
+  // the caption and pause control, in page px, grown by 2 px: their opaque chips snap to whole px at the edge (clip chrome, left out of the card's counts)
+  const controls = [credit, pause].filter(Boolean).map((e) => {
+    const q = e.getBoundingClientRect();
+    return [q.left - 2, q.top - 2, q.right + 2, q.bottom + 2];
+  });
+  // the caption and pause control stay off the arena: over it they hide part of the arena
+  if (live && controls.some(([l, t, r, b]) => l < ax1 && ax0 < r && t < ay1 && ay0 < b)) issues.push("control-over-arena");
+  return {
+    live,
+    issues,
+    coverPct: Number(coverPct.toFixed(1)),
+    players,
+    centroidIn,
+    clip: { x: r.left, y: r.top, w: r.width, h: r.height },
+    theta,
+    half,
+    arena: [ax0, ay0, ax1, ay1],
+    pageRgb,
+    controls,
+  };
 };
 
-/** Decodes a PNG of the card and counts page-white pixels inside the card that lie outside the arena (the wedge a card corner past the arena shows). Arena pixels, pills included, are clip content. */
+/** Decodes a PNG of the card and counts, in CSS px^2, over the card's pixels outside the arena (and outside its 2 css px edge ring, where the walls antialias), and outside the caption and pause control (their opaque chips are clip chrome): VOID pixels (the clear colour, #0a0a0a; the card shows the map's background past the arena, never the clear colour) and PAGE pixels (the page's own background colour, so the card shows no page past the arena). Map geometry (walls, platforms, pills) is not counted. */
 const backdropPixels = async ({ b64, g }) => {
   const img = new Image();
   img.src = `data:image/png;base64,${b64}`;
@@ -487,7 +537,10 @@ const backdropPixels = async ({ b64, g }) => {
   const cos = Math.cos(g.theta);
   const sin = Math.sin(g.theta);
   const [ax0, ay0, ax1, ay1] = g.arena;
-  let n = 0;
+  const [pr, pg, pb] = g.pageRgb;
+  const inRect = (x, y, [l, t, r, b]) => x >= l && x <= r && y >= t && y <= b;
+  let page = 0;
+  let voidArea = 0;
   for (let py = 0; py < img.height; py += 1) {
     for (let px = 0; px < img.width; px += 1) {
       const x = g.shot.x + (px + 0.5) / scale;
@@ -497,26 +550,33 @@ const backdropPixels = async ({ b64, g }) => {
       const u = dx * cos + dy * sin;
       const v = -dx * sin + dy * cos;
       if (Math.abs(u) > g.half - 2 || Math.abs(v) > g.half - 2) continue;
+      // the walls' antialiased outer edge sits on the arena's rect edge: geometry, so the 2 css px ring around the arena is not the page
+      if (x >= ax0 - 2 && x <= ax1 + 2 && y >= ay0 - 2 && y <= ay1 + 2) continue;
+      if (g.controls.some((c) => inRect(x, y, c))) continue;
       const i = (py * img.width + px) * 4;
-      if (data[i] < 240 || data[i + 1] < 240 || data[i + 2] < 240) continue;
-      const outsideArena = x < ax0 || x > ax1 || y < ay0 || y > ay1;
-      if (outsideArena) n += 1;
+      const [r, gr, b] = [data[i], data[i + 1], data[i + 2]];
+      if (Math.abs(r - 10) <= 2 && Math.abs(gr - 10) <= 2 && Math.abs(b - 10) <= 2) voidArea += 1;
+      if (Math.abs(r - pr) <= 3 && Math.abs(gr - pg) <= 3 && Math.abs(b - pb) <= 3) page += 1;
     }
   }
-  return n / (scale * scale);
+  return { white: page / (scale * scale), voidArea: voidArea / (scale * scale) };
 };
 
-/** E04 backdrop: the menu clip card (desktop light and dark, phone portrait; the phone landscape has no backdrop by design, menu.css). */
+/** E04 backdrop: the menu clip card (desktop light and dark, phone portrait; the phone landscape has no backdrop by design, menu.css). Eight seconds of clip, sampled every 0.5 s: the card's pixels at +1 s, +3 s and +8 s, and at each sample the controls, the centroid and each live player's position. */
 async function menuBackdrop(s) {
   const cases = [
     ["desktop-light", { viewport: { width: 1280, height: 800 } }, false],
     ["desktop-dark", { viewport: { width: 1280, height: 800 } }, true],
     ["phone-portrait", { viewport: { width: 390, height: 844 }, phone: true }, false],
   ];
+  // the samples that are screenshotted: +1 s, +3 s and +8 s of the clip
+  const shots = new Set([1000, 3000, 8000]);
   const parts = [];
   let worstVoid = 0;
   let pagePx = 0;
   let controls = 0;
+  let coverPct = 0;
+  let playersOut = 0;
   for (const [name, opts, dark] of cases) {
     const h = await s.open(`backdrop-${name}`, { name: "shots", ...opts });
     await h.page.goto(s.base);
@@ -524,13 +584,22 @@ async function menuBackdrop(s) {
     if (opts.phone) await dismissPhoneSplash(h.page);
     await h.page.locator('.drum[data-settled="true"]').waitFor();
     await h.page.locator(".menu-square.is-live").waitFor({ timeout: 20000 }).catch(() => {});
-    const samples = [];
-    for (const wait of [1000, 3000]) {
-      await sleep(wait);
+    // per sampled frame with live players: the centroid's flag, and each live player's flag (inside the card or not)
+    let frames = 0;
+    let centroidIn = 0;
+    const perPlayer = new Map();
+    const issues = new Set();
+    const pixels = [];
+    let live = true;
+    let casePage = 0;
+    let caseVoid = 0;
+    for (let i = 1; i <= 16; i += 1) {
+      const wait = i * 500;
+      await sleep(500);
       const g = await h.page.evaluate(backdropGeometry);
       if (!g) return { pass: false, detail: `${name}: no menu card or camera` };
-      let px = 0;
-      if (g.live) {
+      let px = { white: 0, voidArea: 0 };
+      if (g.live && shots.has(wait)) {
         // The card's box can reach past the viewport (a card-past-viewport control issue above): shoot only what is on screen.
         const x0 = Math.max(0, g.clip.x);
         const y0 = Math.max(0, g.clip.y);
@@ -540,18 +609,46 @@ async function menuBackdrop(s) {
           const shot = await h.page.screenshot({ clip: { x: x0, y: y0, width: x1 - x0, height: y1 - y0 } });
           px = await h.page.evaluate(backdropPixels, { b64: shot.toString("base64"), g: { ...g, shot: { x: x0, y: y0, w: x1 - x0 } } });
         }
+        pixels.push(`+${wait}ms white=${px.white.toFixed(1)} void=${px.voidArea.toFixed(1)}`);
       }
-      samples.push({ wait, live: g.live, outside: g.outside, px: Number(px.toFixed(1)), issues: g.issues });
-      worstVoid = Math.max(worstVoid, g.outside);
-      pagePx = Math.max(pagePx, px);
+      live = live && g.live;
+      casePage = Math.max(casePage, px.white);
+      caseVoid = Math.max(caseVoid, px.voidArea);
+      coverPct = Math.max(coverPct, g.coverPct);
       controls += g.issues.length;
+      for (const x of g.issues) issues.add(x);
+      if (g.players.length > 0) {
+        frames += 1;
+        if (g.centroidIn) centroidIn += 1;
+        for (const p of g.players) {
+          const t = perPlayer.get(p.id) ?? { n: 0, inside: 0 };
+          t.n += 1;
+          if (p.inside) t.inside += 1;
+          perPlayer.set(p.id, t);
+        }
+      }
     }
-    const live = samples.every((x) => x.live);
+    pagePx = Math.max(pagePx, casePage);
+    worstVoid = Math.max(worstVoid, caseVoid);
+    // The centroid is inside the card in every sampled frame, and each live player inside it in >= 98% of its frames.
+    const centroidPct = frames ? (100 * centroidIn) / frames : 0;
+    const minInsidePct = perPlayer.size ? Math.min(...[...perPlayer.values()].map((t) => (100 * t.inside) / t.n)) : 0;
+    const out = !(frames > 0 && centroidPct >= 100 && minInsidePct >= 98);
+    playersOut += out ? 1 : 0;
     if (!live) controls += 1;
-    parts.push(`${name} ${samples.map((x) => `+${x.wait}ms(live=${x.live} outside=${x.outside} px=${x.px}${x.issues.length ? ` ${x.issues.join(",")}` : ""})`).join(" ")}${live ? "" : " NO-LIVE-CLIP"}`);
+    parts.push(`${name} live=${live} frames=${frames} centroid=${centroidPct.toFixed(0)}% minPlayer=${minInsidePct.toFixed(0)}%${out ? " OUT" : ""} ${pixels.join(" ")}${issues.size ? ` ${[...issues].join(",")}` : ""}${live ? "" : " NO-LIVE-CLIP"}`);
     await h.page.close().catch(() => {});
   }
-  return { metrics: { "overlay.backdrop.void.px": worstVoid, "overlay.backdrop.page.px": Math.round(pagePx), "overlay.backdrop.control.count": controls }, detail: parts.join("; ") };
+  return {
+    metrics: {
+      "overlay.backdrop.void.px": worstVoid,
+      "overlay.backdrop.page.px": Math.round(pagePx),
+      "overlay.backdrop.control.count": controls,
+      "overlay.backdrop.caption.pct": Math.round(coverPct),
+      "overlay.backdrop.players.out.count": playersOut,
+    },
+    detail: parts.join("; "),
+  };
 }
 
 async function fontPref(s) {

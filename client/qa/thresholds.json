@@ -51,6 +51,8 @@
   "overlay.backdrop.page.px": { "max": 0, "runner": true },
   "overlay.backdrop.void.px": { "max": 2, "runner": true },
   "overlay.backdrop.control.count": { "max": 0, "runner": true },
+  "overlay.backdrop.caption.pct": { "max": 20, "runner": true },
+  "overlay.backdrop.players.out.count": { "max": 0, "runner": true },
   "interaction.promptedInput.reacts": { "min": 1, "runner": true },
   "editor.perf.dragP95Frames": { "max": 1, "runner": true },
   "editor.perf.drag4xP95ms": { "max": 33.4, "runner": true },
