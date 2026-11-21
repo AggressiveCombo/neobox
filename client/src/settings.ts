@@ -85,9 +85,11 @@ export function readOnlyKeys(settings: Record<string, unknown>): string[] {
   return Object.keys(settings).filter((k) => !COVERED.has(k)).sort();
 }
 
-/** A player-facing label for a read-only setting key: sentence case, underscores as spaces. */
+/** A player-facing label for a read-only setting key: the editor's name when it has one, else words from the key. */
 export function readOnlyLabel(key: string): string {
-  const text = key.replace(/_/g, " ");
+  const def = SETTINGS.find((s) => s.label === key || s.field === key);
+  if (def) return def.name;
+  const text = key.replace(/_/g, " ").replace(/([a-z])([A-Z])/g, "$1 $2").toLowerCase();
   return text.charAt(0).toUpperCase() + text.slice(1);
 }
 
