@@ -219,6 +219,7 @@ export function showPostGame(ctx: AppCtx, award: XpAward, map: MapMeta | null): 
   const closeBtn = h("button", { type: "button", class: "primary", onclick: () => close() }, icon("arrow-left", 18), "Back to room");
   const { close, dialog } = openModal({
     title: "Game over",
+    icon: "flag",
     body: [body],
     actions: [closeBtn],
     onclose: () => {

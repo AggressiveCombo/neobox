@@ -192,6 +192,8 @@ function initial(name: string): string {
 
 export interface ModalOptions {
   title: string;
+  /** A leading icon on the title (the modal's heading). */
+  icon?: IconName;
   body: Child[];
   /** Buttons for the bottom row; a Close button is added when none is given. */
   actions?: HTMLButtonElement[];
@@ -264,7 +266,7 @@ export function openModal(opts: ModalOptions): { dialog: HTMLDialogElement; clos
   const dialog = h(
     "dialog",
     { class: "modal", "aria-labelledby": titleId },
-    h("div", { class: "modal-head" }, h("h2", { id: titleId }, opts.title)),
+    h("div", { class: "modal-head" }, h("h2", { id: titleId }, opts.icon ? icon(opts.icon, 20) : null, opts.title)),
     h("div", { class: "modal-body", tabindex: "0" }, ...opts.body),
     h("div", { class: "modal-actions" }, ...actions),
   );

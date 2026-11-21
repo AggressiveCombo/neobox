@@ -502,10 +502,10 @@ export const replayScreen: ScreenFactory = (ctx) => {
           h(
             "div",
             { class: "replay-step", role: "group", "aria-label": "Jump and step" },
-            stepBtn("Back 5 s", "rotate-ccw", () => jump(-JUMP_SECONDS), "start"),
+            stepBtn("Back 5 s", "undo-2", () => jump(-JUMP_SECONDS), "start"),
             stepBtn("Step back", "step-back", () => step(-1), "start"),
             stepBtn("Step forward", "step-forward", () => step(1), "end"),
-            stepBtn("Forward 5 s", "rotate-cw", () => jump(JUMP_SECONDS), "end"),
+            stepBtn("Forward 5 s", "redo-2", () => jump(JUMP_SECONDS), "end"),
           ),
           speedGroup.el,
         ),

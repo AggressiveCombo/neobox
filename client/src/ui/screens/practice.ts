@@ -193,9 +193,18 @@ export const practiceScreen: ScreenFactory = (ctx) => {
           h("details", null, h("summary", null, "Details"), h("p", null, mapsError.detail)),
         ),
       );
-      items.push(h("button", { type: "button", class: "quiet", onclick: retryMaps }, icon("rotate-ccw", 18), "Try again"));
+      items.push(h("button", { type: "button", class: "quiet", onclick: retryMaps }, icon("refresh-cw", 18), "Try again"));
     }
-    if (maps?.length === 0) items.push(h("p", { class: "offline-status" }, "This server has no built-in maps. Paste a map code to play."));
+    if (maps?.length === 0) {
+      items.push(
+        h(
+          "div",
+          { class: "empty" },
+          icon("inbox", 40),
+          h("p", { class: "offline-status" }, "This server has no built-in maps. Paste a map code to play."),
+        ),
+      );
+    }
     for (const m of maps ?? []) {
       const selected = choice?.code === m.code;
       items.push(
@@ -326,7 +335,7 @@ export const practiceScreen: ScreenFactory = (ctx) => {
       h(
         "div",
         { class: "practice-grid" },
-        h("section", { class: "section practice-maps" }, h("h2", null, "Map"), list),
+        h("section", { class: "section practice-maps" }, h("h2", null, icon("map", 20), "Map"), list),
         h(
           "div",
           { class: "panel practice-side" },
@@ -334,9 +343,9 @@ export const practiceScreen: ScreenFactory = (ctx) => {
             "div",
             { class: "practice-code" },
             field("Map code", code, "Or paste a map code to play it."),
-            h("button", { type: "button", onclick: () => void useCode() }, "Use code"),
+            h("button", { type: "button", onclick: () => void useCode() }, icon("clipboard", 18), "Use code"),
           ),
-          h("h2", null, "Rules"),
+          h("h2", null, icon("book-open", 20), "Rules"),
           rulesSeg.el,
           hint,
         ),

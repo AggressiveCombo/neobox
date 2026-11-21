@@ -198,13 +198,14 @@ export function rotateGate(): { el: HTMLElement; destroy(): void } {
         sync();
       },
     },
+    icon("play", 18),
     "Play in portrait anyway",
   );
   const el: HTMLElement = h(
     "div",
     { class: "hud-rotate", role: "dialog", "aria-label": "Turn your phone sideways", hidden: true },
     h("div", { class: "hud-rotate-icon", "aria-hidden": "true" }),
-    h("h2", null, "Turn your phone sideways"),
+    h("h2", null, icon("smartphone", 20), "Turn your phone sideways"),
     h("p", null, "Matches play in landscape. Turn the phone, or go full screen to keep it locked there."),
     h("div", { class: "hud-rotate-actions" }, full, anyway),
   );
@@ -438,6 +439,7 @@ export const hudScreen: HudFactory = (ctx) => {
   function syncMenu(): void {
     fullscreenLabel.textContent = document.fullscreenElement !== null ? "Exit fullscreen" : "Fullscreen";
     muteLabel.textContent = prefs.value.musicMuted ? "Unmute music" : "Mute music";
+    muteItem.replaceChildren(icon(prefs.value.musicMuted ? "volume-x" : "volume-2", 18), muteLabel);
     volumeInput.value = String(Math.round(prefs.value.volume * 100));
     signOutItem.hidden = ctx.store.state.account === null;
   }
