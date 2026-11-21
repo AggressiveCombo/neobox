@@ -1165,6 +1165,40 @@ async function drumAfterButton(s) {
   return "arrows roll the drum from a focused button; Enter opens the front option";
 }
 
+/** Leave out of a Quick play match, ten times: the Leave chip and Menu -> Show lobby -> Leave each reach the menu without a timeout. */
+async function quickLeaveRepeat(s) {
+  const h = await s.open("quick-leave");
+  const { page } = h;
+  const times = [];
+  for (let i = 0; i < 10; i++) {
+    await page.goto(s.base);
+    await menuName(page).waitFor();
+    await navTo(page, "Quick play");
+    const field = page.getByLabel("Name", { exact: true });
+    await field.waitFor();
+    await field.fill(`Leaver${i}`);
+    await page.locator("button.quick-choose").first().click();
+    const chip = page.locator(".hud-leave");
+    await chip.waitFor({ state: "visible", timeout: 30_000 });
+    const t0 = Date.now();
+    if (i % 3 === 0) {
+      await chip.click();
+    } else if (i % 3 === 1) {
+      await button(page, "Menu").click();
+      await page.getByRole("button", { name: "Show lobby", exact: true }).click();
+      await page.getByRole("button", { name: "Leave", exact: true }).click();
+    } else {
+      // The Menu panel is open while Leave is clicked: the chip must stay clickable under it.
+      await button(page, "Menu").click();
+      await page.locator("#hud-menu").waitFor({ state: "visible" });
+      await chip.click({ timeout: 10_000 });
+    }
+    await chip.waitFor({ state: "hidden", timeout: 15_000 });
+    times.push(Date.now() - t0);
+  }
+  return `10 Quick play leaves, each back to the menu; ms: ${times.join(", ")}`;
+}
+
 /** The room-list row of `roomName` on the room list (`ul[aria-label="rooms"]`). */
 const roomRow = (page, roomName) =>
   page.locator('ul[aria-label="rooms"] li.room-item').filter({ hasText: roomName }).locator("button.room-row");
@@ -1431,6 +1465,7 @@ export const scenarios = [
   { name: "menu", run: menu },
   { name: "drum after a button", run: drumAfterButton },
   { name: "quick play shows name", run: quickPlayShowsName },
+  { name: "quick leave repeat", run: quickLeaveRepeat },
   { name: "settings", run: settings },
   { name: "accessibility prefs", run: accessibilityPrefs },
   { name: "accounts", run: accounts },
