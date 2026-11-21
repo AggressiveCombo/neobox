@@ -4,6 +4,8 @@
 import { h, type Child } from "./dom";
 import { icon, type IconName } from "./icons";
 import { reducedMotion } from "./a11y";
+import { PALETTES } from "../render/geometry";
+import { prefs } from "../prefs";
 
 /** What Tab can land on inside a modal. */
 const TAB_STOPS = 'a[href],button:not(:disabled),input:not(:disabled):not([type=hidden]),select:not(:disabled),textarea:not(:disabled),[tabindex]:not([tabindex="-1"])';
@@ -182,17 +184,27 @@ export function loading(text: string): HTMLElement {
   return h("p", { class: "loading-line", role: "status" }, h("span", { class: "loader", "aria-hidden": "true" }), text);
 }
 
-/** A player's coloured square with their initial. `color` is 0xRRGGBB; the letter takes whichever ink contrasts more with it. */
+/**
+ * A player's coloured square with their initial. `color` is 0xRRGGBB; with none chosen, one of the palette's player
+ * colours picked by the name, so a player keeps one colour (never a grey placeholder). The letter takes whichever ink
+ * contrasts more with it.
+ */
 export function avatar(name: string, color: number | null, small = false): HTMLElement {
   const el = h("span", { class: small ? "avatar small" : "avatar", "aria-hidden": "true" }, small ? "" : initial(name));
-  if (color !== null) {
-    el.style.setProperty("--avatar", `#${color.toString(16).padStart(6, "0")}`);
-    // The letter takes whichever of white or near-black contrasts more with the colour.
-    el.style.color = contrastRatio(color, 0xffffff) > contrastRatio(color, 0x0a0a0a) ? "#ffffff" : "#0a0a0a";
-    // A colour within 3:1 of either theme's ground loses its edge: outline it in ink.
-    if (GROUNDS.some((g) => contrastRatio(color, g) < 3)) el.classList.add("is-edged");
-  }
+  const c = color ?? nameColor(name);
+  el.style.setProperty("--avatar", `#${c.toString(16).padStart(6, "0")}`);
+  el.style.color = contrastRatio(c, 0xffffff) > contrastRatio(c, 0x0a0a0a) ? "#ffffff" : "#0a0a0a";
+  // A colour within 3:1 of either theme's ground loses its edge: outline it in ink.
+  if (GROUNDS.some((g) => contrastRatio(c, g) < 3)) el.classList.add("is-edged");
   return el;
+}
+
+/** One of the current palette's player colours, chosen by a hash of the name. */
+function nameColor(name: string): number {
+  const ffa = PALETTES[prefs.value.palette].ffa;
+  let hash = 0;
+  for (let i = 0; i < name.length; i++) hash = (hash * 31 + name.charCodeAt(i)) >>> 0;
+  return ffa[hash % ffa.length] ?? 0x888888;
 }
 
 /** Light and dark `--ground` (style.css). */
