@@ -1148,6 +1148,23 @@ async function quickPlayShowsName(s) {
   return "Quick play shows the menu name; an empty name disables Play and says why";
 }
 
+/** Home drum: after a click on another home control, the arrows still roll the drum and Enter opens the front option. */
+async function drumAfterButton(s) {
+  const h = await s.open("drum-button");
+  const { page } = h;
+  await page.goto(s.base);
+  await menuName(page).waitFor();
+  const mute = page.getByRole("button", { name: /^(Mute|Unmute) music$/ });
+  await mute.click();
+  await page.keyboard.press("ArrowDown");
+  const browse = drumOption(page, "Browse rooms");
+  check((await browse.getAttribute("aria-selected")) === "true", "ArrowDown after a button click did not roll the drum to Browse rooms");
+  await page.keyboard.press("ArrowUp");
+  await page.keyboard.press("Enter");
+  await page.getByRole("heading", { name: "Quick play", exact: true }).waitFor();
+  return "arrows roll the drum from a focused button; Enter opens the front option";
+}
+
 /** The room-list row of `roomName` on the room list (`ul[aria-label="rooms"]`). */
 const roomRow = (page, roomName) =>
   page.locator('ul[aria-label="rooms"] li.room-item').filter({ hasText: roomName }).locator("button.room-row");
@@ -1412,6 +1429,7 @@ export const scenarios = [
   { name: "library pick back", run: libraryPickBack },
   { name: "renderer lost", run: rendererGone },
   { name: "menu", run: menu },
+  { name: "drum after a button", run: drumAfterButton },
   { name: "quick play shows name", run: quickPlayShowsName },
   { name: "settings", run: settings },
   { name: "accessibility prefs", run: accessibilityPrefs },

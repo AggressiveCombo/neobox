@@ -267,12 +267,14 @@ export function mountDrum(items: DrumItem[], label: string): Drum {
     e.preventDefault();
   });
 
-  // Arrow keys with nothing focused (the page background) roll the drum and take focus.
+  // Arrow keys roll the drum from wherever focus is, except a text field or an open dialog: a focused button or link
+  // must not swallow them (the drum then looks stuck, and Enter activates that control instead of the option).
   const onDocKey = (e: KeyboardEvent): void => {
     if (e.defaultPrevented || e.altKey || e.ctrlKey || e.metaKey) return;
-    const active = document.activeElement;
-    if (active && active !== document.body && active !== document.documentElement) return;
     if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
+    const active = document.activeElement;
+    const typing = active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement || active instanceof HTMLSelectElement || (active instanceof HTMLElement && active.isContentEditable);
+    if (typing || document.querySelector("dialog[open]")) return;
     e.preventDefault();
     listbox.focus({ preventScroll: true });
     roll(e.key === "ArrowDown" ? 1 : -1);
