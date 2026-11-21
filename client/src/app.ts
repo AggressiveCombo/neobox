@@ -280,7 +280,7 @@ export function start(): Store<AppState> {
     scene.localKeys = input.mask();
     const local = computeCamera(scene, findLocal(scene));
     if (backdrop) syncBackdropView();
-    const cam = backdrop ? backdropCamera(scene, menuBox()) : local;
+    const cam = backdrop ? backdropCamera(scene, menuBox(), local) : local;
     if (backdrop) publishBackdrop(cam, scene.arenaW, scene.arenaH);
     renderer?.draw(scene, cam);
     overlay.draw(scene, cam, names, tickHz, chrome);

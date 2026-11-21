@@ -550,18 +550,19 @@ const backdropGeometry = () => {
   if (corners.some(([x, y]) => x < 0 || y < 0 || x > innerWidth || y > innerHeight)) issues.push("card-past-viewport");
   // the content turns with the card: the same angle, or the arena is drawn on another axis than the card's
   if (Math.abs(contentDeg - cardDeg) > 0.5) issues.push("content-untilted");
+  // An arena that fits the match view is wholly in it (camera.ts computeCamera); a larger one is followed and cut, as in a match.
+  const fits = cam.aw <= cam.mw * 1.0001 && cam.ah <= cam.mh * 1.0001;
   if (live) {
-    // the arena fills the card's shorter side less BACKDROP_MARGIN (0.02) per side: 1 / 1.04 = 0.96 (camera.ts backdropSize),
-    // and the card has the arena's shape; under 0.9 the clip reads zoomed out next to the match view
-    const fill = hw <= hh ? cam.aw / cam.w : cam.ah / cam.h;
-    if (fill < 0.9) issues.push("arena-small");
-    if (Math.abs((hw / hh) / (cam.aw / cam.ah) - 1) > 0.01) issues.push("card-aspect");
-    if (arenaHalf[0] > hw + 0.5 || arenaHalf[1] > hh + 0.5) issues.push("arena-clipped");
+    // the card shows what a match shows (camera.ts backdropCamera): its world rect is the match view, within 1%. A margin
+    // around it shows the walls' outside and reads as zoomed out (E04: 4% passed the old arena-share >= 0.9 test).
+    if (!(cam.mw > 0) || Math.abs(cam.w / cam.mw - 1) > 0.01 || Math.abs(cam.h / cam.mh - 1) > 0.01) issues.push("view-mismatch");
+    if (Math.abs((hw / hh) / (cam.mw / cam.mh) - 1) > 0.01) issues.push("card-aspect");
+    if (fits && (arenaHalf[0] > hw + 0.5 || arenaHalf[1] > hh + 0.5)) issues.push("arena-clipped");
   }
   if (live) {
     // half a px of rounding: an arena or label that exactly meets the card edge reads -0.0x on some engines. Static ground
     // past the arena edge may be cut (as in a match), so only the arena's corners count.
-    if (arenaMargin < -0.5) issues.push("arena-out");
+    if (fits && arenaMargin < -0.5) issues.push("arena-out");
     if (labelMargin < -0.5) issues.push("label-out");
   }
   // the page's own background colour: the first of body or html that is not transparent (the card must show none of it)
@@ -653,8 +654,8 @@ const backdropPixels = async ({ b64, g }) => {
   return { white: page / (scale * scale), voidArea: voidArea / (scale * scale), edge: edge / (scale * scale) };
 };
 
-/** Frame issues (overlay.backdrop.frame.count): the card's content does not turn with the card, or the arena is small in the card or not its shape. */
-const FRAME_ISSUES = new Set(["content-untilted", "arena-clipped", "arena-small", "card-aspect"]);
+/** Frame issues (overlay.backdrop.frame.count): the card's content does not turn with the card, or the card shows other than the match view or not its shape. */
+const FRAME_ISSUES = new Set(["content-untilted", "arena-clipped", "view-mismatch", "card-aspect"]);
 
 /** Placement, counted apart: the whole arena and its walls inside the card (arena-out), each name label inside it (label-out). */
 const PLACEMENT_ISSUES = new Set(["arena-out", "label-out"]);

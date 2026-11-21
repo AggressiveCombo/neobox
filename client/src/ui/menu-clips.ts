@@ -8,7 +8,6 @@
 import type { AppCtx } from "../ctx";
 import type { Engine, ReplayInfo } from "../engine";
 import { fetchClipReplay, listClips, type ClipSummary } from "../clips";
-import { backdropSize } from "../camera";
 import { fetchPrecached } from "../precached";
 import { HttpError } from "../http-error";
 import { reducedMotion } from "./a11y";
@@ -136,8 +135,8 @@ export function mountMenuClips(ctx: AppCtx, host: HTMLElement, onState?: (state:
     if (engine.replayFrame(p.tick, p.follow) === null) return false;
     const scene = ctx.present(p.names, p.info.hz, false);
     if (!scene) return false;
-    const shown = backdropSize(scene);
-    const aspect = shown.w / shown.h;
+    // the card takes the match view's shape (camera.ts backdropCamera)
+    const aspect = scene.viewAspect;
     if (aspect !== reportedAspect && Number.isFinite(aspect)) {
       reportedAspect = aspect;
       onAspect?.(aspect);
