@@ -322,6 +322,9 @@ export function domMeasure(opts) {
   const coveredNow = () => {
     let n = 0;
     for (const el of content) {
+      // pointer-events is inherited: a none here means the element and its descendants are never hit, so
+      // elementFromPoint cannot report what covers them. Their visibility is not a hit-test question; skip them.
+      if (getComputedStyle(el).pointerEvents === "none") continue;
       const r = el.getBoundingClientRect();
       const cx = r.left + r.width / 2;
       const cy = r.top + r.height / 2;

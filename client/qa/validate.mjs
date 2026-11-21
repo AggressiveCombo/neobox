@@ -179,6 +179,24 @@ const FIXTURES = [
     html: doc(main(`<button>Under bar</button>`) + `<div style="position:fixed;top:0;left:0;right:0;height:60px;background:#222;z-index:10"></div>`),
   },
   {
+    // The same text under the same bar, the board inert (pointer-events:none, as replay.css sets it): hit tests cannot see it, so nothing may fire.
+    name: "edges.coveredByFixed.inert",
+    keys: [],
+    html: doc(
+      main(`<h1 style="margin-top:80px">Inert board fixture</h1><p style="position:absolute;left:16px;top:16px;margin:0;pointer-events:none">Board text</p>`) +
+        `<div style="position:fixed;top:0;left:0;right:0;height:60px;background:#222;z-index:10"></div>`,
+    ),
+  },
+  {
+    // The same text, the board hit-testable (pointer-events:auto): the bar covers it, so the detector must fire.
+    name: "edges.coveredByFixed.hittable",
+    keys: ["edges.coveredByFixed"],
+    html: doc(
+      main(`<h1 style="margin-top:80px">Hittable board fixture</h1><p style="position:absolute;left:16px;top:16px;margin:0;pointer-events:auto">Board text</p>`) +
+        `<div style="position:fixed;top:0;left:0;right:0;height:60px;background:#222;z-index:10"></div>`,
+    ),
+  },
+  {
     name: "targets.small",
     keys: ["targets.small"],
     html: doc(main(`<button aria-label="Tiny close" style="width:12px;height:12px;padding:0;min-width:0;min-height:0"></button>`)),
