@@ -1165,6 +1165,30 @@ async function drumAfterButton(s) {
   return "arrows roll the drum from a focused button; Enter opens the front option";
 }
 
+/** Map editor title: opening a built-in map shows its name, and so does Test play -> Edit. */
+async function editorKeepsMapName(s) {
+  const h = await s.open("editor-title");
+  const { page } = h;
+  await page.goto(s.base);
+  await menuName(page).waitFor();
+  await navTo(page, "Map editor");
+  const title = page.locator("input.editor-name");
+  await title.waitFor({ state: "visible" });
+  await button(page, "Menu").click();
+  await page.locator(".editor-menu").waitFor({ state: "visible" });
+  const item = page.locator(".editor-list .editor-item").first();
+  const mapName = ((await item.textContent()) ?? "").trim();
+  await item.click();
+  await page.locator(".editor-menu").waitFor({ state: "hidden" });
+  check((await title.inputValue()) === mapName, `title after opening "${mapName}" is "${await title.inputValue()}"`);
+  await button(page, "Test play").click();
+  await page.locator(".offline.playing .offline-title").waitFor();
+  await button(page, "Edit").click();
+  await title.waitFor({ state: "visible" });
+  check((await title.inputValue()) === mapName, `title after Test play -> Edit is "${await title.inputValue()}", not "${mapName}"`);
+  return `editor title keeps "${mapName}" after opening it and after Test play -> Edit`;
+}
+
 /** Leave out of a Quick play match, ten times: the Leave chip and Menu -> Show lobby -> Leave each reach the menu without a timeout. */
 async function quickLeaveRepeat(s) {
   const h = await s.open("quick-leave");
@@ -1465,6 +1489,7 @@ export const scenarios = [
   { name: "menu", run: menu },
   { name: "drum after a button", run: drumAfterButton },
   { name: "quick play shows name", run: quickPlayShowsName },
+  { name: "editor keeps map name", run: editorKeepsMapName },
   { name: "quick leave repeat", run: quickLeaveRepeat },
   { name: "settings", run: settings },
   { name: "accessibility prefs", run: accessibilityPrefs },

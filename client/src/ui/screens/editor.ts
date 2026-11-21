@@ -402,6 +402,7 @@ export const editorScreen: ScreenFactory = (ctx) => {
     }
     ctrl.load(doc);
     mapName = label;
+    refresh();
     markSaved();
     toggleMenu(false);
     ctx.toast(`Opened ${label}`);
@@ -419,6 +420,7 @@ export const editorScreen: ScreenFactory = (ctx) => {
     }
     ctrl.load(emptyDoc());
     mapName = null;
+    refresh();
     libraryMap = null;
     markSaved();
     toggleMenu(false);
