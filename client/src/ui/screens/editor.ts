@@ -80,7 +80,7 @@ export const editorScreen: ScreenFactory = (ctx) => {
   const canvas = h("canvas", { class: "editor-canvas", "aria-label": "Map canvas" });
   const lagEl = h("p", { class: "editor-lag", role: "status" });
   const scopeText = h("span", {});
-  const scopeBar = h("div", { class: "editor-scope", role: "status" }, scopeText, h("button", { type: "button", onclick: () => ctrl.leaveScope() }, "Leave body"));
+  const scopeBar = h("div", { class: "editor-scope", role: "status" }, scopeText, h("button", { type: "button", onclick: () => ctrl.leaveScope() }, icon("arrow-left", 18), "Leave body"));
   scopeBar.hidden = true;
   const viewport = h("div", { class: "editor-viewport" }, canvas, scopeBar, lagEl);
   const ctrl = new EditorController(canvas, () => refresh(), !inRoom);
@@ -217,18 +217,18 @@ export const editorScreen: ScreenFactory = (ctx) => {
   const pasteInput = h("input", { type: "text", placeholder: "Paste a map code", "aria-label": "Map code to open" });
   const fileInput = h("input", { type: "file", accept: ".json,application/json", "aria-label": "Open map file" });
   fileInput.hidden = true;
-  const menuClose = h("button", { type: "button", class: "quiet", onclick: () => toggleMenu(false) }, "Close");
+  const menuClose = h("button", { type: "button", class: "quiet", onclick: () => toggleMenu(false) }, icon("x", 18), "Close");
   const menu = h(
     "div",
     { class: "editor-menu", id: menuId, role: "dialog", "aria-label": "Map menu" },
-    h("div", { class: "editor-menu-head" }, h("h2", null, "Map"), menuClose),
+    h("div", { class: "editor-menu-head" }, h("h2", null, icon("map", 20), "Map"), menuClose),
     h(
       "div",
       { class: "editor-menu-body" },
       h(
         "section",
         { class: "editor-group" },
-        h("h3", null, "File"),
+        h("h3", null, icon("folder-open", 20), "File"),
         h(
           "div",
           { class: "editor-buttons" },
@@ -240,16 +240,16 @@ export const editorScreen: ScreenFactory = (ctx) => {
         ),
         fileInput,
       ),
-      h("section", { class: "editor-group" }, h("h3", null, "Built-in maps"), builtinList),
-      h("section", { class: "editor-group" }, h("h3", null, "My maps"), mineList),
-      h("section", { class: "editor-group" }, h("h3", null, "Favourites"), favList),
+      h("section", { class: "editor-group" }, h("h3", null, icon("library-big", 20), "Built-in maps"), builtinList),
+      h("section", { class: "editor-group" }, h("h3", null, icon("map", 20), "My maps"), mineList),
+      h("section", { class: "editor-group" }, h("h3", null, icon("star", 20), "Favourites"), favList),
       h(
         "section",
         { class: "editor-group" },
-        h("h3", null, "Paste code"),
-        h("div", { class: "editor-row" }, pasteInput, h("button", { type: "button", onclick: () => void openCode(pasteInput.value, "pasted code") }, "Open")),
+        h("h3", null, icon("clipboard", 20), "Paste code"),
+        h("div", { class: "editor-row" }, pasteInput, h("button", { type: "button", onclick: () => void openCode(pasteInput.value, "pasted code") }, icon("folder-open", 18), "Open")),
       ),
-      h("section", { class: "editor-group" }, h("h3", null, "Map code"), codeBox),
+      h("section", { class: "editor-group" }, h("h3", null, icon("clipboard", 20), "Map code"), codeBox),
     ),
   );
   menu.dataset.open = "false";
@@ -465,7 +465,7 @@ export const editorScreen: ScreenFactory = (ctx) => {
     try {
       const maps = await ctx.maps();
       builtinList.replaceChildren(
-        ...maps.map((m) => h("button", { type: "button", class: "editor-item", onclick: () => void openCode(m.code, m.name) }, m.name)),
+        ...maps.map((m) => h("button", { type: "button", class: "editor-item", onclick: () => void openCode(m.code, m.name) }, icon("map", 18), m.name)),
       );
     } catch (err) {
       builtinList.replaceChildren(h("p", { class: "editor-status error" }, errorText(err)));
@@ -484,7 +484,7 @@ export const editorScreen: ScreenFactory = (ctx) => {
     if (result.status === "rejected") return [h("p", { class: "editor-status error" }, errorText(result.reason))];
     if (result.value.length === 0) return [h("p", { class: "editor-status" }, empty)];
     return result.value.map((m) =>
-      h("button", { type: "button", class: "editor-item", onclick: () => openLibraryMap(m, owned) }, `${m.name} · ${VISIBILITY_LABELS[m.visibility]}`),
+      h("button", { type: "button", class: "editor-item", onclick: () => openLibraryMap(m, owned) }, icon("map", 18), `${m.name} · ${VISIBILITY_LABELS[m.visibility]}`),
     );
   }
 
@@ -540,11 +540,11 @@ export const editorScreen: ScreenFactory = (ctx) => {
     const done = (): void => modal?.close();
     const cancel = h("button", { type: "button", class: "quiet" }, "Cancel");
     cancel.addEventListener("click", done);
-    const primary = h("button", { type: "button", class: "primary" }, current ? "Overwrite" : "Upload");
+    const primary = h("button", { type: "button", class: "primary" }, icon(current ? "save" : "upload", 18), current ? "Overwrite" : "Upload");
     primary.addEventListener("click", () => void saveToLibrary(current ? "overwrite" : "new", fields(), primary, done));
     const actions = [cancel, primary];
     if (current) {
-      const asNew = h("button", { type: "button" }, "Save as new");
+      const asNew = h("button", { type: "button" }, icon("save", 18), "Save as new");
       asNew.addEventListener("click", () => void saveToLibrary("new", fields(), asNew, done));
       actions.push(asNew);
     }

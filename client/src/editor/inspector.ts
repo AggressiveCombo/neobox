@@ -3,6 +3,7 @@
 // grouped under headings.
 
 import { h } from "../ui/dom";
+import { icon, type IconName } from "../ui/icons";
 import {
   BODY_DEFAULTS,
   CAP_DEFAULTS,
@@ -404,13 +405,41 @@ function fieldRow(f: Field, value: Value, apply: Apply): HTMLElement {
   return h("label", { class: "field" }, h("span", { class: "field-label" }, f.label), input);
 }
 
+const KIND_ICONS: Record<string, IconName> = {
+  body: "square",
+  joint: "link-2",
+  spawn: "flag",
+  turret: "crosshair",
+  grapple: "anchor",
+  cap: "target",
+};
+
+const GROUP_ICONS: Record<string, IconName> = {
+  Position: "move-up",
+  "Start motion": "play",
+  Material: "hand",
+  Forces: "zap",
+  Appearance: "palette",
+  Gameplay: "swords",
+  Objective: "target",
+  Collisions: "layout-grid",
+  "Pinning and zones": "anchor",
+  Joint: "link-2",
+  Spring: "repeat",
+  Motor: "rotate-cw",
+  Turret: "crosshair",
+  Bullet: "send",
+  Screen: "monitor",
+  Physics: "gauge",
+};
+
 /** Field rows under their headings. `item` is read through `defaults`; `set` gets each change. */
 function fieldGroups(gs: readonly Group[], item: Obj, defaults: Obj, set: (f: Field, v: Value) => void): HTMLElement[] {
   return gs.map(([title, fs]) =>
     h(
       "section",
       { class: "inspector-group" },
-      h("h3", null, title),
+      h("h3", null, icon(GROUP_ICONS[title] ?? "pencil-ruler", 20), title),
       ...fs.map((f) => fieldRow(f, readField(item, f, defaults), (v) => set(f, v))),
     ),
   );
@@ -444,15 +473,15 @@ export function renderInspector(o: InspectorOpts): HTMLElement {
     const bodies = sel.filter((r) => r.kind === "body").map((r) => r.i);
     const merge =
       bodies.length === sel.length && bodies.length > 1
-        ? [h("button", { type: "button", onclick: () => o.commit((d) => mergeBodies(d, bodies).doc) }, "Merge bodies")]
+        ? [h("button", { type: "button", onclick: () => o.commit((d) => mergeBodies(d, bodies).doc) }, icon("combine", 18), "Merge bodies")]
         : [];
     return h(
       "div",
       { class: "inspector" },
-      h("h2", { class: "inspector-title" }, `${sel.length} selected`),
+      h("h2", { class: "inspector-title" }, icon("pencil-ruler", 20), `${sel.length} selected`),
       h("p", { class: "hint" }, "Drag to move. Arrow keys nudge."),
       ...merge,
-      h("button", { type: "button", class: "danger", onclick: o.remove }, "Delete"),
+      h("button", { type: "button", class: "danger", onclick: o.remove }, icon("trash-2", 18), "Delete"),
     );
   }
   const ref = sel[0]!;
@@ -464,7 +493,7 @@ export function renderInspector(o: InspectorOpts): HTMLElement {
 
   const children: (Node | string | false | null | undefined)[] = [
     // bodies go by their map id: the id joints and grapple points refer to
-    h("h2", { class: "inspector-title" }, ref.kind === "body" ? `Body ${num(item, "1", ref.i)}` : `${kindLabel(ref.kind)} ${ref.i + 1}`),
+    h("h2", { class: "inspector-title" }, icon(KIND_ICONS[ref.kind] ?? "pencil-ruler", 20), ref.kind === "body" ? `Body ${num(item, "1", ref.i)}` : `${kindLabel(ref.kind)} ${ref.i + 1}`),
   ];
   if (ref.kind === "body") {
     children.push(...fieldGroups(BODY_GROUPS, item, BODY_DEFAULTS, setField), shapesBlock(doc, ref.i, o.commit));
@@ -498,7 +527,7 @@ export function renderInspector(o: InspectorOpts): HTMLElement {
   } else {
     children.push(...fields(CAP_FIELDS, CAP_DEFAULTS));
   }
-  children.push(h("button", { type: "button", class: "danger", onclick: o.remove }, "Delete"));
+  children.push(h("button", { type: "button", class: "danger", onclick: o.remove }, icon("trash-2", 18), "Delete"));
   return h("div", { class: "inspector" }, ...children);
 }
 
@@ -512,17 +541,17 @@ function scopeInspector(doc: Obj, bi: number, body: Obj, shapes: readonly number
     return h(
       "div",
       { class: "inspector" },
-      h("h2", { class: "inspector-title" }, `Body ${num(body, "1", bi)}`),
+      h("h2", { class: "inspector-title" }, icon("square", 20), `Body ${num(body, "1", bi)}`),
       h("p", { class: "hint" }, "Click a shape to edit it."),
       shapesBlock(doc, bi, commit),
     );
   }
-  const del = h("button", { type: "button", class: "danger", onclick: remove }, "Delete");
+  const del = h("button", { type: "button", class: "danger", onclick: remove }, icon("trash-2", 18), "Delete");
   if (shapes.length > 1) {
     return h(
       "div",
       { class: "inspector" },
-      h("h2", { class: "inspector-title" }, `${shapes.length} shapes selected`),
+      h("h2", { class: "inspector-title" }, icon("pencil-ruler", 20), `${shapes.length} shapes selected`),
       h("p", { class: "hint" }, "Drag to move. Arrow keys nudge."),
       del,
     );
@@ -531,7 +560,7 @@ function scopeInspector(doc: Obj, bi: number, body: Obj, shapes: readonly number
   return h(
     "div",
     { class: "inspector" },
-    h("h2", { class: "inspector-title" }, `Shape ${si + 1} in body ${num(body, "1", bi)}`),
+    h("h2", { class: "inspector-title" }, icon("pentagon", 20), `Shape ${si + 1} in body ${num(body, "1", bi)}`),
     shapeBlock(bi, body, si, asObj(list(body, "s")[si] ?? {}), commit),
     del,
   );
@@ -545,7 +574,7 @@ function shapesBlock(doc: Obj, bodyIdx: number, commit: Commit): HTMLElement {
   return h(
     "section",
     { class: "inspector-group inspector-shapes" },
-    h("h3", null, `Shapes (${shapes.length})`),
+    h("h3", null, icon("pentagon", 20), `Shapes (${shapes.length})`),
     ...shapes.map((s, si) => {
       const shape = asObj(s);
       const details = h("details", { class: "inspector-shape-details", open: lone }, h("summary", null, `Shape ${si + 1}`));
@@ -669,7 +698,7 @@ function mapSettings(doc: Obj, commit: Commit): HTMLElement {
   return h(
     "div",
     { class: "inspector" },
-    h("h2", { class: "inspector-title" }, "Map"),
+    h("h2", { class: "inspector-title" }, icon("map", 20), "Map"),
     h("p", { class: "hint" }, `${getList(doc, "body").length} bodies, ${getList(doc, "joint").length} joints`),
     ...fieldGroups(MAP_GROUPS, set, SETTINGS_DEFAULTS, (f, v) => commit((d) => ({ ...d, set: withField(asObj(d.set), f.key, stored(f, v), SETTINGS_DEFAULTS) }))),
   );

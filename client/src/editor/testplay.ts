@@ -7,6 +7,7 @@ import type { Engine } from "../engine";
 import { FrameLoop } from "../local-loop";
 import { TEAM_BLUE, TEAM_FFA, TEAM_RED, isTeamMode, type MatchStart } from "../protocol";
 import { h } from "../ui/dom";
+import { icon } from "../ui/icons";
 import { touchControls } from "../ui/screens/hud";
 import type { Obj } from "./schema";
 
@@ -86,9 +87,9 @@ export async function startTestPlay(ctx: AppCtx, doc: Obj, mode: number, onLeave
   const top = h(
     "div",
     { class: "offline-top offline-overlay" },
-    h("button", { type: "button", onclick: () => onLeave() }, "Edit"),
+    h("button", { type: "button", onclick: () => onLeave() }, icon("pencil", 18), "Edit"),
     h("span", { class: "offline-title" }, "Test play"),
-    h("button", { type: "button", onclick: restart }, "Restart"),
+    h("button", { type: "button", onclick: restart }, icon("rotate-ccw", 18), "Restart"),
   );
   const releaseTop = ctx.reserveTop(top);
   loop.start();

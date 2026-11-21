@@ -244,6 +244,7 @@ export const settingsScreen: ScreenFactory = (ctx) => {
         closePicker = openColorPicker(prefs.value.color ?? 0x888888, (color) => prefs.set({ color }));
       },
     },
+    icon("palette", 18),
     "Choose colour",
   );
   const autoColor = h("button", { type: "button", onclick: () => prefs.set({ color: null }) }, "Automatic");
@@ -294,7 +295,7 @@ export const settingsScreen: ScreenFactory = (ctx) => {
   const touchLayout = h(
     "div",
     { class: "touch-layout" },
-    h("h3", { class: "settings-sub" }, "Button layout"),
+    h("h3", { class: "settings-sub" }, icon("smartphone", 20), "Button layout"),
     h("p", { class: "field-hint" }, "Pick what each button does. An action already in use moves to the button you changed."),
     h("div", { class: "touch-slots" }, touchSlotRows),
     h(
@@ -419,6 +420,7 @@ export const settingsScreen: ScreenFactory = (ctx) => {
               resetAll();
             },
           },
+          icon("rotate-ccw", 18),
           "Reset everything",
         ),
       ],
@@ -509,6 +511,7 @@ export const settingsScreen: ScreenFactory = (ctx) => {
                     assign(pending.action, pending.index, pending.code);
                   },
                 },
+                icon("arrow-right", 18),
                 "Move",
               ),
               h(
@@ -576,7 +579,7 @@ export const settingsScreen: ScreenFactory = (ctx) => {
     const el = h(
       "section",
       { class: "panel settings-section", "aria-labelledby": `settings-${id}-title`, "data-section": id },
-      h("h2", { id: `settings-${id}-title`, tabindex: "-1" }, name ? icon(name, 22) : null, title),
+      h("h2", { id: `settings-${id}-title`, tabindex: "-1" }, name ? icon(name, 20) : null, title),
       hint ? h("p", { class: "field-hint" }, hint) : null,
       ...content,
       h("div", { class: "settings-group" }, h("button", { type: "button", class: "quiet", onclick: () => resetSection(id, title) }, icon("rotate-ccw", 18), `Reset ${title.toLowerCase()} to defaults`)),
@@ -642,7 +645,7 @@ export const settingsScreen: ScreenFactory = (ctx) => {
           "Click a key to change it. Up to three keys per action.",
           noticeEl,
           bindList,
-          h("h3", { class: "settings-sub" }, "Gamepad (fixed)"),
+          h("h3", { class: "settings-sub" }, icon("gamepad-2", 20), "Gamepad (fixed)"),
           gamepad,
         ),
         section(
