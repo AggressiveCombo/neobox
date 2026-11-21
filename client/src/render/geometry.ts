@@ -4,7 +4,7 @@
 // shrink, so steady-state frames allocate nothing here.
 
 import type { PlayerRec, Scene } from "../frame";
-import { FLAG_DASH, FLAG_FROZEN, FLAG_GHOST, FLAG_LOCAL } from "../frame";
+import { FLAG_FROZEN, FLAG_GHOST, FLAG_LOCAL } from "../frame";
 import { backdropBounds, findLocal, type Bounds } from "../camera";
 import { TEAM_BLUE, TEAM_FFA, TEAM_RED, TEAM_SPECTATOR } from "../protocol";
 import { prefs, type Palette } from "../prefs";
@@ -49,7 +49,6 @@ export function relLuminance(rgb: number): number {
 export const AWAY_RING_BELOW_LUM = 0.25;
 
 const ICE_RGB = 0xbfe9ff;
-const WHITE_RGB = 0xffffff;
 const GHOST_ALPHA = 0.35;
 const FROZEN_MIX = 0.5;
 /** Launcher and egg aim lines, and the countdown outline: the original's light grey, half-opaque lines. */
@@ -139,11 +138,8 @@ export function cssHex(rgb: number): string {
 }
 
 function bodyRgb(flags: number, rgb: number): number {
-  let c = rgb;
-  if ((flags & FLAG_FROZEN) !== 0) c = mixRgb(c, ICE_RGB, FROZEN_MIX);
-  let lift = 0;
-  if ((flags & FLAG_DASH) !== 0) lift += 0.3;
-  return mixRgb(c, WHITE_RGB, Math.min(lift, 0.5));
+  if ((flags & FLAG_FROZEN) !== 0) return mixRgb(rgb, ICE_RGB, FROZEN_MIX);
+  return rgb;
 }
 
 /** Scratch output of poseAt, reused so mapping a vertex allocates nothing. */
