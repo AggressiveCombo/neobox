@@ -46,7 +46,6 @@ export const quickScreen: ScreenFactory = (ctx) => {
   let attempted = false;
   /** Whether the matching loader and Cancel are in the wait box. */
   let waitShown = false;
-  let nameTouched = false;
   /** Set once the transport starts connecting, so an earlier "closed" state is not read as a failure. */
   let sawConnecting = false;
   let counts: Record<string, number> | null = null;
@@ -65,14 +64,10 @@ export const quickScreen: ScreenFactory = (ctx) => {
     value: account?.name ?? (store.state.name || readStoredName()),
     readonly: account !== null,
     oninput: () => {
-      nameTouched = true;
       sync();
       saveTypedName(nameInput.value);
     },
-    onblur: () => {
-      nameTouched = true;
-      sync();
-    },
+    onblur: () => sync(),
   });
   const nameError = h("p", { class: "field-error", role: "alert", hidden: true });
   const nameBlock = h("div", { class: "quick-name" }, field("Name", nameInput), nameError);
@@ -164,15 +159,14 @@ export const quickScreen: ScreenFactory = (ctx) => {
     sync();
   }
 
-  /** Cards need a valid name unless the account supplies one. The error shows once the player has typed or left the field. */
+  /** Cards need a valid name unless the account supplies one. The reason shows next to them while they are disabled. */
   function sync(): void {
     const problem = account !== null ? null : nameProblem(nameInput.value);
-    const shown = nameTouched ? problem : null;
     for (const card of cards.values()) {
       card.choose.disabled = problem !== null || waiting;
     }
-    nameError.textContent = shown ?? "";
-    nameError.hidden = shown === null;
+    nameError.textContent = problem ?? "";
+    nameError.hidden = problem === null;
     renderStatus();
   }
 
@@ -222,7 +216,6 @@ export const quickScreen: ScreenFactory = (ctx) => {
     const name = account?.name ?? nameInput.value.trim();
     if (!account && nameProblem(name) !== null) {
       waiting = false;
-      nameTouched = true;
       sync();
       return;
     }

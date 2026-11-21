@@ -1130,6 +1130,24 @@ async function quickPlayName(s) {
   return "typed name kept across reload without a play action";
 }
 
+/** Quick play starts with the name the menu shows, and says why Play is off when the name cannot play. */
+async function quickPlayShowsName(s) {
+  const h = await s.open("quick-shows-name");
+  const { page } = h;
+  await page.goto(s.base);
+  await menuName(page).waitFor();
+  const shown = await menuName(page).inputValue();
+  check(/^Box\d{4}$/.test(shown), `menu name "${shown}" is not a guest name`);
+  await navTo(page, "Quick play");
+  const field = page.getByLabel("Name", { exact: true });
+  await field.waitFor();
+  check((await field.inputValue()) === shown, `Quick play name is "${await field.inputValue()}", not "${shown}"`);
+  await field.fill("");
+  await page.getByRole("alert").filter({ hasText: "Names are 1 to 15" }).waitFor();
+  check(await page.locator("button.quick-choose").first().isDisabled(), "Play is enabled with an empty name");
+  return "Quick play shows the menu name; an empty name disables Play and says why";
+}
+
 /** The room-list row of `roomName` on the room list (`ul[aria-label="rooms"]`). */
 const roomRow = (page, roomName) =>
   page.locator('ul[aria-label="rooms"] li.room-item').filter({ hasText: roomName }).locator("button.room-row");
@@ -1394,6 +1412,7 @@ export const scenarios = [
   { name: "library pick back", run: libraryPickBack },
   { name: "renderer lost", run: rendererGone },
   { name: "menu", run: menu },
+  { name: "quick play shows name", run: quickPlayShowsName },
   { name: "settings", run: settings },
   { name: "accessibility prefs", run: accessibilityPrefs },
   { name: "accounts", run: accounts },

@@ -141,7 +141,7 @@ export const menuScreen: ScreenFactory = (ctx) => {
   // Signed-in accounts play under their account name, which cannot be edited here.
   const account = store.state.account;
   // A first visit gets a suggested guest name, so Browse rooms works straight away; it can be changed.
-  const initialName = account?.name ?? (store.state.name || readStoredName() || guestName());
+  const initialName = account?.name ?? (store.state.name || storedGuestName());
 
   const nameInput = h("input", {
     type: "text",
