@@ -17,6 +17,7 @@ import { chatPlaceholder } from "../chat-hint";
 import { h } from "../dom";
 import { icon, type IconName } from "../icons";
 import { confirmDialog, contrastRatio } from "../kit";
+import { showPhoneSplash } from "../phone-splash";
 import { createScoreboard } from "../scoreboard";
 
 const SCORE_INTERVAL_MS = 100;
@@ -293,6 +294,9 @@ export const hudScreen: HudFactory = (ctx) => {
   let spectateLabel = "";
   let xpTimer: number | undefined;
   let typingLine = "";
+
+  // Phone welcome, once per device: it is about turning the phone for play, so it waits for a match.
+  showPhoneSplash();
 
   // Touch controls. The Chat button sits in the top-right bar (shown on touch devices).
   const touch = touchControls(ctx);

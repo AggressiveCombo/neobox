@@ -1148,6 +1148,17 @@ async function quickPlayShowsName(s) {
   return "Quick play shows the menu name; an empty name disables Play and says why";
 }
 
+/** The phone welcome is about play, which is in a match: the menu of a first phone visit shows no welcome sheet. */
+async function phoneMenuNoWelcome(s) {
+  const h = await s.open("phone-menu", { phone: true });
+  const { page } = h;
+  await page.goto(s.base);
+  await menuName(page).waitFor();
+  await drumOption(page, "Quick play").waitFor();
+  check((await page.getByRole("dialog", { name: "Welcome", exact: true }).count()) === 0, "phone menu shows the welcome sheet");
+  return "first phone visit: the menu has no welcome sheet";
+}
+
 /** Home drum: after a click on another home control, the arrows still roll the drum and Enter opens the front option. */
 async function drumAfterButton(s) {
   const h = await s.open("drum-button");
@@ -1489,6 +1500,7 @@ export const scenarios = [
   { name: "menu", run: menu },
   { name: "drum after a button", run: drumAfterButton },
   { name: "quick play shows name", run: quickPlayShowsName },
+  { name: "phone menu no welcome", run: phoneMenuNoWelcome },
   { name: "editor keeps map name", run: editorKeepsMapName },
   { name: "quick leave repeat", run: quickLeaveRepeat },
   { name: "settings", run: settings },

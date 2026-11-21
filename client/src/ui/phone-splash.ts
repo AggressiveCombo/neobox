@@ -1,4 +1,4 @@
-// Phone welcome: on touch-only devices, a short sheet at the bottom of the first screen
+// Phone welcome: on touch-only devices, a short sheet at the bottom of the first match
 // says how to play on a phone. Play enters fullscreen (a tap is the gesture browsers
 // require for it). Not now, Escape or Play close it. The sheet is not modal: the page
 // underneath stays usable, so an invite link can be joined while it is open.
