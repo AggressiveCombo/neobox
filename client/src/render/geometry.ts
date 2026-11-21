@@ -115,6 +115,8 @@ export function playerRgb(team: number, id: number): number {
   }
   return c.ffa[id % c.ffa.length];
 }
+/** QA hook (like __qaCam): the client's colour for a player, so instruments can check the frame's corpse colour against it. */
+Object.assign(globalThis, { __qaPlayerRgb: playerRgb });
 
 /** The colours `playerRgb` draws players with, as the words `nb_set_colours` reads (see `PlayerColours::from_words`): red, blue,
  *  the FFA palette (count, colours), then the room's colours (count, id and colour pairs; default palette only). */
