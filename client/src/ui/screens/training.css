@@ -11,7 +11,6 @@
   flex-direction: column;
   gap: 12px;
   width: min(calc(100% - 16px), 40rem);
-  max-height: calc(100% - 9.5rem - 8.5rem);
   overflow: hidden;
   padding: 16px 18px;
   background: var(--ground);
@@ -31,6 +30,13 @@
 
   .training-text {
     font-size: var(--step-small);
+  }
+}
+
+@media (max-width: 600px) and (min-height: 501px) {
+  /* Portrait phones: the touch rows sit under the card's lower edge, so the card ends above them. */
+  .training-lesson {
+    max-height: calc(100% - 9.5rem - 8.5rem);
   }
 }
 
@@ -82,10 +88,11 @@
 }
 
 /* Next sat at a different height per lesson: the card follows the text. The minimum holds the longest lesson's
-   lines (step 5) on every step; landscape phones are too short for it and keep the content height. */
+   lines (step 5) on every step, capped at 30vh so large text scrolls inside the card instead of pushing Next out
+   of it; landscape phones are too short for it and keep the content height. */
 @media (min-height: 501px) {
   .training-text {
-    min-height: 5lh;
+    min-height: min(5lh, 30vh);
   }
 }
 
