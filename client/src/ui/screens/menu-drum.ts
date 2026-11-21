@@ -36,8 +36,6 @@ const STEP_DEG = 14;
 const SIN_STEP = Math.sin((STEP_DEG * Math.PI) / 180);
 /** Options turned past this from the front are on the far side of the cylinder and not drawn. */
 const FRONT_DEG = 60;
-/** Neighbours never fade below this opacity, so their text keeps WCAG AA contrast against the page. */
-const OPACITY_FLOOR = 0.6;
 /** Wheel and trackpad travel that rolls one option, px. */
 const WHEEL_PX_PER_OPTION = 100;
 /** How far past an end the target may be pushed (in options): the bump that springs back once the input stops. */
@@ -76,6 +74,7 @@ export function mountDrum(items: DrumItem[], label: string, initial = 0): Drum {
   let pitch = PITCH_FALLBACK_PX;
   let radius = pitch / SIN_STEP;
   let half = 0;
+  let optHalf = 0;
   let frame = 0;
   let last = 0;
   let settleTimer = 0;
@@ -193,17 +192,19 @@ export function mountDrum(items: DrumItem[], label: string, initial = 0): Drum {
       const rad = (deg * Math.PI) / 180;
       const y = radius * Math.sin(rad);
       const style = opts[i].style;
-      if (Math.abs(deg) >= FRONT_DEG || Math.abs(y) > half) {
+      // How far the option's box pokes past the window edge on its side: 0 or less while it sits fully inside.
+      const over = Math.abs(y) + optHalf - half;
+      if (Math.abs(deg) >= FRONT_DEG || over >= 2 * optHalf) {
         // Off the window: invisible and inert, but not display:none or visibility:hidden, so screen readers still list it.
         style.opacity = "0";
         style.pointerEvents = "none";
         continue;
       }
       const z = radius * (Math.cos(rad) - 1);
-      const a = Math.abs(deg) / STEP_DEG;
       style.pointerEvents = "";
       style.transform = `translate3d(0, ${y.toFixed(2)}px, ${z.toFixed(2)}px) rotateX(${(-deg / 2).toFixed(2)}deg)`;
-      style.opacity = Math.max(OPACITY_FLOOR, 1 - 0.1 * a).toFixed(3);
+      // Fully inside: full label contrast. A row the window edge cuts fades with the share still visible: "more below", not disabled.
+      style.opacity = over <= 0 ? "1" : (1 - over / (2 * optHalf)).toFixed(3);
     }
   }
 
@@ -214,6 +215,8 @@ export function mountDrum(items: DrumItem[], label: string, initial = 0): Drum {
     pitch = Number.isFinite(p) && p > 0 ? p : PITCH_FALLBACK_PX;
     radius = pitch / SIN_STEP;
     half = listbox.clientHeight / 2;
+    const optH = parseFloat(getComputedStyle(listbox).getPropertyValue("--drum-opt-h")) * rem;
+    optHalf = Number.isFinite(optH) && optH > 0 ? optH / 2 : 0;
     render();
   }
 
