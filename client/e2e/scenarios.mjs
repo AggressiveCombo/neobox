@@ -43,7 +43,7 @@ import { roomsInvScenarios } from "./inv-rooms.mjs";
 import { serverInvScenarios } from "./inv-server.mjs";
 import { transitionScenarios } from "./transition.mjs";
 import { mapAspectScenarios } from "./mapaspect.mjs";
-import { writeFileSync, mkdtempSync } from "node:fs";
+import { writeFileSync, mkdtempSync, readFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
@@ -1269,6 +1269,46 @@ async function pinnedPartsHoldStill(s) {
   return `pinned parts hold still: ${checked.join(", ")}`;
 }
 
+/**
+ * The game view uses the window: in the replay viewer and in practice, the arena's rect (#gl-host) covers at least 60%
+ * of the window at 1920x1080 and 1433x1013 (with the bar and the dock, a 16:10 view tops out near 65-80%). A panel
+ * open by default that the arena must clear shrank the replay to 35%.
+ */
+async function gameViewFillsWindow(s) {
+  // Passed as a buffer: WebKit on Windows could not read the picked file by path ("The object can not be found here").
+  const demo = { name: "demo.json", mimeType: "application/json", buffer: readFileSync(path.join(import.meta.dirname, "../public/clips/demo.json")) };
+  const shares = [];
+  for (const viewport of [{ width: 1920, height: 1080 }, { width: 1433, height: 1013 }]) {
+    const h = await s.open(`view-${viewport.width}`, { viewport });
+    const { page } = h;
+    const share = () =>
+      page.evaluate(() => {
+        const r = document.getElementById("gl-host").getBoundingClientRect();
+        return (r.width * r.height) / (window.innerWidth * window.innerHeight);
+      });
+    await page.goto(s.base);
+    await menuName(page).waitFor();
+    await navTo(page, "Replay");
+    await page.locator("input[type=file]").first().setInputFiles(demo);
+    await page.locator(".replay-dock").waitFor();
+    await sleep(800);
+    const replay = await share();
+    await page.goto(s.base);
+    await menuName(page).waitFor();
+    await navTo(page, "Practice");
+    await page.locator(".offline-list .offline-choice").first().click();
+    await button(page, "Start").click();
+    await page.locator(".offline.playing").waitFor();
+    await sleep(800);
+    const play = await share();
+    for (const [where, v] of [["replay", replay], ["practice", play]]) {
+      check(v >= 0.6, `${where} at ${viewport.width}x${viewport.height}: the game view covers ${Math.round(v * 100)}% of the window (want 60% or more)`);
+      shares.push(`${where} ${viewport.width}: ${Math.round(v * 100)}%`);
+    }
+  }
+  return shares.join(", ");
+}
+
 /** Home drum Enter: with nothing focused (fresh load, no arrow key yet), Enter opens the selected option, Quick play. */
 async function drumEnterOnLoad(s) {
   const h = await s.open("drum-enter");
@@ -1880,6 +1920,7 @@ export const scenarios = [
   { name: "settings back stays", run: settingsBackStays },
   { name: "escape goes back", run: escapeGoesBack },
   { name: "pinned parts hold still", run: pinnedPartsHoldStill },
+  { name: "game view fills window", run: gameViewFillsWindow },
   { name: "quick play shows name", run: quickPlayShowsName },
   { name: "phone menu no welcome", run: phoneMenuNoWelcome },
   { name: "editor keeps map name", run: editorKeepsMapName },
