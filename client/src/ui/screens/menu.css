@@ -442,9 +442,10 @@ button.home-privacy {
 }
 
 button.home-privacy {
-  padding: 0;
+  /* Inline like its sibling links: the 48px touch target is padding, and the negative margin keeps it out of the line box so the text sits on the same baseline. */
+  padding: 14px 0;
+  margin-block: -14px;
   min-width: 48px;
-  min-height: 48px;
   background: none;
 }
 
