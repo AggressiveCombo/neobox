@@ -1060,8 +1060,10 @@ async function touchMatch(s) {
   await startMatch(host, [guest]);
   await page.locator(".hud-touch-layer").waitFor({ state: "visible" });
   await waitForPixels(guest, "landscape canvas");
-  // Frames freeze during the start countdown; wait it out before touching the controls.
+  // Frames freeze during the start countdown; wait it out before touching the controls. The first match on a phone
+  // opens the welcome sheet over the bottom right (the Jump button), so it goes after the countdown.
   await sleep(4000);
+  await dismissPhoneSplash(page);
   await ensureProbe(page);
   const send = await touchDriver(page, s.env.browser);
   return { page, send, jump: await centre(page, '.hud-touch[data-action="up"]') };
