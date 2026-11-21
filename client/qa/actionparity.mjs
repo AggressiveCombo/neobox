@@ -9,6 +9,7 @@
 //   is drawn in. The wasm colour table of 02f3b72 draws it in another colour: the check fails there.
 // - bat-charge: the body keeps its playerRgb colour while the bat swings (the original draws no bat lift). Its exact-colour
 //   pixel count in screenshots before and after holding C must not fall; a lifted body colour fails it.
+// - movement-trail: a jumping body draws no trail (the original's jump frames show none); trail-coloured pixels must be absent.
 // - stamina-bar, label-box, label-marker: the local label is drawn as in the original (overlay.ts drawNames). Its box is black
 //   at 60%, 18 CSS px tall. Its top row is the stamina bar: one CSS px (devicePixelRatio device rows) at the box width, green
 //   over a black track, with nothing green above the box. The followed player's yellow marker (#ffd440, outlined) tip sits
@@ -50,7 +51,7 @@ const frameOf = (pg) => pg.evaluate(() => {
   const np = u[3], rec = u[4];
   for (let i = 0; i < np; i++) {
     const b = rec + i * 14;
-    players.push({ id: u[b], team: u[b + 4], x: f[b + 1], rocket: f[b + 10], flags: u[b + 6] });
+    players.push({ id: u[b], team: u[b + 4], x: f[b + 1], y: f[b + 2], size: f[b + 8], rocket: f[b + 10], flags: u[b + 6] });
   }
   return { colours, players };
 });
@@ -111,6 +112,25 @@ const batting = batHeld !== null;
 const batBody = { idle: batRgb === null ? 0 : pixelsOf(batIdleShot, batRgb), held: batRgb === null || batHeldShot === null ? 0 : pixelsOf(batHeldShot, batRgb) };
 for (const [name, shot] of [["bat-idle", batIdleShot], ["bat-held", batHeldShot]]) if (shot) writeFileSync(path.join(outDir(), "evidence", `${name}.png`), shot);
 const batPass = batting && batBody.idle > 0 && batBody.held >= batBody.idle;
+
+// --- movement-trail: the original draws no motion trail behind a moving body (its jump and dash frames show none), so no
+// trail-coloured pixels appear while the body rises. The body must move, or the check passes vacuously. ---
+const TRAIL_RGB = 0x4d6d73; // the colour geometry.ts drew the trail in
+await sleep(1500); // the bat swing settles
+const jumpSize = (await frame())?.players[0]?.size ?? 0;
+const jumpYs = [];
+const jumpShots = [];
+await page.keyboard.down("ArrowUp");
+for (let i = 0; i < 6; i++) {
+  await sleep(60);
+  jumpYs.push((await frame())?.players[0]?.y ?? null);
+  jumpShots.push(await page.screenshot());
+}
+await page.keyboard.up("ArrowUp");
+const jumpYsKnown = jumpYs.filter((y) => y !== null);
+const trailMoved = jumpYsKnown.length > 1 && jumpSize > 0 && Math.max(...jumpYsKnown) - Math.min(...jumpYsKnown) > jumpSize;
+const trailPixels = jumpShots.map((s) => pixelsOf(s, TRAIL_RGB));
+const trailPass = trailMoved && trailPixels.every((n) => n === 0);
 
 // --- stamina-bar, label box and marker: the local label's box is black at 60%, 18 CSS px tall (overlay.ts drawNames) ---
 // The bar is the box's top row; the followed player's marker (yellow, outlined) tip sits 4 CSS px above the box.
@@ -218,7 +238,7 @@ const corpse = {
   debrisColours: corpseGrew.sort((a, b) => b.added - a.added).slice(0, 8),
 };
 
-const pass = rocketPass && batPass && staminaPass && boxPass && markerPass && corpsePass && errors.length === 0;
+const pass = rocketPass && batPass && trailPass && staminaPass && boxPass && markerPass && corpsePass && errors.length === 0;
 const result = {
   pass,
   actions: {
@@ -230,6 +250,7 @@ const result = {
       grew: rocketGrew.sort((a, b) => b.added - a.added).slice(0, 12),
     },
     "bat-charge": { pass: batPass, batting, flags: batHeld?.players[0]?.flags ?? null, body: batBody, rgb: batRgb === null ? null : `0x${batRgb.toString(16).padStart(6, "0")}` },
+    "movement-trail": { pass: trailPass, moved: trailMoved, y: jumpYs, trailPixels },
     "corpse-colour": corpse,
     "stamina-bar": { pass: staminaPass, dpr1: stamina1.probe, dpr3: stamina3.probe },
     "label-box": { pass: boxPass, dpr1: stamina1.probe?.boxRows, dpr3: stamina3.probe?.boxRows },
@@ -242,6 +263,7 @@ writeFileSync(path.join(outDir(), "actionparity.json"), JSON.stringify(result, n
 console.log(`${rocketPass ? "PASS" : "FAIL"} rocket-charge ${JSON.stringify(rocketAdded)}${idle && held ? "" : " (no __qaEngine: build lacks the hook)"}`);
 console.log(`${corpsePass ? "PASS" : "FAIL"} corpse-colour expected ${corpse.expected} debris ${JSON.stringify(corpse.debrisColours.slice(0, 3))}${dead ? "" : " (player did not fall)"}`);
 console.log(`${batPass ? "PASS" : "FAIL"} bat-charge body ${JSON.stringify(batBody)} rgb ${batRgb === null ? "none" : batRgb.toString(16)}${batting ? "" : " (bat did not swing)"}`);
+console.log(`${trailPass ? "PASS" : "FAIL"} movement-trail moved ${trailMoved} y ${JSON.stringify(jumpYs)} trail pixels per shot ${JSON.stringify(trailPixels)}`);
 console.log(`${staminaPass ? "PASS" : "FAIL"} stamina-bar dpr1 ${JSON.stringify(stamina1.probe?.rows.filter((r) => r.green || r.opaque || r.other))} dpr3 ${JSON.stringify(stamina3.probe?.rows.filter((r) => r.green || r.opaque || r.other))} box top ${stamina1.probe?.yBase ?? "none"}`);
 console.log(`${boxPass ? "PASS" : "FAIL"} label-box dpr1 ${stamina1.probe?.boxRows ?? "none"}/${stamina1.probe?.boxH ?? "none"} dpr3 ${stamina3.probe?.boxRows ?? "none"}/${stamina3.probe?.boxH ?? "none"}`);
 console.log(`${markerPass ? "PASS" : "FAIL"} label-marker dpr1 ${JSON.stringify(stamina1.probe?.marker ?? null)} dpr3 ${JSON.stringify(stamina3.probe?.marker ?? null)} box top ${stamina1.probe?.yBase ?? "none"}`);

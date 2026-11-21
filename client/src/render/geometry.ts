@@ -4,7 +4,7 @@
 // shrink, so steady-state frames allocate nothing here.
 
 import type { PlayerRec, Scene } from "../frame";
-import { FLAG_DASH, FLAG_FROZEN, FLAG_GHOST, FLAG_LOCAL, FLAG_TELEPORT } from "../frame";
+import { FLAG_DASH, FLAG_FROZEN, FLAG_GHOST, FLAG_LOCAL } from "../frame";
 import { backdropBounds, findLocal, type Bounds } from "../camera";
 import { TEAM_BLUE, TEAM_FFA, TEAM_RED, TEAM_SPECTATOR } from "../protocol";
 import { prefs, type Palette } from "../prefs";
@@ -17,7 +17,7 @@ export const VOID_RGB = [10 / 255, 10 / 255, 10 / 255, 1] as const;
 const WORDS_PER_VERTEX = 3;
 const INITIAL_CAPACITY = 1024;
 const BACKGROUND_VERTICES = 18;
-/** Body (6), launcher (90), egg (6) and highlight ring (24). The trail reserves its own. */
+/** Body (6), launcher (90), egg (6) and highlight ring (24). */
 const PLAYER_MAX_VERTICES = 126;
 
 /** Clip transform (sx, sy, ox, oy): clip = (x*sx + ox, y*sy + oy). */
@@ -68,10 +68,6 @@ const HUB_X = 0.625;
 const HUB_RADIUS = 0.0475;
 const HUB_SIDES = 12;
 const EGG_REACH = 4;
-/** Motion trail: how long a position stays (ms) and its full width at the body, in player sides. */
-const TRAIL_MS = 200;
-const TRAIL_WIDTH = 0.4;
-const TRAIL_RGB = 0x4d6d73;
 /** Countdown outline stroke, and the keys that light it (the original's push, rocket, bat and grab). */
 const HIGHLIGHT_STROKE = 0.08;
 const HIGHLIGHT_KEYS = BIT.PUSH | BIT.ROCKET | BIT.BAT | BIT.GRAB;
@@ -150,9 +146,6 @@ function bodyRgb(flags: number, rgb: number): number {
   return mixRgb(c, WHITE_RGB, Math.min(lift, 0.5));
 }
 
-/** Vertices per trail segment and per quad (two triangles). */
-const SEGMENT_VERTICES = 6;
-
 /** Scratch output of poseAt, reused so mapping a vertex allocates nothing. */
 const at = { x: 0, y: 0 };
 /** Current local-to-world transform: origin, rotation, y-flip, pivot and scale (the original's pixi pose). */
@@ -184,18 +177,6 @@ function ease(x: number, a: number, b: number, c: number): number {
   return a + b * (t * t * ((1.70158 + 1) * t + 1.70158) + 1);
 }
 
-/** A trail sample: the body's position and when it was recorded (ms). */
-interface TrailPoint {
-  x: number;
-  y: number;
-  t: number;
-}
-
-interface Trail {
-  points: TrailPoint[];
-  generation: number;
-}
-
 export class Geometry {
   private f32 = new Float32Array(0);
   private u32 = new Uint32Array(0);
@@ -203,9 +184,6 @@ export class Geometry {
   private capacity = 0;
   /** Vertices written by the current build(). */
   private used = 0;
-  /** Motion trails by player id; `generation` is the last build that drew the player. */
-  private readonly trails = new Map<number, Trail>();
-  private generation = 0;
 
   readonly background: Span = { first: 0, count: 0 };
   readonly world: Span = { first: 0, count: 0 };
@@ -278,59 +256,22 @@ export class Geometry {
     const players = scene.players;
     this.reserve(players.length * PLAYER_MAX_VERTICES + SPAWN_VERTICES);
     this.players.first = this.used;
-    this.generation++;
-    const now = Date.now();
     const followed = findLocal(scene);
     this.putSpawn(scene, followed);
     for (let i = 0; i < players.length; i++) {
       const p = players[i];
-      if (p.team !== TEAM_SPECTATOR) this.putPlayer(scene, p, now);
+      if (p.team !== TEAM_SPECTATOR) this.putPlayer(scene, p);
     }
-    this.pruneTrails();
     this.players.count = this.used - this.players.first;
   }
 
-  /** Drop the trails of players that are not drawn this frame. */
-  private pruneTrails(): void {
-    for (const [id, trail] of this.trails) {
-      if (trail.generation !== this.generation) this.trails.delete(id);
-    }
-  }
-
-  private putPlayer(scene: Scene, p: PlayerRec, now: number): void {
+  private putPlayer(scene: Scene, p: PlayerRec): void {
     const rgb = playerRgb(p.team, p.id);
-    this.putTrail(p, now);
-    // The trail took room from the up-front reservation: make sure this player's parts still fit.
-    this.reserve(PLAYER_MAX_VERTICES);
     this.putBody(p, rgb);
     // The launcher and egg aim are drawn over the body, as the original's are (its bar crosses the body).
     this.putLauncher(p);
     this.putEgg(p);
     if ((p.flags & FLAG_LOCAL) !== 0 && scene.intro > -1 && (scene.localKeys & HIGHLIGHT_KEYS) !== 0) this.putHighlight(p);
-  }
-
-  /**
-   * The original's motion trail: the body's positions over the last TRAIL_MS, each segment as wide as
-   * its newer end and thinning with age. A teleport starts a fresh trail.
-   */
-  private putTrail(p: PlayerRec, now: number): void {
-    let trail = this.trails.get(p.id);
-    if (!trail || (p.flags & FLAG_TELEPORT) !== 0) {
-      trail = { points: [], generation: 0 };
-      this.trails.set(p.id, trail);
-    }
-    trail.generation = this.generation;
-    const pts = trail.points;
-    pts.push({ x: p.x, y: p.y, t: now });
-    while (pts.length > 1 && now - pts[0].t > TRAIL_MS) pts.shift();
-    this.reserve((pts.length - 1) * SEGMENT_VERTICES);
-    const colour = packRgba(TRAIL_RGB, 1);
-    for (let i = 1; i < pts.length; i++) {
-      const a = pts[i - 1];
-      const b = pts[i];
-      const width = TRAIL_WIDTH * p.size * (1 - (now - b.t) / TRAIL_MS);
-      this.putSegment(a.x, a.y, b.x, b.y, width / 2, colour);
-    }
   }
 
   /**
@@ -432,22 +373,6 @@ export class Geometry {
     this.put(ax, ay, colour);
     this.put(bx, by, colour);
     this.put(at.x, at.y, colour);
-  }
-
-  /** Line of half-width `hw` from (ax, ay) to (bx, by), world coordinates; nothing for a zero-length line. */
-  private putSegment(ax: number, ay: number, bx: number, by: number, hw: number, colour: number): void {
-    const dx = bx - ax;
-    const dy = by - ay;
-    const len = Math.hypot(dx, dy);
-    if (len === 0) return;
-    const nx = (-dy / len) * hw;
-    const ny = (dx / len) * hw;
-    this.put(ax + nx, ay + ny, colour);
-    this.put(ax - nx, ay - ny, colour);
-    this.put(bx - nx, by - ny, colour);
-    this.put(ax + nx, ay + ny, colour);
-    this.put(bx - nx, by - ny, colour);
-    this.put(bx + nx, by + ny, colour);
   }
 
   /** Square of side `size` centred on the player, rotated by `angle`. */
