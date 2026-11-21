@@ -800,6 +800,7 @@ button.room-menu-item[aria-checked="true"] {
 
 /* ---- dock: the host's start controls, fixed under the scrolling content ---- */
 
+/* The dock's bar spans the window; its content lines up with the 1280 px column above it. */
 .room-dock {
   flex: none;
   display: flex;
@@ -807,8 +808,9 @@ button.room-menu-item[aria-checked="true"] {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
+  max-width: none;
   margin: 0;
-  padding: 12px var(--margin) calc(16px + env(safe-area-inset-bottom));
+  padding: 12px max(var(--margin), calc((100% - 1280px) / 2 + var(--margin))) calc(16px + env(safe-area-inset-bottom));
   background: var(--surface);
   box-sizing: border-box;
 }
