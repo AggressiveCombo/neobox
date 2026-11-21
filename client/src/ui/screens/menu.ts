@@ -375,8 +375,21 @@ export const menuScreen: ScreenFactory = (ctx) => {
 
   // The training badge marks the first visit only; choosing Training dismisses it for good.
   const trainingBadge = h("span", { class: "home-badge", "aria-hidden": "true", hidden: readFlag(TRAINING_SEEN_KEY) }, "Start here");
-  // Every destination, in drum order: Quick play and Browse rooms first, Profile and News last.
+  // Every destination, in drum order: Profile and News above, then Quick play (selected at load, so the window shows
+  // options above and below it, not an empty end) and Browse rooms, then the rest.
   const items: DrumItem[] = [
+    { id: "account", label: "Profile", icon: "user", hint: "Your account and your level.", run: () => store.set({ screen: "account" }) },
+    {
+      id: "news",
+      label: "News",
+      icon: "newspaper",
+      hint: "What has changed in neobox.",
+      extra: unreadMark,
+      run: () => {
+        openNews();
+        unreadMark.hidden = !hasUnreadNews();
+      },
+    },
     { id: "quick", label: "Quick play", icon: "zap", hint: "Jump into a match now.", run: () => store.set({ screen: "quick" }) },
     { id: "browse", label: "Browse rooms", icon: "door-open", hint: "Pick a room to join, or start one.", run: () => go() },
     ...DESTINATIONS.map(
@@ -395,20 +408,8 @@ export const menuScreen: ScreenFactory = (ctx) => {
         },
       }),
     ),
-    { id: "account", label: "Profile", icon: "user", hint: "Your account and your level.", run: () => store.set({ screen: "account" }) },
-    {
-      id: "news",
-      label: "News",
-      icon: "newspaper",
-      hint: "What has changed in neobox.",
-      extra: unreadMark,
-      run: () => {
-        openNews();
-        unreadMark.hidden = !hasUnreadNews();
-      },
-    },
   ];
-  const drum = mountDrum(items, "Destinations");
+  const drum = mountDrum(items, "Destinations", items.findIndex((it) => it.id === "quick"));
 
   sync();
   syncMute();

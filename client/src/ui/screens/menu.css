@@ -508,9 +508,9 @@ button.home-privacy {
   }
 
   .drum {
-    --drum-pitch: 44px;
+    --drum-pitch: 38px;
     --drum-opt-h: 40px;
-    height: 296px;
+    height: 344px;
   }
 
   .menu-art {

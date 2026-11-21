@@ -1273,6 +1273,7 @@ async function drumFastWheel(s) {
   const { drum, settled, selected } = drumOf(page);
   await drum.waitFor();
   await settled();
+  const startIndex = (await drum.locator(".drum-label").allTextContents()).indexOf(await selected());
   const box = await drum.boundingBox();
   await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
   const recording = page.evaluate(
@@ -1316,9 +1317,11 @@ async function drumFastWheel(s) {
   check(rec.settledAt !== null, "the drum never settled");
   const settleMs = rec.settledAt - lastWheel;
   check(settleMs <= 250, `the drum settled ${Math.round(settleMs)} ms after the last wheel event, want 250 or less`);
-  // 30 steps of 25 px is 7.5 options: the drum settles on the nearest, Math.round(7.5) = 8.
+  // 30 steps of 25 px is 7.5 options from where the drum started: it settles on the nearest, Math.round(start + 7.5),
+  // held at the last option.
   const labels = await drum.locator(".drum-label").allTextContents();
-  check((await selected()) === labels[8], `the drum settled on "${await selected()}", not "${labels[8]}"`);
+  const want = labels[Math.min(labels.length - 1, startIndex + 8)];
+  check((await selected()) === want, `the drum settled on "${await selected()}", not "${want}"`);
   return `frames moving ${Math.round(share * 100)}% of the burst; settled ${Math.round(settleMs)} ms after the last wheel event`;
 }
 

@@ -62,13 +62,15 @@ function pads(): (Gamepad | null)[] {
   return typeof navigator.getGamepads === "function" ? Array.from(navigator.getGamepads()) : [];
 }
 
-export function mountDrum(items: DrumItem[], label: string): Drum {
+/** `initial` is the option selected at mount (centred, with options above and below it when the list has them). */
+export function mountDrum(items: DrumItem[], label: string, initial = 0): Drum {
   const n = items.length;
   // `target` is where the input has put the drum; `pos` is where it is drawn, easing toward `target`.
   // `front` is the selected option: the target rounded and kept on the list.
-  let pos = 0;
-  let target = 0;
-  let front = 0;
+  const start = Math.min(n - 1, Math.max(0, initial));
+  let pos = start;
+  let target = start;
+  let front = start;
   let pitch = PITCH_FALLBACK_PX;
   let radius = pitch / SIN_STEP;
   let half = 0;
