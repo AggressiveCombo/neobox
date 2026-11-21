@@ -551,17 +551,17 @@ const backdropGeometry = () => {
   // the content turns with the card: the same angle, or the arena is drawn on another axis than the card's
   if (Math.abs(contentDeg - cardDeg) > 0.5) issues.push("content-untilted");
   if (live) {
-    // the playable bounds (walls included, camera.ts backdropBounds) fill the card's shorter side less BACKDROP_MARGIN (0.08) per side: 1 / 1.16 = 0.86, and the card has the bounds' shape
-    const bw = cam.bx1 - cam.bx0;
-    const bh = cam.by1 - cam.by0;
-    const fill = hw <= hh ? bw / cam.w : bh / cam.h;
-    if (fill < 0.84) issues.push("arena-small");
-    if (Math.abs((hw / hh) / (bw / bh) - 1) > 0.01) issues.push("card-aspect");
+    // the arena fills the card's shorter side less BACKDROP_MARGIN (0.02) per side: 1 / 1.04 = 0.96 (camera.ts backdropSize),
+    // and the card has the arena's shape; under 0.9 the clip reads zoomed out next to the match view
+    const fill = hw <= hh ? cam.aw / cam.w : cam.ah / cam.h;
+    if (fill < 0.9) issues.push("arena-small");
+    if (Math.abs((hw / hh) / (cam.aw / cam.ah) - 1) > 0.01) issues.push("card-aspect");
     if (arenaHalf[0] > hw + 0.5 || arenaHalf[1] > hh + 0.5) issues.push("arena-clipped");
   }
   if (live) {
-    // half a px of rounding: an arena or label that exactly meets the card edge reads -0.0x on some engines
-    if (arenaMargin < -0.5 || wallMargin < -0.5) issues.push("arena-out");
+    // half a px of rounding: an arena or label that exactly meets the card edge reads -0.0x on some engines. Static ground
+    // past the arena edge may be cut (as in a match), so only the arena's corners count.
+    if (arenaMargin < -0.5) issues.push("arena-out");
     if (labelMargin < -0.5) issues.push("label-out");
   }
   // the page's own background colour: the first of body or html that is not transparent (the card must show none of it)
