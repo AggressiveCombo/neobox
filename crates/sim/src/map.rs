@@ -136,6 +136,8 @@ pub struct MapSettings {
     pub gravity: f64,
     /// `19` player edge wrapping.
     pub wrap: bool,
+    /// Neobox key `"aspect"` (not numeric, so the original never reads it): `"wide"` selects the 16:9 view; absent or `"classic"` the original's 16:10.
+    pub wide: bool,
     pub extra: Extra,
 }
 
@@ -157,8 +159,19 @@ impl Default for MapSettings {
             color_bottom: 16777215.0,
             gravity: 15.0,
             wrap: false,
+            wide: false,
             extra: Extra::default(),
         }
+    }
+}
+
+/// The view's width over its height: 16:10 for the original, 16:9 for `wide` maps.
+pub const CLASSIC_VIEW_ASPECT: f64 = 1.6;
+pub const WIDE_VIEW_ASPECT: f64 = 16.0 / 9.0;
+
+impl MapSettings {
+    pub fn view_aspect(&self) -> f64 {
+        if self.wide { WIDE_VIEW_ASPECT } else { CLASSIC_VIEW_ASPECT }
     }
 }
 
@@ -694,9 +707,9 @@ fn list<'a>(root: &'a Map<String, Value>, k: &str, required: bool) -> Result<&'a
     }
 }
 
-fn decode_settings(o: &Map<String, Value>) -> MapSettings {
+fn decode_settings(o: &Map<String, Value>) -> Result<MapSettings, MapError> {
     let d = MapSettings::default();
-    MapSettings {
+    Ok(MapSettings {
         screen_width: crate::js::min(num(o, "3", d.screen_width), 100.0),
         snap: num(o, "4", d.snap),
         gn: num(o, "5", d.gn),
@@ -712,7 +725,18 @@ fn decode_settings(o: &Map<String, Value>) -> MapSettings {
         color_bottom: num(o, "17", d.color_bottom),
         gravity: num(o, "18", d.gravity),
         wrap: flag(o, "19", d.wrap),
-        extra: extra_of(o, &["3", "4", "5", "7", "8", "9", "10", "11", "12", "13", "15", "16", "17", "18", "19"]),
+        wide: decode_aspect(o)?,
+        extra: extra_of(o, &["3", "4", "5", "7", "8", "9", "10", "11", "12", "13", "15", "16", "17", "18", "19", "aspect"]),
+    })
+}
+
+/// The `aspect` key is Neobox's own (non-numeric, so the original never reads it): absent or `"classic"` is the original's 16:10, `"wide"` is 16:9.
+fn decode_aspect(o: &Map<String, Value>) -> Result<bool, MapError> {
+    match o.get("aspect") {
+        None => Ok(false),
+        Some(Value::String(s)) if s == "classic" => Ok(false),
+        Some(Value::String(s)) if s == "wide" => Ok(true),
+        Some(_) => Err(MapError::BadStructure("settings aspect must be \"classic\" or \"wide\"")),
     }
 }
 
@@ -1005,7 +1029,7 @@ impl MapData {
             map.caps.push(decode_cap(obj(c)?));
         }
         map.settings = match root.get("set") {
-            Some(Value::Object(o)) => decode_settings(o),
+            Some(Value::Object(o)) => decode_settings(o)?,
             _ => return Err(MapError::BadStructure("missing settings")),
         };
         map.extra = extra(root, &["b", "j", "s", "p", "tu", "tc", "gp", "c", "set"]);
@@ -1100,6 +1124,9 @@ fn encode_settings(s: &MapSettings) -> Value {
     o.n("17", s.color_bottom, d.color_bottom);
     o.n("18", s.gravity, d.gravity);
     o.b("19", s.wrap, d.wrap);
+    if s.wide {
+        o.0.insert("aspect".into(), Value::from("wide"));
+    }
     o.extra(&s.extra)
 }
 
@@ -1396,4 +1423,58 @@ pub fn encode_code(json: &str) -> String {
         }
     }
     out
+}
+
+#[cfg(test)]
+mod aspect_tests {
+    use super::*;
+    use serde_json::json;
+
+    fn obj(v: Value) -> Map<String, Value> {
+        match v {
+            Value::Object(o) => o,
+            _ => panic!("not an object"),
+        }
+    }
+
+    fn decode(v: Value) -> MapSettings {
+        match decode_settings(&obj(v)) {
+            Ok(s) => s,
+            Err(_) => panic!("settings should decode"),
+        }
+    }
+
+    #[test]
+    fn absent_aspect_is_classic() {
+        let s = decode(json!({ "3": 30 }));
+        assert!(!s.wide);
+        assert_eq!(s.view_aspect(), CLASSIC_VIEW_ASPECT);
+    }
+
+    #[test]
+    fn explicit_classic_is_classic_and_not_written_back() {
+        let s = decode(json!({ "aspect": "classic" }));
+        assert!(!s.wide);
+        assert!(encode_settings(&s).get("aspect").is_none());
+    }
+
+    #[test]
+    fn wide_round_trips_through_encode() {
+        let s = decode(json!({ "aspect": "wide" }));
+        assert!(s.wide);
+        assert_eq!(s.view_aspect(), WIDE_VIEW_ASPECT);
+        let encoded = encode_settings(&s);
+        assert!(encoded["aspect"] == "wide");
+        assert!(decode(encoded).wide);
+    }
+
+    #[test]
+    fn default_settings_are_classic_for_imports() {
+        assert!(!MapSettings::default().wide);
+    }
+
+    #[test]
+    fn unknown_aspect_is_rejected() {
+        assert!(decode_settings(&obj(json!({ "aspect": "square" }))).is_err());
+    }
 }
