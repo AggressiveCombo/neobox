@@ -248,17 +248,6 @@
       }
     },
     {
-      "id": "guest-level-cap-news",
-      "text": "Guests can reach level 1.",
-      "basis": "code",
-      "source": { "file": "client/src/ui/news.ts" },
-      "truth": {
-        "check": "GUEST_XP_CAP is xpForLevel(2) - 1, so guest XP stops just below level 2.",
-        "value": true,
-        "evidence": [{ "file": "client/src/levels.ts", "contains": "GUEST_XP_CAP" }]
-      }
-    },
-    {
       "id": "guest-level-cap-postgame",
       "text": "Guests stop at level 1.",
       "basis": "code",
@@ -267,20 +256,6 @@
         "check": "GUEST_XP_CAP is xpForLevel(2) - 1, so guest XP stops just below level 2.",
         "value": true,
         "evidence": [{ "file": "client/src/levels.ts", "contains": "GUEST_XP_CAP" }]
-      }
-    },
-    {
-      "id": "news-renderer-fallback",
-      "text": "Rendering uses WebGPU where it is available, with WebGL2 as the fallback.",
-      "basis": "code",
-      "source": { "file": "client/src/ui/news.ts" },
-      "truth": {
-        "check": "createRenderer tries WebGPU first, then WebGL2.",
-        "value": true,
-        "evidence": [
-          { "file": "client/src/render/index.ts", "contains": "createWebGpuRenderer(gpuCanvas" },
-          { "file": "client/src/render/index.ts", "contains": "createWebGl2Renderer(glCanvas" }
-        ]
       }
     },
     {
@@ -816,17 +791,6 @@
       }
     },
     {
-      "id": "news-view-aspect",
-      "text": "16:10 for the original's maps and 16:9 for maps that chose wide",
-      "basis": "code",
-      "source": { "file": "client/src/ui/news.ts" },
-      "truth": {
-        "check": "The game view takes the map's aspect: 16:10 for classic maps and 16:9 for wide maps (map-aspect.ts CLASSIC_ASPECT and WIDE_ASPECT).",
-        "value": true,
-        "evidence": [{ "file": "client/src/map-aspect.ts", "contains": "export const CLASSIC_ASPECT = 1.6;" }]
-      }
-    },
-    {
       "id": "news-quick-sweaty-bois",
       "text": "Sweaty Bois (up to 4 players",
       "basis": "code",
@@ -840,57 +804,6 @@
           { "file": "crates/server/src/rotation.rs", "contains": "filter(|m| !m.meta.teams)" },
           { "file": "crates/sim/src/round.rs", "contains": "fn last_standing(&mut self, gs" }
         ]
-      }
-    },
-    {
-      "id": "news-room-settings-fold",
-      "text": "the host's settings fold away under More settings",
-      "basis": "code",
-      "source": { "file": "client/src/ui/news.ts" },
-      "truth": {
-        "check": "The room screen renders a More settings summary that folds the host's settings.",
-        "value": true,
-        "evidence": [{ "file": "client/src/ui/screens/room.ts", "contains": "More settings" }]
-      }
-    },
-    {
-      "id": "training-stamina-bar",
-      "text": "Your stamina is the bar on your name: abilities spend it, and only you can see it.",
-      "basis": "code",
-      "source": { "file": "client/src/ui/screens/training.ts" },
-      "truth": {
-        "check": "The stamina bar is drawn only for the local player, on the top edge of the name label box.",
-        "value": true,
-        "evidence": [
-          { "file": "client/src/render/overlay.ts", "contains": "const hasBar = (l: NameLabel): boolean => l.local && scene.maxStamina > 0;" },
-          { "file": "client/src/render/overlay.ts", "contains": "const left = snap(l.x - l.w / 2);" },
-          { "file": "client/src/render/overlay.ts", "contains": "this.drawStamina(l.player.stamina / scene.maxStamina, left, right - left, top);" }
-        ]
-      }
-    },
-    {
-      "id": "news-custom-lives",
-      "text": "New custom rooms start in lives mode with 5 lives.",
-      "basis": "code",
-      "source": { "file": "client/src/ui/news.ts" },
-      "truth": {
-        "check": "The custom rotation meta is gameMode 1 (lives) with limit 5, and new custom rooms take their defaults from rotation.custom().",
-        "value": true,
-        "evidence": [
-          { "file": "maps/rotation/maps2.json", "contains": "\"gameMode\":1,\"limit\":5" },
-          { "file": "crates/server/src/conn.rs", "contains": "defaults: rotation.custom()" }
-        ]
-      }
-    },
-    {
-      "id": "news-quick-rooms-no-host",
-      "text": "Quick rooms have no host and rotate through maps.",
-      "basis": "code",
-      "source": { "file": "client/src/ui/news.ts" },
-      "truth": {
-        "check": "Quick rooms have no host: room.rs gives the room no host when it is quick.",
-        "value": true,
-        "evidence": [{ "file": "crates/server/src/room.rs", "contains": "self.host.is_none() && self.quick.is_none()" }]
       }
     },
     {
