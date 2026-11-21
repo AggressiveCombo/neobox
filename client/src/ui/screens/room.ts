@@ -17,7 +17,7 @@ import {
   isTeamMode,
 } from "../../protocol";
 import type { MapMeta, PlayerInfo, RoomState } from "../../protocol";
-import { SETTINGS, formatValue, normalizeInput, readOnlyKeys } from "../../settings";
+import { SETTINGS, formatValue, normalizeInput, readOnlyKeys, readOnlyLabel } from "../../settings";
 import type { SettingDef } from "../../settings";
 import { drawMapPreview } from "../../render/preview";
 import { openLibraryPicker } from "../library-picker";
@@ -607,7 +607,7 @@ export const roomScreen: ScreenFactory = (ctx: AppCtx) => {
       h(
         "div",
         { class: "room-players-head" },
-        h("h2", { class: "room-panel-title" }, "Players", h("span", { class: "room-count" }, `${room.players.length}/${room.max_players}`)),
+        h("h2", { class: "panel-title" }, "Players", h("span", { class: "room-count" }, `${room.players.length}/${room.max_players}`)),
         h(
           "div",
           { class: "room-team-pick" },
@@ -631,7 +631,7 @@ export const roomScreen: ScreenFactory = (ctx: AppCtx) => {
           h(
             "section",
             { class: "room-roster-group" },
-            h("h3", { class: "room-subtitle" }, `${title} (${ps.length})`),
+            h("h3", { class: "panel-sub" }, `${title} (${ps.length})`),
             ps.length === 0 ? h("p", { class: "room-muted" }, `No one on ${title}`) : list(ps),
           ),
         );
@@ -642,7 +642,7 @@ export const roomScreen: ScreenFactory = (ctx: AppCtx) => {
     }
     const spectators = members(TEAM_SPECTATOR);
     if (spectators.length > 0) {
-      nodes.push(h("section", { class: "room-roster-group" }, h("h3", { class: "room-subtitle" }, `Spectating (${spectators.length})`), list(spectators)));
+      nodes.push(h("section", { class: "room-roster-group" }, h("h3", { class: "panel-sub" }, `Spectating (${spectators.length})`), list(spectators)));
     }
     return nodes;
   }
@@ -1188,12 +1188,12 @@ export const roomScreen: ScreenFactory = (ctx: AppCtx) => {
 
   const playersBody = h("div", { class: "room-players-body" });
   const renderPlayers = keyed(playersBody, buildPlayers);
-  const playersPanel = h("section", { class: "room-panel room-players" }, playersBody);
+  const playersPanel = h("section", { class: "panel room-panel room-players" }, playersBody);
 
   const modeBody = h("div", { class: "room-mode-body" });
   const modeList = h("div", { class: "room-mode-list" });
   const renderMode = keyed(modeBody, buildMode);
-  const modePanel = h("section", { class: "room-panel room-mode-panel" }, h("h2", { class: "room-panel-title" }, "Mode"), modeBody);
+  const modePanel = h("section", { class: "panel room-panel room-mode-panel" }, h("h2", { class: "panel-title" }, "Mode"), modeBody);
 
   const mapName = h("p", { class: "room-map-name" });
   const mapInfo = h("div", { class: "room-map-info" });
@@ -1221,7 +1221,7 @@ export const roomScreen: ScreenFactory = (ctx: AppCtx) => {
   const mapControls = h(
     "div",
     { class: "room-map-controls" },
-    h("h3", { class: "room-subtitle" }, "Paste a map code"),
+    h("h3", { class: "panel-sub" }, "Paste a map code"),
     textarea,
     h(
       "div",
@@ -1245,20 +1245,20 @@ export const roomScreen: ScreenFactory = (ctx: AppCtx) => {
       h("label", { class: "room-file" }, icon("upload", 16), "Load file", fileInput),
     ),
   );
-  const mapPanel = h("section", { class: "room-panel room-map-panel" }, h("h2", { class: "room-panel-title" }, "Map"), mapCanvas, mapName, mapInfo);
+  const mapPanel = h("section", { class: "panel room-panel room-map-panel" }, h("h2", { class: "panel-title" }, "Map"), mapCanvas, mapName, mapInfo);
 
   const manageBody = h("div", { class: "room-manage-body" });
   const renderManage = keyed(manageBody, buildManage);
-  const managePanel = h("section", { class: "room-panel room-manage" }, h("h2", { class: "room-panel-title" }, "Manage"), manageBody);
+  const managePanel = h("section", { class: "panel room-panel room-manage" }, h("h2", { class: "panel-title" }, "Manage"), manageBody);
 
   const bansBody = h("div", { class: "room-bans-body" });
   const renderBans = keyed(bansBody, buildBans);
-  const bansPanel = h("section", { class: "room-panel room-bans-panel" }, h("h2", { class: "room-panel-title" }, "Bans"), bansBody);
+  const bansPanel = h("section", { class: "panel room-panel room-bans-panel" }, h("h2", { class: "panel-title" }, "Bans"), bansBody);
 
   const settingsBody = h("div", { class: "room-settings-body" });
   let settingsOpen = false;
   const renderSettings = keyed(settingsBody, buildSettings);
-  const settingsPanel = h("section", { class: "room-panel room-settings-panel" }, h("h2", { class: "room-panel-title" }, "Settings"), settingsBody);
+  const settingsPanel = h("section", { class: "panel room-panel room-settings-panel" }, h("h2", { class: "panel-title" }, "Settings"), settingsBody);
 
   const renderHeader = keyed(header, () => (st.room === null ? [] : buildHeader(st.room)));
   const renderStartNotice = keyed(startNotice, () => startNoticeNodes(isHost()));
@@ -1288,8 +1288,8 @@ export const roomScreen: ScreenFactory = (ctx: AppCtx) => {
   };
   const chatPanel = h(
     "section",
-    { class: "room-panel room-chat" },
-    h("h2", { class: "room-panel-title" }, icon("message-square", 20), "Chat"),
+    { class: "panel room-panel room-chat" },
+    h("h2", { class: "panel-title" }, icon("message-square", 20), "Chat"),
     chatLog,
     h(
       "div",
@@ -1422,7 +1422,7 @@ export const roomScreen: ScreenFactory = (ctx: AppCtx) => {
             h(
               "div",
               { class: "room-setting" },
-              h("span", { class: "room-setting-label" }, key),
+              h("span", { class: "room-setting-label" }, readOnlyLabel(key)),
               h("span", { class: "room-setting-value" }, show(room.settings[key])),
             ),
           ),
