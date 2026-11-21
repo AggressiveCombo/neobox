@@ -211,25 +211,23 @@ function axisCentre(l: number, lo: number, hi: number, len: number, a: number, b
 }
 
 /**
- * The margin the backdrop keeps around the arena, as a share of its size on each side. The card shows the whole arena:
- * its boundary walls, the floor and every player, with room left for the name labels above players on the edges.
+ * The margin the backdrop keeps around the arena, as a share of its size on each side: room for the name labels of players
+ * at the arena's edge. The card frames the arena as a match does (static ground past the arena edge is cut, as in a match).
+ * At 0.08 around the walls' extent the clip read as zoomed out next to the match view.
  */
-const BACKDROP_MARGIN = 0.08;
+const BACKDROP_MARGIN = 0.02;
 
-/** The part of the map the backdrop shows: its playable bounds (backdropBounds: the arena and the static walls) with the margin
- *  on each side, in world units. Its shape is the bounds'. */
+/** The part of the map the backdrop shows: the arena with the margin on each side, in world units. Its shape is the arena's. */
 export function backdropSize(scene: Scene): { w: number; h: number } {
-  const b = backdropBounds(scene);
-  return { w: (b.x1 - b.x0) * (1 + 2 * BACKDROP_MARGIN), h: (b.y1 - b.y0) * (1 + 2 * BACKDROP_MARGIN) };
+  return { w: scene.arenaW * (1 + 2 * BACKDROP_MARGIN), h: scene.arenaH * (1 + 2 * BACKDROP_MARGIN) };
 }
 
 /**
  * Backdrop camera (the main menu's clip). The GL view is the menu card itself, untilted: `box` is its rect in CSS px.
- * The card is the rect backdropSize gives, centred on the playable bounds' centre (backdropBounds: the arena and its walls),
- * scaled so that rect fills the card edge to edge, so the whole map sits inside it. `fill` is the card's world rect: the
- * backdrop's background covers it, so the card shows the map's own background (no page colour, no void). Fixed on that
- * centre: no follow, no zoom, so the clip holds still from its first frame. Also publishes the live players' ids and world
- * positions to the QA hook (qaView.live).
+ * The card is the rect backdropSize gives, centred on the arena, scaled so that rect fills the card edge to edge. `fill` is
+ * the card's world rect: the backdrop's background covers it, so the card shows the map's own background (no page colour,
+ * no void). Fixed on that centre: no follow, no zoom, so the clip holds still from its first frame. Also publishes the
+ * walls' extent and the live players' ids and world positions to the QA hook (qaView).
  */
 export function backdropCamera(scene: Scene, box: { w: number; h: number }): Camera {
   // World units per CSS px: the larger of the shown rect's ratios to the card, so the whole shown rect fits on both axes.
@@ -237,9 +235,9 @@ export function backdropCamera(scene: Scene, box: { w: number; h: number }): Cam
   const k = Math.max(shown.w / box.w, shown.h / box.h);
   const w = box.w * k;
   const h = box.h * k;
+  const cx = scene.arenaW / 2;
+  const cy = scene.arenaH / 2;
   const ext = backdropBounds(scene);
-  const cx = (ext.x0 + ext.x1) / 2;
-  const cy = (ext.y0 + ext.y1) / 2;
   // the drawn static extent (walls included) for the QA hook
   qaView.bx0 = ext.x0;
   qaView.by0 = ext.y0;
