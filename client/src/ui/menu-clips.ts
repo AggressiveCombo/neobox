@@ -246,6 +246,12 @@ export function mountMenuClips(ctx: AppCtx, host: HTMLElement, onState?: (state:
       paused = reduce;
       showPaused();
     }
+    // A modal over the menu covers the clip: its last frame stays up undrawn, so the modal's open and close animations
+    // get the frame budget. The clip resumes from the same tick when the modal closes (last is kept current above).
+    if (document.querySelector("dialog.modal[open]")) {
+      ctx.holdView();
+      return;
+    }
     if (paused) {
       ctx.holdView();
       // Held on one frame: drawn once, and again until it reaches the screen.
