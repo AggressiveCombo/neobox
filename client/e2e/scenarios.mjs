@@ -1379,10 +1379,13 @@ async function drumFastWheel(s, { load = false } = {}) {
   const box = await drum.boundingBox();
   await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
   if (load) await loadPage(s, page);
-  // Records until the drum has settled after the last wheel step (capped at 15 s, so a drum that never settles fails).
+  // Records until the drum has settled after the last wheel step it received and no wheel has come for QUIET_MS: a slow
+  // engine can deliver its last steps after the burst call returns, so the travel is read only once the input is quiet.
+  // Capped at 15 s after the burst, so a drum that never settles fails.
   const recording = page.evaluate(
     () =>
       new Promise((resolve) => {
+        const QUIET_MS = 1500;
         const listbox = document.querySelector('[role="listbox"][aria-label="Destinations"]');
         const rec = { frames: [], wheels: [], deltaY: 0, settledAt: null };
         const sig = () => [...listbox.querySelectorAll('[role="option"]')].map((o) => o.style.transform).join("|");
@@ -1398,13 +1401,15 @@ async function drumFastWheel(s, { load = false } = {}) {
           },
           { passive: true },
         );
-        const start = performance.now();
         const tick = () => {
-          rec.frames.push({ t: performance.now(), sig: sig() });
+          rec.frames.push({ t: performance.now(), sig: sig(), front: listbox.getAttribute("aria-activedescendant"), settled: listbox.dataset.settled });
+          const now = performance.now();
           const lastWheel = rec.wheels[rec.wheels.length - 1];
-          const settledAfter =
-            window.__wheelBurstEnded === true && lastWheel !== undefined && rec.settledAt !== null && rec.settledAt > lastWheel;
-          if (settledAfter || performance.now() - start > 15000) {
+          const burstEnd = window.__wheelBurstEnded;
+          const ended = typeof burstEnd === "number";
+          const done =
+            ended && lastWheel !== undefined && rec.settledAt !== null && rec.settledAt > lastWheel && now - lastWheel >= QUIET_MS;
+          if (done || (ended && now - burstEnd > 15000)) {
             observer.disconnect();
             resolve(rec);
           } else requestAnimationFrame(tick);
@@ -1418,32 +1423,45 @@ async function drumFastWheel(s, { load = false } = {}) {
     await page.waitForTimeout(8);
   }
   await page.evaluate(() => {
-    window.__wheelBurstEnded = true;
+    window.__wheelBurstEnded = performance.now();
   });
   const rec = await recording;
-  const firstWheel = Math.min(...rec.wheels);
   const lastWheel = Math.max(...rec.wheels);
   // Chromium may coalesce wheel events that land within one frame (fewer listener calls), summing their travel. Under
   // load another engine may drop some before the page sees them: the drum must then settle on the travel it did get.
   const travel = rec.deltaY;
   check(travel > 0, "the drum got no wheel travel");
-  if (!load) {
-    check(travel === 750, `the drum got ${travel} px of wheel travel, want 750 (30 steps of 25)`);
-    // Only frames while the wheel is turning count: a pause in the input (a slow dispatch on a loaded machine) is not the drum's to move.
-    const turning = rec.frames.filter((f) => {
-      const prior = rec.wheels.filter((w) => w <= f.t);
-      return prior.length > 0 && f.t - prior[prior.length - 1] <= 50 && f.t >= firstWheel && f.t <= lastWheel;
-    });
-    let moved = 0;
-    for (let i = 1; i < turning.length; i += 1) if (turning[i].sig !== turning[i - 1].sig) moved += 1;
-    const share = moved / Math.max(1, turning.length - 1);
-    check(share >= 0.9, `the drum moved on ${Math.round(share * 100)}% of frames during the wheel burst, want 90%`);
+  if (!load) check(travel === 750, `the drum got ${travel} px of wheel travel, want 750 (30 steps of 25)`);
+  // A step owes a move only when it changes the option the drum points at (round(raw)): the drum must move in the frame
+  // that shows the change or the next one. Steps that leave the front where it is owe nothing, so the share measures how
+  // the drum handles the input, not how often the browser paints a frame.
+  let owed = 0;
+  let moved = 0;
+  for (let i = 1; i + 1 < rec.frames.length; i += 1) {
+    const prev = rec.frames[i - 1];
+    const cur = rec.frames[i];
+    const next = rec.frames[i + 1];
+    if (cur.front === prev.front) continue;
+    owed += 1;
+    if (cur.sig !== prev.sig || next.sig !== cur.sig) moved += 1;
   }
+  check(owed >= 3, `the drum changed its front option only ${owed} times during the burst`);
+  const share = moved / owed;
+  check(share >= 0.9, `the drum moved on ${Math.round(share * 100)}% of ${owed} front changes, want 90%`);
   check(rec.settledAt !== null, "the drum never settled");
   const settleMs = rec.settledAt - lastWheel;
-  // The ease runs on frames, so under 4x CPU load its frames come 4x slower: the budget scales with the load.
+  // The drum eases in time (menu-drum.ts EASE_MS 45, SETTLE_MS 50, REST 0.02): from a lag of up to two options it settles
+  // within (50 + 45 ln(2 / 0.02)) ms, about 257 ms at 60 Hz. Counted in presented frames, plus one frame of slack, so a
+  // browser that paints slowly is not a failure of the drum. Update the bound if those constants change.
+  const presented = rec.frames.filter((f) => f.t > lastWheel && f.t <= rec.settledAt).length;
+  const SETTLE_FRAMES = Math.ceil(((50 + 45 * Math.log(2 / 0.02)) * 60) / 1000) + 1;
+  check(presented <= SETTLE_FRAMES, `the drum took ${presented} frames to settle after the last wheel event, want ${SETTLE_FRAMES} or less`);
+  // The wall-clock budget applies only where the frames are fast enough (<= 20 ms apart) to measure it: a slow paint rate
+  // is not a slow drum. Under load the budget is wider, as the frames come slower.
+  const gaps = rec.frames.slice(1).map((f, i) => f.t - rec.frames[i].t).sort((a, b) => a - b);
+  const frameGap = gaps[Math.floor(gaps.length / 2)];
   const budget = load ? 1000 : 250;
-  check(settleMs <= budget, `the drum settled ${Math.round(settleMs)} ms after the last wheel event, want ${budget} or less`);
+  if (load || frameGap <= 20) check(settleMs <= budget, `the drum settled ${Math.round(settleMs)} ms after the last wheel event, want ${budget} or less`);
   // Each 100 px is one option: the drum settles on the option nearest where the travel ends.
   const labels = await drum.locator(".drum-label").allTextContents();
   const at = Math.min(labels.length - 1, Math.max(0, Math.round(startIndex + travel / 100)));
