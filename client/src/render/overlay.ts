@@ -7,7 +7,7 @@ import type { Camera, ViewRect } from "../camera";
 import { findLocal, worldXf } from "../camera";
 import type { Scene } from "../frame";
 import { FLAG_AIR_JUMP, FLAG_FROZEN, FLAG_LOCAL, HIT_KIND_PLAYER } from "../frame";
-import { TEAM_BLUE, TEAM_RED, TEAM_SPECTATOR, isTeamMode } from "../protocol";
+import { TEAM_BLUE, TEAM_FFA, TEAM_RED, TEAM_SPECTATOR, isTeamMode } from "../protocol";
 import { reducedMotion } from "../ui/a11y";
 import { AWAY_RING_BELOW_LUM, cssHex, playerRgb, relLuminance } from "./geometry";
 
@@ -19,6 +19,19 @@ const INTRO_FROM = 1.35;
 const INTRO_IN_S = 0.25;
 const BANNER_TITLE_FONT = "700 22px system-ui, sans-serif";
 const BANNER_SUB_FONT = "500 13px system-ui, sans-serif";
+const CARD_LOWER_FONT = "700 110px system-ui, sans-serif";
+const CARD_UPPER_FONT = "600 90px system-ui, sans-serif";
+/** Winner card: a 35% black veil, #dddddd text, a 130 px box with a 10 px border (CSS content-box), rotated -28 degrees. */
+const CARD_VEIL = "rgba(0, 0, 0, 0.35)";
+const CARD_TEXT = "#dddddd";
+const CARD_BOX = 130;
+const CARD_BORDER = 10;
+const CARD_ANGLE = (-28 * Math.PI) / 180;
+/** The card waits CARD_DELAY_S after the round ends, fades in over CARD_FADE_S, then slides in over CARD_SLIDE_S after CARD_SLIDE_DELAY_S. */
+const CARD_DELAY_S = 0.5;
+const CARD_FADE_S = 0.3;
+const CARD_SLIDE_DELAY_S = 0.2;
+const CARD_SLIDE_S = 0.6;
 const BAR_FONT = "500 13px system-ui, sans-serif";
 const PERSONAL_FONT = "700 15px system-ui, sans-serif";
 const FEED_FONT = "600 12px system-ui, sans-serif";
@@ -131,6 +144,8 @@ export class Overlay {
   private readonly labelSprites = new Map<string, LabelSprite>();
   private readonly feed: KillEntry[] = [];
   private readonly hitFlashes: { id: number; at: number }[] = [];
+  /** Tick the round-end winner card began (its delay and animation count from here); null while no card is due. */
+  private cardFrom: number | null = null;
   /** CSS px at the top taken by a screen's own controls (AppCtx.reserveTop); the top bars go below. */
   topInset = 0;
   /** The game view's rect in window CSS px (the canvas covers it). */
@@ -197,11 +212,13 @@ export class Overlay {
     const cssH = this.canvas.height / dpr;
     if (chrome) this.recordEvents(scene);
     this.drawDamageBars(scene, cam, cssW, cssH);
+    this.drawTurrets(scene, cam, cssW, cssH);
     if (chrome) this.drawIntro(scene, tickHz, cssW, cssH);
     this.publishDraw(scene.tick, this.drawNames(scene, cam, names, cssW, cssH));
     if (chrome) this.drawHitFlashes(scene, cam, cssW, cssH);
     if (!chrome) return;
     this.publishAway(scene.tick, this.drawAway(scene, cam, names, cssW, cssH));
+    this.drawWinnerCard(scene, names, tickHz, cssW, cssH);
     this.drawBanner(scene, names, cssW, cssH);
     this.drawPersonal(scene, names, cssW);
     this.drawFeed(names, cssW);
@@ -535,6 +552,60 @@ export class Overlay {
     }
   }
 
+  /**
+   * The round-end winner card (the original's E7) for a non-team round a player won: a rotated box in the winner's colour
+   * with a border 85% of that colour, "WINS" and the name, on a 35% black veil. It appears CARD_DELAY_S after the round
+   * ends (no text banner meanwhile), fades in, and its contents slide down from two window heights. Reduced motion shows it still.
+   */
+  private drawWinnerCard(scene: Scene, names: ReadonlyMap<number, string>, tickHz: number, cssW: number, cssH: number): void {
+    if (scene.roundOver < 0 || scene.gameOver >= 0 || scene.winner < 0 || isTeamMode(scene.mode)) {
+      this.cardFrom = null;
+      this.publishCard(null);
+      return;
+    }
+    this.cardFrom ??= scene.tick;
+    const hz = tickHz > 0 ? tickHz : 1;
+    const age = reducedMotion() ? Infinity : (scene.tick - this.cardFrom) / hz - CARD_DELAY_S;
+    if (age < 0) {
+      this.publishCard(null);
+      return;
+    }
+    const opacity = Math.min(1, age / CARD_FADE_S);
+    const slide = Math.min(1, Math.max(0, age - CARD_SLIDE_DELAY_S) / CARD_SLIDE_S);
+    // easeInExpo: the contents start two window heights up and reach their place at the end.
+    const eased = slide === 0 ? 0 : 2 ** (10 * slide - 10);
+    const offsetY = -2 * cssH * (1 - eased);
+    const rgb = playerRgb(TEAM_FFA, scene.winner);
+    const name = nameOf(names, scene.winner);
+    const ctx = this.ctx;
+    ctx.save();
+    ctx.globalAlpha = opacity;
+    ctx.fillStyle = CARD_VEIL;
+    ctx.fillRect(0, 0, cssW, cssH);
+    ctx.translate(0, offsetY);
+    ctx.textAlign = "right";
+    ctx.textBaseline = "bottom";
+    ctx.fillStyle = CARD_TEXT;
+    ctx.font = CARD_LOWER_FONT;
+    ctx.fillText("WINS", cssW * 0.98, cssH);
+    ctx.font = CARD_UPPER_FONT;
+    ctx.fillText(name, cssW * 0.98, cssH - 105);
+    const outer = CARD_BOX + 2 * CARD_BORDER;
+    ctx.translate(cssW - 50 - outer / 2, cssH - 200 - outer / 2);
+    ctx.rotate(CARD_ANGLE);
+    ctx.fillStyle = cssHex(darken(rgb));
+    ctx.fillRect(-outer / 2, -outer / 2, outer, outer);
+    ctx.fillStyle = cssHex(rgb);
+    ctx.fillRect(-CARD_BOX / 2, -CARD_BOX / 2, CARD_BOX, CARD_BOX);
+    ctx.restore();
+    this.publishCard({ tick: scene.tick, name, colour: cssHex(rgb), opacity, offsetY });
+  }
+
+  /** QA hook (like __qaDraw): the winner card this frame, or null when none is drawn. */
+  private publishCard(card: { tick: number; name: string; colour: string; opacity: number; offsetY: number } | null): void {
+    Object.assign(globalThis, { __qaCard: card });
+  }
+
   /** The local player's latest kill, death or suicide: the largest active timer in its score row. */
   private drawPersonal(scene: Scene, names: ReadonlyMap<number, string>, cssW: number): void {
     const row = scene.scores.find((r) => r.id === scene.localId);
@@ -676,6 +747,12 @@ function nameOf(names: ReadonlyMap<number, string>, id: number): string {
   return names.get(id) ?? `player ${id}`;
 }
 
+/** `rgb` with each channel at 85%: the winner card's border. */
+function darken(rgb: number): number {
+  const channel = (shift: number) => Math.round(((rgb >> shift) & 255) * 0.85);
+  return (channel(16) << 16) | (channel(8) << 8) | channel(0);
+}
+
 function killText(k: KillEntry, names: ReadonlyMap<number, string>): string {
   const victim = nameOf(names, k.victim);
   if (k.killer < 0 || k.killer === k.victim) return `${victim} died`;
@@ -692,6 +769,8 @@ interface Banner {
 function bannerText(scene: Scene, names: ReadonlyMap<number, string>): Banner | null {
   const matchOver = scene.gameOver >= 0;
   if (!matchOver && scene.roundOver < 0) return null;
+  // A round a player wins is the winner card's (drawWinnerCard); only team rounds and match ends read as text.
+  if (!matchOver && scene.winner >= 0 && !isTeamMode(scene.mode)) return null;
   const sub = matchOver ? null : "New round incoming…";
   // The original's round-end texts: a team round with no team to score reads "New round incoming" (-1) or "Draw" (-2);
   // a non-team round with nobody left reads "New round incoming..." (-1) or "Draw!" (-2). Neither has a second line.
