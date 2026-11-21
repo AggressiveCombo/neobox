@@ -137,6 +137,9 @@ pub struct MapSettings {
     /// `19` player edge wrapping.
     pub wrap: bool,
     /// Neobox key `"aspect"` (not numeric, so the original never reads it): `"wide"` selects the 16:9 view; absent or `"classic"` the original's 16:10.
+    /// Not in the binary encoding: a new field there would stop every recorded snapshot (clips, saved replays) decoding. A wide
+    /// map keeps `"aspect": "wide"` in `extra`, and [`MapSettings::restore_wide`] reads it back after a decode.
+    #[serde(skip)]
     pub wide: bool,
     pub extra: Extra,
 }
@@ -172,6 +175,11 @@ pub const WIDE_VIEW_ASPECT: f64 = 16.0 / 9.0;
 impl MapSettings {
     pub fn view_aspect(&self) -> f64 {
         if self.wide { WIDE_VIEW_ASPECT } else { CLASSIC_VIEW_ASPECT }
+    }
+
+    /// Set `wide` from `extra` (a binary decode leaves it false; see the field).
+    pub fn restore_wide(&mut self) {
+        self.wide = self.extra.to_map().get("aspect").and_then(Value::as_str) == Some("wide");
     }
 }
 
@@ -709,6 +717,11 @@ fn list<'a>(root: &'a Map<String, Value>, k: &str, required: bool) -> Result<&'a
 
 fn decode_settings(o: &Map<String, Value>) -> Result<MapSettings, MapError> {
     let d = MapSettings::default();
+    let wide = decode_aspect(o)?;
+    let mut extra = extra(o, &["3", "4", "5", "7", "8", "9", "10", "11", "12", "13", "15", "16", "17", "18", "19", "aspect"]);
+    if wide {
+        extra.insert("aspect".into(), Value::from("wide"));
+    }
     Ok(MapSettings {
         screen_width: crate::js::min(num(o, "3", d.screen_width), 100.0),
         snap: num(o, "4", d.snap),
@@ -725,8 +738,8 @@ fn decode_settings(o: &Map<String, Value>) -> Result<MapSettings, MapError> {
         color_bottom: num(o, "17", d.color_bottom),
         gravity: num(o, "18", d.gravity),
         wrap: flag(o, "19", d.wrap),
-        wide: decode_aspect(o)?,
-        extra: extra_of(o, &["3", "4", "5", "7", "8", "9", "10", "11", "12", "13", "15", "16", "17", "18", "19", "aspect"]),
+        wide,
+        extra: Extra::from_map(&extra),
     })
 }
 

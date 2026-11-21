@@ -159,7 +159,9 @@ pub fn encode_state(state: &State) -> Vec<u8> {
 
 pub fn decode_state(b: &[u8]) -> Result<State, MatchError> {
     let raw = miniz_oxide::inflate::decompress_to_vec_zlib_with_limit(b, 64 << 20).map_err(|_| MatchError::Snapshot)?;
-    postcard::from_bytes(&raw).map_err(|_| MatchError::Snapshot)
+    let mut state: State = postcard::from_bytes(&raw).map_err(|_| MatchError::Snapshot)?;
+    state.settings.restore_wide();
+    Ok(state)
 }
 
 // ------------------------------------------------------------------ server

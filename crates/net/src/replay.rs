@@ -540,6 +540,30 @@ mod tests {
         }
     }
 
+    /// The menu plays this clip on a server with no clips. Its snapshot was encoded by an older build, so it fails as soon
+    /// as a change to the state's binary layout stops old recordings (clips, saved replays) decoding.
+    #[test]
+    fn bundled_demo_clip_still_plays() {
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../client/public/clips/demo.json");
+        let replay = Replay::from_json(&std::fs::read(path).unwrap()).unwrap();
+        assert!(replay.snapshot.is_some(), "the demo must keep a snapshot to cover old encoded states");
+        let player = ReplayPlayer::new(replay).unwrap();
+        assert!(player.end_tick() > player.first_tick());
+    }
+
+    /// A wide map's view survives a snapshot (a late join, a clip that starts mid-match) though `wide` is not encoded.
+    #[test]
+    fn snapshot_keeps_a_wide_view() {
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../maps/01-proving-grounds.json");
+        let mut json: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+        json["map"]["set"]["aspect"] = "wide".into();
+        let map = MapData::from_json(&json["map"]).unwrap();
+        let state = State::from_map(&map);
+        assert!(state.settings.wide);
+        let back = decode_state(&encode_state(&state)).unwrap();
+        assert_eq!(back.settings.view_aspect(), state.settings.view_aspect());
+    }
+
     #[test]
     fn clip_plays_back_like_the_source_match() {
         let start = start();
