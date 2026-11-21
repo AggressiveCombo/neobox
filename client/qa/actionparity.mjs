@@ -95,10 +95,28 @@ const charging = !!held && held.players.some((p) => p.rocket > 0);
 const rocketPass = idle !== null && held !== null && charging && rocketAdded.length === 0;
 
 // --- rocket-flight: a fired rocket draws its nose grey and its body and trail in the owner's colour, which grows as the rocket
-// flies. Samples the frames for 480 ms after the release of a 1 s charge. ---
+// flies. Samples the frames for 480 ms after the release of a 1 s charge. The rocket-charge row just fired a rocket, so this
+// row first waits until that rocket has left the frame and the launcher charges again (a press during the cooldown charges
+// nothing): without that wait the row sampled the old rocket (nose and trail flat from the first sample) or no rocket at all. ---
 async function rocketFlight(pg) {
-  const idleNose = (await frameOf(pg))?.colours[ROCKET_NOSE_RGB] ?? 0;
-  await pg.keyboard.down("z");
+  let idleNose = null;
+  for (let t = 0; t < 50 && idleNose !== 0; t++) {
+    idleNose = (await frameOf(pg))?.colours[ROCKET_NOSE_RGB] ?? 0;
+    if (idleNose !== 0) await sleep(100);
+  }
+  let charging = false;
+  for (let attempt = 0; attempt < 10 && !charging; attempt++) {
+    await pg.keyboard.down("z");
+    for (let t = 0; t < 6 && !charging; t++) {
+      await sleep(50);
+      charging = ((await frameOf(pg))?.players[0]?.rocket ?? -1) > 0;
+    }
+    if (!charging) {
+      await pg.keyboard.up("z");
+      await sleep(500);
+    }
+  }
+  if (!charging) return { pass: false, nose: [], trail: [], owner: null, reason: "the launcher never charged" };
   await sleep(1000);
   const me = (await frameOf(pg))?.players[0] ?? null;
   const rgb = me ? await pg.evaluate(([team, id]) => globalThis.__qaPlayerRgb?.(team, id) ?? null, [me.team, me.id]) : null;
