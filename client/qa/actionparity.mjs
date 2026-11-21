@@ -148,7 +148,15 @@ async function rocketFlight(pg) {
   const pass = Math.max(...nose) >= idleNose + 6 && Math.max(...trail) >= 6 && Math.max(...trail) > trail[0];
   return { pass, nose, trail, owner: owner < 0 ? null : `0x${owner.toString(16).padStart(6, "0")}` };
 }
-const flight = await rocketFlight(page);
+// Its own practice: the rocket-charge row's rocket can lodge in a wall and stay, and while it does the launcher fires no
+// other (nose and trail flat from the first sample in the r47 gate and once on r50).
+const flightCtx = await browser.newContext({ viewport: { width: 1366, height: 768 } });
+const flightPage = await flightCtx.newPage();
+flightPage.on("pageerror", (e) => errors.push(String(e).slice(0, 200)));
+await startPractice({ page: flightPage }, srv.base, null, { pixels: false });
+await sleep(3000);
+const flight = await rocketFlight(flightPage);
+await flightCtx.close();
 const rocketFlightPass = flight.pass;
 
 // Pixels in a PNG screenshot whose RGB is exactly rgb (the living body is drawn by geometry.ts, outside the wasm vertex buffer).
@@ -251,10 +259,13 @@ async function dashRow() {
     }
     await dpage.keyboard.up("z");
     await dpage.keyboard.up("d");
-    const foot = rgb === null ? -1 : bodyLowest(idleShot, rgb, idleBox);
+    // Each shot is measured at its own lowest body row: a dash can carry the body up or down a few rows, and the idle
+    // foot band then missed it (held 0 in the r47 gate).
+    const idleFoot = rgb === null ? -1 : bodyLowest(idleShot, rgb, idleBox);
+    const heldFoot = rgb === null || heldShot === null ? -1 : bodyLowest(heldShot, rgb, heldBox);
     const body = {
-      idle: foot < 0 ? 0 : bodyOutside(idleShot, rgb, idleBox, foot - 7, foot),
-      held: foot < 0 || heldShot === null ? 0 : bodyOutside(heldShot, rgb, heldBox, foot - 7, foot),
+      idle: idleFoot < 0 ? 0 : bodyOutside(idleShot, rgb, idleBox, idleFoot - 7, idleFoot),
+      held: heldFoot < 0 ? 0 : bodyOutside(heldShot, rgb, heldBox, heldFoot - 7, heldFoot),
     };
     for (const [name, shot] of [["dash-idle", idleShot], ["dash-held", heldShot]]) if (shot) writeFileSync(path.join(outDir(), "evidence", `${name}.png`), shot);
     // The bat's swing can cross a few body pixels in one frame: a lift would drop the count to a fraction of idle.
@@ -367,6 +378,14 @@ const staminaPassOf = (probe) => {
 const boxPassOf = (probe) => !!probe && probe.boxH > 0 && probe.boxRows === probe.boxH;
 // The marker has yellow pixels, and its tip sits 4 CSS px above the box top.
 const markerPassOf = (probe) => !!probe?.marker && probe.marker.yellow > 0 && Math.abs(probe.yBase - probe.marker.bottom - 4 * probe.dpr) <= 1;
+// The rows before this one spend stamina (rockets, push, bat); an empty bar has no green to find. Wait (up to 10 s) until
+// the stamina has refilled: it is above zero and has stopped rising for half a second.
+for (let t = 0, last = -1, still = 0; t < 100 && still < 5; t++) {
+  await sleep(100);
+  const s = (await frame())?.players[0]?.stamina ?? 0;
+  still = s > 0 && s === last ? still + 1 : 0;
+  last = s;
+}
 const stamina1 = await staminaOn(page);
 const ctx3 = await browser.newContext({ viewport: { width: 1366, height: 768 }, deviceScaleFactor: 3 });
 const page3 = await ctx3.newPage();
@@ -410,7 +429,10 @@ async function corpseOf(pg, label = "default") {
   const me = alive?.players[0] ?? null;
   const rgb = me ? await pg.evaluate(([team, id]) => globalThis.__qaPlayerRgb?.(team, id) ?? null, [me.team, me.id]) : null;
   const expected = rgb === null ? null : packedOf(rgb);
-  await pg.keyboard.down("ArrowLeft");
+  // Walk left; a wall or a ledge that a hop can't clear stops the walk, so turn round once the player has not moved for
+  // a second (the spawn decides which edge is reachable; "player did not fall" in the r47 gate).
+  let dir = "ArrowLeft";
+  await pg.keyboard.down(dir);
   let dead = null;
   const xs = [];
   const until = Date.now() + FALL_MS;
@@ -421,8 +443,15 @@ async function corpseOf(pg, label = "default") {
     const now = await frameOf(pg);
     xs.push(now?.players[0]?.x ?? null);
     if (now && now.players.length === 0) { dead = now; break; }
+    const last = xs.slice(-4);
+    if (last.length === 4 && last.every((x) => x !== null && Math.abs(x - last[0]) < 0.1)) {
+      await pg.keyboard.up(dir);
+      dir = dir === "ArrowLeft" ? "ArrowRight" : "ArrowLeft";
+      await pg.keyboard.down(dir);
+      xs.push(null);
+    }
   }
-  await pg.keyboard.up("ArrowLeft");
+  await pg.keyboard.up(dir);
   const shotDead = dead ? await pg.screenshot() : null;
   for (const [name, shot] of [["alive", shotAlive], ["dead", shotDead]]) {
     if (shot) writeFileSync(path.join(outDir(), "evidence", `corpse-${label}-${name}.png`), shot);
