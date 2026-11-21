@@ -182,9 +182,11 @@
 
 .room-col-chat {
   grid-area: chat;
+  /* the row's height, not the chat's own content: the log scrolls inside it instead of growing the lobby */
+  align-self: stretch;
   position: sticky;
   top: var(--margin);
-  max-height: calc(100dvh - 2 * var(--margin));
+  max-height: calc(100dvh - var(--wip-h, 0px) - 2 * var(--margin));
 }
 
 .room-panel {
@@ -742,7 +744,7 @@ button.room-menu-item[aria-checked="true"] {
 }
 
 .room-chat-log {
-  flex: 1;
+  flex: 1 1 0;
   min-height: 240px;
   overflow-y: auto;
   display: flex;
@@ -840,6 +842,12 @@ button.room-menu-item[aria-checked="true"] {
   .room-chat {
     height: auto;
   }
+
+  /* a fixed log height: messages scroll inside it rather than growing the lobby */
+  .room-chat-log {
+    flex: none;
+    height: 240px;
+  }
 }
 
 @media (max-width: 599px) {
@@ -884,7 +892,7 @@ button.room-menu-item[aria-checked="true"] {
   }
 
   .room-chat-log {
-    min-height: 50vh;
+    height: 50vh;
   }
 
   .room-more {
