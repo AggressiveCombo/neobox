@@ -599,6 +599,108 @@ async function training(s) {
 }
 
 /**
+ * Training hall, knockout lesson: the local player stomps a dummy from above (a kill by player 0 of dummy 1 or 2, read from
+ * the framebuffer's kill list), which completes lesson 3 and opens lesson 4. The lesson names no key, so the kill is the check.
+ */
+async function trainingKnockout(s) {
+  const h = await s.open("training-knockout", { name: uniqueName("tk") });
+  const { page } = h;
+  await page.goto(s.base);
+  await menuName(page).waitFor();
+  await navTo(page, "Training");
+  await page.locator(".training-text").waitFor();
+  await waitForPixels(h, "training canvas");
+  await button(page, "Next").click();
+  await button(page, "Next").click();
+  check((await page.locator(".training-count").textContent()) === "3 of 7", "the knockout lesson is not third of seven");
+  const snap = () =>
+    page.evaluate(() => {
+      const fb = globalThis.__qaEngine?.framebuffer?.();
+      if (!fb) return null;
+      const u = fb.u32,
+        f = fb.f32;
+      const players = [];
+      for (let i = 0; i < u[3]; i++) {
+        const o = u[4] + i * 14;
+        players.push({ id: u[o], x: f[o + 1], y: f[o + 2] });
+      }
+      const kills = [];
+      for (let i = 0; i < u[30]; i++) {
+        const o = u[31] + i * 3;
+        kills.push({ killer: u[o], victim: u[o + 1] });
+      }
+      return { players, kills };
+    });
+  let held = null;
+  const setHeld = async (k) => {
+    if (held === k) return;
+    if (held) await page.keyboard.up(held);
+    if (k) await page.keyboard.down(k);
+    held = k;
+  };
+  // the framebuffer's kill list is transient (a kill can pass between two reads), so a knock also shows as dummy 1 leaving
+  // the framebuffer: a dummy only leaves by dying
+  let knocked = false;
+  let dummySeen = false;
+  const scan = async () => {
+    const v = await snap();
+    if (v?.kills.some((k) => k.killer === 0 && (k.victim === 1 || k.victim === 2))) knocked = true;
+    if (v?.players.some((p) => p.id === 1)) dummySeen = true;
+    else if (dummySeen && v?.players.some((p) => p.id === 0)) knocked = true;
+    return v;
+  };
+  // the local player and dummy 1 while both stand; null once a kill ends the walk
+  const state = async () => {
+    for (let i = 0; i < 100; i++) {
+      const v = await scan();
+      if (knocked) return null;
+      const me = v?.players.find((p) => p.id === 0);
+      const d = v?.players.find((p) => p.id === 1);
+      if (me && d) return { me, d };
+      await sleep(100);
+    }
+    throw new Error("the local player and dummy 1 never appeared in the framebuffer");
+  };
+  try {
+    // walk to the dummy's right, jump, and steer left over it; repeat until the local player's kill lands
+    for (let attempt = 0; attempt < 8 && !knocked; attempt++) {
+      for (let i = 0; i < 80; i++) {
+        const st = await state();
+        if (!st) break;
+        const dx = st.d.x - st.me.x;
+        if (dx > -3.2 && dx < -1.2 && st.me.y > 23.4) break;
+        await setHeld(dx > -2.2 ? "ArrowRight" : "ArrowLeft");
+        await sleep(30);
+      }
+      if (knocked) break;
+      await setHeld("ArrowLeft");
+      await page.keyboard.down("ArrowUp");
+      await sleep(100);
+      await page.keyboard.up("ArrowUp");
+      for (let i = 0; i < 40 && !knocked; i++) {
+        await scan();
+        await sleep(30);
+      }
+      await setHeld(null);
+      await sleep(800);
+    }
+  } finally {
+    await setHeld(null);
+  }
+  check(knocked, "the local player never knocked a dummy out");
+  // the completed check shows for ADVANCE_MS (450 ms) before lesson 4 opens
+  let count = "";
+  for (let i = 0; i < 30 && count !== "4 of 7"; i++) {
+    await sleep(100);
+    count = await page.locator(".training-count").textContent();
+  }
+  check(count === "4 of 7", `the knockout did not complete its lesson (counter ${count})`);
+  await button(page, "Leave").click();
+  await menuName(page).waitFor();
+  return "stomped a dummy from above: lesson 3 completed, lesson 4 of 7 opened";
+}
+
+/**
  * E42: in the training hall the camera follows the player at the base view size. Walking right, away from the dummies,
  * the view width (camera.ts publishes it on globalThis.__qaCam) must not change; it zoomed out to keep the dummies in.
  */
@@ -2216,6 +2318,7 @@ export const scenarios = [
   { name: "wip mark", run: wipMark },
   { name: "lobby signals", run: lobbySignals },
   { name: "training", run: training },
+  { name: "training knockout", run: trainingKnockout },
   { name: "training camera", run: trainingCamera },
   { name: "opponent stamina", run: opponentStamina },
   { name: "news", run: news },

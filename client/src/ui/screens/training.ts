@@ -7,6 +7,7 @@ import type { Engine, LocalStart } from "../../engine";
 import { GAMEPAD_LABELS, inputProfile, keyLabel, onInputProfile, padButton } from "../../input";
 import { ACTIONS, type Action, prefs } from "../../prefs";
 import { FrameLoop } from "../../local-loop";
+import type { Scene } from "../../frame";
 import type { Screen } from "../../state";
 import { type Child, h } from "../dom";
 import { type EngineStatus, engineStatus } from "../engine-status";
@@ -90,6 +91,11 @@ const STEP_ACTIONS: readonly (readonly Action[])[] = [
   ["grab"],
   [],
 ];
+/** The step that completes when the local player knocks a dummy out; it names no key, so the kill (a stomp or any attack) is the check. */
+const KNOCKOUT_STEP = 2;
+/** The local player's id and the dummies' ids (begin()): a kill of one of them by the local player completes KNOCKOUT_STEP. */
+const LOCAL_ID = 0;
+const DUMMY_IDS: readonly number[] = [1, 2];
 const ACTION_BITS = Object.fromEntries(ACTIONS.map((a) => [a.action, a.bit])) as Record<Action, number>;
 /** How long a completed step shows its check before the next one opens. */
 const ADVANCE_MS = 450;
@@ -183,7 +189,8 @@ export const trainingScreen: ScreenFactory = (ctx) => {
     detectPresses(mask, dt);
     prevMask = mask;
     eng.localFrame(dt, mask);
-    ctx.present(names, TICK_HZ);
+    const scene = ctx.present(names, TICK_HZ);
+    if (scene) detectKnockouts(scene);
   }
 
   /** Marks each control the lesson names once it is pressed; when all are, the card flashes and the step moves on. */
@@ -200,10 +207,19 @@ export const trainingScreen: ScreenFactory = (ctx) => {
     if (need.length === 0) return;
     for (const action of need) if (fresh & ACTION_BITS[action]) hit.add(action);
     markHits();
-    if (need.every((action) => hit.has(action))) {
-      advanceIn = ADVANCE_MS;
-      cardEl?.classList.add("is-complete");
-    }
+    if (need.every((action) => hit.has(action))) completeStep();
+  }
+
+  /** Shows the step's check, then moves on: the check is a short wait, so a press during it still counts toward the next step. */
+  function completeStep(): void {
+    advanceIn = ADVANCE_MS;
+    cardEl?.classList.add("is-complete");
+  }
+
+  /** Completes KNOCKOUT_STEP when this frame's scene reports the local player killing a dummy (new kills only, since present reports each once). */
+  function detectKnockouts(scene: Scene): void {
+    if (lesson !== KNOCKOUT_STEP || advanceIn !== null) return;
+    if (scene.kills.some((k) => k.killer === LOCAL_ID && DUMMY_IDS.includes(k.victim))) completeStep();
   }
 
   /** Shows which named controls are pressed so far in this step. */
