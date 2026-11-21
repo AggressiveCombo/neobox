@@ -28,7 +28,7 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { PNG } from "pngjs";
-import { launchEngine, startServer, startPractice, runCleanups, sleep, outDir } from "./lib-qa.mjs";
+import { launchEngine, startServer, startPractice, runCleanups, sleep, outDir, createRoom, startMatch, uniqueName } from "./lib-qa.mjs";
 
 // packRgba (geometry.ts) packs r, g, b into the low 24 bits and alpha into the top byte.
 const LAUNCHER_RGB = new Set([0xdddddd, 0x20208c]); // LINE_RGB 0xdddddd; LAUNCHER_RED_RGB 0x8c2020 (r=0x8c, g=0x20, b=0x20 packs to 0x20208c)
@@ -121,7 +121,7 @@ for (const [name, shot] of [["bat-idle", batIdleShot], ["bat-held", batHeldShot]
 const batPass = batting && batBody.idle > 0 && batBody.held >= batBody.idle;
 
 // The local label box (CSS px -> device px): the stamina bar is drawn in its top row and changes colour as a dash spends stamina.
-const labelBoxOf = (id) => page.evaluate((pid) => {
+const labelBoxOf = (pg, id) => pg.evaluate((pid) => {
   const r = globalThis.__qaDraw?.rects.find((q) => q.kind === "label" && q.id === pid);
   const d = devicePixelRatio;
   return r ? { x0: r.box.left * d, y0: r.box.top * d, x1: r.box.right * d, y1: r.box.bottom * d } : null;
@@ -153,34 +153,55 @@ function bodyLowest(buf, rgb, box) {
 }
 
 // --- dash-body: the body keeps its colour while a dash runs (the original draws no dash lift). Dash needs the dashEnabled
-// rule, which the Free play preset leaves off: the build must enable it. ---
-await sleep(3000); // the bat swing and its stamina settle; a dash needs 30 stamina
-const dashIdle = await frame();
-const dashIdleShot = await page.screenshot();
-const dashMe = dashIdle?.players[0] ?? null;
-const dashIdleBox = dashMe ? await labelBoxOf(dashMe.id) : null;
-const dashRgb = dashMe ? await page.evaluate(([team, id]) => globalThis.__qaPlayerRgb?.(team, id) ?? null, [dashMe.team, dashMe.id]) : null;
-await page.keyboard.down("d");
-await page.keyboard.down("z");
-let dashHeld = null;
-let dashHeldShot = null;
-let dashHeldBox = null;
-for (let i = 0; i < 40 && dashHeld === null; i++) {
-  await sleep(50);
-  const f = await frame();
-  if ((f?.players[0]?.flags & 64) !== 0) {
-    dashHeld = f;
-    dashHeldShot = await page.screenshot();
-    dashHeldBox = await labelBoxOf(f.players[0].id);
+// rule, which the Free play preset leaves off: a host room turns it on with /set, then starts a match of its own. ---
+async function dashRow() {
+  const dctx = await browser.newContext({ viewport: { width: 1366, height: 768 } });
+  const dpage = await dctx.newPage();
+  const h = { page: dpage };
+  try {
+    await createRoom(h, srv.base, uniqueName("room"), { isPublic: false });
+    const chat = dpage.getByLabel("Chat message", { exact: true });
+    await chat.fill("/set dashEnabled true");
+    await chat.press("Enter");
+    await dpage.locator("div.room-chat-log").getByText("dashEnabled: true").waitFor();
+    await startMatch(h);
+    await dpage.evaluate(() => document.activeElement?.blur());
+    await sleep(3000); // the bat swing and its stamina settle; a dash needs 30 stamina
+    const idle = await frameOf(dpage);
+    const idleShot = await dpage.screenshot();
+    const me = idle?.players[0] ?? null;
+    const idleBox = me ? await labelBoxOf(dpage, me.id) : null;
+    const rgb = me ? await dpage.evaluate(([team, id]) => globalThis.__qaPlayerRgb?.(team, id) ?? null, [me.team, me.id]) : null;
+    await dpage.keyboard.down("d");
+    await dpage.keyboard.down("z");
+    let held = null;
+    let heldShot = null;
+    let heldBox = null;
+    for (let i = 0; i < 40 && held === null; i++) {
+      await sleep(50);
+      const f = await frameOf(dpage);
+      if ((f?.players[0]?.flags & 64) !== 0) {
+        held = f;
+        heldShot = await dpage.screenshot();
+        heldBox = await labelBoxOf(dpage, f.players[0].id);
+      }
+    }
+    await dpage.keyboard.up("z");
+    await dpage.keyboard.up("d");
+    const foot = rgb === null ? -1 : bodyLowest(idleShot, rgb, idleBox);
+    const body = {
+      idle: foot < 0 ? 0 : bodyOutside(idleShot, rgb, idleBox, foot - 7, foot),
+      held: foot < 0 || heldShot === null ? 0 : bodyOutside(heldShot, rgb, heldBox, foot - 7, foot),
+    };
+    for (const [name, shot] of [["dash-idle", idleShot], ["dash-held", heldShot]]) if (shot) writeFileSync(path.join(outDir(), "evidence", `${name}.png`), shot);
+    // The bat's swing can cross a few body pixels in one frame: a lift would drop the count to a fraction of idle.
+    return { pass: held !== null && body.idle > 0 && body.held >= body.idle * 0.9, dashing: held !== null, flags: held?.players[0]?.flags ?? null, body, rgb };
+  } finally {
+    await dctx.close();
   }
 }
-await page.keyboard.up("z");
-await page.keyboard.up("d");
-const dashing = dashHeld !== null;
-const dashFoot = dashRgb === null ? -1 : bodyLowest(dashIdleShot, dashRgb, dashIdleBox);
-const dashBody = { idle: dashFoot < 0 ? 0 : bodyOutside(dashIdleShot, dashRgb, dashIdleBox, dashFoot - 7, dashFoot), held: dashFoot < 0 || dashHeldShot === null ? 0 : bodyOutside(dashHeldShot, dashRgb, dashHeldBox, dashFoot - 7, dashFoot) };
-for (const [name, shot] of [["dash-idle", dashIdleShot], ["dash-held", dashHeldShot]]) if (shot) writeFileSync(path.join(outDir(), "evidence", `${name}.png`), shot);
-const dashPass = dashing && dashBody.idle > 0 && dashBody.held >= dashBody.idle;
+const dash = await dashRow();
+const dashPass = dash.pass;
 
 // --- movement-trail: the original draws no motion trail behind a moving body (its jump and dash frames show none), so no
 // trail-coloured pixels appear while the body rises. The body must move, or the check passes vacuously. ---
@@ -374,7 +395,7 @@ const result = {
     },
     "bat-charge": { pass: batPass, batting, flags: batHeld?.players[0]?.flags ?? null, body: batBody, rgb: batRgb === null ? null : `0x${batRgb.toString(16).padStart(6, "0")}` },
     "movement-trail": { pass: trailPass, moved: trailMoved, y: jumpYs, trailPixels },
-    "dash-body": { pass: dashPass, dashing, flags: dashHeld?.players[0]?.flags ?? null, body: dashBody, rgb: dashRgb === null ? null : `0x${dashRgb.toString(16).padStart(6, "0")}` },
+    "dash-body": { pass: dashPass, dashing: dash.dashing, flags: dash.flags, body: dash.body, rgb: dash.rgb === null ? null : `0x${dash.rgb.toString(16).padStart(6, "0")}` },
     "push-charge": { pass: pushPass, pushing, stamina: pushStamina, flags: pushHeld?.players[0]?.flags ?? null, body: pushBody, rgb: pushRgb === null ? null : `0x${pushRgb.toString(16).padStart(6, "0")}` },
     "corpse-colour": { ...corpse, cvd },
     "palette-default": { pass: paletteDefaultPass, original: ORIGINAL, table: tableNow },
@@ -391,7 +412,7 @@ console.log(`${pushPass ? "PASS" : "FAIL"} push-charge body ${JSON.stringify(pus
 console.log(`${corpsePass ? "PASS" : "FAIL"} corpse-colour expected ${corpse.expected} debris ${JSON.stringify(corpse.debrisColours.slice(0, 3))}${corpse.died ? "" : " (player did not fall)"}`);
 console.log(`${batPass ? "PASS" : "FAIL"} bat-charge body ${JSON.stringify(batBody)} rgb ${batRgb === null ? "none" : batRgb.toString(16)}${batting ? "" : " (bat did not swing)"}`);
 console.log(`${trailPass ? "PASS" : "FAIL"} movement-trail moved ${trailMoved} y ${JSON.stringify(jumpYs)} trail pixels per shot ${JSON.stringify(trailPixels)}`);
-console.log(`${dashPass ? "PASS" : "FAIL"} dash-body body ${JSON.stringify(dashBody)} rgb ${dashRgb === null ? "none" : dashRgb.toString(16)}${dashing ? "" : " (dash did not start)"}`);
+console.log(`${dashPass ? "PASS" : "FAIL"} dash-body body ${JSON.stringify(dash.body)} rgb ${dash.rgb === null ? "none" : dash.rgb.toString(16)}${dash.dashing ? "" : " (dash did not start)"}`);
 console.log(`${paletteDefaultPass ? "PASS" : "FAIL"} palette-default red ${tableNow.red?.toString(16)} blue ${tableNow.blue?.toString(16)} ffa ${JSON.stringify(tableNow.ffa.map((c) => c?.toString(16)))}`);
 for (const [palette, row] of Object.entries(cvd)) console.log(`${row.pass ? "PASS" : "FAIL"} corpse-colour ${palette} expected ${row.expected} debris ${JSON.stringify(row.debrisColours.slice(0, 3))}${row.died ? "" : " (player did not fall)"}`);
 console.log(`${staminaPass ? "PASS" : "FAIL"} stamina-bar dpr1 ${JSON.stringify(stamina1.probe?.rows.filter((r) => r.green || r.opaque || r.other))} dpr3 ${JSON.stringify(stamina3.probe?.rows.filter((r) => r.green || r.opaque || r.other))} box top ${stamina1.probe?.yBase ?? "none"}`);
