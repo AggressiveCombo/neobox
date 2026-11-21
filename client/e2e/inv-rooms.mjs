@@ -281,10 +281,10 @@ async function browseRows(s) {
 const rosterRows = (page) => page.locator("li.room-player");
 const panel = (page, cls) => page.locator(`section.room-panel.${cls}`);
 
-/** A guest's Manage section has no host controls: no buttons and no ban list. */
+/** A guest's Manage section has no host controls and the Bans panel is hidden from guests. */
 const guestHasNoManage = async (page) =>
   (await panel(page, "room-manage").getByRole("button").count()) === 0 &&
-  (await panel(page, "room-manage").getByText("No one is banned.", { exact: true }).count()) === 0;
+  !(await panel(page, "room-bans-panel").isVisible());
 
 /** A host with a new public room named `roomName`. Clipboard is granted where the browser has it. */
 async function openHostRoom(s, roomName, { clipboard = false } = {}) {
@@ -413,7 +413,7 @@ async function roomManage(s) {
   const { h, roomName, code } = await openHostRoomNamed(s);
   const { page } = h;
   const manage = panel(page, "room-manage");
-  await manage.getByText("No one is banned.", { exact: true }).waitFor({ state: "visible" });
+  await panel(page, "room-bans-panel").getByText("No one is banned.", { exact: true }).waitFor({ state: "visible" });
   check(await manage.getByRole("button", { name: "End match", exact: true }).isDisabled(), "End match is enabled with no match running");
   const lock = manage.getByRole("button", { name: "Lock teams", exact: true });
   check(await lock.isEnabled(), "Lock teams is disabled");
@@ -790,8 +790,8 @@ async function chatHost(s) {
 async function kickBanLeave(s) {
   const { h, code, roomName } = await openHostRoomNamed(s);
   const { g, name: guestName } = await joinGuest(s, code, roomName);
-  const manage = panel(h.page, "room-manage");
-  const bans = manage.locator("li.room-ban").filter({ hasText: guestName });
+  const bansPanel = panel(h.page, "room-bans-panel");
+  const bans = bansPanel.locator("li.room-ban").filter({ hasText: guestName });
   const inRoom = () => rosterRows(h.page).filter({ hasText: guestName }).waitFor({ state: "visible" });
 
   await sayPaced(h.page, `/kick ${guestName}`);
@@ -805,7 +805,7 @@ async function kickBanLeave(s) {
   await bans.waitFor({ state: "visible" });
   await sayPaced(h.page, `/unban ${guestName}`);
   await chatLine(h.page, `${guestName} was unbanned`).waitFor({ state: "visible" });
-  await manage.getByText("No one is banned.", { exact: true }).waitFor({ state: "visible" });
+  await bansPanel.getByText("No one is banned.", { exact: true }).waitFor({ state: "visible" });
   await joinByInvite(g, s.base, code, roomName);
   await inRoom();
 
