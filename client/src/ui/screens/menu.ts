@@ -131,9 +131,9 @@ export const menuScreen: ScreenFactory = (ctx) => {
   const nameError = h("p", { class: "field-error", role: "alert", hidden: true });
   // Server lines with no data say so and offer Try again; the chip in the top bar says the connection is down.
   const onlineText = h("span");
-  const statsRetry = h("button", { type: "button", class: "quiet menu-retry", hidden: true, "aria-label": "Try again: players online", onclick: () => retryConnection() }, "Try again");
+  const statsRetry = h("button", { type: "button", class: "quiet menu-retry", hidden: true, "aria-label": "Try again: players online", onclick: () => retryConnection() }, icon("refresh-cw", 18), "Try again");
   const onlineLine = h("p", { class: "menu-online" }, onlineText, statsRetry);
-  const accountRetry = h("button", { type: "button", class: "quiet menu-retry", "aria-label": "Try again: account", onclick: () => retryConnection() }, "Try again");
+  const accountRetry = h("button", { type: "button", class: "quiet menu-retry", "aria-label": "Try again: account", onclick: () => retryConnection() }, icon("refresh-cw", 18), "Try again");
   const accountLine = h("p", { class: "menu-account-line", hidden: true }, h("span", null, "Account unavailable offline"), accountRetry);
   const offlineChip = h("p", { class: "home-offline", role: "status", hidden: true }, "Offline: online play, accounts and the library need a connection");
   const makersLine = h("p", { class: "menu-makers", hidden: true });
@@ -457,7 +457,7 @@ export const menuScreen: ScreenFactory = (ctx) => {
         "Fan-made successor to Hitbox.io · ",
         h("a", { href: REPO_URL, target: "_blank", rel: "noopener", tabindex: "0" }, "Source"),
         " · ",
-        h("button", { type: "button", class: "quiet home-privacy", onclick: () => store.set({ screen: "privacy" }) }, "Privacy"),
+        h("button", { type: "button", class: "quiet home-privacy", onclick: () => store.set({ screen: "privacy" }) }, icon("shield", 18), "Privacy"),
       ),
     ),
   );
