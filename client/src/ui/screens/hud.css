@@ -210,6 +210,10 @@
 .hud-menu button:hover {
   box-shadow: inset 3px 0 0 var(--accent);
 }
+/* The chip hover above (0,5,1) would paint a menu row solid black and hide its label: rows keep their surface on hover. */
+.hud-root .hud-menu button:hover:not(:disabled):not([aria-expanded="true"]):not(.hud-on) {
+  background: var(--surface-2);
+}
 
 .hud-menu button[hidden] {
   display: none;
