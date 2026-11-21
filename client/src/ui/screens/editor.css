@@ -619,21 +619,23 @@
 
   .editor-top {
     padding: 8px 16px;
-    gap: 6px 8px;
+    gap: 6px;
     flex-wrap: wrap;
   }
 
   .editor-name {
     order: 2;
-    flex: 1 0 100%;
+    flex: 1 1 160px;
     max-width: none;
   }
 
+  /* Row 1 is the icon buttons (the tools cluster is not a box here, so they wrap with the header); the mode select joins the name on row 2. */
   .editor-top-tools {
-    flex: none;
-    order: 1;
-    margin-left: auto;
-    gap: 4px;
+    display: contents;
+  }
+
+  .editor-mode {
+    order: 2;
   }
 
   .editor-top button {
