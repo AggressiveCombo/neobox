@@ -550,19 +550,6 @@ button:disabled {
 
 .label-swap-state.label-swap-off {
   visibility: hidden;
-/* A list row: a full-width button whose leading icon and label start on one left edge. The base button centres its content, which scatters the icons of a list down a column. Every button that lists rows with icons uses this class (qa/list-rows.mjs checks the icons share one x). */
-.list-row {
-  justify-content: flex-start;
-  width: 100%;
-  text-align: left;
-}
-
-}
-
-}
-
-}
-
 }
 
 /* Inside a panel (already on --surface), plain buttons step up one tone. */
