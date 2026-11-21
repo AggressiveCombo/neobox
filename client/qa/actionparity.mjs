@@ -7,6 +7,9 @@
 // - corpse-colour: a player who falls out of the arena leaves debris (wasm frame.rs, source_player). Its colour must be
 //   the client's colour for that player (globalThis.__qaPlayerRgb, geometry.ts playerRgb), the colour the living body
 //   is drawn in. The wasm colour table of 02f3b72 draws it in another colour: the check fails there.
+// - stamina-bar: the local player's stamina is a 1 px green bar on a black track on the overlay canvas, directly above the
+//   name label (the original's bar; overlay.ts drawStamina). The check reads the overlay pixels above the label box: the row
+//   just above it holds only green or black, and no other row does. A bar under the body fails it.
 //
 // Usage:  cd client && QA_OUT=<dir> node qa/actionparity.mjs --dist <dist>
 // Output: <QA_OUT>/actionparity.json; exit code 1 on FAIL. Needs a build with the __qaEngine and __qaPlayerRgb hooks.
@@ -72,6 +75,36 @@ const rocketAdded = rocketGrew.filter((row) => !LAUNCHER_RGB.has(Number(row.rgb)
 const charging = !!held && held.players.some((p) => p.rocket > 0);
 const rocketPass = idle !== null && held !== null && charging && rocketAdded.length === 0;
 
+// --- stamina-bar: the row just above the local label is the stamina track (green fill, black rest), nothing else ---
+const me0 = idle?.players[0] ?? null;
+const staminaProbe = me0 ? await page.evaluate((id) => {
+  const c = document.getElementById("overlay");
+  const lab = globalThis.__qaDraw?.rects.find((r) => r.kind === "label" && r.id === id);
+  if (!c || !lab) return null;
+  const r = c.getBoundingClientRect();
+  const sx = c.width / r.width, sy = c.height / r.height;
+  const ctx = c.getContext("2d", { willReadFrequently: true });
+  // The draw rects are in the view's CSS px (the overlay canvas covers the view): scale them to canvas pixels.
+  const x0 = Math.round(lab.box.left * sx), x1 = Math.round(lab.box.right * sx);
+  const yBase = Math.round(lab.box.top * sy);
+  const rows = [];
+  for (let y = yBase - 6; y <= yBase + 1; y++) {
+    const d = ctx.getImageData(x0, y, x1 - x0, 1).data;
+    let green = 0, black = 0, other = 0;
+    for (let i = 0; i < d.length; i += 4) {
+      const [R, G, B, A] = [d[i], d[i + 1], d[i + 2], d[i + 3]];
+      if (A === 255 && Math.abs(R - 52) <= 3 && Math.abs(G - 186) <= 3 && Math.abs(B - 86) <= 3) green++;
+      else if (A === 255 && R + G + B === 0) black++;
+      else other++;
+    }
+    rows.push({ y, green, black, other });
+  }
+  return { yBase, width: x1 - x0, rows };
+}, me0.id) : null;
+const barRows = staminaProbe ? staminaProbe.rows.filter((row) => row.green > 0 || row.black > 0) : [];
+const staminaPass = !!staminaProbe && barRows.length === 1 && barRows[0].y === staminaProbe.yBase - 1
+  && barRows[0].green > 0 && barRows[0].other <= 1 && barRows[0].green + barRows[0].black + barRows[0].other === staminaProbe.width;
+
 // --- corpse-colour: walk left off the platform; the player's debris keeps the player's colour ---
 await sleep(500);
 const alive = await frame();
@@ -104,7 +137,7 @@ const corpse = {
   debrisColours: corpseGrew.sort((a, b) => b.added - a.added).slice(0, 8),
 };
 
-const pass = rocketPass && corpsePass && errors.length === 0;
+const pass = rocketPass && staminaPass && corpsePass && errors.length === 0;
 const result = {
   pass,
   actions: {
@@ -116,6 +149,7 @@ const result = {
       grew: rocketGrew.sort((a, b) => b.added - a.added).slice(0, 12),
     },
     "corpse-colour": corpse,
+    "stamina-bar": { pass: staminaPass, player: me0, probe: staminaProbe },
   },
   pageErrors: errors,
 };
@@ -123,6 +157,7 @@ mkdirSync(outDir(), { recursive: true });
 writeFileSync(path.join(outDir(), "actionparity.json"), JSON.stringify(result, null, 2));
 console.log(`${rocketPass ? "PASS" : "FAIL"} rocket-charge ${JSON.stringify(rocketAdded)}${idle && held ? "" : " (no __qaEngine: build lacks the hook)"}`);
 console.log(`${corpsePass ? "PASS" : "FAIL"} corpse-colour expected ${corpse.expected} debris ${JSON.stringify(corpse.debrisColours.slice(0, 3))}${dead ? "" : " (player did not fall)"}`);
+console.log(`${staminaPass ? "PASS" : "FAIL"} stamina-bar ${JSON.stringify(staminaProbe?.rows.filter((r) => r.green || r.black || r.other))} label top ${staminaProbe?.yBase ?? "none"}`);
 await srv.stop();
 await runCleanups();
 process.exitCode = pass ? 0 : 1;

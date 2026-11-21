@@ -26,10 +26,9 @@ const OUTLINE = "rgba(0, 0, 0, 0.7)";
 const PANEL = "rgba(0, 0, 0, 0.5)";
 const TEXT = "#ffffff";
 const CROWN_FILL = "#ffd24a";
-const STAMINA_FILL = "#8fe3ff";
-/** Stamina bar under the local player: half width and height, CSS px. */
-const STAMINA_HALF_W = 20;
-const STAMINA_H = 3;
+/** Stamina bar above the local name: the original's green fill on a black track, one device px tall. */
+const STAMINA_FILL = "#34ba56";
+const STAMINA_TRACK = "#000000";
 /** Damage bar: black border (CSS px, centred on the body) and the white fill inside its 1 px rim. */
 const BAR_BORDER_W = 32;
 const BAR_BORDER_H = 6;
@@ -354,7 +353,9 @@ export class Overlay {
       // The local player reads its own status from the stamina bar and kill line instead.
       if (l.player.id === leader && !l.local) this.drawCrown(l.x, l.y - l.h - 6);
       if (l.local && scene.maxStamina > 0) {
-        this.drawStamina(l.player.stamina / scene.maxStamina, l.x, l.centreY + l.bodyHalf + 4);
+        const barLeft = Math.round((l.x - l.w / 2) * dpr) / dpr;
+        const barRight = Math.round((l.x + l.w / 2) * dpr) / dpr;
+        this.drawStamina(l.player.stamina / scene.maxStamina, barLeft, barRight - barLeft, Math.round((l.y - l.h) * dpr) / dpr - 1 / dpr, dpr);
       }
     }
     // The followed player's jump emblem: geometry's putMarker triangle in the same world transform, on the GL layer under the overlay.
@@ -483,15 +484,14 @@ export class Overlay {
     }
   }
 
-  /** Thin stamina bar of `fraction` (0..1) centred on x, top edge at `top`. */
-  private drawStamina(fraction: number, x: number, top: number): void {
+  /** Stamina bar of `fraction` (0..1) across a label of `width` at `left`, one device px tall with its top edge at `top`. */
+  private drawStamina(fraction: number, left: number, width: number, top: number, dpr: number): void {
     const ctx = this.ctx;
-    const left = x - STAMINA_HALF_W;
-    const width = STAMINA_HALF_W * 2;
-    ctx.fillStyle = PANEL;
-    ctx.fillRect(left, top, width, STAMINA_H);
+    const h = 1 / dpr;
+    ctx.fillStyle = STAMINA_TRACK;
+    ctx.fillRect(left, top, width, h);
     ctx.fillStyle = STAMINA_FILL;
-    ctx.fillRect(left, top, width * Math.min(1, Math.max(0, fraction)), STAMINA_H);
+    ctx.fillRect(left, top, width * Math.min(1, Math.max(0, fraction)), h);
   }
 
   private drawIntro(scene: Scene, tickHz: number, cssW: number, cssH: number): void {
