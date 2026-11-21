@@ -249,9 +249,15 @@ async function menuButtons(s) {
   await navTo(page, "News");
   const news = page.getByRole("dialog", { name: "Update news", exact: false });
   await news.waitFor();
-  check(await news.getByText("1 of 6", { exact: false }).isVisible(), "news modal not paged 1 of 6");
-  await news.getByRole("button", { name: "Next", exact: true }).click();
-  await news.getByText("2 of 6", { exact: false }).waitFor();
+  const pages = Number(/^1 of (\d+)$/.exec((await news.locator(".news-count").textContent()) ?? "")?.[1] ?? 0);
+  check(pages >= 1, "news modal does not open on page 1 of N");
+  const next = news.getByRole("button", { name: "Next", exact: true });
+  if (pages > 1) {
+    await next.click();
+    await news.getByText(`2 of ${pages}`, { exact: false }).waitFor();
+  } else {
+    check(await next.isDisabled(), "Next is enabled on the only news page");
+  }
   check(!(await dot.isVisible().catch(() => false)), "dot still shown while news is open");
   await page.keyboard.press("Escape");
   await news.waitFor({ state: "detached" }).catch(() => {});

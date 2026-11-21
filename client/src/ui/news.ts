@@ -14,87 +14,23 @@ interface NewsEntry {
   items: string[];
 }
 
-/** Newest first. Player-facing wording only. */
+/**
+ * Newest first. Player-facing wording only: each entry says what changed for players since the previous public
+ * release. Development builds before the public launch get no entries (players never saw them).
+ */
 const NEWS: NewsEntry[] = [
   {
-    date: "2026-11-16",
+    date: "2026-11-21",
     items: [
-      "The blue logo is back, and blue is the accent colour again. Buttons and menus have icons, and screens fade into each other.",
-      "The main menu is simpler and fills the screen: your name, Quick play, Browse rooms and a grid of buttons on one side, the match replay on the other.",
-      "The game view keeps each map's shape: 16:10 for the original's maps and 16:9 for maps that chose wide, with black bars around it instead of a stretched or cropped view.",
-      "New menu and match music, real sound effects for jumps, hits and deaths, and soft interface sounds for hovers and clicks that you can turn off (Settings, Sound).",
-      "Profiles: open a player from the room or your friends list to see their level, games, wins, kills, deaths, time played and maps.",
-      "In lives mode, a bar at the top shows how many lives you have left.",
-      "Phones: Settings, Touch has a Control size slider and a Left-handed layout.",
-    ],
-  },
-  {
-    date: "2026-11-15",
-    items: [
-      "A new look everywhere: clearer screens, and a light and a dark theme (Settings, Display; it follows your system by default).",
-      "The main menu plays a match inside the big square. Press Quick play straight away: you get a guest name you can change.",
-      "Rooms: the players are front and centre, the host's settings fold away under More settings, and on phones the lobby has Players, Match and Chat tabs with Start always at the bottom.",
-      "Phones: play in landscape with a separate Jump button; in portrait the game asks you to turn your phone, and can switch to full screen.",
-      "The match HUD shows your connection: ping, and whether it runs over UDP or WebSocket.",
-      "Report a player from the room, or a map from the library. Reports go to the moderators.",
-      "Map library: maps show as a grid; open one for its details, votes, Fastest Times and Report.",
-      "Room links now show the room's name, map and player count when you paste them in chat apps.",
-      "Add neobox to your home screen to play it like an app.",
-      "A privacy page explains what neobox stores and why (About, Privacy).",
-    ],
-  },
-  {
-    date: "2026-11-15",
-    items: [
-      "Quick play has two modes: Sweaty Bois (up to 4 players, last one standing each round, first to 2 round wins) and Team Madness (up to 8 players in two teams, each with a shared pool of 50 lives), each with its map rotation. Sweaty Bois also adds the week's best-rated library maps. Browse a mode's maps with the arrows on its card.",
-      "New custom rooms start in lives mode with 5 lives.",
-      "Checkpoint races are back: touch numbered checkpoints in order, return to your last checkpoint when you die, and reach the highest one to finish. Map makers set them in the editor (Race checkpoint, Race object).",
-      "Fastest Times: with /set recordMode true, finishing a library map saves your best time. See the board with the Fastest Times button in the room.",
-      "Vote on the room's map from its vote counts.",
-      "Bodies that become dynamic when damaged now do so.",
-      "In matches: damage bars on breakable bodies, a flashing square where you will respawn, grab lines, the bat swing with its windup, and the rocket launcher with its charge, movement trails, and a highlight on your player when you press an action key during the countdown.",
-    ],
-  },
-  {
-    date: "2026-11-14",
-    items: [
-      "Experience and levels: finish games to earn XP. The game-over panel shows your placement, the XP you gained and your progress to the next level.",
-      "Guests can reach level 1. Sign in to keep earning levels.",
-      "Quick play: pick Sweaty Bois or Team Madness. Quick rooms have no host and rotate through maps.",
-      "Menu music, with a mute switch on the menu and in Settings.",
-      "Jukebox: the room host can play YouTube videos for everyone, then pause, resume or stop them. Players can suggest a video by pasting its link in chat.",
-      "Training hall: a new practice screen from the menu.",
-      "The menu plays shared match clips in the background.",
-      "Appearance colour: pick your player colour in Settings or in a room.",
-      "Emoji: type a shortcode such as :smile: in chat to send an emoji.",
-      "Profanity filter, on by default. Turn it off in Settings.",
-      "Chat shows when someone is typing. Rooms show who is in the map editor.",
-      "Start countdowns can be aborted by the host. The room shows each map's author, votes and age.",
-      "The menu shows how many players are online and this week's top map makers.",
-      "Room list: each room shows its jukebox video, the friends in it and a badge for quick-play rooms.",
-    ],
-  },
-  {
-    date: "2026-11-14",
-    items: [
-      "Accounts: sign up, sign in, change your password or delete your account.",
-      "Friends: send and accept friend requests, and see which room your friends are in.",
-      "Map library: publish your maps, browse new, hot, top and most-played maps, vote, pick favourites and read map descriptions.",
-      "Replays: record finished matches and watch them back.",
-      "Practice: play offline on a built-in or pasted map, with Free play or Fewer abilities rules.",
-      "Host tools: lock teams, kick or ban players, move players between teams and hand over host.",
-      "Reconnect: if your connection drops during a game, you rejoin the same seat.",
-    ],
-  },
-  {
-    date: "2026-11-13",
-    items: [
-      "neobox launched: a free, open-source browser game inspired by Hitbox.io.",
-      "Deterministic physics: the same inputs give the same result in your browser and on the server, so online matches stay in step.",
-      "Rollback netcode: your moves are predicted on your device and corrected when the server disagrees.",
-      "Rendering uses WebGPU where it is available, with WebGL2 as the fallback.",
-      "Keyboard controls and touch controls for phones and tablets.",
-      "Built-in maps to play and learn on.",
+      "neobox is out: a free browser game inspired by Hitbox.io. Play straight away as a guest, or sign up to keep your level, friends and maps.",
+      "Quick play has two modes: Sweaty Bois (up to 4 players, last one standing each round, first to 2 round wins) and Team Madness (up to 8 players in two teams, each with a shared pool of 50 lives).",
+      "Custom rooms: the host picks the map and rules, can lock teams, kick or ban players, move players between teams and hand over host. Vote on the room's map.",
+      "Jukebox: the room host can play YouTube videos for everyone. Suggest one by pasting its link in chat.",
+      "Map editor and library: make maps (race checkpoints included), publish them, browse new, hot, top and most-played maps and vote on them. Rooms in record mode keep each map's Fastest Times.",
+      "Training hall teaches the moves. Practice lets you play offline on any built-in or pasted map.",
+      "Earn XP and levels by finishing games. Open a player's profile from the room or your friends list, see which room your friends are in, and watch replays of your matches.",
+      "Phones and tablets: touch controls in landscape, with a Control size slider and a Left-handed layout (Settings, Touch). Add neobox to your home screen to play it like an app.",
+      "Settings: light or dark theme, your player colour, music and sound, and a profanity filter.",
     ],
   },
 ];
