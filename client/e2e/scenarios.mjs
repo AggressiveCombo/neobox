@@ -1450,18 +1450,19 @@ async function drumFastWheel(s, { load = false } = {}) {
   check(share >= 0.9, `the drum moved on ${Math.round(share * 100)}% of ${owed} front changes, want 90%`);
   check(rec.settledAt !== null, "the drum never settled");
   const settleMs = rec.settledAt - lastWheel;
-  // The drum eases in time (menu-drum.ts EASE_MS 45, SETTLE_MS 50, REST 0.02): from a lag of up to two options it settles
-  // within (50 + 45 ln(2 / 0.02)) ms, about 257 ms at 60 Hz. Counted in presented frames, plus one frame of slack, so a
-  // browser that paints slowly is not a failure of the drum. Update the bound if those constants change.
-  const presented = rec.frames.filter((f) => f.t > lastWheel && f.t <= rec.settledAt).length;
-  const SETTLE_FRAMES = Math.ceil(((50 + 45 * Math.log(2 / 0.02)) * 60) / 1000) + 1;
-  check(presented <= SETTLE_FRAMES, `the drum took ${presented} frames to settle after the last wheel event, want ${SETTLE_FRAMES} or less`);
-  // The wall-clock budget applies only where the frames are fast enough (<= 20 ms apart) to measure it: a slow paint rate
-  // is not a slow drum. Under load the budget is wider, as the frames come slower.
+  // The drum settles on a model (menu-drum.ts): once the input is still for SETTLE_MS (50) it eases to REST (0.02) with time
+  // constant EASE_MS (45), so from a lag of up to two options it lands within 50 + 45 ln(2 / 0.02) ms, about 257 ms. A browser
+  // paints in frames, so the bound adds two median frame gaps of paint quantization: about 290 ms on a 60 Hz engine, about
+  // 460 ms where frames take 100 ms. One rule for every engine and under load; a drum slower than its model fails everywhere.
+  // Update the bound if the constants change.
   const gaps = rec.frames.slice(1).map((f, i) => f.t - rec.frames[i].t).sort((a, b) => a - b);
   const frameGap = gaps[Math.floor(gaps.length / 2)];
-  const budget = load ? 1000 : 250;
-  if (load || frameGap <= 20) check(settleMs <= budget, `the drum settled ${Math.round(settleMs)} ms after the last wheel event, want ${budget} or less`);
+  const modelMs = 50 + 45 * Math.log(2 / 0.02);
+  const bound = modelMs + 2 * frameGap;
+  check(
+    settleMs <= bound,
+    `the drum settled ${Math.round(settleMs)} ms after the last wheel event, want ${Math.round(bound)} or less (model ${Math.round(modelMs)} ms + 2 frames of ${Math.round(frameGap)} ms)`,
+  );
   // Each 100 px is one option: the drum settles on the option nearest where the travel ends.
   const labels = await drum.locator(".drum-label").allTextContents();
   const at = Math.min(labels.length - 1, Math.max(0, Math.round(startIndex + travel / 100)));
