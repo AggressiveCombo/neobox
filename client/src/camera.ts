@@ -99,11 +99,11 @@ export function publishBackdrop(cam: Camera, arenaW: number, arenaH: number): vo
 }
 
 /**
- * The view for a frame. It frames every live sprite: the subject (the followed player, else the held
- * centre, else the arena middle) is weighted into the middle of the group, the view zooms out only as far
- * as the group needs (up to MAX_ZOOM_OUT) with HUD insets kept clear, and it stays inside the arena.
- * Live opponents still outside the view are listed in `away` for edge indicators. No state beyond the
- * held centre: the frame's positions are used as they come (no easing).
+ * The view for a frame. With a subject (the followed player, else its held centre) the view follows it at the base
+ * view size: other players never widen it, and those out of view are listed in `away`
+ * for an edge indicator. Without one (a replay or spectator following nobody) the view frames every live sprite, zooming
+ * out only as far as the group needs (up to MAX_ZOOM_OUT) with HUD insets kept clear. Either way it stays inside the arena.
+ * No state beyond the held centre: the frame's positions are used as they come (no easing).
  */
 export function computeCamera(scene: Scene, local?: PlayerRec): Camera {
   let sx: number;
@@ -120,11 +120,14 @@ export function computeCamera(scene: Scene, local?: PlayerRec): Camera {
     sy = scene.arenaH / 2;
   }
   const live = liveSprites(scene);
+  // The framed group: the subject alone when there is one (E42: walking away from the training dummies zoomed the view
+  // out to keep them in), else every live sprite.
+  const follows = local !== undefined || lastCentre !== null;
   let minX = sx;
   let maxX = sx;
   let minY = sy;
   let maxY = sy;
-  if (live.length > 0) {
+  if (!follows && live.length > 0) {
     minX = Infinity;
     maxX = -Infinity;
     minY = Infinity;
