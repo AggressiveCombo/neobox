@@ -10,8 +10,3 @@ export const WIDE_ASPECT = 16 / 9;
 export function aspectFor(wide: boolean): number {
   return wide ? WIDE_ASPECT : CLASSIC_ASPECT;
 }
-
-/** The map setting value for a `wide` flag: `"wide"`, or `"classic"` (the original's default). */
-export function aspectSetting(wide: boolean): "classic" | "wide" {
-  return wide ? "wide" : "classic";
-}
