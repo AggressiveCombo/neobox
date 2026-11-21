@@ -193,6 +193,28 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* The empty map's prompt sits over the canvas; only its button takes pointer input, so the canvas under it still works. */
+.editor-empty {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: min(360px, calc(100% - 32px));
+  margin: 0;
+  padding: 0;
+  color: var(--ink);
+  pointer-events: none;
+}
+
+.editor-empty button {
+  pointer-events: auto;
+}
+
+/* The prompt's own display (flex, from .empty) must not override the hidden attribute. */
+.editor-empty[hidden] {
+  display: none;
+}
+
 .editor-foot {
   flex: none;
   display: flex;

@@ -82,7 +82,14 @@ export const editorScreen: ScreenFactory = (ctx) => {
   const scopeText = h("span", {});
   const scopeBar = h("div", { class: "editor-scope", role: "status" }, scopeText, h("button", { type: "button", onclick: () => ctrl.leaveScope() }, icon("arrow-left", 18), "Leave body"));
   scopeBar.hidden = true;
-  const viewport = h("div", { class: "editor-viewport" }, canvas, scopeBar, lagEl);
+  const emptyEl = h(
+    "p",
+    { class: "empty editor-empty" },
+    icon("map", 40),
+    "Your map is empty. Start with a platform: choose Box, then drag it on the canvas.",
+    h("button", { type: "button", class: "primary", onclick: () => ctrl.setTool("rect") }, icon("square", 18), "Draw a platform"),
+  );
+  const viewport = h("div", { class: "editor-viewport" }, canvas, scopeBar, lagEl, emptyEl);
   const ctrl = new EditorController(canvas, () => refresh(), !inRoom);
   const observer = new ResizeObserver(() => {
     if (viewport.isConnected) ctrl.resize();
@@ -334,6 +341,8 @@ export const editorScreen: ScreenFactory = (ctx) => {
     setDisabled(redoBtn, !ctrl.canRedo);
     setDisabled(resetZoomBtn, ctrl.atFit);
     const scope = ctrl.scope;
+    const showEmpty = !scope && isEmptyMap();
+    if (emptyEl.hidden === showEmpty) emptyEl.hidden = !showEmpty;
     if (scopeBar.hidden !== !scope) scopeBar.hidden = !scope;
     setText(scopeText, scope ? `Editing shapes inside body ${scope.id}. Esc returns.` : "");
     setDisabled(mergeBtn, ctrl.sel.filter((r) => r.kind === "body").length < 2);
