@@ -876,10 +876,10 @@ async function matchRecordEnd(s) {
   await matchChat(page, "/record");
   await page.getByText("Clip saved. It can play on the main menu.", { exact: true }).waitFor({ state: "visible" });
   await matchChat(page, "/end");
-  await page.getByText("The host ended the match. No experience was awarded.", { exact: true }).waitFor({ state: "visible" });
+  await page.getByText("You ended the match. No experience was awarded.", { exact: true }).waitFor({ state: "visible" });
   await page.locator(".hud-leave").waitFor({ state: "hidden" });
   await roomTitle(page).waitFor({ state: "visible" });
-  return `/record -> "Clip saved. It can play on the main menu."; /end -> "The host ended the match. No experience was awarded."; match HUD hidden, room shown`;
+  return `/record -> "Clip saved. It can play on the main menu."; /end -> "You ended the match. No experience was awarded."; match HUD hidden, room shown`;
 }
 
 /** room-replay-save: End match on the HUD, confirmed, leaves "Save replay" in the room; it downloads a .nbreplay. */

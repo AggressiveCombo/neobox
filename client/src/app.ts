@@ -982,8 +982,12 @@ export function start(): Store<AppState> {
         return;
       case "match_end":
         // A host or admin stop awards nothing, so no results panel opens: say why on the room screen.
-        if (msg.reason === "ended by the host") toast("The host ended the match. No experience was awarded.");
-        else if (msg.reason === "ended by an administrator") toast("An administrator ended the match. No experience was awarded.");
+        if (msg.reason === "ended by the host") {
+          // The host who ended the match is told so; everyone else hears who did.
+          const room = store.state.room;
+          const iEnded = room?.players.some((p) => p.id === store.state.myId && p.host) ?? false;
+          toast(iEnded ? "You ended the match. No experience was awarded." : "The host ended the match. No experience was awarded.");
+        } else if (msg.reason === "ended by an administrator") toast("An administrator ended the match. No experience was awarded.");
         loop?.stop();
         pendingMatch = null;
         store.set({ inMatch: false, tickHz: 0, showScores: false, replayReady: true, screen: "room" });
