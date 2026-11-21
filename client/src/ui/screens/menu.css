@@ -268,8 +268,8 @@ button.home-account {
 
 /* A drum with no box: the page shows through, and the options fade out at the top and bottom of the window. */
 .drum {
-  --drum-pitch: 40px;
-  --drum-opt-h: 36px;
+  --drum-pitch: 2.5rem;
+  --drum-opt-h: 2.25rem;
   position: relative;
   container-type: inline-size;
   height: 320px;
@@ -494,8 +494,8 @@ button.home-privacy {
   }
 
   .drum {
-    --drum-pitch: 38px;
-    --drum-opt-h: 40px;
+    --drum-pitch: 2.375rem;
+    --drum-opt-h: 2.5rem;
     height: 266px;
   }
 
@@ -564,8 +564,8 @@ button.home-privacy {
   }
 
   .drum {
-    --drum-pitch: 40px;
-    --drum-opt-h: 36px;
+    --drum-pitch: 2.5rem;
+    --drum-opt-h: 2.25rem;
     height: 200px;
   }
 }

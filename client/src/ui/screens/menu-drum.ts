@@ -199,7 +199,9 @@ export function mountDrum(items: DrumItem[], label: string, initial = 0): Drum {
   }
 
   function layout(): void {
-    const p = parseFloat(getComputedStyle(listbox).getPropertyValue("--drum-pitch"));
+    // --drum-pitch is in rem (it scales with the text size); the layout works in px.
+    const rem = parseFloat(getComputedStyle(document.documentElement).fontSize);
+    const p = parseFloat(getComputedStyle(listbox).getPropertyValue("--drum-pitch")) * rem;
     pitch = Number.isFinite(p) && p > 0 ? p : PITCH_FALLBACK_PX;
     radius = pitch / SIN_STEP;
     half = listbox.clientHeight / 2;
@@ -375,6 +377,8 @@ export function mountDrum(items: DrumItem[], label: string, initial = 0): Drum {
   window.addEventListener("gamepaddisconnected", padConnection);
   const resizeObserver = new ResizeObserver(layout);
   resizeObserver.observe(listbox);
+  // An option's box is in rem: a live text-size change resizes it, so the drum lays out again.
+  for (const o of opts) resizeObserver.observe(o);
 
   layout();
   announce();
