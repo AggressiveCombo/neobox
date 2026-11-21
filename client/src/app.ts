@@ -431,6 +431,21 @@ export function start(): Store<AppState> {
     else play(store.state.name);
   }
 
+  /**
+   * Escape steps back one level: an open question on the page first (its Cancel carries `data-escape`; the last one
+   * shown wins), else the page's Back. Whatever handles Escape itself calls preventDefault first (a key being bound, a
+   * running practice or lesson, a replay); an open dialog closes on it instead. Added again after each mount, so it runs
+   * after the listeners the screen just added. A declaration: the first mount runs before this line.
+   */
+  function escapeBack(e: KeyboardEvent): void {
+    if (e.key !== "Escape" || e.defaultPrevented || e.repeat || document.querySelector("dialog[open]") || !current) return;
+    const answers = Array.from(current.el.querySelectorAll<HTMLButtonElement>("button[data-escape]")).filter((b) => !b.disabled && b.getClientRects().length > 0);
+    const step = answers.at(-1) ?? current.el.querySelector<HTMLButtonElement>(".page-head .page-back");
+    if (!step || step.disabled) return;
+    e.preventDefault();
+    step.click();
+  }
+
   /** Mount a screen factory's output, replacing whatever is shown. */
   function mount(screen: Screen): void {
     // Hide the game view before the leaving screen clears its clip mask (the menu's destroy) and the new screen mounts:
@@ -460,6 +475,8 @@ export function start(): Store<AppState> {
     // The controls of a new screen (and the transition's motion) set the band the game view fits between.
     scheduleResize();
     handle.el.addEventListener("animationend", scheduleResize);
+    window.removeEventListener("keydown", escapeBack);
+    window.addEventListener("keydown", escapeBack);
   }
 
   store.subscribe((state, prev) => {

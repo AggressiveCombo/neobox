@@ -563,8 +563,10 @@ async function settingsControls(s) {
   await page.getByText(/Press a key for Jump/).waitFor();
   await page.keyboard.press("ArrowLeft");
   await page.getByText(/is already used for Left\. Move it to Jump\?/).waitFor();
+  // Escape answers the question with Cancel and stays in Settings (a second Escape would go Back)
   await page.keyboard.press("Escape");
-  await page.getByText(/Press a key for Jump/).waitFor({ state: "detached" });
+  await page.getByText(/is already used for Left\. Move it to Jump\?/).waitFor({ state: "detached" });
+  check(await page.getByRole("button", { name: /^Jump key/ }).count(), "Escape on the conflict question left Settings");
 
   // cancel: Escape ends the capture with the binding unchanged
   const before = JSON.stringify((await prefs(page)).keys.up);

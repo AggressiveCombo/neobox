@@ -242,7 +242,7 @@ export const browserScreen: ScreenFactory = (ctx) => {
       h(
         "div",
         { class: "actions" },
-        h("button", { type: "button", onclick: () => store.set({ invite: null }) }, icon("x", 18), "Cancel"),
+        h("button", { type: "button", "data-escape": "", onclick: () => store.set({ invite: null }) }, icon("x", 18), "Cancel"),
       ),
     );
   }

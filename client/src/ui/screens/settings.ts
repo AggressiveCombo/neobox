@@ -518,6 +518,7 @@ export const settingsScreen: ScreenFactory = (ctx) => {
                 "button",
                 {
                   type: "button",
+                  "data-escape": "",
                   onclick: () => {
                     conflict = null;
                     renderControls();

@@ -18,6 +18,10 @@ Applies to every screen: room, browse, quick play, create room, settings, accoun
 - Players see names, never wire keys. Room settings show the `name` from `src/settings.ts`; `label` is only the key sent to the server.
 - Sentence case for labels and headings.
 
+## Keys and pinned parts
+- Escape steps back one level: an open dialog closes; else an open question on the page is cancelled (mark its Cancel button `data-escape`); else the page's Back runs (app.ts `escapeBack`). A screen that uses Escape itself calls `preventDefault` in its own listener.
+- Anything pinned under the sticky page head uses `top: calc(var(--page-head-h) + <gap>)`, so it pins exactly where it starts at any text size (e2e "pinned parts hold still").
+
 ## Both themes
 - Check light and dark. Borders and surfaces must meet 3:1 against the page; text must meet 4.5:1 on its surface.
 - Panels must not overflow at 200% text size or at 390 px width.

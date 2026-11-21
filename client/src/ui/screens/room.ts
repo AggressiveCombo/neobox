@@ -1162,7 +1162,7 @@ export const roomScreen: ScreenFactory = (ctx: AppCtx) => {
     { class: "room-joining", role: "status", "aria-live": "polite" },
     h("span", { class: "room-joining-dot", "aria-hidden": "true" }),
     joiningText,
-    h("button", { type: "button", onclick: () => ctx.cancelJoin() }, icon("x", 18), "Cancel"),
+    h("button", { type: "button", "data-escape": "", onclick: () => ctx.cancelJoin() }, icon("x", 18), "Cancel"),
   );
   const startButton = h("button", { type: "button", class: "room-btn primary", onclick: () => void start() }, icon("play", 16), "Start");
   const dockStatus = h("p", { class: "room-dock-status", role: "status" });

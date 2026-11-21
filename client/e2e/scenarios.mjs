@@ -1206,6 +1206,69 @@ async function settingsBackStays(s) {
   return "Back stays on screen at the bottom of Settings and returns to the menu";
 }
 
+/** Escape on a page goes Back one step: every page returns to the menu; with a dialog open, Escape closes only the dialog. */
+async function escapeGoesBack(s) {
+  const h = await s.open("escape-back");
+  const { page } = h;
+  await page.goto(s.base);
+  await menuName(page).waitFor();
+  for (const link of ["Library", "Friends", "Replay", "Settings", "About"]) {
+    await navTo(page, link);
+    await page.locator(".page-head .page-back").waitFor({ state: "visible" });
+    await page.keyboard.press("Escape");
+    await menuName(page).waitFor({ timeout: 3000 }).catch(() => check(false, `Escape on ${link} did not go back to the menu`));
+  }
+  await playFromMenu(page, null);
+  await button(page, "New room").click();
+  const create = page.getByRole("heading", { name: "Create a room", exact: true });
+  await create.waitFor();
+  await page.keyboard.press("Escape");
+  await create.waitFor({ state: "hidden" });
+  check(await button(page, "New room").isVisible(), "Escape on the Create a room dialog left Browse rooms too");
+  await page.keyboard.press("Escape");
+  await menuName(page).waitFor({ timeout: 3000 }).catch(() => check(false, "a second Escape on Browse rooms did not go back to the menu"));
+  return "Escape goes back from Library, Friends, Replay, Settings, About; on Browse rooms it closes Create a room first";
+}
+
+/**
+ * Pinned parts hold still: a sticky part that pins within 48 px of where it starts must start there. Otherwise it moves a
+ * few pixels with the page and then stops (Settings' section list did, 16 px under the pinned page head).
+ */
+async function pinnedPartsHoldStill(s) {
+  const h = await s.open("pinned", { viewport: { width: 1433, height: 640 } });
+  const { page } = h;
+  await page.goto(s.base);
+  await menuName(page).waitFor();
+  const sticky = () =>
+    page.evaluate(() =>
+      [...document.querySelectorAll("#ui *")]
+        .filter((el) => getComputedStyle(el).position === "sticky" && el.getClientRects().length > 0)
+        .map((el) => ({ cls: el.className, top: Math.round(el.getBoundingClientRect().top), pin: Math.round(parseFloat(getComputedStyle(el).top) || 0) })),
+    );
+  const checked = [];
+  for (const link of ["Settings", "Library", "Friends", "About", "Replay"]) {
+    await navTo(page, link);
+    await page.locator(".page-head .page-back").waitFor({ state: "visible" });
+    await page.waitForTimeout(400);
+    const before = await sticky();
+    await page.mouse.move(1000, 500);
+    await page.mouse.wheel(0, 400);
+    await page.waitForTimeout(400);
+    const after = await sticky();
+    for (const [i, a] of after.entries()) {
+      const b = before[i];
+      if (!b || b.cls !== a.cls || a.top !== a.pin) continue;
+      const travel = b.top - a.top;
+      check(travel === 0 || travel >= 48, `${link}: "${a.cls}" moves ${travel}px when the page scrolls, then pins (starts at ${b.top}, pins at ${a.pin})`);
+      checked.push(`${link} ${a.cls}`);
+    }
+    await page.locator(".page-head .page-back").click();
+    await menuName(page).waitFor();
+  }
+  check(checked.some((c) => c.startsWith("Settings settings-nav")), `Settings' section list was not pinned after scrolling (checked: ${checked.join(", ")})`);
+  return `pinned parts hold still: ${checked.join(", ")}`;
+}
+
 /** Home drum Enter: with nothing focused (fresh load, no arrow key yet), Enter opens the selected option, Quick play. */
 async function drumEnterOnLoad(s) {
   const h = await s.open("drum-enter");
@@ -1747,6 +1810,8 @@ export const scenarios = [
   { name: "drum ignores an unarmed pad", run: drumIgnoresUnarmedPad },
   { name: "drum enter on load", run: drumEnterOnLoad },
   { name: "settings back stays", run: settingsBackStays },
+  { name: "escape goes back", run: escapeGoesBack },
+  { name: "pinned parts hold still", run: pinnedPartsHoldStill },
   { name: "quick play shows name", run: quickPlayShowsName },
   { name: "phone menu no welcome", run: phoneMenuNoWelcome },
   { name: "editor keeps map name", run: editorKeepsMapName },
