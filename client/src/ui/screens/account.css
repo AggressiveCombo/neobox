@@ -95,12 +95,18 @@
   color: var(--accent);
 }
 
-/* Signed in: the profile card, then Security below it. */
+/* Signed in: the profile card, with Security in the column beside it (one column on narrow screens). */
 .account-member {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 340px);
+  gap: 32px;
+  align-items: start;
+}
+
+.account-side {
   display: flex;
   flex-direction: column;
-  gap: 24px;
-  max-width: 720px;
+  gap: 16px;
 }
 
 .account-subform > h3 {
@@ -113,12 +119,11 @@
   gap: 8px;
 }
 
-/* The level is the profile's headline number. */
+/* A value under its section heading: body size, so the figure ranks below the heading and the page title. */
 .account-level-num {
-  font-size: clamp(40px, 6vw, 64px);
-  font-weight: 500;
-  line-height: 1;
-  letter-spacing: -0.02em;
+  font-size: var(--step-body);
+  font-weight: 600;
+  line-height: 1.3;
 }
 
 .account-level .meter {
@@ -197,6 +202,11 @@
     gap: 24px;
   }
 
+  .account-member {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 24px;
+  }
+
   .account-aside {
     padding-top: 0;
   }
@@ -205,9 +215,5 @@
 @media (max-width: 600px) {
   .account-form {
     padding: 20px;
-  }
-
-  .account-level-num {
-    font-size: 3rem;
   }
 }
