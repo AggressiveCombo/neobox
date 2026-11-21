@@ -799,7 +799,7 @@ function objectiveLabel(scene: Scene): string {
     case 3:
       return limit > 0 ? `${limit} rounds to win` : "Rounds";
     case 4:
-      return limit > 0 ? `${limit} objectives to win` : "Endless teams";
+      return "Endless teams";
     case 5:
       return local !== undefined ? `Spawns remaining: ${Math.round(local.lives)}` : "Lives teams";
     case 6:
