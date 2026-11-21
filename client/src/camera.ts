@@ -142,8 +142,11 @@ export function computeCamera(scene: Scene, local?: PlayerRec): Camera {
   // centred on it (no follow, no zoom pumping), and a larger arena is followed and clamped to its edges. Ground or
   // map machinery past the arena edge is not framed.
   const bounds: Bounds = { x0: 0, y0: 0, x1: Math.max(0, scene.arenaW), y1: Math.max(0, scene.arenaH) };
-  const fitsX = bounds.x1 - bounds.x0 <= w0;
-  const fitsY = bounds.y1 - bounds.y0 <= h0;
+  // The view aspect reaches the client as an f32, so a view exactly the arena's size can land a hair short of it (classic
+  // 1.6 is 1.6000000238 in f32): the fit test allows that rounding, or a classic arena that fills the view would follow.
+  const FIT_EPS = 1e-4;
+  const fitsX = bounds.x1 - bounds.x0 <= w0 + FIT_EPS;
+  const fitsY = bounds.y1 - bounds.y0 <= h0 + FIT_EPS;
   // The narrowest view that keeps the group inside the insets, on the axes that move.
   const needX = fitsX ? 0 : (maxX - minX) / (1 - 2 * SAFE_SIDE);
   const needY = fitsY ? 0 : ((maxY - minY) * scene.viewAspect) / (1 - SAFE_TOP - SAFE_BOTTOM);
