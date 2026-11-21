@@ -580,7 +580,12 @@ export const STATES = [
     return h;
   }),
   state("replay-loaded", { fit: true }, async (s) => {
-    const { host } = await inMatch(s);
+    // The HUD mounts the phone welcome sheet (hud.ts), which covers the portrait rotate gate's own button, so
+    // the gate is left up by inMatch and dismissed here, after the welcome.
+    const { host } = await inMatch(s, { keepRotateGate: true });
+    await dismissPhoneSplash(host.page);
+    // Play on the welcome requests fullscreen, which can bring the portrait rotate gate back over the HUD.
+    await dismissRotateGate(host.page);
     // End match opens the app's confirm dialog; the ended match then shows "Save replay" in the room lobby.
     await host.page.locator(".hud-end").click();
     const endDialog = host.page.getByRole("alertdialog", { name: "End the match?", exact: true });
