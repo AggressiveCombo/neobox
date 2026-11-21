@@ -137,6 +137,11 @@ dialog.modal.profile-dialog .modal-body {
   white-space: nowrap;
 }
 
+.profile-map-name > svg.icon {
+  margin-right: 6px;
+  vertical-align: -2px;
+}
+
 .profile-map-figs {
   display: flex;
   flex: none;
