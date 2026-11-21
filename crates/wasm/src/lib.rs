@@ -6,7 +6,7 @@
 
 pub mod frame;
 
-use frame::{Feed, FrameBuilder, Meta};
+use frame::{Feed, FrameBuilder, Meta, PlayerColours};
 use neobox_net::{ClientFrame, ClientSession, Desync, InputFrame, MatchStart, Replay, ReplayPlayer, ReplayRecorder, RttTracker, ServerFrame, ServerMatch, TickClock};
 use neobox_sim::start::Outcome;
 use neobox_sim::{GameSettings, MapData, State};
@@ -470,6 +470,25 @@ pub extern "C" fn nb_set_trace(on: u32) {
     with(|a| {
         a.trace_on = on != 0;
         a.trace.clear();
+    })
+}
+
+/// Player colours the frames are drawn with: `len` bytes of little-endian words (see `PlayerColours::from_words`).
+/// # Safety
+/// `ptr` must come from `nb_alloc` with at least `len` bytes.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn nb_set_colours(ptr: u32, len: u32) -> i32 {
+    if len % 4 != 0 {
+        return with(|a| fail(a, "player colours are not whole words"));
+    }
+    let raw = unsafe { bytes(ptr, len) };
+    let words: Vec<u32> = raw.chunks_exact(4).map(|c| u32::from_le_bytes([c[0], c[1], c[2], c[3]])).collect();
+    with(|a| match PlayerColours::from_words(&words) {
+        Some(colours) => {
+            a.frame.set_colours(colours);
+            0
+        }
+        None => fail(a, "malformed player colours"),
     })
 }
 

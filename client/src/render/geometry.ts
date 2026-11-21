@@ -116,6 +116,16 @@ export function playerRgb(team: number, id: number): number {
   return c.ffa[id % c.ffa.length];
 }
 
+/** The colours `playerRgb` draws players with, as the words `nb_set_colours` reads (see `PlayerColours::from_words`): red, blue,
+ *  the FFA palette (count, colours), then the room's colours (count, id and colour pairs; default palette only). */
+export function playerColourWords(): Uint32Array {
+  const c = PALETTES[prefs.value.palette];
+  const room = prefs.value.palette === "default" ? [...playerColours] : [];
+  const words = [c.red, c.blue, c.ffa.length, ...c.ffa, room.length];
+  for (const [id, rgb] of room) words.push(id, rgb);
+  return new Uint32Array(words);
+}
+
 /** Linear blend of two 0xRRGGBB colours. */
 export function mixRgb(a: number, b: number, t: number): number {
   return (mixChannel(a, b, 16, t) << 16) | (mixChannel(a, b, 8, t) << 8) | mixChannel(a, b, 0, t);

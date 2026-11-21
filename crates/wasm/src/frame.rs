@@ -8,8 +8,8 @@ use neobox_sim::step::kind;
 use neobox_sim::GameSettings;
 use std::collections::HashMap;
 
-pub const LAYOUT_VERSION: u32 = 8;
-pub const HEADER_WORDS: usize = 42;
+pub const LAYOUT_VERSION: u32 = 9;
+pub const HEADER_WORDS: usize = 43;
 pub const PLAYER_WORDS: usize = 14;
 pub const SOUND_WORDS: usize = 5;
 pub const SCORE_WORDS: usize = 15;
@@ -21,19 +21,63 @@ pub const SOUND_FANFARE: u32 = 20;
 pub const DAMAGE_DYNAMIC_RGB: u32 = 0xd4cd47;
 pub const DAMAGE_REMOVAL_RGB: u32 = 0xc43543;
 
-/// Team colours (0xRRGGBB).
+/// Team colours (0xRRGGBB) of the parts that carry no player colour: projectiles, flags.
 pub const RED: u32 = 0xd44234;
 pub const BLUE: u32 = 0x347bd4;
-/// FFA palette (original colours, chosen for neobox).
-pub const PALETTE: [u32; 8] = [0x2f9bff, 0xffc94a, 0x4cd98b, 0xff6f91, 0xa98bff, 0xff9a3c, 0x3fd6d6, 0xd6e05a];
 
-pub fn player_color(id: f64, team: f64) -> u32 {
-    if team == 2.0 {
-        RED
-    } else if team == 3.0 {
-        BLUE
-    } else {
-        PALETTE[(id.max(0.0) as usize) % PALETTE.len()]
+/// The colours player-owned parts are drawn in, as the client draws players (`playerColourWords` in
+/// client/src/render/geometry.ts): team colours, the FFA palette by player id, and the room's own colour
+/// per FFA player id.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PlayerColours {
+    red: u32,
+    blue: u32,
+    ffa: Vec<u32>,
+    room: Vec<(u32, u32)>,
+}
+
+impl Default for PlayerColours {
+    /// The client's default palette; the client sends its own before the first frame (`nb_set_colours`).
+    fn default() -> Self {
+        Self {
+            red: 0xff5252,
+            blue: 0x4d9bff,
+            ffa: vec![0x9be15d, 0x4fd1c5, 0x7f9cf5, 0xf28c28, 0xb0b0ff, 0xff7f9f, 0x3fbfbf, 0xcc79a7],
+            room: Vec::new(),
+        }
+    }
+}
+
+impl PlayerColours {
+    /// Decode the words of `nb_set_colours`: red, blue, FFA count, FFA colours, room count, then (id, colour) pairs.
+    pub fn from_words(w: &[u32]) -> Option<Self> {
+        let [red, blue, n, rest @ ..] = w else { return None };
+        let n = *n as usize;
+        if n == 0 || rest.len() < n {
+            return None;
+        }
+        let (ffa, rest) = rest.split_at(n);
+        let [m, pairs @ ..] = rest else { return None };
+        if pairs.len() != 2 * *m as usize {
+            return None;
+        }
+        Some(Self { red: *red, blue: *blue, ffa: ffa.to_vec(), room: pairs.chunks_exact(2).map(|p| (p[0], p[1])).collect() })
+    }
+
+    /// Colour of a player of `team` with id `id`: the same mapping as `playerRgb` in the client.
+    pub fn of(&self, id: f64, team: f64) -> u32 {
+        if team == 2.0 {
+            return self.red;
+        }
+        if team == 3.0 {
+            return self.blue;
+        }
+        if team == 1.0 {
+            if let Some(&(_, rgb)) = self.room.iter().find(|(rid, _)| f64::from(*rid) == id) {
+                return rgb;
+            }
+        }
+        self.ffa[(id.max(0.0) as usize) % self.ffa.len()]
     }
 }
 
@@ -76,6 +120,18 @@ pub struct FrameBuilder {
     tmp: Vec<[f32; 2]>,
     /// Damage bars of the built frame: x, y, fraction, colour (BAR_WORDS each).
     bars: Vec<u32>,
+    /// Player colours the frames are drawn with (set by `nb_set_colours`).
+    colours: PlayerColours,
+}
+
+impl FrameBuilder {
+    /// Set the player colours of the next frames. Cached meshes keep the colours they were built with, so they go too.
+    pub fn set_colours(&mut self, colours: PlayerColours) {
+        if colours != self.colours {
+            self.colours = colours;
+            self.cache.clear();
+        }
+    }
 }
 
 /// Local-space triangles of one shape and its colour.
@@ -529,7 +585,7 @@ impl FrameBuilder {
                 .shapes
                 .iter()
                 .map(|s| {
-                    let c = if def.source_player > -1.0 { player_color(def.source_player, s.color) } else { s.color as u32 & 0xffffff };
+                    let c = if def.source_player > -1.0 { self.colours.of(def.source_player, s.color) } else { s.color as u32 & 0xffffff };
                     shape_mesh(s, c)
                 })
                 .collect();
@@ -623,12 +679,12 @@ impl FrameBuilder {
         let fade = (e.ttl / 15.0).clamp(0.15, 1.0) as f32;
         match e.kind as i64 {
             33 => {
-                let c = rgba(player_color(e.player, e.team), 0.55 * fade);
+                let c = rgba(self.colours.of(e.player, e.team), 0.55 * fade);
                 self.quad_line(e.x, e.y, e.x2, e.y2, 0.12, c);
             }
             43 => {
                 let r = 0.6 + (4.0 - e.ttl).max(0.0) * 0.5;
-                self.ring(e.x, e.y, r, 0.08, rgba(player_color(e.player, e.team), 0.5 * fade));
+                self.ring(e.x, e.y, r, 0.08, rgba(self.colours.of(e.player, e.team), 0.5 * fade));
             }
             18 => self.ring(e.x, e.y, 0.25 + (15.0 - e.ttl).max(0.0) * 0.03, 0.06, rgba(0xffffff, 0.6 * fade)),
             0 => {
@@ -746,7 +802,7 @@ impl FrameBuilder {
                 let w = gs.player_width;
                 let h = 0.5 * gs.player_height / 2.0;
                 let tris = [[-w, -h], [w, -h], [w, h], [-w, -h], [w, h], [-w, h]].map(|v| [v[0] as f32, v[1] as f32]);
-                let col = rgba(player_color(p.id, p.team), 0.85);
+                let col = rgba(self.colours.of(p.id, p.team), 0.85);
                 self.push_tri_list(&tris, c.x, c.y, c.angle, col);
                 self.quad_line(px, py, c.x - w * c.angle.cos(), c.y - w * c.angle.sin(), 0.04, rgba(0xdddddd, 0.7));
                 self.quad_line(px, py, c.x + w * c.angle.cos(), c.y + w * c.angle.sin(), 0.04, rgba(0xdddddd, 0.7));
@@ -769,7 +825,7 @@ impl FrameBuilder {
                 self.ring(ex, ey, 0.02, 0.04, rgba(0xbbbbbb, 0.7));
             }
             self.bat_head(pp, p, t, gs, px, py);
-            let col = player_color(p.id, p.team);
+            let col = self.colours.of(p.id, p.team);
             if p.rocket_frame >= 0.0 {
                 let (charge, a) = interp_rocket(pp, p, t);
                 let len = 1.2 + charge.min(8.0) * 0.08;
@@ -915,6 +971,7 @@ impl FrameBuilder {
         w[11] = f(st.height);
         w[12] = st.color_top as u32 & 0xffffff;
         w[13] = st.color_bottom as u32 & 0xffffff;
+        w[42] = f(st.view_aspect());
         w[14] = meta.tick;
         w[15] = meta.local as u32;
         w[16] = f(cur.round.intro);
@@ -1267,6 +1324,29 @@ mod tests {
             let cold = mesh_summary(FrameBuilder::default().meshes(&new));
             assert_eq!(mesh_summary(warm.meshes(&new)), cold);
         }
+    }
+
+    #[test]
+    fn player_owned_shapes_take_the_client_colour_of_their_player() {
+        // a dead player's debris: the shape carries the team, the body the player id
+        let debris = |id: f64, team: f64| {
+            let mut def = BodyDef::default();
+            def.source_player = id;
+            def.shapes = vec![MapShape { kind: 0.0, color: team, points: vec![[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]], ..MapShape::default() }];
+            std::sync::Arc::new(def)
+        };
+        let colour = |f: &mut FrameBuilder, def: &std::sync::Arc<BodyDef>| f.meshes(def)[0].color;
+        let mut f = FrameBuilder::default();
+        // the room gave player 40 its own FFA colour; other FFA ids cycle the palette
+        f.set_colours(PlayerColours::from_words(&[0xff5252, 0x4d9bff, 2, 0x111111, 0x222222, 1, 40, 0xabcdef]).expect("valid colours"));
+        assert_eq!(colour(&mut f, &debris(40.0, 1.0)), 0xabcdef);
+        assert_eq!(colour(&mut f, &debris(41.0, 1.0)), 0x222222);
+        assert_eq!(colour(&mut f, &debris(40.0, 2.0)), 0xff5252);
+        assert_eq!(colour(&mut f, &debris(40.0, 3.0)), 0x4d9bff);
+        // a new palette replaces the colours of meshes already cached
+        f.set_colours(PlayerColours::from_words(&[0x010101, 0x020202, 1, 0x030303, 0]).expect("valid colours"));
+        assert_eq!(colour(&mut f, &debris(40.0, 1.0)), 0x030303);
+        assert_eq!(colour(&mut f, &debris(40.0, 2.0)), 0x010101);
     }
 
     #[test]

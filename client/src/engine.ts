@@ -5,6 +5,7 @@
 import type { MatchStart } from "./protocol";
 import { fetchPrecached } from "./precached";
 import { HttpError } from "./http-error";
+import { playerColourWords } from "./render/geometry";
 
 export interface NeoboxExports {
   memory: WebAssembly.Memory;
@@ -38,6 +39,7 @@ export interface NeoboxExports {
   nb_rollback_hist(): number;
   nb_hash_log(): number;
   nb_set_cap(cap: number): void;
+  nb_set_colours(ptr: number, len: number): number;
   nb_corr_hist(): number;
   nb_stall_stats(): number;
   nb_set_trace(on: number): void;
@@ -108,6 +110,7 @@ export class Engine {
   private viewPtr = -1;
   private viewLen = -1;
   private view: FrameView | null = null;
+  private colours: Uint32Array | null = null;
 
   constructor(raw: RawEngine) {
     this.x = raw.exports;
@@ -137,6 +140,20 @@ export class Engine {
 
   private check(rc: number): void {
     if (rc < 0) throw new EngineError(this.lastError() || `engine error ${rc}`);
+  }
+
+  /** Send the player colours to the frame builder when they differ from the last ones sent. */
+  private syncColours(): void {
+    const words = playerColourWords();
+    const prev = this.colours;
+    if (prev !== null && prev.length === words.length && prev.every((w, i) => w === words[i])) return;
+    const b = this.alloc(new Uint8Array(words.buffer));
+    try {
+      this.check(this.x.nb_set_colours(b.ptr, b.len));
+    } finally {
+      this.free(b);
+    }
+    this.colours = words;
   }
 
   matchStart(start: MatchStart, local: number, nowMs: number): void {
@@ -180,6 +197,7 @@ export class Engine {
 
   /** Advance one step; returns the outgoing binary frame (empty = nothing to send). */
   frame(nowMs: number, mask: number): Uint8Array {
+    this.syncColours();
     const n = this.x.nb_frame(nowMs, mask);
     return n > 0 ? this.outView(n) : EMPTY;
   }
@@ -342,6 +360,7 @@ export class Engine {
 
   /** Build the replay frame at fractional tick `tickF`, following player `follow` (-1 none). Returns the tick shown, or null while a seek waits for keyframes (the previous frame stays). */
   replayFrame(tickF: number, follow: number): number | null {
+    this.syncColours();
     const rc = this.x.nb_replay_frame(tickF, follow);
     if (rc === REPLAY_PENDING) return null;
     this.check(rc);
@@ -371,6 +390,7 @@ export class Engine {
 
   /** Advance the offline game by `dtMs` with input `mask` and build its frame; true once the game is over. */
   localFrame(dtMs: number, mask: number): boolean {
+    this.syncColours();
     const rc = this.x.nb_local_frame(dtMs, mask);
     this.check(rc);
     return rc === 1;
