@@ -42,6 +42,7 @@ import { accountsInvScenarios } from "./inv-accounts.mjs";
 import { roomsInvScenarios } from "./inv-rooms.mjs";
 import { serverInvScenarios } from "./inv-server.mjs";
 import { transitionScenarios } from "./transition.mjs";
+import { mapAspectScenarios } from "./mapaspect.mjs";
 import { writeFileSync, mkdtempSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -1790,5 +1791,6 @@ export const scenarios = [
   ...roomsInvScenarios,
   ...serverInvScenarios,
   ...transitionScenarios,
+  ...mapAspectScenarios,
   ...livenessScenarios,
 ];
