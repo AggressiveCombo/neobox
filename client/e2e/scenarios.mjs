@@ -1186,6 +1186,40 @@ function drumOf(page) {
   };
 }
 
+/** Settings Back: scrolled to the bottom of Settings, Back is still on screen (the page head stays pinned). */
+async function settingsBackStays(s) {
+  const h = await s.open("settings-back");
+  const { page } = h;
+  await page.goto(s.base);
+  await menuName(page).waitFor();
+  await navTo(page, "Settings");
+  const back = page.locator(".page-head .page-back");
+  await back.waitFor({ state: "visible" });
+  await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
+  await page.waitForTimeout(300);
+  const box = await back.boundingBox();
+  const vh = page.viewportSize().height;
+  check(box !== null && box.y >= 0 && box.y + box.height <= vh, `Back is off screen after scrolling Settings (box ${JSON.stringify(box)})`);
+  await back.click();
+  await menuName(page).waitFor();
+  return "Back stays on screen at the bottom of Settings and returns to the menu";
+}
+
+/** Home drum Enter: with nothing focused (fresh load, no arrow key yet), Enter opens the selected option, Quick play. */
+async function drumEnterOnLoad(s) {
+  const h = await s.open("drum-enter");
+  const { page } = h;
+  await page.goto(s.base);
+  await menuName(page).waitFor();
+  const { drum, settled } = drumOf(page);
+  await drum.waitFor();
+  await settled();
+  await page.evaluate(() => document.activeElement instanceof HTMLElement && document.activeElement.blur());
+  await page.keyboard.press("Enter");
+  await page.getByRole("heading", { name: "Quick play", exact: true }).waitFor({ timeout: 3000 });
+  return "Enter on a fresh menu opens Quick play";
+}
+
 /** Home drum ends: rolling past the first or last option stops there (no wrap); Home and End and the wheel go to the ends. */
 async function drumEnds(s) {
   const h = await s.open("drum-ends");
@@ -1710,6 +1744,8 @@ export const scenarios = [
   { name: "drum rows", run: drumRows },
   { name: "drum fast wheel", run: drumFastWheel },
   { name: "drum ignores an unarmed pad", run: drumIgnoresUnarmedPad },
+  { name: "drum enter on load", run: drumEnterOnLoad },
+  { name: "settings back stays", run: settingsBackStays },
   { name: "quick play shows name", run: quickPlayShowsName },
   { name: "phone menu no welcome", run: phoneMenuNoWelcome },
   { name: "editor keeps map name", run: editorKeepsMapName },

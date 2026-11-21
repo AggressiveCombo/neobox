@@ -1,7 +1,8 @@
 // One-shot sound effects. Engine sounds (docs/CLIENT-API.md sound kinds) and interface
 // sounds share one path: short recorded or produced clips (client/public/sfx, built from
 // the Kenney CC0 packs by neobox-scratch/audio-work/build_sfx.py) decoded once and played
-// through WebAudio, with a little random pitch and a random variant per play.
+// through WebAudio. Each action has one sound, so a player learns it; a slight pitch spread
+// keeps fast repeats from sounding mechanical.
 
 import { prefs } from "./prefs";
 import { fetchPrecached } from "./precached";
@@ -13,37 +14,37 @@ export type UiSound = "hover" | "click" | "tab" | "toggle" | "open" | "close" | 
 /** An engine sound kind (docs/CLIENT-API.md) or an interface sound. */
 type Key = number | UiSound;
 
-/** Clip variants per key, as file names in client/public/sfx (without `.mp3`). Kind 5 is never emitted. */
-const CLIPS: Partial<Record<Key, readonly string[]>> = {
-  1: ["maximize_002", "maximize_008"], // jump
-  2: ["maximize_004", "maximize_007"], // air jump
-  3: ["impactPlate_medium_001", "impactPlank_medium_001"], // push hit
-  4: ["impactPunch_medium_000", "impactPunch_medium_002"], // push miss
-  6: ["impactPlank_medium_001", "impactPlank_medium_003"], // impact
-  7: ["impactPlate_medium_000", "impactPlate_medium_002"], // impact on a no-jump body
-  8: ["scratch_004", "scratch_005"], // freeze
-  9: ["open_002", "confirmation_004"], // spawn
-  10: ["back_003", "switch_001"], // countdown tick (also the post-game point tick)
-  11: ["laser6", "phaserDown3"], // death
-  12: ["impactSoft_medium_003", "impactSoft_medium_004"], // body impact
-  13: ["phaseJump4", "laserSmall_002"], // bat swing
-  14: ["impactWood_medium_000", "impactWood_medium_001"], // bat hit
-  15: ["spaceEngineSmall_000", "spaceEngineSmall_002"], // rocket charge
-  16: ["explosionCrunch_003", "explosionCrunch_000"], // rocket fire
-  17: ["explosionCrunch_001", "lowFrequency_explosion_001"], // explosion
-  18: ["thrusterFire_001", "thrusterFire_004"], // parachute
-  19: ["tick_001", "tick_002"], // ghost trail (quiet)
-  20: ["jingles_SAX01", "jingles_SAX14"], // fanfare (game over, level up)
-  hover: ["tick_004", "select_001"],
-  click: ["click_001", "click_002"],
-  tab: ["select_002", "select_003"],
-  toggle: ["switch_004", "click_001"],
-  open: ["maximize_006"],
-  close: ["minimize_004"],
-  error: ["forceField_001", "forceField_004"],
-  win: ["jingles_STEEL01"],
-  lose: ["jingles_SAX02"],
-  chat: ["drop_002", "drop_004"],
+/** The clip for each key, a file name in client/public/sfx (without `.mp3`); no two actions share a clip. Kind 5 is never emitted. */
+const CLIPS: Partial<Record<Key, string>> = {
+  1: "maximize_002", // jump
+  2: "maximize_004", // air jump
+  3: "impactPlate_medium_001", // push hit
+  4: "impactPunch_medium_000", // push miss
+  6: "impactPlank_medium_003", // impact
+  7: "impactPlate_medium_002", // impact on a no-jump body
+  8: "scratch_004", // freeze
+  9: "open_002", // spawn
+  10: "back_003", // countdown tick (also the post-game point tick)
+  11: "phaserDown3", // death
+  12: "impactSoft_medium_003", // body impact
+  13: "phaseJump4", // bat swing
+  14: "impactWood_medium_000", // bat hit
+  15: "spaceEngineSmall_000", // rocket charge
+  16: "explosionCrunch_003", // rocket fire
+  17: "lowFrequency_explosion_001", // explosion
+  18: "thrusterFire_001", // parachute
+  19: "tick_001", // ghost trail (quiet)
+  20: "jingles_SAX01", // fanfare (game over, level up)
+  hover: "tick_004",
+  click: "click_001",
+  tab: "select_002",
+  toggle: "switch_004",
+  open: "maximize_006",
+  close: "minimize_004",
+  error: "forceField_001",
+  win: "jingles_STEEL01",
+  lose: "jingles_SAX02",
+  chat: "drop_002",
 };
 
 /** Caption text for each engine sound kind, shown when captions are on (the sound's visual twin for players who cannot hear it). */
@@ -77,7 +78,7 @@ const qaSounds = { emitted: new Set<number>(), captioned: new Set<number>() };
 Object.assign(globalThis, { __qaSounds: qaSounds });
 
 /** Every distinct file, loaded once on the first gesture. */
-const FILES = [...new Set(Object.values(CLIPS).flatMap((clips) => clips ?? []))];
+const FILES = [...new Set(Object.values(CLIPS).filter((clip): clip is string => clip !== undefined))];
 
 /** Interface sounds sit well under the game effects. */
 const UI_LEVEL = 0.5;
@@ -178,14 +179,15 @@ export class Sfx {
   private trigger(key: Key, level: number, pan: number): void {
     const ctx = this.ctx;
     if (!ctx || prefs.value.muted || ctx.state !== "running") return;
-    const variants = (CLIPS[key] ?? []).map((n) => this.buffers.get(n)).filter((b): b is AudioBuffer => b !== undefined);
-    if (variants.length === 0) return;
+    const clip = CLIPS[key];
+    const buffer = clip === undefined ? undefined : this.buffers.get(clip);
+    if (buffer === undefined) return;
     const now = performance.now();
     if (now - (this.lastPlayed.get(key) ?? -Infinity) < MIN_GAP_MS) return;
     this.lastPlayed.set(key, now);
 
     const src = ctx.createBufferSource();
-    src.buffer = variants[Math.floor(Math.random() * variants.length)];
+    src.buffer = buffer;
     src.playbackRate.value = 1 + (Math.random() * 2 - 1) * RATE_SPREAD;
     const gain = ctx.createGain();
     gain.gain.value = level;

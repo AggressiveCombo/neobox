@@ -58,11 +58,6 @@ button.home-account {
   min-height: 48px;
 }
 
-.home-account .avatar {
-  width: 32px;
-  height: 32px;
-}
-
 .home-level {
   font-variant-numeric: tabular-nums;
 }

@@ -129,9 +129,11 @@
   height: 10px;
 }
 
-/* Security is a disclosure: closed, it is one row with a shield; open, its forms. */
-.account-security {
+/* Security is a disclosure: closed, it is one row with a shield; open, its forms. The panel's own padding and gap would
+   frame the closed row in 24 px of empty space on every side (.panel comes later in the cascade): the summary carries it. */
+.panel.account-security {
   padding: 0;
+  gap: 0;
 }
 
 .account-security > summary {

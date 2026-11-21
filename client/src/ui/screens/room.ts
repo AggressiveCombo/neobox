@@ -730,21 +730,11 @@ export const roomScreen: ScreenFactory = (ctx: AppCtx) => {
     ctx.send({ t: "editing", open: true });
   }
 
-  /** Share the invite link: the system share sheet when there is one, else copy it, else show it to copy by hand. */
+  /** Copy the invite link (no system share sheet: one press, the link is on the clipboard), else show it to copy by hand. */
   async function shareInvite(): Promise<void> {
     const room = st.room;
     if (room === null) return;
     const url = inviteUrl(room.code);
-    if (typeof navigator.share === "function") {
-      // The system share sheet is outside the page and can take a while to appear: say in the page that it is open.
-      ctx.toast("Choose an app to share the invite link.");
-      try {
-        await navigator.share({ title: room.name, text: `Join ${room.name} on neobox`, url });
-        return;
-      } catch (err: unknown) {
-        if (err instanceof DOMException && err.name === "AbortError") return;
-      }
-    }
     if (await copyText(url)) {
       flashInviteCopied();
       ctx.toast("Invite link copied.");

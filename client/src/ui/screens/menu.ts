@@ -14,7 +14,6 @@ import { local } from "../../storage";
 import { NAME_STORAGE_KEY, TRAINING_SEEN_KEY } from "../../storage-keys";
 import { h } from "../dom";
 import { type IconName, icon } from "../icons";
-import { avatar } from "../kit";
 import { mountMenuClips } from "../menu-clips";
 import { hasUnreadNews, openNews } from "../news";
 import { REPO_URL } from "./about";
@@ -173,14 +172,11 @@ export const menuScreen: ScreenFactory = (ctx) => {
     onclick: () => store.set({ screen: "account" }),
   });
 
-  /** Guests see "Sign in"; signed-in players see their avatar and level under one label. */
+  /** Guests see "Sign in"; signed-in players see the account icon and their level under one label. */
   function setAccount(acc: Account | null): void {
     if (acc) {
-      // No letter: the button's visible text must match its label (axe label-content-name-mismatch).
-      const swatch = avatar(acc.name, null, true);
-      swatch.setAttribute("aria-hidden", "true");
       accountBtn.setAttribute("aria-label", `Account, Level ${levelOf(acc.xp)}`);
-      accountBtn.replaceChildren(swatch, h("span", { class: "home-level" }, `Level ${levelOf(acc.xp)}`));
+      accountBtn.replaceChildren(icon("user", 20), h("span", { class: "home-level" }, `Level ${levelOf(acc.xp)}`));
     } else {
       accountBtn.removeAttribute("aria-label");
       accountBtn.replaceChildren(icon("user", 20), h("span", null, navigator.onLine ? "Sign in" : "Account"));

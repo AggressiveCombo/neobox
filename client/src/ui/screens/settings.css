@@ -8,11 +8,6 @@
   align-items: start;
 }
 
-/* The page title scrolls with the page: a sticky bar over the controls hid them at large text sizes. */
-.settings-page .page-head {
-  position: static;
-}
-
 .settings-nav {
   display: flex;
   flex-wrap: wrap;

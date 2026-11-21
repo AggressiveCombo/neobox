@@ -2,18 +2,25 @@
 
 .room-screen {
   width: 100%;
-  max-width: 1280px;
-  margin: 0 auto;
   display: flex;
   flex-direction: column;
   box-sizing: border-box;
-  /* The room sits over the game view while a match runs behind it: the opaque ground keeps every panel's text at contrast. */
+  /* The room sits over the game view while a match runs behind it: the opaque ground spans the whole window (the
+     game never shows at the sides of a wide screen) and keeps every panel's text at contrast. The content keeps its
+     1280 px column (below). */
   background: var(--ground);
   /* While the reconnect banner shows, room.ts sets --reconnect-space to its bottom edge: the scroller starts below it */
   padding-top: max(env(safe-area-inset-top), var(--reconnect-space, 0px));
   /* fills #ui (the viewport): the content scrolls and the dock stays put below it */
   height: 100%;
   min-height: 0;
+}
+
+.room-screen > * {
+  width: 100%;
+  max-width: 1280px;
+  margin-inline: auto;
+  box-sizing: border-box;
 }
 
 .room-content {
@@ -493,9 +500,11 @@ button.room-menu-item[aria-checked="true"] {
   gap: 4px;
 }
 
+/* A list row, not a centred button: icon and text start on one left edge, so the icons line up down the list. */
 .room-mode-option {
   display: flex;
   align-items: flex-start;
+  justify-content: flex-start;
   gap: 12px;
   width: 100%;
   min-height: 0;

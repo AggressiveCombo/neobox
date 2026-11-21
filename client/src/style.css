@@ -406,9 +406,9 @@ button,
 
 @media (max-width: 600px) {
   /* Back and title share row 1 at the same place on every page; actions head the column (kit.ts placeActions).
-     A title too wide for row 1 (wide readable spacing at large text) moves to its own row instead of breaking mid-word. */
+     A title too wide for row 1 (wide readable spacing at large text) moves to its own row instead of breaking mid-word.
+     The head stays sticky, so Back is always reachable while the page scrolls. */
   .page-head {
-    position: static;
     display: flex;
     flex-wrap: wrap;
     align-items: center;
@@ -417,6 +417,13 @@ button,
 
   .page-head h1 {
     flex: 1 1 auto;
+  }
+}
+
+/* A short window (a phone on its side, a zoomed page) has no room for a pinned head over the content: it scrolls away. */
+@media (max-height: 500px) {
+  .page-head {
+    position: static;
   }
 }
 
