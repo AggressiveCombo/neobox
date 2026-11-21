@@ -94,7 +94,7 @@ const MODE_BLURBS: Record<number, string> = {
   1: "Each player has lives; the last one left wins.",
   2: "Play rounds; the most round wins takes the match.",
   3: "Red and Blue play rounds; the team with more round wins takes the match.",
-  4: "Red and Blue score kills in an endless match.",
+  4: "Red and Blue score kills; bringing the enemy flag home ends the match.",
   5: "Red and Blue share lives; the last team with lives left wins.",
   6: "Score kills in an endless match.",
 };
