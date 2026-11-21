@@ -28,7 +28,27 @@
     padding: 8px 14px;
   }
 
+  /* Progress and Next share the top row: the lesson keeps a 44px (touch target) row under them. */
+  .training-lesson {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-rows: auto minmax(0, 1fr);
+    grid-template-areas:
+      "progress next"
+      "text text";
+  }
+
+  .training-progress {
+    grid-area: progress;
+  }
+
+  .training-next {
+    grid-area: next;
+  }
+
   .training-text {
+    grid-area: text;
+    min-height: 44px;
     font-size: var(--step-small);
   }
 }
