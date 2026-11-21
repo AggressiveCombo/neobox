@@ -65,11 +65,13 @@ function pads(): (Gamepad | null)[] {
 /** `initial` is the option selected at mount (centred, with options above and below it when the list has them). */
 export function mountDrum(items: DrumItem[], label: string, initial = 0): Drum {
   const n = items.length;
-  // `target` is where the input has put the drum; `pos` is where it is drawn, easing toward `target`.
+  // `raw` is the travel the input has put the drum at: a wheel step adds to it, and only a discrete input (a key, a
+  // click, a drag) or a settle changes it. `target` is where the drum eases to, `pos` where it is drawn now.
   // `front` is the selected option: the target rounded and kept on the list.
   const start = Math.min(n - 1, Math.max(0, initial));
   let pos = start;
   let target = start;
+  let raw = start;
   let front = start;
   let pitch = PITCH_FALLBACK_PX;
   let radius = pitch / SIN_STEP;
@@ -125,9 +127,9 @@ export function mountDrum(items: DrumItem[], label: string, initial = 0): Drum {
     ...opts,
   );
 
-  /** The option nearest the target, on the list. */
-  function nearest(): number {
-    return Math.min(n - 1, Math.max(0, Math.round(target)));
+  /** The option nearest `x`, on the list. */
+  function nearestTo(x: number): number {
+    return Math.min(n - 1, Math.max(0, Math.round(x)));
   }
 
   /** Make the front option the selected one: the listbox, the options and the hint say so. */
@@ -137,10 +139,10 @@ export function mountDrum(items: DrumItem[], label: string, initial = 0): Drum {
     hint.textContent = items[front].hint;
   }
 
-  /** Moves the target, held within the ends and their bump, and the drum follows it. */
-  function aim(x: number): void {
+  /** Points the drum at `x`, held within the ends and their bump: the front option follows and the drum eases there. */
+  function point(x: number): void {
     target = Math.min(n - 1 + BUMP, Math.max(-BUMP, x));
-    const f = nearest();
+    const f = nearestTo(target);
     if (f !== front) {
       front = f;
       announce();
@@ -149,17 +151,24 @@ export function mountDrum(items: DrumItem[], label: string, initial = 0): Drum {
     kick();
   }
 
+  /** Moves where the input has put the drum (`raw`, within the ends and their bump) and points the drum at it. */
+  function aim(x: number): void {
+    raw = Math.min(n - 1 + BUMP, Math.max(-BUMP, x));
+    point(raw);
+  }
+
   function cancelSettle(): void {
     clearTimeout(settleTimer);
     settleTimer = 0;
   }
 
-  /** Settles on the nearest option once the input has been still for SETTLE_MS. */
+  /** Settles on the nearest option once the input has been still for SETTLE_MS. The snap rounds the target, not `raw`:
+   * the travel is kept, so a pause mid-gesture (a slow frame) does not throw away the steps after it. */
   function scheduleSettle(): void {
     cancelSettle();
     settleTimer = window.setTimeout(() => {
       settleTimer = 0;
-      aim(nearest());
+      point(nearestTo(raw));
     }, SETTLE_MS);
   }
 
@@ -171,7 +180,7 @@ export function mountDrum(items: DrumItem[], label: string, initial = 0): Drum {
 
   /** One option up or down, from the front. At an end the drum bumps and springs back. */
   function step(dir: number): void {
-    const base = Math.round(target);
+    const base = Math.round(raw);
     const next = base + dir;
     aim(next < 0 || next > n - 1 ? base + dir * BUMP : next);
     scheduleSettle();
@@ -214,7 +223,7 @@ export function mountDrum(items: DrumItem[], label: string, initial = 0): Drum {
 
   function tick(now: number): void {
     frame = 0;
-    const dt = last ? Math.min(64, now - last) : 16;
+    const dt = last ? now - last : 16;
     last = now;
     if (reducedMotion()) pos = target;
     else pos += (target - pos) * (1 - Math.exp(-dt / EASE_MS));
@@ -326,7 +335,7 @@ export function mountDrum(items: DrumItem[], label: string, initial = 0): Drum {
       e.preventDefault();
       const px = e.deltaMode === 1 ? e.deltaY * 16 : e.deltaMode === 2 ? e.deltaY * window.innerHeight : e.deltaY;
       cancelSettle();
-      aim(target + px / WHEEL_PX_PER_OPTION);
+      aim(raw + px / WHEEL_PX_PER_OPTION);
       scheduleSettle();
     },
     { passive: false },
@@ -336,7 +345,7 @@ export function mountDrum(items: DrumItem[], label: string, initial = 0): Drum {
   listbox.addEventListener("pointerdown", (e) => {
     if (e.button !== 0) return;
     suppressClick = false;
-    drag = { id: e.pointerId, y: e.clientY, start: target, moved: false };
+    drag = { id: e.pointerId, y: e.clientY, start: raw, moved: false };
   });
   listbox.addEventListener("pointermove", (e) => {
     if (!drag || e.pointerId !== drag.id) return;
@@ -358,7 +367,7 @@ export function mountDrum(items: DrumItem[], label: string, initial = 0): Drum {
     if (!moved) return;
     // The release of a drag is not a click on whatever is under the pointer.
     suppressClick = true;
-    aim(nearest());
+    aim(nearestTo(target));
   };
   listbox.addEventListener("pointerup", endDrag);
   listbox.addEventListener("pointercancel", endDrag);

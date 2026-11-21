@@ -1362,9 +1362,13 @@ async function drumRows(s) {
   return `visible options: desktop ${desk}, phone portrait ${portrait}, phone landscape ${landscape}`;
 }
 
-/** Home drum fast wheel: 30 wheel events in 300 ms move it every frame, and it settles within 250 ms of the last one. */
-async function drumFastWheel(s) {
-  const h = await s.open("drum-wheel");
+/**
+ * Home drum fast wheel: 30 wheel steps of 25 px (7.5 options) in a burst, then the drum settles on the option nearest
+ * where the travel ends. With `load`, the page runs under CPU load (Chromium: CDP 4x throttle; the other engines: a
+ * main-thread hog), so the steps arrive slower than a frame and every one of them must still count.
+ */
+async function drumFastWheel(s, { load = false } = {}) {
+  const h = await s.open(load ? "drum-wheel-load" : "drum-wheel");
   const { page } = h;
   await page.goto(s.base);
   await menuName(page).waitFor();
@@ -1374,25 +1378,36 @@ async function drumFastWheel(s) {
   const startIndex = (await drum.locator(".drum-label").allTextContents()).indexOf(await selected());
   const box = await drum.boundingBox();
   await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  if (load) await loadPage(s, page);
+  // Records until the drum has settled after the last wheel step (capped at 15 s, so a drum that never settles fails).
   const recording = page.evaluate(
     () =>
       new Promise((resolve) => {
         const listbox = document.querySelector('[role="listbox"][aria-label="Destinations"]');
-        const rec = { frames: [], wheels: [], settledAt: null };
+        const rec = { frames: [], wheels: [], deltaY: 0, settledAt: null };
         const sig = () => [...listbox.querySelectorAll('[role="option"]')].map((o) => o.style.transform).join("|");
         const observer = new MutationObserver(() => {
-          if (listbox.dataset.settled === "true" && rec.settledAt === null) rec.settledAt = performance.now();
+          if (listbox.dataset.settled === "true") rec.settledAt = performance.now();
         });
         observer.observe(listbox, { attributes: true, attributeFilter: ["data-settled"] });
-        listbox.addEventListener("wheel", () => rec.wheels.push(performance.now()), { passive: true });
+        listbox.addEventListener(
+          "wheel",
+          (e) => {
+            rec.wheels.push(performance.now());
+            rec.deltaY += e.deltaY;
+          },
+          { passive: true },
+        );
         const start = performance.now();
         const tick = () => {
           rec.frames.push({ t: performance.now(), sig: sig() });
-          if (performance.now() - start < 1500) requestAnimationFrame(tick);
-          else {
+          const lastWheel = rec.wheels[rec.wheels.length - 1];
+          const settledAfter =
+            window.__wheelBurstEnded === true && lastWheel !== undefined && rec.settledAt !== null && rec.settledAt > lastWheel;
+          if (settledAfter || performance.now() - start > 15000) {
             observer.disconnect();
             resolve(rec);
-          }
+          } else requestAnimationFrame(tick);
         };
         requestAnimationFrame(tick);
       }),
@@ -1402,25 +1417,58 @@ async function drumFastWheel(s) {
     await page.mouse.wheel(0, 25);
     await page.waitForTimeout(8);
   }
+  await page.evaluate(() => {
+    window.__wheelBurstEnded = true;
+  });
   const rec = await recording;
   const firstWheel = Math.min(...rec.wheels);
   const lastWheel = Math.max(...rec.wheels);
-  // Chromium coalesces wheel events that land within one frame, so the count can come in under 30.
-  check(rec.wheels.length >= 25, `saw ${rec.wheels.length} of 30 wheel events`);
-  const during = rec.frames.filter((f) => f.t >= firstWheel && f.t <= lastWheel);
-  let moved = 0;
-  for (let i = 1; i < during.length; i += 1) if (during[i].sig !== during[i - 1].sig) moved += 1;
-  const share = moved / Math.max(1, during.length - 1);
-  check(share >= 0.9, `the drum moved on ${Math.round(share * 100)}% of frames during the wheel burst, want 90%`);
+  // Chromium may coalesce wheel events that land within one frame (fewer listener calls), summing their travel. Under
+  // load another engine may drop some before the page sees them: the drum must then settle on the travel it did get.
+  const travel = rec.deltaY;
+  check(travel > 0, "the drum got no wheel travel");
+  if (!load) {
+    check(travel === 750, `the drum got ${travel} px of wheel travel, want 750 (30 steps of 25)`);
+    // Only frames while the wheel is turning count: a pause in the input (a slow dispatch on a loaded machine) is not the drum's to move.
+    const turning = rec.frames.filter((f) => {
+      const prior = rec.wheels.filter((w) => w <= f.t);
+      return prior.length > 0 && f.t - prior[prior.length - 1] <= 50 && f.t >= firstWheel && f.t <= lastWheel;
+    });
+    let moved = 0;
+    for (let i = 1; i < turning.length; i += 1) if (turning[i].sig !== turning[i - 1].sig) moved += 1;
+    const share = moved / Math.max(1, turning.length - 1);
+    check(share >= 0.9, `the drum moved on ${Math.round(share * 100)}% of frames during the wheel burst, want 90%`);
+  }
   check(rec.settledAt !== null, "the drum never settled");
   const settleMs = rec.settledAt - lastWheel;
-  check(settleMs <= 250, `the drum settled ${Math.round(settleMs)} ms after the last wheel event, want 250 or less`);
-  // 30 steps of 25 px is 7.5 options from where the drum started: it settles on the nearest, Math.round(start + 7.5),
-  // held at the last option.
+  // The ease runs on frames, so under 4x CPU load its frames come 4x slower: the budget scales with the load.
+  const budget = load ? 1000 : 250;
+  check(settleMs <= budget, `the drum settled ${Math.round(settleMs)} ms after the last wheel event, want ${budget} or less`);
+  // Each 100 px is one option: the drum settles on the option nearest where the travel ends.
   const labels = await drum.locator(".drum-label").allTextContents();
-  const want = labels[Math.min(labels.length - 1, startIndex + 8)];
+  const at = Math.min(labels.length - 1, Math.max(0, Math.round(startIndex + travel / 100)));
+  const want = labels[at];
   check((await selected()) === want, `the drum settled on "${await selected()}", not "${want}"`);
-  return `frames moving ${Math.round(share * 100)}% of the burst; settled ${Math.round(settleMs)} ms after the last wheel event`;
+  return `${load ? "under load" : "unloaded"}: settled ${Math.round(settleMs)} ms after the last wheel event on "${want}"`;
+}
+
+/** Loads the page's main thread: Chromium throttles its CPU over CDP; the other engines run a busy loop between tasks. */
+async function loadPage(s, page) {
+  if (s.env.browser.browserType().name() === "chromium") {
+    const cdp = await page.context().newCDPSession(page);
+    await cdp.send("Emulation.setCPUThrottlingRate", { rate: 4 });
+    return;
+  }
+  await page.evaluate(() => {
+    const hog = () => {
+      const t = performance.now();
+      while (performance.now() - t < 40) {
+        /* busy */
+      }
+      setTimeout(hog, 0);
+    };
+    hog();
+  });
 }
 
 /**
@@ -1807,6 +1855,7 @@ export const scenarios = [
   { name: "drum ends", run: drumEnds },
   { name: "drum rows", run: drumRows },
   { name: "drum fast wheel", run: drumFastWheel },
+  { name: "drum fast wheel under load", run: (s) => drumFastWheel(s, { load: true }) },
   { name: "drum ignores an unarmed pad", run: drumIgnoresUnarmedPad },
   { name: "drum enter on load", run: drumEnterOnLoad },
   { name: "settings back stays", run: settingsBackStays },
