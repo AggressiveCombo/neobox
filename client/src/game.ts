@@ -4,7 +4,7 @@
 
 import type { HudHandle, Present } from "./ctx";
 import type { Engine } from "./engine";
-import { readScene, type Scene } from "./frame";
+import { FLAG_AIR_JUMP, FLAG_LOCAL, readScene, type Scene } from "./frame";
 import type { Input } from "./input";
 import type { Net } from "./net";
 import type { MatchStart } from "./protocol";
@@ -137,6 +137,8 @@ export class MatchLoop {
     if (scene) {
       qaTick.tick = scene.tick;
       this.lastScene = scene;
+      const local = scene.players.find((p) => (p.flags & FLAG_LOCAL) !== 0);
+      input.setAirReady(local !== undefined && (local.flags & FLAG_AIR_JUMP) !== 0);
       this.d.hud()?.onFrame(scene);
     }
 

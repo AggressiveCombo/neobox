@@ -988,6 +988,21 @@ async function touchDriver(page, browser) {
   };
 }
 
+/** The local player's y (screen down) and whether its air jump is ready (flag 256), from the frame buffer; null before a frame. */
+async function localPlayer(page) {
+  return page.evaluate(() => {
+    const fb = globalThis.__qaEngine?.framebuffer?.();
+    if (!fb || fb.u32[3] === 0) return null;
+    const base = fb.u32[4];
+    for (let i = 0; i < fb.u32[3]; i++) {
+      const o = base + i * 14;
+      const flags = fb.u32[o + 6];
+      if ((flags & 1) !== 0) return { y: fb.f32[o + 2], ready: (flags & 256) !== 0 };
+    }
+    return null;
+  });
+}
+
 /** A landscape phone joins a match and drives the touch stick and Jump with real touch events. */
 async function phoneLandscapeTouch(s) {
   const roomName = uniqueName("touch room");
@@ -1056,7 +1071,41 @@ async function phoneLandscapeTouch(s) {
   const jumpHold = await holdUntilMoved(() => send("touchStart", [{ x: jump.x, y: jump.y }]));
   check(jumpHold.ticks >= 10, `the simulation did not advance while holding Jump (${jumpHold.ticks} ticks)`);
   check(jumpHold.moved > 5, `guest frames barely changed while holding Jump (${jumpHold.moved} changes over ${jumpHold.ticks} sim ticks)`);
-  return `stick right: ${stickHold.moved} frame changes; Jump: ${jumpHold.moved} frame changes`;
+  // Holding Jump through an air jump: once the air jump is ready again (the emblem turns yellow, flag 256), the
+  // held thumb must jump again. Spend the air jump with two taps, then hold Jump until it is ready.
+  const tap = async () => {
+    await send("touchStart", [{ x: jump.x, y: jump.y }]);
+    await sleep(120);
+    await send("touchEnd", []);
+  };
+  const awaitPlayer = async (pred, ms) => {
+    const end = Date.now() + ms;
+    let p = null;
+    do {
+      p = await localPlayer(page);
+      if (p && pred(p)) return p;
+      await sleep(50);
+    } while (Date.now() < end);
+    return p;
+  };
+  check((await awaitPlayer((p) => p.ready, 5000))?.ready, "the local player never showed the air jump as ready");
+  await tap();
+  await sleep(250);
+  await tap();
+  check((await awaitPlayer((p) => !p.ready, 3000))?.ready === false, "two Jump taps did not spend the air jump");
+  await send("touchStart", [{ x: jump.x, y: jump.y }]);
+  const landed = await awaitPlayer((p) => p.ready, 6000);
+  check(landed?.ready, "the air jump never became ready again while Jump was held");
+  let yMin = landed.y;
+  const endAt = Date.now() + 2500;
+  while (Date.now() < endAt && yMin > landed.y - 1) {
+    const p = await localPlayer(page);
+    if (p) yMin = Math.min(yMin, p.y);
+    await sleep(50);
+  }
+  await send("touchEnd", []);
+  check(yMin <= landed.y - 1, `holding Jump gave no second jump once ready (y ${landed.y.toFixed(1)} -> ${yMin.toFixed(1)})`);
+  return `stick right: ${stickHold.moved} frame changes; Jump: ${jumpHold.moved} frame changes; held Jump re-jumps once ready`;
 }
 
 async function latency(s) {

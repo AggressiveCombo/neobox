@@ -182,6 +182,10 @@ export class Input {
   /** Stick and buttons have their own bits: Jump (UP) and the stick's up share a bit, so one must not clear the other. */
   private stick = new TouchMask();
   private buttons = new TouchMask();
+  /** Air jump ready as of the last frame, and whether it rose since `mask` last ran; frames left with Jump lifted. */
+  private airReady = false;
+  private airReadyRose = false;
+  private repressFrames = 0;
   /** Physical keys currently down (bound or not), so bits stay right after a rebind. */
   private held = new Set<string>();
   private codeBits = buildCodeBits(prefs.value.keys);
@@ -270,7 +274,24 @@ export class Input {
   }
 
   mask(): number {
-    return this.keys | this.stick.get() | this.buttons.get() | readPad();
+    const rose = this.airReadyRose;
+    this.airReadyRose = false;
+    const touch = this.stick.get() | this.buttons.get();
+    if ((touch & BIT.UP) === 0) this.repressFrames = 0;
+    else if (rose) this.repressFrames = PAD_REPRESS_FRAMES;
+    // Only the touch Jump lifts: a held keyboard or gamepad Jump keeps its own press.
+    const lifting = this.repressFrames > 0;
+    if (lifting) this.repressFrames--;
+    return this.keys | readPad() | (lifting ? touch & ~BIT.UP : touch);
+  }
+
+  /**
+   * The local player's air jump is ready (the yellow emblem). A rise while the thumb already holds Jump lifts
+   * Jump for `PAD_REPRESS_FRAMES` render frames, so the next press jumps again (see `mask`).
+   */
+  setAirReady(ready: boolean): void {
+    this.airReadyRose = ready && !this.airReady;
+    this.airReady = ready;
   }
 }
 
@@ -289,3 +310,6 @@ const PAD_BUTTONS: [number, number][] = [
   [4, BIT.GRAB],
 ];
 const STICK_DEAD = 0.5;
+
+/** Render frames Jump stays lifted for a touch re-press. `mask` runs once per frame, so a lift of one frame could fall between two simulation ticks and be lost. */
+const PAD_REPRESS_FRAMES = 3;
