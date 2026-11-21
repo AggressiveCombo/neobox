@@ -279,33 +279,24 @@ button.home-account {
   min-width: 0;
 }
 
+/* A drum with no box: the page shows through, and the options fade out at the top and bottom of the window. */
 .drum {
-  --drum-pitch: 60px;
-  --drum-opt-h: 52px;
+  --drum-pitch: 40px;
+  --drum-opt-h: 36px;
   position: relative;
   container-type: inline-size;
-  height: 264px;
+  height: 320px;
   overflow: hidden;
   touch-action: none;
   user-select: none;
   -webkit-user-select: none;
-  border-radius: 14px;
-  background: var(--surface);
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 4%, #000 96%, transparent 100%);
+  mask-image: linear-gradient(to bottom, transparent 0, #000 4%, #000 96%, transparent 100%);
 }
 
+/* No outline: the mask would clip it. The focus ring is the front option's inset ring, below. */
 .drum:focus-visible {
-  outline: 2px solid var(--ink);
-  outline-offset: 2px;
-}
-
-/* Fades at the top and bottom of the window, where the options roll in and out of view. */
-.drum::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  z-index: 1;
-  pointer-events: none;
-  background: linear-gradient(var(--surface) 0%, transparent 30%, transparent 70%, var(--surface) 100%);
+  outline: none;
 }
 
 .drum-opt {
@@ -375,6 +366,8 @@ button.home-account {
 @media (forced-colors: active) {
   .drum {
     border: 1px solid CanvasText;
+    -webkit-mask-image: none;
+    mask-image: none;
   }
 
   .drum-opt[aria-selected="true"] {
@@ -515,9 +508,9 @@ button.home-privacy {
   }
 
   .drum {
-    --drum-pitch: 56px;
-    --drum-opt-h: 48px;
-    height: 232px;
+    --drum-pitch: 44px;
+    --drum-opt-h: 40px;
+    height: 296px;
   }
 
   .menu-art {
@@ -576,8 +569,8 @@ button.home-privacy {
   }
 
   .drum {
-    --drum-pitch: 56px;
-    --drum-opt-h: 48px;
+    --drum-pitch: 40px;
+    --drum-opt-h: 36px;
     height: 200px;
   }
 }

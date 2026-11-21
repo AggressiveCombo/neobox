@@ -714,7 +714,8 @@ async function drumStep(label, step) {
 }
 
 /**
- * Rolls the home destinations drum until `label` is centred: the shortest way round, from the keyboard. Untimed.
+ * Rolls the home destinations drum until `label` is centred, one option at a time from the keyboard. The drum has
+ * ends, so the way is straight, not round. Untimed.
  */
 export function rollDrum(page, label) {
   return drumStep(label, async () => {
@@ -729,9 +730,7 @@ export function rollDrum(page, label) {
     });
     const want = labels.indexOf(label);
     if (want < 0) throw new Error(`no home destination "${label}"`);
-    const n = labels.length;
-    let steps = (((want - front) % n) + n) % n;
-    if (steps > n / 2) steps -= n;
+    const steps = want - front;
     if (steps !== 0) {
       await drum.focus();
       for (let k = 0; k < Math.abs(steps); k += 1) await page.keyboard.press(steps > 0 ? "ArrowDown" : "ArrowUp");

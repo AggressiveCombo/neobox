@@ -1176,6 +1176,189 @@ async function drumAfterButton(s) {
   return "arrows roll the drum from a focused button; Enter opens the front option";
 }
 
+/** The drum's settled state, and the selected option's label. */
+function drumOf(page) {
+  const drum = page.getByRole("listbox", { name: "Destinations", exact: true });
+  return {
+    drum,
+    settled: () => drum.and(page.locator('[data-settled="true"]')).waitFor(),
+    selected: () => drum.locator('[role="option"][aria-selected="true"] .drum-label').textContent(),
+  };
+}
+
+/** Home drum ends: rolling past the first or last option stops there (no wrap); Home and End and the wheel go to the ends. */
+async function drumEnds(s) {
+  const h = await s.open("drum-ends");
+  const { page } = h;
+  await page.goto(s.base);
+  await menuName(page).waitFor();
+  const { drum, settled, selected } = drumOf(page);
+  await drum.waitFor();
+  await settled();
+  const labels = await drum.locator(".drum-label").allTextContents();
+  const first = labels[0];
+  const last = labels[labels.length - 1];
+  await drum.focus();
+  for (let i = 0; i < 3; i += 1) await page.keyboard.press("ArrowUp");
+  await settled();
+  check((await selected()) === first, `ArrowUp past the first option selected "${await selected()}", not "${first}"`);
+  await page.keyboard.press("End");
+  await settled();
+  check((await selected()) === last, `End did not select the last option "${last}"`);
+  for (let i = 0; i < 3; i += 1) await page.keyboard.press("ArrowDown");
+  await settled();
+  check((await selected()) === last, `ArrowDown past the last option selected "${await selected()}", not "${last}"`);
+  await page.keyboard.press("Home");
+  await settled();
+  check((await selected()) === first, `Home did not select the first option "${first}"`);
+  const box = await drum.boundingBox();
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.wheel(0, 3000);
+  await settled();
+  check((await selected()) === last, `wheel past the last option selected "${await selected()}", not "${last}"`);
+  await page.mouse.wheel(0, -3000);
+  await settled();
+  check((await selected()) === first, `wheel past the first option selected "${await selected()}", not "${first}"`);
+  return "rolling past either end stops there; Home, End and the wheel reach the ends";
+}
+
+/** Home drum visible rows: the drum shows a window of options, not a list of five: 9 on desktop, 7 on phone portrait, 5 on phone landscape. */
+async function drumRows(s) {
+  const h = await s.open("drum-rows");
+  const { page } = h;
+  await page.goto(s.base);
+  await menuName(page).waitFor();
+  const { drum, settled } = drumOf(page);
+  await drum.waitFor();
+  await drum.focus();
+  for (let i = 0; i < 5; i += 1) await page.keyboard.press("ArrowDown");
+  await settled();
+  const count = () =>
+    drum.evaluate((box) => {
+      const r = box.getBoundingClientRect();
+      return [...box.querySelectorAll('[role="option"]')].filter((o) => {
+        const b = o.getBoundingClientRect();
+        return o.style.opacity !== "0" && b.top >= r.top && b.bottom <= r.bottom;
+      }).length;
+    });
+  // A viewport change re-lays the drum out a frame later, so poll for the count instead of reading it at once.
+  const visible = async (min) => {
+    const end = Date.now() + 2000;
+    let n = await count();
+    while (n < min && Date.now() < end) {
+      await page.waitForTimeout(50);
+      n = await count();
+    }
+    return n;
+  };
+  const desk = await visible(9);
+  check(desk >= 9, `desktop drum shows ${desk} options, want at least 9`);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await settled();
+  const portrait = await visible(7);
+  check(portrait >= 7, `phone portrait drum shows ${portrait} options, want at least 7`);
+  await page.setViewportSize({ width: 844, height: 390 });
+  await settled();
+  const landscape = await visible(5);
+  check(landscape >= 5, `phone landscape drum shows ${landscape} options, want at least 5`);
+  return `visible options: desktop ${desk}, phone portrait ${portrait}, phone landscape ${landscape}`;
+}
+
+/** Home drum fast wheel: 30 wheel events in 300 ms move it every frame, and it settles within 250 ms of the last one. */
+async function drumFastWheel(s) {
+  const h = await s.open("drum-wheel");
+  const { page } = h;
+  await page.goto(s.base);
+  await menuName(page).waitFor();
+  const { drum, settled, selected } = drumOf(page);
+  await drum.waitFor();
+  await settled();
+  const box = await drum.boundingBox();
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  const recording = page.evaluate(
+    () =>
+      new Promise((resolve) => {
+        const listbox = document.querySelector('[role="listbox"][aria-label="Destinations"]');
+        const rec = { frames: [], wheels: [], settledAt: null };
+        const sig = () => [...listbox.querySelectorAll('[role="option"]')].map((o) => o.style.transform).join("|");
+        const observer = new MutationObserver(() => {
+          if (listbox.dataset.settled === "true" && rec.settledAt === null) rec.settledAt = performance.now();
+        });
+        observer.observe(listbox, { attributes: true, attributeFilter: ["data-settled"] });
+        listbox.addEventListener("wheel", () => rec.wheels.push(performance.now()), { passive: true });
+        const start = performance.now();
+        const tick = () => {
+          rec.frames.push({ t: performance.now(), sig: sig() });
+          if (performance.now() - start < 1500) requestAnimationFrame(tick);
+          else {
+            observer.disconnect();
+            resolve(rec);
+          }
+        };
+        requestAnimationFrame(tick);
+      }),
+  );
+  await page.waitForTimeout(50);
+  for (let i = 0; i < 30; i += 1) {
+    await page.mouse.wheel(0, 25);
+    await page.waitForTimeout(8);
+  }
+  const rec = await recording;
+  const firstWheel = Math.min(...rec.wheels);
+  const lastWheel = Math.max(...rec.wheels);
+  // Chromium coalesces wheel events that land within one frame, so the count can come in under 30.
+  check(rec.wheels.length >= 25, `saw ${rec.wheels.length} of 30 wheel events`);
+  const during = rec.frames.filter((f) => f.t >= firstWheel && f.t <= lastWheel);
+  let moved = 0;
+  for (let i = 1; i < during.length; i += 1) if (during[i].sig !== during[i - 1].sig) moved += 1;
+  const share = moved / Math.max(1, during.length - 1);
+  check(share >= 0.9, `the drum moved on ${Math.round(share * 100)}% of frames during the wheel burst, want 90%`);
+  check(rec.settledAt !== null, "the drum never settled");
+  const settleMs = rec.settledAt - lastWheel;
+  check(settleMs <= 250, `the drum settled ${Math.round(settleMs)} ms after the last wheel event, want 250 or less`);
+  // 30 steps of 25 px is 7.5 options: the drum settles on the nearest, Math.round(7.5) = 8.
+  const labels = await drum.locator(".drum-label").allTextContents();
+  check((await selected()) === labels[8], `the drum settled on "${await selected()}", not "${labels[8]}"`);
+  return `frames moving ${Math.round(share * 100)}% of the burst; settled ${Math.round(settleMs)} ms after the last wheel event`;
+}
+
+/**
+ * A pad whose stick reads -1 from the start (a pedal or wheel axis, mapping ""): the drum does not roll on its own.
+ * Once the axis has been seen at rest it counts: moved to +1 it rolls and repeats while held.
+ */
+async function drumIgnoresUnarmedPad(s) {
+  const h = await s.open("drum-pad");
+  const { page } = h;
+  await page.addInitScript(() => {
+    window.__axes = [0, -1, 0, 0];
+    const pad = { id: "Fake pedal", index: 0, mapping: "", connected: true, buttons: [], get axes() { return window.__axes; } };
+    Object.defineProperty(navigator, "getGamepads", { value: () => [pad], configurable: true });
+  });
+  await page.goto(s.base);
+  await menuName(page).waitFor();
+  const { drum, settled, selected } = drumOf(page);
+  await drum.waitFor();
+  await settled();
+  const start = await selected();
+  await page.waitForTimeout(1500);
+  check((await selected()) === start, `a pad axis that never rested rolled the drum to "${await selected()}"`);
+  await page.evaluate(() => {
+    window.__axes = [0, 0, 0, 0];
+  });
+  await page.waitForTimeout(100);
+  await page.evaluate(() => {
+    window.__axes = [0, 1, 0, 0];
+  });
+  await page.waitForTimeout(700);
+  await page.evaluate(() => {
+    window.__axes = [0, 0, 0, 0];
+  });
+  await settled();
+  const after = await selected();
+  check(after !== start, "a stick held down after rest did not roll the drum");
+  return `pad axis at -1 from the start: drum still on "${start}"; held stick rolled it to "${after}"`;
+}
+
 /** Map editor title: opening a built-in map shows its name, and so does Test play -> Edit. */
 async function editorKeepsMapName(s) {
   const h = await s.open("editor-title");
@@ -1520,6 +1703,10 @@ export const scenarios = [
   { name: "renderer lost", run: rendererGone },
   { name: "menu", run: menu },
   { name: "drum after a button", run: drumAfterButton },
+  { name: "drum ends", run: drumEnds },
+  { name: "drum rows", run: drumRows },
+  { name: "drum fast wheel", run: drumFastWheel },
+  { name: "drum ignores an unarmed pad", run: drumIgnoresUnarmedPad },
   { name: "quick play shows name", run: quickPlayShowsName },
   { name: "phone menu no welcome", run: phoneMenuNoWelcome },
   { name: "editor keeps map name", run: editorKeepsMapName },
