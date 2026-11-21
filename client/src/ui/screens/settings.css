@@ -366,10 +366,12 @@
     gap: 40px;
   }
 
+  /* Pinned where it starts, under the sticky page head (its measured height, kit.ts headSize) and the page's 32px gap:
+     any other top makes it jump when the page begins to scroll. */
   .settings-nav {
     flex-direction: column;
     position: sticky;
-    top: 88px;
+    top: calc(var(--page-head-h, 72px) + 32px);
     gap: 8px;
   }
 

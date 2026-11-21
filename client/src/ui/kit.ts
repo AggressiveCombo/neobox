@@ -46,10 +46,24 @@ function placeActions(pg: HTMLElement): void {
 
 phoneQuery.addEventListener("change", () => document.querySelectorAll<HTMLElement>("main.page").forEach(placeActions));
 
+/**
+ * The shown page head's height as `--page-head-h` on the root: large text or a wrapped title makes the sticky head taller
+ * than its 72px minimum, and focus scrolling (#ui scroll-padding) and parts pinned under it (Settings' section list) follow.
+ * A head leaving the page reports size 0: it is dropped from the observer.
+ */
+const headSize = new ResizeObserver((entries) => {
+  for (const entry of entries) {
+    const el = entry.target as HTMLElement;
+    if (!el.isConnected) headSize.unobserve(el);
+    else if (el.offsetHeight > 0) document.documentElement.style.setProperty("--page-head-h", `${el.offsetHeight}px`);
+  }
+});
+
 /** A full-viewport page on the ground colour: `head`, then the content in a centred column. */
 export function page(className: string, head: HTMLElement, ...content: Child[]): HTMLElement {
   const pg = h("main", { class: `page ${className}` }, head, h("div", { class: "page-inner enter" }, ...content));
   placeActions(pg);
+  headSize.observe(head);
   return pg;
 }
 
