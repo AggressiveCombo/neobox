@@ -469,6 +469,7 @@ const backdropGeometry = () => {
   const sqBox = getComputedStyle(sq);
   const hw = parseFloat(sqBox.width) / 2;
   const hh = parseFloat(sqBox.height) / 2;
+  const radius = parseFloat(sqBox.borderTopLeftRadius) || 0;
   // css px per world unit: the view is the card's rect, so the camera's w spans its width
   const k = parseFloat(getComputedStyle(gl).width) / cam.w;
   // world -> page px: the content's turn about the card's centre (camera.ts: the view is centred on the arena)
@@ -515,6 +516,8 @@ const backdropGeometry = () => {
   };
   const arenaMargin = Math.min(...cornersOf(0, 0, cam.aw, cam.ah).map(margin));
   const wallMargin = Math.min(...cornersOf(cam.bx0, cam.by0, cam.bx1, cam.by1).map(margin));
+  // the boundary walls' extent in the card's own coordinates (page px in, un-turned card px out)
+  const wallHalf = [0, 1].map((i) => Math.max(...cornersOf(cam.bx0, cam.by0, cam.bx1, cam.by1).map((p) => Math.abs(local(p[0], p[1])[i]))));
   // the name labels: the overlay's own px (its view is centred on the card and turns with it): every box corner in the card
   const ov = document.getElementById("overlay");
   const labels = window.__qaDraw?.rects.filter((r) => r.kind === "label") ?? [];
@@ -548,10 +551,12 @@ const backdropGeometry = () => {
   // the content turns with the card: the same angle, or the arena is drawn on another axis than the card's
   if (Math.abs(contentDeg - cardDeg) > 0.5) issues.push("content-untilted");
   if (live) {
-    // the arena fills the card's shorter side (camera.ts: the arena less BACKDROP_MARGIN per side) and the card has the arena's shape
-    const fill = hw <= hh ? cam.aw / cam.w : cam.ah / cam.h;
-    if (fill < 0.895) issues.push("arena-small");
-    if (Math.abs((hw / hh) / (cam.aw / cam.ah) - 1) > 0.01) issues.push("card-aspect");
+    // the playable bounds (walls included, camera.ts backdropBounds) fill the card's shorter side less BACKDROP_MARGIN (0.08) per side: 1 / 1.16 = 0.86, and the card has the bounds' shape
+    const bw = cam.bx1 - cam.bx0;
+    const bh = cam.by1 - cam.by0;
+    const fill = hw <= hh ? bw / cam.w : bh / cam.h;
+    if (fill < 0.84) issues.push("arena-small");
+    if (Math.abs((hw / hh) / (bw / bh) - 1) > 0.01) issues.push("card-aspect");
     if (arenaHalf[0] > hw + 0.5 || arenaHalf[1] > hh + 0.5) issues.push("arena-clipped");
   }
   if (live) {
@@ -571,7 +576,9 @@ const backdropGeometry = () => {
     theta,
     half: [hw, hh],
     arenaHalf,
+    wallHalf,
     cardDeg,
+    radius,
     contentDeg,
     pageRgb,
     arenaMargin,
@@ -611,17 +618,36 @@ const backdropPixels = async ({ b64, g }) => {
       const ov = Math.abs(v) - g.half[1];
       if ((ou >= 0.5 && ou <= 2.5 && Math.abs(v) <= g.half[1]) || (ov >= 0.5 && ov <= 2.5 && Math.abs(u) <= g.half[0])) {
         const i = (py * img.width + px) * 4;
-        const isPage = Math.abs(data[i] - pr) <= 6 && Math.abs(data[i + 1] - pg) <= 6 && Math.abs(data[i + 2] - pb) <= 6;
+        // the card's own box-shadow (menu.css: rgb(0 0 0 / 0.55)) darkens the page beside its edge: a neutral grey no darker than the page at that alpha is the page, not a hairline
+        const shade = Math.abs(data[i] - data[i + 1]) <= 2 && Math.abs(data[i + 1] - data[i + 2]) <= 2 && data[i] >= pr * 0.45 - 3 && data[i] <= pr + 6;
+        const isPage = shade || (Math.abs(data[i] - pr) <= 6 && Math.abs(data[i + 1] - pg) <= 6 && Math.abs(data[i + 2] - pb) <= 6);
         if (!isPage) edge += 1;
         continue;
       }
       if (Math.abs(u) > g.half[0] - 2 || Math.abs(v) > g.half[1] - 2) continue;
-      // the walls' antialiased outer edge sits on the arena's edge: geometry, so the 2 css px ring around the arena is not the page
-      if (Math.abs(u) <= g.arenaHalf[0] + 2 && Math.abs(v) <= g.arenaHalf[1] + 2) continue;
+      // the card's rounded corners: outside the rounded rect (past its curve, 1 css px AA tolerance) the card shows no pixels
+      const R = g.radius;
+      const ca = Math.abs(u) - (g.half[0] - R);
+      const cb = Math.abs(v) - (g.half[1] - R);
+      if (R > 0 && ca > 0 && cb > 0) {
+        const d = Math.hypot(ca, cb);
+        if (d > R - 1) continue;
+      }
       const i = (py * img.width + px) * 4;
       const [r, gr, b] = [data[i], data[i + 1], data[i + 2]];
-      if (Math.abs(r - 10) <= 2 && Math.abs(gr - 10) <= 2 && Math.abs(b - 10) <= 2) voidArea += 1;
-      if (Math.abs(r - pr) <= 3 && Math.abs(gr - pg) <= 3 && Math.abs(b - pb) <= 3) page += 1;
+      // void: the clear colour with every pixel of its 3x3 neighbourhood the clear colour too (one erosion step). A 1 px antialias
+      // line between map geometry (black wall, white interior) has map neighbours, so it is not a gap; a real band of clear colour is.
+      let voidHere = true;
+      for (let ny = py - 1; ny <= py + 1 && voidHere; ny += 1) {
+        for (let nx = px - 1; nx <= px + 1; nx += 1) {
+          if (nx < 0 || ny < 0 || nx >= img.width || ny >= img.height) { voidHere = false; break; }
+          const j = (ny * img.width + nx) * 4;
+          if (!(Math.abs(data[j] - 10) <= 2 && Math.abs(data[j + 1] - 10) <= 2 && Math.abs(data[j + 2] - 10) <= 2)) { voidHere = false; break; }
+        }
+      }
+      if (voidHere) voidArea += 1;
+      // the map's boundary walls are drawn in the page's own colour: inside their box (+3 css px AA) the page count does not apply
+      if (Math.abs(r - pr) <= 3 && Math.abs(gr - pg) <= 3 && Math.abs(b - pb) <= 3 && !(Math.abs(u) <= g.wallHalf[0] + 3 && Math.abs(v) <= g.wallHalf[1] + 3)) page += 1;
     }
   }
   return { white: page / (scale * scale), voidArea: voidArea / (scale * scale), edge: edge / (scale * scale) };

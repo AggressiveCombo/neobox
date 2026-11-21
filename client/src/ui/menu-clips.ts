@@ -136,7 +136,7 @@ export function mountMenuClips(ctx: AppCtx, host: HTMLElement, onState?: (state:
     if (engine.replayFrame(p.tick, p.follow) === null) return false;
     const scene = ctx.present(p.names, p.info.hz, false);
     if (!scene) return false;
-    const shown = backdropSize(scene.arenaW, scene.arenaH);
+    const shown = backdropSize(scene);
     const aspect = shown.w / shown.h;
     if (aspect !== reportedAspect && Number.isFinite(aspect)) {
       reportedAspect = aspect;
