@@ -315,21 +315,32 @@ impl RoundObj {
         }
     }
 
-    /// `dr`: objective delivered for `team`. Endless teams: the delivery scores for the team and ends the match at once, as the original does (`xo` = game-over countdown), whatever the objective limit.
-    fn objective(&mut self, team: f64) {
+    /// `dr`: objective delivered for `team`.
+    fn objective(&mut self, team: f64, gs: &GameSettings) {
         match self.mode {
             Mode::EndlessTeams => {
                 if self.round_over() || self.game_over() {
                     return;
                 }
+                let mut win = false;
                 if team == 2.0 {
                     self.eo.red += 1.0;
+                    if self.eo.red >= gs.objective_limit {
+                        win = true;
+                    }
                 }
                 if team == 3.0 {
                     self.eo.blue += 1.0;
+                    if self.eo.blue >= gs.objective_limit {
+                        win = true;
+                    }
                 }
                 self.eo.objective_team = team;
-                self.eo.game_over = GAME_OVER_TICKS;
+                if win {
+                    self.eo.game_over = GAME_OVER_TICKS;
+                } else {
+                    self.eo.round_over = ROUND_OVER_TICKS;
+                }
             }
             Mode::LivesTeams => {
                 if !(self.round_over() || self.game_over()) {
@@ -758,7 +769,8 @@ pub(crate) fn race_out(ctx: &mut Ctx<'_>, id: f64) {
 }
 
 pub(crate) fn objective(ctx: &mut Ctx<'_>, team: f64) {
-    ctx.round.objective(team);
+    let gs = ctx.gs;
+    ctx.round.objective(team, gs);
 }
 
 pub(crate) fn capture_win(ctx: &mut Ctx<'_>, owner: f64) {
@@ -777,14 +789,18 @@ pub(crate) fn game_over(ctx: &Ctx<'_>) -> bool {
 mod tests {
     use super::*;
 
-    /// A flag delivery in endless teams ends the match at once (the original sets `xo` to the game-over countdown), whatever the objective limit.
+    /// Endless teams: a flag delivery scores; the match ends once the score reaches the objective limit, otherwise the round ends (the original's `dr`: `xo` game over, else `_o` round over).
     #[test]
-    fn endless_teams_flag_delivery_ends_game() {
+    fn endless_teams_flag_delivery_scores_to_limit() {
         let gs = GameSettings { game_mode: mode::ENDLESS_TEAMS, objective_limit: 5.0, ..GameSettings::default() };
         let mut r = RoundObj::new(Round::default(), &gs);
-        r.objective(2.0);
-        assert!(r.game_over(), "flag delivery must end the match");
-        assert_eq!(r.eo.objective_team, 2.0);
+        r.objective(2.0, &gs);
+        assert!(!r.game_over(), "one of five: the match goes on");
+        assert!(r.round_over(), "one of five: the round ends");
         assert_eq!(r.eo.red, 1.0);
+        let gs = GameSettings { objective_limit: 1.0, ..gs };
+        let mut r = RoundObj::new(Round::default(), &gs);
+        r.objective(2.0, &gs);
+        assert!(r.game_over(), "reaching the limit ends the match");
     }
 }
