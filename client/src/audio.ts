@@ -7,45 +7,13 @@
 import { prefs } from "./prefs";
 import { fetchPrecached } from "./precached";
 import { HttpError } from "./http-error";
+import { CLIPS, CLIP_GAIN_DB, HOVER_LEVEL, UI_LEVEL, type SoundKey } from "./sfx-levels";
 
 /** Interface sound names; the screens never play sounds themselves, the global hooks do (installUiSounds). */
 export type UiSound = "hover" | "click" | "tab" | "toggle" | "open" | "close" | "error" | "win" | "lose" | "chat";
 
 /** An engine sound kind (docs/CLIENT-API.md) or an interface sound. */
-type Key = number | UiSound;
-
-/** The clip for each key, a file name in client/public/sfx (without `.mp3`); no two actions share a clip. Kind 5 is never emitted. */
-const CLIPS: Partial<Record<Key, string>> = {
-  1: "maximize_002", // jump
-  2: "maximize_004", // air jump
-  3: "impactPlate_medium_001", // push hit
-  4: "impactPunch_medium_000", // push miss
-  6: "impactPlank_medium_003", // impact
-  7: "impactPlate_medium_002", // impact on a no-jump body
-  8: "scratch_004", // freeze
-  9: "open_002", // spawn
-  10: "back_003", // countdown tick (also the post-game point tick)
-  11: "phaserDown3", // death
-  12: "impactSoft_medium_003", // body impact
-  13: "phaseJump4", // bat swing
-  14: "impactWood_medium_000", // bat hit
-  15: "spaceEngineSmall_000", // rocket charge
-  16: "explosionCrunch_003", // rocket fire
-  17: "lowFrequency_explosion_001", // explosion
-  18: "thrusterFire_001", // parachute
-  19: "tick_001", // ghost trail (quiet)
-  20: "jingles_SAX01", // fanfare (game over, level up)
-  hover: "tick_004",
-  click: "click_001",
-  tab: "select_002",
-  toggle: "switch_004",
-  open: "maximize_006",
-  close: "minimize_004",
-  error: "forceField_001",
-  win: "jingles_STEEL01",
-  lose: "jingles_SAX02",
-  chat: "drop_002",
-};
+type Key = SoundKey;
 
 /** Caption text for each engine sound kind, shown when captions are on (the sound's visual twin for players who cannot hear it). */
 const CAPTIONS: Partial<Record<number, string>> = {
@@ -80,10 +48,6 @@ Object.assign(globalThis, { __qaSounds: qaSounds });
 /** Every distinct file, loaded once on the first gesture. */
 const FILES = [...new Set(Object.values(CLIPS).filter((clip): clip is string => clip !== undefined))];
 
-/** Interface sounds sit well under the game effects. */
-const UI_LEVEL = 0.5;
-/** Hover ticks play under the other interface sounds: they fire far more often. */
-const HOVER_LEVEL = 0.4;
 /** A repeat of one key sooner than this is dropped (a burst of ticks reads as noise). */
 const MIN_GAP_MS = 35;
 /** On-screen captions for game sounds: how long a caption line stays up. */
@@ -190,7 +154,7 @@ export class Sfx {
     src.buffer = buffer;
     src.playbackRate.value = 1 + (Math.random() * 2 - 1) * RATE_SPREAD;
     const gain = ctx.createGain();
-    gain.gain.value = level;
+    gain.gain.value = level * 10 ** ((CLIP_GAIN_DB[key] ?? 0) / 20);
     src.connect(gain);
     if (pan !== 0 && ctx.createStereoPanner) {
       const panner = ctx.createStereoPanner();
