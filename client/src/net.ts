@@ -13,6 +13,8 @@ export interface CloseNotice {
   label: string;
   text: string;
   reconnect: boolean;
+  /** The server refused this client's build (close reason "outdated"): the version prompt says so. */
+  outdated?: boolean;
 }
 
 /** Map the close reason the server sends (see `hub::close`) to a notice. */
@@ -31,6 +33,8 @@ export function closeNotice(reason: string, wasClean: boolean): CloseNotice {
       return { label: "Message too large", text: "Disconnected: a message was too large.", reconnect: false };
     case "shutdown":
       return { label: "Server restarting", text: "The server is restarting.", reconnect: true };
+    case "outdated":
+      return { label: "", text: "", reconnect: false, outdated: true };
     default:
       return wasClean
         ? { label: "", text: "", reconnect: true }

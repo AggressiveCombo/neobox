@@ -41,6 +41,8 @@ import { prefs } from "./prefs";
 import { music } from "./music";
 import type { XpAward } from "./protocol";
 import { h } from "./ui/dom";
+import { buildId } from "./version";
+import { newVersionOut } from "./sw-update";
 import { closeModalsAbove, modalPopPending, openModal, pushDeferredModals, takeModalPop } from "./ui/kit";
 import { needsServer, offlinePage } from "./ui/offline-page";
 import { showToast } from "./ui/toast";
@@ -778,6 +780,17 @@ export function start(): Store<AppState> {
     else net.send({ t: "list_rooms" });
   }
 
+  /**
+   * The server runs another build and refused this client (`outdated`): it cannot play on. A match or room ends and the
+   * player lands on the menu, where the reload waits. The editor keeps its open work: the reload waits there too.
+   */
+  function versionRefused(): void {
+    resuming = false;
+    loop?.stop();
+    if (store.state.screen !== "editor") resetToMenu();
+    newVersionOut(store);
+  }
+
   /** The game server we were on is gone: back to the room list on the home server. */
   function serverGone(text = "The game server went away"): void {
     leaveRoom();
@@ -852,7 +865,7 @@ export function start(): Store<AppState> {
     // guests have no account to vouch for: no ticket (asking would only get a 401)
     const ticket = server === null || store.state.account === null ? null : await fetchTicket();
     if (seq !== linkSeq || net.status !== "open") return;
-    net.send({ t: "hello", version: PROTOCOL_VERSION, name, color: prefs.value.color, ticket });
+    net.send({ t: "hello", version: PROTOCOL_VERSION, name, color: prefs.value.color, ticket, build: buildId ?? null });
   }
 
   function handleServer(msg: ServerMsg): void {
@@ -899,6 +912,10 @@ export function start(): Store<AppState> {
         }
         return;
       case "error": {
+        if (msg.code === "outdated") {
+          versionRefused();
+          return;
+        }
         if (resuming) {
           resuming = false;
           if (server !== null) {
@@ -1118,6 +1135,8 @@ export function start(): Store<AppState> {
     linkSeq++;
     loop?.stop();
     pendingMatch = null;
+    // The editor keeps its work when the server refuses this build: the reload waits for the menu.
+    if (notice?.outdated && store.state.screen === "editor") return;
     if (unexpected && notice?.reconnect) {
       if (roomCode !== null && resumeToken !== null) {
         beginReconnect();

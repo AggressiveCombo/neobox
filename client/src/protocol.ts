@@ -24,7 +24,7 @@ export type QuickQueue = string;
 export type JukeboxAction = "play" | "pause" | "resume" | "stop";
 
 export type ClientMsg =
-  | { t: "hello"; version: number; name: string; color?: number | null; ticket?: string | null }
+  | { t: "hello"; version: number; name: string; color?: number | null; ticket?: string | null; build?: string | null }
   | { t: "list_rooms" }
   | { t: "create_room"; name: string; password: string | null; max_players: number; public: boolean }
   | { t: "join_room"; room: string; password: string | null; resume?: string | null }
