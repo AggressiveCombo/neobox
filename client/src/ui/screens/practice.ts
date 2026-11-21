@@ -219,6 +219,7 @@ export const practiceScreen: ScreenFactory = (ctx) => {
               renderMaps();
             },
           },
+          icon("map", 18),
           m.name,
         ),
       );

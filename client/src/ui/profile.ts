@@ -125,7 +125,7 @@ function mapRow(m: PlayerMap): HTMLElement {
   return h(
     "li",
     {},
-    h("span", { class: "profile-map-name", title: m.name }, m.name),
+    h("span", { class: "profile-map-name", title: m.name }, icon("map", 16), m.name),
     h(
       "span",
       { class: "profile-map-figs" },
