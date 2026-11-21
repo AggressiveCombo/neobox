@@ -825,16 +825,6 @@ impl FrameBuilder {
                 self.ring(ex, ey, 0.02, 0.04, rgba(0xbbbbbb, 0.7));
             }
             self.bat_head(pp, p, t, gs, px, py);
-            let col = self.colours.of(p.id, p.team);
-            if p.rocket_frame >= 0.0 {
-                let (charge, a) = interp_rocket(pp, p, t);
-                let len = 1.2 + charge.min(8.0) * 0.08;
-                self.quad_line(px, py, px + len * a.cos(), py + len * a.sin(), 0.07, rgba(col, 0.75));
-            }
-            if p.egg_frame > 0.0 {
-                let a = interp_egg_aim(pp, p, t);
-                self.quad_line(px, py, px + 1.4 * a.cos(), py + 1.4 * a.sin(), 0.07, rgba(col, 0.75));
-            }
             if p.bat_frame >= 0.0 && p.bat_frame < gs.bat_fire_on + gs.bat_fire_frames {
                 let a = pp.map_or(p.bat_aim, |pp| lerp_aim(pp.bat_aim, p.bat_aim, t));
                 let firing = p.bat_frame >= gs.bat_fire_on;
@@ -1347,6 +1337,17 @@ mod tests {
         f.set_colours(PlayerColours::from_words(&[0x010101, 0x020202, 1, 0x030303, 0]).expect("valid colours"));
         assert_eq!(colour(&mut f, &debris(40.0, 1.0)), 0x030303);
         assert_eq!(colour(&mut f, &debris(40.0, 2.0)), 0x010101);
+    }
+
+    #[test]
+    fn a_charging_launcher_is_drawn_once_by_the_client() {
+        // the client draws the launcher and the egg aim line (geometry.ts): the frame adds no player-coloured line for them
+        let mut s = State::default();
+        s.players.insert(2, Player { id: 2.0, team: 1.0, rocket_frame: 4.0, rocket_aim: 0.5, egg_frame: 3.0, egg_aim: 0.5, ..Player::default() });
+        let mut f = FrameBuilder::default();
+        f.build(&s, &s, 0.5, &GameSettings::default(), Meta::default(), &Feed::default());
+        let line = rgba(PlayerColours::default().of(2.0, 1.0), 0.75);
+        assert!(f.verts.chunks(3).all(|v| v[2] != line));
     }
 
     #[test]
