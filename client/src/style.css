@@ -558,15 +558,15 @@ button.ink:hover:not(:disabled) {
   opacity: 0.88;
 }
 
+/* Destructive actions (End match, delete, reset, and the confirm that guards them): one filled red, the strongest button. */
 button.danger {
-  background: transparent;
-  color: var(--danger);
-  box-shadow: inset 0 0 0 2px var(--danger);
+  background: var(--danger);
+  color: var(--danger-ink);
 }
 
 button.danger:hover:not(:disabled) {
   background: var(--danger);
-  color: var(--danger-ink);
+  opacity: 0.88;
 }
 
 /* No fill until pointed at: toolbars, rows of secondary actions. */

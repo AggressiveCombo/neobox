@@ -364,7 +364,7 @@ export function confirmDialog(opts: ConfirmOptions): Promise<boolean> {
     close();
     resolve(yes);
   };
-  const cancel = h("button", { type: "button", class: "quiet", autofocus: true }, "Cancel");
+  const cancel = h("button", { type: "button", autofocus: true }, "Cancel");
   const actionBtn = h("button", { type: "button", class: "danger" }, opts.action);
   const { dialog, close } = openModal({
     title: opts.title,
