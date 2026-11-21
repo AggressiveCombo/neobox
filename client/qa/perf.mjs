@@ -594,12 +594,13 @@ async function editorActions(s, base, { cpu }) {
   await navTo(page, "Map editor");
   if (cpu) await setCpu(await cdpOf(page), CPU_RATE);
   const save = page.getByRole("button", { name: "Save", exact: true });
-  const modal = page.locator(".modal");
+  const modal = page.locator("dialog.modal[open]");
   const ms = [];
   for (let i = 0; i < ACTION_N; i++) {
     ms.push(await timedClick(page, save, modal));
     await button(modal, "Cancel").click();
-    await modal.waitFor({ state: "hidden" });
+    // Cancel closes at once but the dialog fades out for a while (is-closing); the next Save must not open a second one during it.
+    await page.waitForFunction(() => !document.querySelector("dialog.modal"));
   }
   return actionResult({ saveEditorMap: ms }, { cpu });
 }
