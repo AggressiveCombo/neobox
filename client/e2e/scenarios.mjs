@@ -797,7 +797,6 @@ async function jukeboxPanel(s) {
   await play.click();
   const panel = host.page.getByLabel("Jukebox", { exact: true });
   await panel.waitFor({ state: "visible" });
-  await panel.getByText(`suggested by ${guestName}`, { exact: true }).waitFor({ state: "visible" });
   const frame = panel.locator("iframe");
   await frame.waitFor({ state: "attached", timeout: 15_000 });
   const small = await frame.boundingBox();
@@ -808,6 +807,7 @@ async function jukeboxPanel(s) {
     return title !== null && video !== null && (title.compareDocumentPosition(video) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0;
   });
   need(titleFirst, "the title does not come before the player");
+  await panel.getByText(`suggested by ${guestName}`, { exact: true }).waitFor({ state: "visible" });
   await host.page.getByRole("button", { name: "Show video", exact: true }).click();
   const big = await frame.boundingBox();
   need(big !== null && big.width > 200 && Math.abs(big.width / big.height - 16 / 9) < 0.02, `Show video made the player ${big?.width}x${big?.height}, not 16:9`);
@@ -841,6 +841,7 @@ async function wipMark(s) {
     });
   await h.page.goto(s.base, { waitUntil: "commit", timeout: 60_000 });
   await menuName(h.page).waitFor();
+  need((await mark.count()) > 0, "the page has no WIP mark ([data-wip] is absent)");
   await mark.waitFor({ state: "visible" });
   need((await mark.evaluate((el) => getComputedStyle(el).pointerEvents)) === "none", "the WIP mark takes pointer events");
   const onMenu = await covered();
