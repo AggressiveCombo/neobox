@@ -127,23 +127,35 @@ impl Rotation {
             .collect()
     }
 
-    /// Adds fresh library maps to every mode without teams.
+    /// Adds fresh library maps: team-only maps join the team modes, the rest
+    /// the modes without teams. Maps that fail to decode are left out.
     fn with_fresh(mut self, fresh: Vec<RoomMap>) -> Rotation {
-        let modes: Vec<String> = self.modes().into_iter().filter(|m| !m.meta.teams).map(|m| m.id).collect();
-        if modes.is_empty() {
-            return self;
+        let modes = self.modes();
+        let ids = |teams: bool| -> Vec<String> { modes.iter().filter(|m| m.meta.teams == teams).map(|m| m.id.clone()).collect() };
+        let (team_ids, free_ids) = (ids(true), ids(false));
+        for m in fresh {
+            let Ok(data) = neobox_sim::MapData::from_code(&m.code) else { continue };
+            let join = if team_only(&data) { &team_ids } else { &free_ids };
+            if join.is_empty() {
+                continue;
+            }
+            self.maps.push(RotationMap {
+                author: m.author,
+                description: m.description,
+                leveldata: m.code,
+                name: m.name,
+                dbid: m.id,
+                published: Some(datetime(m.created)),
+                modes: join.clone(),
+            });
         }
-        self.maps.extend(fresh.into_iter().map(|m| RotationMap {
-            author: m.author,
-            description: m.description,
-            leveldata: m.code,
-            name: m.name,
-            dbid: m.id,
-            published: Some(datetime(m.created)),
-            modes: modes.clone(),
-        }));
         self
     }
+}
+
+/// A map whose objects only make sense in a team mode: red or blue spawns, or capture points.
+fn team_only(map: &neobox_sim::MapData) -> bool {
+    map.spawns.iter().any(|s| s.teams[2] || s.teams[3]) || !map.caps.is_empty()
 }
 
 /// The current rotation (fixed maps plus fresh library maps), built at most
@@ -229,21 +241,27 @@ mod tests {
         assert_eq!(r.maps_of("qp_2").len(), 6);
         assert_eq!(r.maps_of("custom").len(), 1);
         for m in &r.maps {
-            neobox_sim::MapData::from_code(&m.leveldata).unwrap_or_else(|e| panic!("{}: {e}", m.name));
+            let data = neobox_sim::MapData::from_code(&m.leveldata).unwrap_or_else(|e| panic!("{}: {e}", m.name));
+            for id in &m.modes {
+                assert!(!team_only(&data) || r.mode_meta(id).is_some_and(|meta| meta.teams), "{} is team-only but offered in {id}", m.name);
+            }
         }
-        // fresh maps join the modes without teams only
-        let fresh = RoomMap {
-            id: 7,
+        // library maps: team-only ones join the team modes, the rest the modes without teams
+        let golden = r.maps[0].leveldata.clone();
+        let twin = std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("../../maps/04-team-fort.json")).unwrap();
+        let twin = neobox_sim::MapData::from_json(&serde_json::from_str::<serde_json::Value>(&twin).unwrap()["map"]).unwrap().to_code();
+        let fresh = |code: String, id| RoomMap {
+            id,
             name: "New".into(),
             author: "me".into(),
             description: String::new(),
             created: 0,
             up: 3,
             down: 0,
-            code: r.maps[0].leveldata.clone(),
+            code,
         };
-        let r = r.with_fresh(vec![fresh]);
+        let r = r.with_fresh(vec![fresh(golden, 7), fresh(twin, 8)]);
         assert_eq!(r.maps_of("qp_1").len(), 15);
-        assert_eq!(r.maps_of("qp_2").len(), 6);
+        assert_eq!(r.maps_of("qp_2").len(), 7);
     }
 }
