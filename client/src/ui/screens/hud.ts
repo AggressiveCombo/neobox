@@ -19,6 +19,7 @@ import { icon, type IconName } from "../icons";
 import { confirmDialog, contrastRatio } from "../kit";
 import { showPhoneSplash } from "../phone-splash";
 import { createScoreboard } from "../scoreboard";
+import { stickBits, stickOctant } from "../../touch-stick";
 
 const SCORE_INTERVAL_MS = 100;
 const CHAT_SHOWN = 8;
@@ -44,11 +45,6 @@ function nameText(rgb: number): number {
 /** Own chat lines (most recent last), recalled with Up/Down. Kept for the session only. */
 const SENT_HISTORY_MAX = 50;
 const sentChat: string[] = [];
-
-/** Stick: fraction of the radius before a direction engages. */
-const STICK_DEAD = 0.3;
-/** tan(67.5°): a direction stays on within 67.5° of its axis (8-way). */
-const STICK_SECTOR = 2.414;
 
 /** What each touch action looks like and feeds the engine. Settings draws the same icons. */
 export const TOUCH_BUTTONS: Record<TouchAction, { bit: number; label: string; icon: IconName }> = {
@@ -97,18 +93,15 @@ function touchStick(ctx: AppCtx): HTMLElement {
   let cx = 0;
   let cy = 0;
   let radius = 1;
+  let octant = -1;
   const set = (dx: number, dy: number): void => {
+    octant = stickOctant(octant, dx, dy, radius);
+    const bits = stickBits(octant);
+    for (const bit of [BIT.LEFT, BIT.RIGHT, BIT.UP, BIT.DOWN]) ctx.input.setTouch("stick", bit, (bits & bit) !== 0);
     const dist = Math.hypot(dx, dy);
-    const on = dist > radius * STICK_DEAD;
-    const horizontal = on && Math.abs(dx) * STICK_SECTOR >= Math.abs(dy);
-    const vertical = on && Math.abs(dy) * STICK_SECTOR >= Math.abs(dx);
-    ctx.input.setTouch("stick", BIT.LEFT, horizontal && dx < 0);
-    ctx.input.setTouch("stick", BIT.RIGHT, horizontal && dx > 0);
-    ctx.input.setTouch("stick", BIT.UP, vertical && dy < 0);
-    ctx.input.setTouch("stick", BIT.DOWN, vertical && dy > 0);
     const k = dist > radius ? radius / dist : 1;
     knob.style.transform = `translate(${dx * k}px, ${dy * k}px)`;
-    pad.classList.toggle("hud-on", on);
+    pad.classList.toggle("hud-on", octant >= 0);
   };
   pad.addEventListener("pointerdown", (e: PointerEvent) => {
     if (active !== null) return;
