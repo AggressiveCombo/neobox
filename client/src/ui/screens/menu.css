@@ -452,9 +452,8 @@ button.home-privacy {
   background: none;
 }
 
-/* Phone portrait: one column in flow. Wordmark, name, the drum, then the square centred
-   under them, fully on screen at 390x844. Landscape phones keep the two-column layout (the stack
-   would push the square below the fold). */
+/* Phone portrait: one column in flow. Wordmark, name, the drum, then the card under them in its own shape, fully on
+   screen at 390x844. Landscape phones keep the two-column layout (the stack would push the card below the fold). */
 @media (max-width: 860px) and (orientation: portrait) {
   .page.home {
     display: flex;
@@ -497,13 +496,24 @@ button.home-privacy {
   .drum {
     --drum-pitch: 38px;
     --drum-opt-h: 40px;
-    height: 344px;
+    height: 266px;
   }
 
   .menu-art {
     order: 3;
     width: min(88vw, 44vh);
     align-self: center;
+    aspect-ratio: auto;
+  }
+
+  /* The art box is the card's height: the card takes its own shape in flow, not a square with the card centred in it. */
+  .menu-square {
+    position: relative;
+    left: auto;
+    top: auto;
+    transform: none;
+    height: auto;
+    aspect-ratio: calc(var(--card-w, 1) / var(--card-h, 1));
   }
 
   .home-foot {
