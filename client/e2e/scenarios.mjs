@@ -1200,6 +1200,27 @@ async function editorKeepsMapName(s) {
   return `editor title keeps "${mapName}" after opening it and after Test play -> Edit`;
 }
 
+/** Guest Save to library: the modal says saving needs an account and offers Download map file for a map with content. */
+async function editorGuestSaveNote(s) {
+  const h = await s.open("editor-guest-save");
+  const { page } = h;
+  await page.goto(s.base);
+  await menuName(page).waitFor();
+  await navTo(page, "Map editor");
+  await button(page, "Menu").click();
+  await page.locator(".editor-menu").waitFor({ state: "visible" });
+  await page.locator(".editor-list .editor-item").first().click();
+  await page.locator(".editor-menu").waitFor({ state: "hidden" });
+  await button(page, "Menu").click();
+  await page.getByRole("button", { name: "Save to library", exact: true }).click();
+  const modal = page.locator("dialog.modal[open]");
+  await modal.waitFor({ state: "visible" });
+  await modal.getByText("Saving to the library needs an account.", { exact: false }).waitFor({ state: "visible" });
+  await modal.getByRole("button", { name: "Download map file", exact: true }).click();
+  await modal.waitFor({ state: "hidden" });
+  return "guest Save to library says saving needs an account and offers Download map file";
+}
+
 /** Leave out of a Quick play match, ten times: the Leave chip and Menu -> Show lobby -> Leave each reach the menu without a timeout. */
 async function quickLeaveRepeat(s) {
   const h = await s.open("quick-leave");
@@ -1502,6 +1523,7 @@ export const scenarios = [
   { name: "quick play shows name", run: quickPlayShowsName },
   { name: "phone menu no welcome", run: phoneMenuNoWelcome },
   { name: "editor keeps map name", run: editorKeepsMapName },
+  { name: "editor guest save note", run: editorGuestSaveNote },
   { name: "quick leave repeat", run: quickLeaveRepeat },
   { name: "settings", run: settings },
   { name: "accessibility prefs", run: accessibilityPrefs },

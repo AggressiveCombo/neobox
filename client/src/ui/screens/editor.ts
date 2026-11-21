@@ -504,7 +504,21 @@ export const editorScreen: ScreenFactory = (ctx) => {
   /** The save dialog: a name, a description and visibility. Overwrites the open library map or uploads a new one. */
   function openSaveDialog(): void {
     if (!ctx.store.state.account) {
-      openModal({ title: "Save to library", body: [signInPrompt(ctx, "Sign in to save maps to your library.")] });
+      const actions: HTMLButtonElement[] = [];
+      if (!isEmptyMap()) {
+        const download = h("button", { type: "button" }, icon("download"), "Download map file");
+        download.addEventListener("click", () => {
+          downloadMap(ctrl.doc);
+          markSaved();
+          modal.close();
+        });
+        actions.push(download);
+      }
+      const modal = openModal({
+        title: "Save to library",
+        body: [signInPrompt(ctx, "Saving to the library needs an account. Sign in to save this map.")],
+        actions,
+      });
       return;
     }
     const current = libraryMap;

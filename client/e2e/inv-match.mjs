@@ -890,7 +890,7 @@ async function matchEditorGuest(s) {
   const modal = page.locator("dialog.modal[open]");
   await modal.waitFor({ state: "visible" });
   check((await modal.count()) === 1, `${await modal.count()} modals open for a guest save`);
-  await modal.getByText("Sign in to save maps to your library.").waitFor({ state: "visible" });
+  await modal.getByText("Saving to the library needs an account.").waitFor({ state: "visible" });
   await modal.getByRole("button", { name: /^(Cancel|Close)$/ }).first().click();
   await modal.waitFor({ state: "hidden" });
   return "guest Save to library shows the sign-in prompt in one modal";
