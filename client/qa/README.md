@@ -180,6 +180,7 @@ Viewport rows of the rubric (section 2.2): `T1-M` 1280x800 dsf 1 (with text spac
 
 - `metrics.mjs`: `domMeasure()` (layout, overflow, overlap, obscuring, targets, SR names, balance, runs in the page), reduced-motion check, axe-core, reflow issues.
 - `edges.coveredByFixed` hit-tests each content element's centre; a `pointer-events: none` element (and its descendants, the property is inherited) is skipped, since no hit test can see what covers it. Test that a real cover still counts: a `pointer-events: auto` board under a fixed bar.
+- `targets.small` skips a `pointer-events: none` control (a drum row kept as a peek is not a click target). Test that a real small control still counts: the 12px `targets.small` fixture; the inert twin (`targets.small.inert`) must stay clean.
 - `focus.mjs`: Tab-walk focus audit: `focus.invisible` (T1-K only), `focus.obscured` (every Tab stop, centre covered by a fixed or sticky element), `focus.order.jumps` (scroll-aware), `focus.trapBroken`.
 - `image.mjs`: screenshot pixel metrics: void cells, text-over-media contrast, control border contrast.
 

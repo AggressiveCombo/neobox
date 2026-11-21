@@ -202,6 +202,12 @@ const FIXTURES = [
     html: doc(main(`<button aria-label="Tiny close" style="width:12px;height:12px;padding:0;min-width:0;min-height:0"></button>`)),
   },
   {
+    // The same 12px control, pointer-events:none (a drum peek row): no pointer reaches it, so targets.small must not fire.
+    name: "targets.small.inert",
+    keys: [],
+    html: doc(main(`<h1>Inert control fixture</h1><button aria-label="Tiny peek" style="width:12px;height:12px;padding:0;min-width:0;min-height:0;pointer-events:none"></button>`)),
+  },
+  {
     name: "targets.touch48.small",
     keys: ["targets.touch48.small"],
     row: TOUCH_ROW,

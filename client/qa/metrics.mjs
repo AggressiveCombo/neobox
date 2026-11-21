@@ -364,6 +364,9 @@ export function domMeasure(opts) {
   for (const el of interactive) {
     const s = cs(el);
     if (s.display === "inline") continue;
+    // pointer-events is inherited: a none here means no pointer can reach the control (a drum row kept as a visible peek,
+    // say), so it is not a click target and its size is not a touch-target defect. A hittable control still counts.
+    if (s.pointerEvents === "none") continue;
     const r = el.getBoundingClientRect();
     if (r.width >= minTarget && r.height >= minTarget) continue;
     // a native checkbox/radio whose visible label is big enough is measured by the label
