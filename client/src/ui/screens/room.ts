@@ -470,7 +470,7 @@ export const roomScreen: ScreenFactory = (ctx: AppCtx) => {
       "button",
       {
         type: "button",
-        class: opts.danger ? "room-menu-item is-danger" : "room-menu-item",
+        class: opts.danger ? "room-menu-item list-row is-danger" : "room-menu-item list-row",
         role: opts.role ?? "menuitem",
         "aria-checked": opts.checked === undefined ? undefined : String(opts.checked),
         disabled: run === null,
@@ -905,7 +905,7 @@ export const roomScreen: ScreenFactory = (ctx: AppCtx) => {
           "button",
           {
             type: "button",
-            class: "room-menu-item",
+            class: "room-menu-item list-row",
             role: "menuitem",
             onclick: () => {
               ctx.send({ t: "chat", text });
@@ -1055,7 +1055,7 @@ export const roomScreen: ScreenFactory = (ctx: AppCtx) => {
         "button",
         {
           type: "button",
-          class: "room-mode-option",
+          class: "room-mode-option list-row",
           "data-focus-key": String(m.id),
           "aria-pressed": m.id === current ? "true" : "false",
           onclick: () => {
