@@ -597,6 +597,52 @@ async function training(s) {
   return "lessons step, replay tutorial, canvas renders, leave";
 }
 
+/**
+ * E42: in the training hall the camera follows the player at the base view size. Walking right, away from the dummies,
+ * the view width (camera.ts publishes it on globalThis.__qaCam) must not change; it zoomed out to keep the dummies in.
+ */
+async function trainingCamera(s) {
+  const h = await s.open("training-camera", { name: uniqueName("tc") });
+  const { page } = h;
+  await page.goto(s.base);
+  await menuName(page).waitFor();
+  await navTo(page, "Training");
+  await page.locator(".training-text").waitFor();
+  await waitForPixels(h, "training canvas");
+  // the view and the first player record's x (src/engine.ts framebuffer: record base u32[4], x at +1)
+  const view = () =>
+    page.evaluate(() => {
+      const fb = globalThis.__qaEngine?.framebuffer?.();
+      return { w: globalThis.__qaCam?.w ?? 0, x: fb && fb.u32[3] > 0 ? fb.f32[fb.u32[4] + 1] : null };
+    });
+  const start = await view();
+  const widths = [start.w];
+  let x = start.x;
+  // Walk (hopping over the hall's steps) until the player stops at the right wall, at most 30 s: the dummies stay left,
+  // and the old camera widened to keep them in once the player was far enough right.
+  await page.keyboard.down("ArrowRight");
+  await page.keyboard.down("ArrowUp");
+  let stillSince = Date.now();
+  for (let i = 0; i < 300 && Date.now() - stillSince < 1500; i++) {
+    await sleep(100);
+    const v = await view();
+    widths.push(v.w);
+    if (v.x !== null && (x === null || v.x > x + 0.01)) stillSince = Date.now();
+    x = v.x;
+  }
+  await page.keyboard.up("ArrowUp");
+  await page.keyboard.up("ArrowRight");
+  const aw = await page.evaluate(() => globalThis.__qaCam?.aw ?? 0);
+  const min = Math.min(...widths);
+  const max = Math.max(...widths);
+  check(min > 0, "the training view published no camera");
+  check(x !== null && aw > 0 && x > aw * 0.85, `the player did not reach the hall's right side (x ${start.x} -> ${x} of ${aw})`);
+  check(max / min <= 1.001, `the view width changed while walking right: ${min.toFixed(1)} to ${max.toFixed(1)} world units`);
+  await button(page, "Leave").click();
+  await menuName(page).waitFor();
+  return `view width ${min.toFixed(1)} held while the player walked right (x ${start.x.toFixed(1)} -> ${x.toFixed(1)})`;
+}
+
 /** In-match menu (the original's): the lobby and the controls while the match runs, then back to the game. */
 async function matchMenu(s) {
   const { host } = await matchWithGuest(s, { clipboard: false });
@@ -1942,6 +1988,7 @@ export const scenarios = [
   { name: "jukebox", run: jukebox },
   { name: "lobby signals", run: lobbySignals },
   { name: "training", run: training },
+  { name: "training camera", run: trainingCamera },
   { name: "news", run: news },
   { name: "clips", run: clips },
   { name: "clips leave quietly", run: clipsLeaveQuietly },
