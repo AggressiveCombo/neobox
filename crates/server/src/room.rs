@@ -39,8 +39,9 @@ const TYPING_GAP: Duration = Duration::from_millis(800);
 const QUICK_AWARD_TICK: f64 = 10.0;
 /// Ticks run at 30 per second in the original, whatever rate the room simulates at.
 const RECORD_TICKS_PER_SECOND: f64 = 30.0;
-/// Appearance colours for players who have not picked one.
-const DEFAULT_COLORS: [u32; 8] = [0x9be15d, 0xffc857, 0xc792ea, 0x4fd1c5, 0xff8fab, 0xf6e05e, 0x7f9cf5, 0xf28c28];
+/// Appearance colours (the original's FFA palette) for players who have not picked one. Each joiner takes the first
+/// one no current player uses, so colours stay distinct in a room until more than six players are in it.
+const DEFAULT_COLORS: [u32; 6] = [0xf9fc91, 0x33658a, 0xe34a6f, 0x3acf60, 0xbc56d5, 0xeea210];
 const HELP: &str = "Commands: /set <key> <value>, /settings, /reset, /mode <n>, /start, /end, /lock, /unlock, \
     /kick <name>, /ban <name>, /unban <name>, /mute <name>, /unmute <name>, /host <name>, \
     /team <name> <ffa|red|blue|spec>, /join <ffa|red|blue|spec>, /upvote, /downvote, /fav, /unfav, /record";
@@ -767,7 +768,10 @@ impl Room {
         let token = new_token();
         info!(room = %self.code, player = id, name = %conn.name, ip = %conn.ip, "join");
         let xp = conn.xp;
-        let color = conn.color.unwrap_or(DEFAULT_COLORS[id as usize % DEFAULT_COLORS.len()]);
+        let taken: Vec<u32> = self.players.iter().map(|p| p.color).collect();
+        let color = conn.color.unwrap_or_else(|| {
+            DEFAULT_COLORS.iter().copied().find(|c| !taken.contains(c)).unwrap_or(DEFAULT_COLORS[id as usize % DEFAULT_COLORS.len()])
+        });
         let name = conn.name.clone();
         self.players.push(RPlayer {
             id,

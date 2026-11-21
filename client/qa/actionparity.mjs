@@ -4,9 +4,13 @@
 // - rocket-charge: while charging, the frame may add vertices only in the launcher's own colours (rail and hub grey,
 //   hub red; geometry.ts putLauncher). A player-coloured vertex added while charging is the solid aim line that the
 //   original never draws (removed in 5d330c8): the check fails on it.
+// - push-charge: while push runs the body keeps its playerRgb colour (the original draws no push lift). The body's exact pixel
+//   count in a screenshot must not fall when X is held; a lifted body colour fails it.
 // - corpse-colour: a player who falls out of the arena leaves debris (wasm frame.rs, source_player). Its colour must be
 //   the client's colour for that player (globalThis.__qaPlayerRgb, geometry.ts playerRgb), the colour the living body
 //   is drawn in. The wasm colour table of 02f3b72 draws it in another colour: the check fails there.
+// - palette-default, corpse-colour in each colour-blind palette (accessibility addition, DEVIATIONS.md): the default team and
+//   FFA colours are the original's (red, blue, six FFA colours); each palette's corpse keeps the body's colour.
 // - bat-charge: the body keeps its playerRgb colour while the bat swings (the original draws no bat lift). Its exact-colour
 //   pixel count in screenshots before and after holding C must not fall; a lifted body colour fails it.
 // - dash-body: the body keeps its playerRgb colour while a dash runs (the original draws no dash lift). Its exact-colour
@@ -54,7 +58,7 @@ const frameOf = (pg) => pg.evaluate(() => {
   const np = u[3], rec = u[4];
   for (let i = 0; i < np; i++) {
     const b = rec + i * 14;
-    players.push({ id: u[b], team: u[b + 4], x: f[b + 1], y: f[b + 2], size: f[b + 8], rocket: f[b + 10], flags: u[b + 6] });
+    players.push({ id: u[b], team: u[b + 4], x: f[b + 1], y: f[b + 2], size: f[b + 8], rocket: f[b + 10], stamina: f[b + 5], flags: u[b + 6] });
   }
   return { colours, players };
 });
@@ -197,6 +201,24 @@ const trailMoved = jumpYsKnown.length > 1 && jumpSize > 0 && Math.max(...jumpYsK
 const trailPixels = jumpShots.map((s) => pixelsOf(s, TRAIL_RGB));
 const trailPass = trailMoved && trailPixels.every((n) => n === 0);
 
+// --- push-charge: the body keeps its colour while push runs (the original draws no push lift) ---
+// Counts the body's exact colour (playerRgb) in screenshots before and after 1 s of holding X, which drains stamina.
+await sleep(3000); // let the rocket check's shot and stamina settle
+const pushIdle = await frame();
+const pushIdleShot = await page.screenshot();
+const pushMe = pushIdle?.players[0] ?? null;
+const pushRgb = pushMe ? await page.evaluate(([team, id]) => globalThis.__qaPlayerRgb?.(team, id) ?? null, [pushMe.team, pushMe.id]) : null;
+await page.keyboard.down("x");
+await sleep(1000);
+const pushHeld = await frame();
+const pushHeldShot = await page.screenshot();
+await page.keyboard.up("x");
+const pushing = !!pushIdle && !!pushHeld && pushHeld.players[0].stamina < pushIdle.players[0].stamina;
+const pushBody = { idle: pushRgb === null ? 0 : pixelsOf(pushIdleShot, pushRgb), held: pushRgb === null ? 0 : pixelsOf(pushHeldShot, pushRgb) };
+for (const [name, shot] of [["push-idle", pushIdleShot], ["push-held", pushHeldShot]]) writeFileSync(path.join(outDir(), "evidence", `${name}.png`), shot);
+const pushStamina = [pushIdle?.players[0]?.stamina ?? null, pushHeld?.players[0]?.stamina ?? null];
+const pushPass = pushing && pushBody.idle > 0 && pushBody.held >= pushBody.idle;
+
 // --- stamina-bar, label box and marker: the local label's box is black at 60%, 18 CSS px tall (overlay.ts drawNames) ---
 // The bar is the box's top row; the followed player's marker (yellow, outlined) tip sits 4 CSS px above the box.
 // Probes the overlay canvas around the local label of page pg.
@@ -272,38 +294,74 @@ const boxPass = boxPassOf(stamina1.probe) && boxPassOf(stamina3.probe);
 const markerPass = markerPassOf(stamina1.probe) && markerPassOf(stamina3.probe);
 
 // --- corpse-colour: walk left off the platform; the player's debris keeps the player's colour ---
-await sleep(500);
-const alive = await frame();
-const me = alive?.players[0] ?? null;
-const expectedRgb = me ? await page.evaluate(([team, id]) => globalThis.__qaPlayerRgb?.(team, id) ?? null, [me.team, me.id]) : null;
 // The frame's colour keys are packed low byte first (see LAUNCHER_RGB): swap red and blue from playerRgb's RRGGBB.
-const expected = expectedRgb === null ? null : ((expectedRgb & 0xff) << 16) | (expectedRgb & 0xff00) | ((expectedRgb >>> 16) & 0xff);
-await page.keyboard.down("ArrowLeft");
-let dead = null;
-const xs = [];
-const until = Date.now() + FALL_MS;
-while (Date.now() < until) {
-  await sleep(250);
-  // A ledge stops the walk: tap jump now and then so the player clears it.
-  if (xs.length % 4 === 3) await page.keyboard.press("ArrowUp");
-  const now = await frame();
-  xs.push(now?.players[0]?.x ?? null);
-  if (now && now.players.length === 0) { dead = now; break; }
+const packedOf = (rgb) => ((rgb & 0xff) << 16) | (rgb & 0xff00) | ((rgb >>> 16) & 0xff);
+// Walks the local player off the platform on page pg; checks the living body and the debris against playerRgb.
+async function corpseOf(pg, label = "default") {
+  await sleep(500);
+  const alive = await frameOf(pg);
+  const shotAlive = await pg.screenshot();
+  const me = alive?.players[0] ?? null;
+  const rgb = me ? await pg.evaluate(([team, id]) => globalThis.__qaPlayerRgb?.(team, id) ?? null, [me.team, me.id]) : null;
+  const expected = rgb === null ? null : packedOf(rgb);
+  await pg.keyboard.down("ArrowLeft");
+  let dead = null;
+  const xs = [];
+  const until = Date.now() + FALL_MS;
+  while (Date.now() < until) {
+    await sleep(250);
+    // A ledge stops the walk: tap jump now and then so the player clears it.
+    if (xs.length % 4 === 3) await pg.keyboard.press("ArrowUp");
+    const now = await frameOf(pg);
+    xs.push(now?.players[0]?.x ?? null);
+    if (now && now.players.length === 0) { dead = now; break; }
+  }
+  await pg.keyboard.up("ArrowLeft");
+  const shotDead = dead ? await pg.screenshot() : null;
+  for (const [name, shot] of [["alive", shotAlive], ["dead", shotDead]]) {
+    if (shot) writeFileSync(path.join(outDir(), "evidence", `corpse-${label}-${name}.png`), shot);
+  }
+  const corpseGrew = dead && alive ? grownColours(alive, dead) : [];
+  // Pixels of the body's colour before the fall (the living body) and in the debris after it (same palette).
+  const pixels = { alive: rgb === null ? 0 : pixelsOf(shotAlive, rgb), dead: rgb === null || !shotDead ? 0 : pixelsOf(shotDead, rgb) };
+  const corpseHit = expected !== null && corpseGrew.some((row) => Number(row.rgb) === expected);
+  return {
+    pass: me !== null && expected !== null && dead !== null && corpseHit && pixels.alive > 0,
+    died: dead !== null,
+    pixels,
+    player: me,
+    expected: expected === null ? null : `0x${expected.toString(16).padStart(6, "0")}`,
+    walkX: xs.filter((_, i) => i % 4 === 0),
+    debrisColours: corpseGrew.sort((a, b) => b.added - a.added).slice(0, 8),
+  };
 }
-await page.keyboard.up("ArrowLeft");
-const corpseGrew = dead && alive ? grownColours(alive, dead) : [];
-const corpseHit = expected !== null && corpseGrew.some((row) => Number(row.rgb) === expected);
-const corpsePass = me !== null && expected !== null && dead !== null && corpseHit;
-const corpse = {
-  pass: corpsePass,
-  died: dead !== null,
-  player: me,
-  expected: expected === null ? null : `0x${expected.toString(16).padStart(6, "0")}`,
-  walkX: xs.filter((_, i) => i % 4 === 0),
-  debrisColours: corpseGrew.sort((a, b) => b.added - a.added).slice(0, 8),
-};
+const corpse = await corpseOf(page);
+const corpsePass = corpse.pass;
 
-const pass = rocketPass && batPass && dashPass && trailPass && staminaPass && boxPass && markerPass && corpsePass && errors.length === 0;
+// --- palette: the default team and FFA colours are the original's (red, blue, six FFA colours) ---
+const ORIGINAL = { red: 0xd44234, blue: 0x347bd4, ffa: [0xf9fc91, 0x33658a, 0xe34a6f, 0x3acf60, 0xbc56d5, 0xeea210] };
+const tableNow = await page.evaluate(() => {
+  const rgb = globalThis.__qaPlayerRgb;
+  return { red: rgb?.(2, 0) ?? null, blue: rgb?.(3, 0) ?? null, ffa: [0, 1, 2, 3, 4, 5].map((id) => rgb?.(1, id) ?? null) };
+});
+const paletteDefaultPass = tableNow.red === ORIGINAL.red && tableNow.blue === ORIGINAL.blue &&
+  tableNow.ffa.every((rgb, i) => rgb === ORIGINAL.ffa[i]);
+
+// --- colour-blind palettes (accessibility addition, DEVIATIONS.md): the corpse keeps the body's colour in each ---
+const cvd = {};
+for (const palette of ["deuteranopia", "protanopia", "tritanopia"]) {
+  const ctxP = await browser.newContext({ viewport: { width: 1366, height: 768 } });
+  // PREFS_KEY (src/storage-keys.ts) holds the prefs JSON; missing keys take their defaults.
+  await ctxP.addInitScript((value) => localStorage.setItem("neobox.prefs", value), JSON.stringify({ palette }));
+  const pageP = await ctxP.newPage();
+  await startPractice({ page: pageP }, srv.base, null, { pixels: false });
+  await sleep(3000);
+  cvd[palette] = await corpseOf(pageP, palette);
+  await ctxP.close();
+}
+const cvdPass = Object.values(cvd).every((row) => row.pass);
+
+const pass = rocketPass && batPass && dashPass && trailPass && pushPass && staminaPass && boxPass && markerPass && corpsePass && paletteDefaultPass && cvdPass && errors.length === 0;
 const result = {
   pass,
   actions: {
@@ -317,7 +375,9 @@ const result = {
     "bat-charge": { pass: batPass, batting, flags: batHeld?.players[0]?.flags ?? null, body: batBody, rgb: batRgb === null ? null : `0x${batRgb.toString(16).padStart(6, "0")}` },
     "movement-trail": { pass: trailPass, moved: trailMoved, y: jumpYs, trailPixels },
     "dash-body": { pass: dashPass, dashing, flags: dashHeld?.players[0]?.flags ?? null, body: dashBody, rgb: dashRgb === null ? null : `0x${dashRgb.toString(16).padStart(6, "0")}` },
-    "corpse-colour": corpse,
+    "push-charge": { pass: pushPass, pushing, stamina: pushStamina, flags: pushHeld?.players[0]?.flags ?? null, body: pushBody, rgb: pushRgb === null ? null : `0x${pushRgb.toString(16).padStart(6, "0")}` },
+    "corpse-colour": { ...corpse, cvd },
+    "palette-default": { pass: paletteDefaultPass, original: ORIGINAL, table: tableNow },
     "stamina-bar": { pass: staminaPass, dpr1: stamina1.probe, dpr3: stamina3.probe },
     "label-box": { pass: boxPass, dpr1: stamina1.probe?.boxRows, dpr3: stamina3.probe?.boxRows },
     "label-marker": { pass: markerPass, dpr1: stamina1.probe?.marker, dpr3: stamina3.probe?.marker },
@@ -327,10 +387,13 @@ const result = {
 mkdirSync(outDir(), { recursive: true });
 writeFileSync(path.join(outDir(), "actionparity.json"), JSON.stringify(result, null, 2));
 console.log(`${rocketPass ? "PASS" : "FAIL"} rocket-charge ${JSON.stringify(rocketAdded)}${idle && held ? "" : " (no __qaEngine: build lacks the hook)"}`);
-console.log(`${corpsePass ? "PASS" : "FAIL"} corpse-colour expected ${corpse.expected} debris ${JSON.stringify(corpse.debrisColours.slice(0, 3))}${dead ? "" : " (player did not fall)"}`);
+console.log(`${pushPass ? "PASS" : "FAIL"} push-charge body ${JSON.stringify(pushBody)} rgb ${pushRgb === null ? "none" : pushRgb.toString(16)} stamina ${JSON.stringify(pushStamina)}${pushing ? "" : " (stamina did not drain)"}`);
+console.log(`${corpsePass ? "PASS" : "FAIL"} corpse-colour expected ${corpse.expected} debris ${JSON.stringify(corpse.debrisColours.slice(0, 3))}${corpse.died ? "" : " (player did not fall)"}`);
 console.log(`${batPass ? "PASS" : "FAIL"} bat-charge body ${JSON.stringify(batBody)} rgb ${batRgb === null ? "none" : batRgb.toString(16)}${batting ? "" : " (bat did not swing)"}`);
 console.log(`${trailPass ? "PASS" : "FAIL"} movement-trail moved ${trailMoved} y ${JSON.stringify(jumpYs)} trail pixels per shot ${JSON.stringify(trailPixels)}`);
 console.log(`${dashPass ? "PASS" : "FAIL"} dash-body body ${JSON.stringify(dashBody)} rgb ${dashRgb === null ? "none" : dashRgb.toString(16)}${dashing ? "" : " (dash did not start)"}`);
+console.log(`${paletteDefaultPass ? "PASS" : "FAIL"} palette-default red ${tableNow.red?.toString(16)} blue ${tableNow.blue?.toString(16)} ffa ${JSON.stringify(tableNow.ffa.map((c) => c?.toString(16)))}`);
+for (const [palette, row] of Object.entries(cvd)) console.log(`${row.pass ? "PASS" : "FAIL"} corpse-colour ${palette} expected ${row.expected} debris ${JSON.stringify(row.debrisColours.slice(0, 3))}${row.died ? "" : " (player did not fall)"}`);
 console.log(`${staminaPass ? "PASS" : "FAIL"} stamina-bar dpr1 ${JSON.stringify(stamina1.probe?.rows.filter((r) => r.green || r.opaque || r.other))} dpr3 ${JSON.stringify(stamina3.probe?.rows.filter((r) => r.green || r.opaque || r.other))} box top ${stamina1.probe?.yBase ?? "none"}`);
 console.log(`${boxPass ? "PASS" : "FAIL"} label-box dpr1 ${stamina1.probe?.boxRows ?? "none"}/${stamina1.probe?.boxH ?? "none"} dpr3 ${stamina3.probe?.boxRows ?? "none"}/${stamina3.probe?.boxH ?? "none"}`);
 console.log(`${markerPass ? "PASS" : "FAIL"} label-marker dpr1 ${JSON.stringify(stamina1.probe?.marker ?? null)} dpr3 ${JSON.stringify(stamina3.probe?.marker ?? null)} box top ${stamina1.probe?.yBase ?? "none"}`);

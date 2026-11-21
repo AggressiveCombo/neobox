@@ -32,7 +32,7 @@ export interface Span {
 /** Team and FFA colours per palette pref (FFA is indexed by player id). Each colour-blind palette is checked under its own
  *  deficiency (RUBRIC D06 cvd.minDeltaE >= 15): team pairs and FFA sets keep CIEDE2000 >= 15 after the Machado 2009 simulation. */
 export const PALETTES: Record<Palette, { red: number; blue: number; ffa: readonly number[] }> = {
-  default: { red: 0xff5252, blue: 0x4d9bff, ffa: [0x9be15d, 0x4fd1c5, 0x7f9cf5, 0xf28c28, 0xb0b0ff, 0xff7f9f, 0x3fbfbf, 0xcc79a7] },
+  default: { red: 0xd44234, blue: 0x347bd4, ffa: [0xf9fc91, 0x33658a, 0xe34a6f, 0x3acf60, 0xbc56d5, 0xeea210] },
   deuteranopia: { red: 0xf85800, blue: 0x0860a0, ffa: [0x706060, 0x0050e0, 0x108030, 0x0090e0, 0x407080, 0xf06020, 0x20a090, 0xf05080] },
   protanopia: { red: 0xc00800, blue: 0x1090f0, ffa: [0x30a000, 0xa000e0, 0x609070, 0x1090f0, 0xb02060, 0x307010, 0xc00030, 0x208090] },
   tritanopia: { red: 0xfcd4d8, blue: 0x98e8fc, ffa: [0xccacf4, 0x80f4f0, 0xf0d87c, 0xf498e8, 0xf8fcd4, 0xb4b4f4, 0xb8c40c, 0xb4e438] },

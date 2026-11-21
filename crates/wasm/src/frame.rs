@@ -40,9 +40,9 @@ impl Default for PlayerColours {
     /// The client's default palette; the client sends its own before the first frame (`nb_set_colours`).
     fn default() -> Self {
         Self {
-            red: 0xff5252,
-            blue: 0x4d9bff,
-            ffa: vec![0x9be15d, 0x4fd1c5, 0x7f9cf5, 0xf28c28, 0xb0b0ff, 0xff7f9f, 0x3fbfbf, 0xcc79a7],
+            red: 0xd44234,
+            blue: 0x347bd4,
+            ffa: vec![0xf9fc91, 0x33658a, 0xe34a6f, 0x3acf60, 0xbc56d5, 0xeea210],
             room: Vec::new(),
         }
     }

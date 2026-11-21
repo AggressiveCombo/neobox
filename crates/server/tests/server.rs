@@ -391,6 +391,15 @@ async fn lobby_signals_and_start_countdown() {
     guest.send(&ClientMsg::Editing { open: true }).await;
     host.room_where("editing", |r| r.players.iter().any(|p| p.id == g.you && p.editing)).await;
 
+    // a player who picks no colour takes the first palette colour no one in the room uses (the host has the first)
+    let mut third = Client::connect(&url, "third").await;
+    let (t, _) = third.join(&h.code, None, None).await.unwrap();
+    host.room_where("default colour", |r| {
+        let colour = |id| r.players.iter().find(|p| p.id == id).map(|p| p.color);
+        colour(h.you) == Some(0xf9fc91) && colour(t.you) == Some(0x33658a)
+    })
+    .await;
+
     // emoji shortcodes become emoji
     guest.chat("gg :fire:").await;
     host.until("emoji", |m| is_chat(m, "gg 🔥").then_some(Ok(()))).await.unwrap();
