@@ -291,8 +291,9 @@
   flex: none;
 }
 
+/* The bar is a row of chips and titles, each with its own solid fill: the row itself stays clear so the map's surround shows around them. */
 .offline-overlay {
-  background: var(--hud-solid);
+  background: none;
 }
 
 /* Forced colours: system colours on the overlay chrome, so every chip and title resolves to a named pair. */

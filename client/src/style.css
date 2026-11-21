@@ -253,8 +253,16 @@ a:hover {
 
 #gl-host {
   z-index: 0;
-  /* Letterbox: the window outside the view is painted black by a spread shadow. */
-  box-shadow: 0 0 0 100vmax #0a0a0a;
+}
+
+/* The window outside the game view is the map's own background, extended: the arena gradient runs from --stage-top at the view's top edge to --stage-bottom at its bottom edge, and holds those colours beyond. */
+#stage-surround {
+  position: fixed;
+  inset: 0;
+  z-index: 0; /* positioned, so it paints over the body's ground; #gl-host and the UI come later in the DOM */
+  --stage-top: #0a0a0a;
+  --stage-bottom: #0a0a0a;
+  background: linear-gradient(var(--stage-top) var(--view-y), var(--stage-bottom) calc(var(--view-y) + var(--view-h)));
 }
 
 #gl-host canvas {
