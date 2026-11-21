@@ -499,6 +499,14 @@ export const STATES = [
     await playVoidMatch(s, host);
     return host;
   }),
+  // Save replay sits in the room header behind the results modal: this state closes the modal, so the control is scanned uncovered.
+  state("postgame-closed", {}, async (s) => {
+    const host = await s.open("host", { name: uniqueName("host") });
+    await playVoidMatch(s, host);
+    await button(host.page, "Back to room").click();
+    await host.page.getByRole("dialog", { name: "Game over" }).waitFor({ state: "hidden" });
+    return host;
+  }),
   state("rotate-prompt", { dialog: true }, async (s) => {
     const { host } = await inMatch(s, { keepRotateGate: true });
     await host.page.getByRole("dialog", { name: "Turn your phone sideways" }).waitFor({ timeout: 4000 }).catch(() => {});

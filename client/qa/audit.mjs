@@ -56,7 +56,7 @@ const EXPECT = {
 // Controls that leave the harness's fixture (sign out, account delete, filing a report, moderation) are not clicked. Leave, remove, reset, delete and decline act on fixture state, which the scan re-prepares after any change.
 const DEAD_SKIP = /\b(sign out|log out|delete account|report|kick|ban|forfeit|quit|block|unfriend|disband|revoke)\b/i;
 // Names the harness generates as fixture data (room, player, password, map, roster rows): user content, not product controls.
-const FIXTURE_NAME = /^(room|pw|host|guest|user)[a-z0-9]{6,8}(?![a-z])|^Actions for guest[a-z0-9]+|^map[a-z0-9]{5,9} by [a-z0-9]+ \d+ votes ?\d+ plays$/;
+const FIXTURE_NAME = /^(room|pw|host|guest|user)[a-z0-9]{6,8}(?![a-z])|^Actions for guest[a-z0-9]+|^Box\d+'s game |^map[a-z0-9]{5,9} by [a-z0-9]+ \d+ votes ?\d+ plays$/;
 const DEAD_SCREENS = process.env.QA_DEAD_SCREENS ? process.env.QA_DEAD_SCREENS.split(",").map((s) => s.trim()) : selfTestMode() === "dead" ? [STATES[0].id] : STATES.map((st) => st.id);
 const TOKEN_SCREENS = ["menu-anon", "settings-controls", "library-grid", "room-host"];
 const TOKEN_THEMES = ["light", "dark"];
@@ -87,7 +87,7 @@ const knownIds = new Set([...STATES.map((st) => st.id), ...scenarios.flatMap((sc
 const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 const mentionsName = (name) => new RegExp(`(?<![a-z0-9])${escapeRe(name.toLowerCase())}(?![a-z0-9])`).test(inventoryLower);
 const firstLine = (err) => String(err?.message ?? err).split("\n")[0];
-const sameControls = (a, b) => a.length === b.length && a.every((c, i) => c.name === b[i].name);
+const sameControls = (a, b) => a.length === b.length && a.every((c, i) => c.name === b[i].name && c.disabled === b[i].disabled);
 const offSite = (href, base) => {
   try {
     return new URL(href).origin !== new URL(base).origin;
@@ -616,8 +616,8 @@ async function deadCase(s) {
         await inject(h.page);
         await warmUp(h);
         const controls = await settledHarvest(h.page);
-        // A state with no modal shows the base controls; only those count as reachable behind a modal.
-        if (!stateById(id).dialog) for (const c of controls) if (!c.covered) reachable.add(`${vp}|${c.name}`);
+        // Any state shows its uncovered controls to the user, a dialog's own included: only controls never uncovered anywhere count as reachable behind a modal.
+        for (const c of controls) if (!c.covered) reachable.add(`${vp}|${c.name}`);
         await h.page.evaluate(SOUND_HOOK);
         await h.page.evaluate(NET_HOOK);
         const st = { h, controls, dirty: false, from, errors: [], downloads: 0, popups: 0, idle: null };
