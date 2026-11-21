@@ -338,7 +338,7 @@ async function roomHeader(s) {
 async function roomPlayers(s) {
   const { h, name, code, roomName } = await openHostRoomNamed(s);
   const { page } = h;
-  const heading = page.locator("h2.room-panel-title").filter({ hasText: "Players" });
+  const heading = page.locator(".room-players-head h2.panel-title");
   check(((await heading.textContent()) ?? "").replace(/\s/g, "") === "Players1/8", `Players heading is "${await heading.textContent()}", not Players 1/8`);
   check(await page.getByRole("radiogroup", { name: "Join or spectate", exact: true }).isVisible(), "no Join or spectate choice for the host");
   check(await rosterRows(page).count() === 1, "the host's roster is not one row");
