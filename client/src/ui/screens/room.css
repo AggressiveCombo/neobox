@@ -516,15 +516,22 @@ button.room-menu-item[aria-checked="true"] {
 }
 
 .room-mode-text {
+.room-control,
+.room-danger {
   display: flex;
   flex-direction: column;
   gap: 2px;
   min-width: 0;
+  gap: 8px;
 }
 
+.room-danger {
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
 .room-mode-option-name {
   font-weight: 500;
 }
+
 
 .room-mode-option-desc {
   color: var(--muted);

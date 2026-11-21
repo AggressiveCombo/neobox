@@ -1381,7 +1381,7 @@ export const roomScreen: ScreenFactory = (ctx: AppCtx) => {
         disabled: !host,
         onchange: () => setSetting(def, String(box.checked)),
       });
-      return h("label", { class: "room-setting" }, h("span", { class: "room-setting-label" }, def.label), box);
+      return h("label", { class: "room-setting" }, h("span", { class: "room-setting-label" }, def.name), box);
     }
     const num = h("input", {
       type: "number",
@@ -1394,7 +1394,7 @@ export const roomScreen: ScreenFactory = (ctx: AppCtx) => {
         else setSetting(def, num.value);
       },
     });
-    return h("label", { class: "room-setting" }, h("span", { class: "room-setting-label" }, def.label), num);
+    return h("label", { class: "room-setting" }, h("span", { class: "room-setting-label" }, def.name), num);
   }
 
   function buildSettings(): Node[] {
@@ -1451,7 +1451,7 @@ export const roomScreen: ScreenFactory = (ctx: AppCtx) => {
       h(
         "dl",
         { class: "room-facts room-limits" },
-        limits.map((def) => fact(def.label, show(room.settings[def.field]))),
+        limits.map((def) => fact(def.name, show(room.settings[def.field]))),
       ),
       h(
         "details",
