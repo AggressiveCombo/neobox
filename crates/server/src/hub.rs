@@ -56,6 +56,9 @@ pub struct Config {
     /// Origins besides this server's own that may use its game socket and API
     /// (`NEOBOX_ALLOWED_ORIGINS`, comma separated). The public and main URLs are always included.
     pub allowed_origins: Vec<String>,
+    /// The build this server runs: the client build's `build-id.txt` in the static dir. A client on another build
+    /// is refused (see `close::OUTDATED`); `None` (no file, as in tests and dev runs): no check.
+    pub build_id: Option<String>,
 }
 
 /// Origins that may open the game socket and post to this server: the
@@ -83,15 +86,24 @@ fn trusted_proxies(list: &str) -> Vec<IpAddr> {
         .collect()
 }
 
+/// The build id the client build in `static_dir` was made with (its `build-id.txt`). `None` when the file is absent.
+fn read_build_id(static_dir: &std::path::Path) -> Option<String> {
+    let id = std::fs::read_to_string(static_dir.join("build-id.txt")).ok()?;
+    let id = id.trim().to_string();
+    (!id.is_empty()).then_some(id)
+}
+
 impl Config {
     pub fn from_env() -> Config {
         let var = |k: &str, d: &str| std::env::var(k).unwrap_or_else(|_| d.to_string());
         let public_url = var("NEOBOX_PUBLIC_URL", "").trim().trim_end_matches('/').to_string();
         let main_url = std::env::var("NEOBOX_MAIN").ok().map(|v| v.trim().trim_end_matches('/').to_string()).filter(|v| !v.is_empty());
         let allowed_origins = allowed_origins(&var("NEOBOX_ALLOWED_ORIGINS", ""), &public_url, main_url.as_deref());
+        let static_dir = PathBuf::from(var("NEOBOX_STATIC", "client"));
+        let build_id = read_build_id(&static_dir);
         Config {
             bind: var("NEOBOX_BIND", "127.0.0.1:8080"),
-            static_dir: var("NEOBOX_STATIC", "client").into(),
+            static_dir,
             maps_dir: var("NEOBOX_MAPS", "maps").into(),
             data: var("NEOBOX_DATA", "data/neobox.db").into(),
             admin_password: var("NEOBOX_ADMIN_PASSWORD", ""),
@@ -125,6 +137,7 @@ impl Config {
             main_url,
             cluster_secret: var("NEOBOX_CLUSTER_SECRET", ""),
             allowed_origins,
+            build_id,
         }
     }
 }
@@ -167,6 +180,8 @@ pub mod close {
     pub const TOO_BIG: Close = Close { code: close_code::SIZE, reason: "too_big" };
     /// The server is restarting.
     pub const SHUTDOWN: Close = Close { code: close_code::AWAY, reason: "shutdown" };
+    /// The client runs another build than this server (see `Config::build_id`).
+    pub const OUTDATED: Close = Close { code: close_code::POLICY, reason: "outdated" };
 }
 
 /// Live per-connection statistics.

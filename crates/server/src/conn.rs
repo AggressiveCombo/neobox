@@ -216,7 +216,14 @@ impl Session {
             Err(_) => return self.error("bad_message", "Malformed message"),
         };
         match msg {
-            ClientMsg::Hello { version, name, color, ticket } => {
+            ClientMsg::Hello { version, name, color, ticket, build } => {
+                if let Some(id) = &self.hub.cfg.build_id {
+                    if build.as_deref() != Some(id.as_str()) {
+                        self.error("outdated", "A new version of neobox is out. Reload to play.");
+                        let _ = self.out.send(Out::Close(close::OUTDATED));
+                        return;
+                    }
+                }
                 let (account, xp) = match self.hello_account(ticket.as_deref()).await {
                     Ok(found) => found,
                     Err(()) => return self.error("bad_ticket", "Sign in again"),

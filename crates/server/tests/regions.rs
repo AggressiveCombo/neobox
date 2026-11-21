@@ -171,7 +171,7 @@ impl Client {
 
     /// Say hello; `Err` carries the server's refusal as `code: message`.
     async fn hello(&mut self, name: &str, ticket: Option<String>) -> Result<(), String> {
-        self.send(&ClientMsg::Hello { version: PROTOCOL_VERSION, name: name.into(), color: None, ticket }).await;
+        self.send(&ClientMsg::Hello { version: PROTOCOL_VERSION, name: name.into(), color: None, ticket, build: None }).await;
         self.until("welcome", |m| match m {
             ServerMsg::Welcome { .. } => Some(Ok(())),
             ServerMsg::Error { code, message } => Some(Err(format!("{code}: {message}"))),

@@ -101,6 +101,10 @@ pub enum ClientMsg {
         color: Option<u32>,
         #[serde(default)]
         ticket: Option<String>,
+        /// The client build's id (`build-id.txt` of its static files). A server on another build refuses the game
+        /// connection; absent: an old client, refused by a server that has a build id.
+        #[serde(default)]
+        build: Option<String>,
     },
     ListRooms,
     CreateRoom { name: String, password: Option<String>, max_players: u8, public: bool },
