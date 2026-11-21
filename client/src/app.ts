@@ -1135,8 +1135,9 @@ export function start(): Store<AppState> {
     linkSeq++;
     loop?.stop();
     pendingMatch = null;
-    // The editor keeps its work when the server refuses this build: the reload waits for the menu.
-    if (notice?.outdated && store.state.screen === "editor") return;
+    // The editor keeps its work through a socket drop when it needs no room (opened from the menu) or the server refused
+    // this build: the version reload waits for the menu, so the player is not moved from the work.
+    if (store.state.screen === "editor" && (!store.state.editorForRoom || notice?.outdated)) return;
     if (unexpected && notice?.reconnect) {
       if (roomCode !== null && resumeToken !== null) {
         beginReconnect();
