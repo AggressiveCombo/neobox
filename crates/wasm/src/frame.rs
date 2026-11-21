@@ -107,6 +107,8 @@ pub struct Meta {
     pub local: i32,
     pub prediction: f32,
     pub rollbacks_per_s: f32,
+    /// simulation ticks per second; a projectile's trail spans `TRAIL_MS` of it
+    pub tick_hz: f64,
 }
 
 #[derive(Default)]
@@ -122,6 +124,8 @@ pub struct FrameBuilder {
     bars: Vec<u32>,
     /// Player colours the frames are drawn with (set by `nb_set_colours`).
     colours: PlayerColours,
+    /// Recent positions of each projectile, oldest first: `(tick, x, y)`. Its trail is drawn from them.
+    trails: HashMap<u32, Vec<(u32, f64, f64)>>,
 }
 
 impl FrameBuilder {
@@ -139,6 +143,35 @@ struct Mesh {
     tris: Vec<[f32; 2]>,
     color: u32,
     z: f64,
+}
+
+/// Projectile bodies are drawn grey whatever their owner (the original's `beginFill(0xBBBBBB)`); the trail carries the owner's colour.
+const PROJECTILE_RGB: u32 = 0xbbbbbb;
+/// How long a projectile's trail lasts, in milliseconds (the original's `Wy`).
+const TRAIL_MS: f64 = 140.0;
+
+/// How fresh the position recorded at tick `at` is: 1 now, 0 once it is `TRAIL_MS` old.
+fn trail_fresh(meta: Meta, at: u32) -> f64 {
+    1.0 - meta.tick.saturating_sub(at) as f64 * 1000.0 / meta.tick_hz / TRAIL_MS
+}
+
+/// Push a quad of width `w` along the segment from `(x1, y1)` to `(x2, y2)`.
+fn push_quad(verts: &mut Vec<u32>, x1: f64, y1: f64, x2: f64, y2: f64, w: f64, color: u32) {
+    let (dx, dy) = (x2 - x1, y2 - y1);
+    let len = (dx * dx + dy * dy).sqrt();
+    if !(len > 1e-9) {
+        return;
+    }
+    let (nx, ny) = (-dy / len * w * 0.5, dx / len * w * 0.5);
+    let p = [
+        [(x1 + nx) as f32, (y1 + ny) as f32],
+        [(x2 + nx) as f32, (y2 + ny) as f32],
+        [(x2 - nx) as f32, (y2 - ny) as f32],
+        [(x1 - nx) as f32, (y1 - ny) as f32],
+    ];
+    for i in [0, 1, 2, 0, 2, 3] {
+        verts.extend([p[i][0].to_bits(), p[i][1].to_bits(), color]);
+    }
 }
 
 fn circle_points(cx: f64, cy: f64, r: f64, out: &mut Vec<[f32; 2]>) {
@@ -600,20 +633,21 @@ impl FrameBuilder {
     }
 
     fn quad_line(&mut self, x1: f64, y1: f64, x2: f64, y2: f64, w: f64, color: u32) {
-        let (dx, dy) = (x2 - x1, y2 - y1);
-        let len = (dx * dx + dy * dy).sqrt();
-        if !(len > 1e-9) {
+        push_quad(&mut self.verts, x1, y1, x2, y2, w, color);
+    }
+
+    /// Record each projectile of `cur` at `meta.tick`. A rollback recomputes ticks from `meta.tick` on, so entries
+    /// from that tick on go; so do entries older than the trail, and projectiles that are gone.
+    fn trail_record(&mut self, cur: &State, meta: Meta) {
+        if !(meta.tick_hz > 0.0) {
+            self.trails.clear();
             return;
         }
-        let (nx, ny) = (-dy / len * w * 0.5, dx / len * w * 0.5);
-        let p = [
-            [(x1 + nx) as f32, (y1 + ny) as f32],
-            [(x2 + nx) as f32, (y2 + ny) as f32],
-            [(x2 - nx) as f32, (y2 - ny) as f32],
-            [(x1 - nx) as f32, (y1 - ny) as f32],
-        ];
-        for i in [0, 1, 2, 0, 2, 3] {
-            self.verts.extend([p[i][0].to_bits(), p[i][1].to_bits(), color]);
+        self.trails.retain(|id, _| cur.projectiles.get(*id).is_some());
+        for (id, q) in cur.projectiles.iter() {
+            let pts = self.trails.entry(id).or_default();
+            pts.retain(|&(at, _, _)| at < meta.tick && trail_fresh(meta, at) > 0.0);
+            pts.push((meta.tick, q.x, q.y));
         }
     }
 
@@ -652,20 +686,50 @@ impl FrameBuilder {
         }
     }
 
-    fn projectile(&mut self, prev: Option<&Projectile>, q: &Projectile, t: f64) {
+    /// Trail of projectile `id`: the polyline through its recent positions, each segment as wide as the rocket
+    /// (`2u`) times how fresh its newer end is and in the owner's colour, drawn under the body as the original does.
+    fn trail(&mut self, id: u32, q: &Projectile, head: (f64, f64), meta: Meta) {
+        if !(meta.tick_hz > 0.0) {
+            return;
+        }
+        let Some(pts) = self.trails.get(&id) else { return };
+        let rgb = self.colours.of(q.owner, q.team);
+        let mut prev: Option<(f64, f64)> = None;
+        for (x, y, fresh) in pts.iter().map(|&(at, x, y)| (x, y, trail_fresh(meta, at))).chain(std::iter::once((head.0, head.1, 1.0))) {
+            if fresh <= 0.0 {
+                continue;
+            }
+            if let Some((px, py)) = prev {
+                if fresh > 0.2 {
+                    push_quad(&mut self.verts, px, py, x, y, 2.0 * q.size * fresh, rgba(rgb, (fresh - 0.2) as f32));
+                }
+            }
+            prev = Some((x, y));
+        }
+    }
+
+    fn projectile(&mut self, prev: Option<&Projectile>, q: &Projectile, id: u32, t: f64, meta: Meta) {
         let (x, y) = match prev {
             Some(p) => (lerp(p.x, q.x, t), lerp(p.y, q.y, t)),
             None => (q.x, q.y),
         };
+        self.trail(id, q, (x, y), meta);
         let angle = if q.align { q.vy.atan2(q.vx) } else { q.angle };
-        let color = rgba(if q.team == 2.0 { RED } else if q.team == 3.0 { BLUE } else { 0xf2f2f2 }, 1.0);
         let u = q.size;
+        if q.shape == 1.0 {
+            // a rocket, as measured from the original's pixels (1366x768, u = 3px): 11.6u long; its rear 7u in the
+            // owner's colour at alpha 0.8 over the background, its nose 4.6u in grey and opaque
+            let (x0, x1, x2, h) = ((-5.8 * u) as f32, (1.2 * u) as f32, (5.8 * u) as f32, u as f32);
+            let body = [[x0, -h], [x1, -h], [x1, h], [x0, -h], [x1, h], [x0, h]];
+            let nose = [[x1, -h], [x2, -h], [x2, h], [x1, -h], [x2, h], [x1, h]];
+            self.push_tri_list(&body, x, y, angle, rgba(self.colours.of(q.owner, q.team), 0.8));
+            self.push_tri_list(&nose, x, y, angle, rgba(PROJECTILE_RGB, 1.0));
+            return;
+        }
+        let color = rgba(if q.team == 2.0 { RED } else if q.team == 3.0 { BLUE } else { 0xf2f2f2 }, 1.0);
         let mut tris = Vec::new();
         if q.shape == 0.0 {
             circle_points(0.0, 0.0, u, &mut tris);
-        } else if q.shape == 1.0 {
-            let (w, h) = ((2.5 * u) as f32, u as f32);
-            tris.extend([[-w, -h], [w, -h], [w, h], [-w, -h], [w, h], [-w, h]]);
         } else {
             let (w, h) = ((1.5 * u) as f32, u as f32);
             tris.extend([[-w, -h], [w, -h], [w, h], [-w, -h], [w, h], [-w, h]]);
@@ -843,8 +907,9 @@ impl FrameBuilder {
                 }
             }
         }
+        self.trail_record(cur, meta);
         for (id, q) in cur.projectiles.iter() {
-            self.projectile(prev.projectiles.get(id), q, t);
+            self.projectile(prev.projectiles.get(id), q, id, t, meta);
         }
         for (_, e) in cur.effects.iter() {
             self.effect(e);

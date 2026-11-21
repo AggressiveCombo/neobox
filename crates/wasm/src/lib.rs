@@ -620,6 +620,7 @@ pub extern "C" fn nb_frame(now_ms: f64, mask: u32) -> u32 {
             local: s.local.map_or(-1, |l| l as i32),
             prediction: (new_head.saturating_sub(s.known)) as f32,
             rollbacks_per_s: a.rollback_rate,
+            tick_hz: s.start.tick_hz,
         };
         a.frame.build(prev, cur, alpha, &s.start.settings, meta, &a.feed);
         // send once per tick (heartbeat + unacknowledged changes) and
@@ -814,7 +815,7 @@ pub extern "C" fn nb_replay_frame(tick_f: f64, follow: i32) -> i32 {
         let alpha = if p.tick() == base + 1 { t - base as f64 } else { 1.0 };
         a.replay_feed_tick = p.tick();
         let (prev, cur) = p.states();
-        let meta = Meta { tick: p.tick(), local: follow, ..Meta::default() };
+        let meta = Meta { tick: p.tick(), local: follow, tick_hz: p.replay.start.tick_hz, ..Meta::default() };
         a.frame.build(prev, cur, alpha, p.settings(), meta, &a.feed);
         base as i32
     })
@@ -916,7 +917,7 @@ pub extern "C" fn nb_local_frame(dt_ms: f64, mask: u32) -> i32 {
             g.m.step();
             a.feed.add(g.m.tick, &g.prev, &g.m.state);
         }
-        let meta = Meta { tick: g.m.tick, local: g.player as i32, ..Meta::default() };
+        let meta = Meta { tick: g.m.tick, local: g.player as i32, tick_hz: g.m.start.tick_hz, ..Meta::default() };
         a.frame.build(&g.prev, &g.m.state, g.acc, &g.m.start.settings, meta, &a.feed);
         (g.m.last_outcome == Outcome::MatchOver) as i32
     })

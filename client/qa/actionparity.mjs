@@ -4,6 +4,9 @@
 // - rocket-charge: while charging, the frame may add vertices only in the launcher's own colours (rail and hub grey,
 //   hub red; geometry.ts putLauncher). A player-coloured vertex added while charging is the solid aim line that the
 //   original never draws (removed in 5d330c8): the check fails on it.
+// - rocket-flight: a fired rocket's nose is drawn grey (0xbbbbbb, opaque) and its body and trail in the owner's colour (body
+//   at alpha 0.8, measured from the original's pixels); the grey nose must appear over the idle frame and the owner's colour
+//   must grow over the first frames after the release.
 // - push-charge: while push runs the body keeps its playerRgb colour (the original draws no push lift). The body's exact pixel
 //   count in a screenshot must not fall when X is held; a lifted body colour fails it.
 // - corpse-colour: a player who falls out of the arena leaves debris (wasm frame.rs, source_player). Its colour must be
@@ -33,6 +36,9 @@ import { launchEngine, startServer, startPractice, runCleanups, sleep, outDir, c
 // packRgba (geometry.ts) packs r, g, b into the low 24 bits and alpha into the top byte.
 const LAUNCHER_RGB = new Set([0xdddddd, 0x20208c]); // LINE_RGB 0xdddddd; LAUNCHER_RED_RGB 0x8c2020 (r=0x8c, g=0x20, b=0x20 packs to 0x20208c)
 const MIN_ADDED = 2; // vertices a stray element adds; a duplicated aim line adds dozens
+// The frame's colour keys are packed low byte first (see LAUNCHER_RGB): swap red and blue from playerRgb's RRGGBB.
+const packedOf = (rgb) => ((rgb & 0xff) << 16) | (rgb & 0xff00) | ((rgb >>> 16) & 0xff);
+const ROCKET_NOSE_RGB = 0xbbbbbb; // the rocket's nose: opaque grey in the original's screenshots
 const FALL_MS = 12000; // walking left from the spawn drops the player out of the practice arena well inside this
 
 const browser = await launchEngine("chromium");
@@ -87,6 +93,45 @@ const rocketGrew = idle && held ? grownColours(idle, held) : [];
 const rocketAdded = rocketGrew.filter((row) => !LAUNCHER_RGB.has(Number(row.rgb)));
 const charging = !!held && held.players.some((p) => p.rocket > 0);
 const rocketPass = idle !== null && held !== null && charging && rocketAdded.length === 0;
+
+// --- rocket-flight: a fired rocket draws its nose grey and its body and trail in the owner's colour, which grows as the rocket
+// flies. Samples the frames for 480 ms after the release of a 1 s charge. ---
+async function rocketFlight(pg) {
+  const idleNose = (await frameOf(pg))?.colours[ROCKET_NOSE_RGB] ?? 0;
+  await pg.keyboard.down("z");
+  await sleep(1000);
+  const me = (await frameOf(pg))?.players[0] ?? null;
+  const rgb = me ? await pg.evaluate(([team, id]) => globalThis.__qaPlayerRgb?.(team, id) ?? null, [me.team, me.id]) : null;
+  const owner = rgb === null ? -1 : packedOf(rgb);
+  // Sampled inside the page every 16 ms, starting before the release: the trail grows for ~100 ms after it, and a host round trip misses that.
+  const sampled = pg.evaluate(([noseRgb, ownerRgb]) => new Promise((resolve) => {
+    const nose = [], trail = [];
+    const t0 = performance.now();
+    const tick = () => {
+      const fb = globalThis.__qaEngine?.framebuffer?.();
+      if (fb) {
+        const u = fb.u32, n = u[1], h = u[2];
+        let nc = 0, tc = 0;
+        for (let i = 0; i < n; i++) {
+          const c = (u[h + i * 3 + 2] & 0xffffff) >>> 0;
+          if (c === noseRgb) nc++;
+          else if (c === ownerRgb) tc++;
+        }
+        nose.push(nc);
+        trail.push(tc);
+      }
+      if (performance.now() - t0 < 480) setTimeout(tick, 16);
+      else resolve({ nose, trail });
+    };
+    tick();
+  }), [ROCKET_NOSE_RGB, owner]);
+  await pg.keyboard.up("z");
+  const { nose, trail } = await sampled;
+  const pass = Math.max(...nose) >= idleNose + 6 && Math.max(...trail) >= 6 && Math.max(...trail) > trail[0];
+  return { pass, nose, trail, owner: owner < 0 ? null : `0x${owner.toString(16).padStart(6, "0")}` };
+}
+const flight = await rocketFlight(page);
+const rocketFlightPass = flight.pass;
 
 // Pixels in a PNG screenshot whose RGB is exactly rgb (the living body is drawn by geometry.ts, outside the wasm vertex buffer).
 function pixelsOf(buf, rgb) {
@@ -339,8 +384,6 @@ const markerAirJumpPass = airJumpSamples.some((s) => s.ready && s.marker.yellow 
 
 
 // --- corpse-colour: walk left off the platform; the player's debris keeps the player's colour ---
-// The frame's colour keys are packed low byte first (see LAUNCHER_RGB): swap red and blue from playerRgb's RRGGBB.
-const packedOf = (rgb) => ((rgb & 0xff) << 16) | (rgb & 0xff00) | ((rgb >>> 16) & 0xff);
 // Walks the local player off the platform on page pg; checks the living body and the debris against playerRgb.
 async function corpseOf(pg, label = "default") {
   await sleep(500);
@@ -406,7 +449,7 @@ for (const palette of ["deuteranopia", "protanopia", "tritanopia"]) {
 }
 const cvdPass = Object.values(cvd).every((row) => row.pass);
 
-const pass = rocketPass && batPass && dashPass && trailPass && pushPass && staminaPass && boxPass && markerPass && markerAirJumpPass && corpsePass && paletteDefaultPass && cvdPass && errors.length === 0;
+const pass = rocketPass && rocketFlightPass && batPass && dashPass && trailPass && pushPass && staminaPass && boxPass && markerPass && markerAirJumpPass && corpsePass && paletteDefaultPass && cvdPass && errors.length === 0;
 const result = {
   pass,
   actions: {
@@ -417,6 +460,7 @@ const result = {
       addedNonLauncher: rocketAdded,
       grew: rocketGrew.sort((a, b) => b.added - a.added).slice(0, 12),
     },
+    "rocket-flight": { pass: rocketFlightPass, ...flight },
     "bat-charge": { pass: batPass, batting, flags: batHeld?.players[0]?.flags ?? null, body: batBody, rgb: batRgb === null ? null : `0x${batRgb.toString(16).padStart(6, "0")}` },
     "movement-trail": { pass: trailPass, moved: trailMoved, y: jumpYs, trailPixels },
     "dash-body": { pass: dashPass, dashing: dash.dashing, flags: dash.flags, body: dash.body, rgb: dash.rgb === null ? null : `0x${dash.rgb.toString(16).padStart(6, "0")}` },
@@ -435,6 +479,7 @@ writeFileSync(path.join(outDir(), "actionparity.json"), JSON.stringify(result, n
 console.log(`${rocketPass ? "PASS" : "FAIL"} rocket-charge ${JSON.stringify(rocketAdded)}${idle && held ? "" : " (no __qaEngine: build lacks the hook)"}`);
 console.log(`${pushPass ? "PASS" : "FAIL"} push-charge body ${JSON.stringify(pushBody)} rgb ${pushRgb === null ? "none" : pushRgb.toString(16)} stamina ${JSON.stringify(pushStamina)}${pushing ? "" : " (stamina did not drain)"}`);
 console.log(`${corpsePass ? "PASS" : "FAIL"} corpse-colour expected ${corpse.expected} debris ${JSON.stringify(corpse.debrisColours.slice(0, 3))}${corpse.died ? "" : " (player did not fall)"}`);
+console.log(`${rocketFlightPass ? "PASS" : "FAIL"} rocket-flight owner ${flight.owner} nose ${JSON.stringify(flight.nose)} trail ${JSON.stringify(flight.trail)}`);
 console.log(`${batPass ? "PASS" : "FAIL"} bat-charge body ${JSON.stringify(batBody)} rgb ${batRgb === null ? "none" : batRgb.toString(16)}${batting ? "" : " (bat did not swing)"}`);
 console.log(`${trailPass ? "PASS" : "FAIL"} movement-trail moved ${trailMoved} y ${JSON.stringify(jumpYs)} trail pixels per shot ${JSON.stringify(trailPixels)}`);
 console.log(`${dashPass ? "PASS" : "FAIL"} dash-body body ${JSON.stringify(dash.body)} rgb ${dash.rgb === null ? "none" : dash.rgb.toString(16)}${dash.dashing ? "" : " (dash did not start)"}`);
