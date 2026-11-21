@@ -1,3 +1,4 @@
+import { PNG } from "pngjs";
 import { button, createRoom, menuName, navTo, sleep, signedIn, uniqueName } from "./lib.mjs";
 
 const check = (ok, message) => {
@@ -43,6 +44,17 @@ async function shareCode(page) {
 /** The map-wide View setting (the Map panel, with nothing selected). */
 const viewSetting = (page) => page.locator("label.field", { has: page.getByText("View", { exact: true }) }).locator("select");
 
+/** Undo/redo apply asynchronously after the click; poll the select until it shows the expected aspect. */
+async function expectViewValue(page, want, message) {
+  const select = viewSetting(page);
+  const deadline = Date.now() + 5000;
+  while (Date.now() < deadline) {
+    if ((await select.inputValue()) === want) return;
+    await sleep(50);
+  }
+  check(false, message);
+}
+
 /** Editor: a new map is wide, the View setting toggles it both ways, undo/redo follow, and test play takes it. */
 async function mapAspectEditor(s) {
   const user = await signedIn(s, "aspect");
@@ -75,9 +87,9 @@ async function mapAspectEditor(s) {
   check(await button(page, "Undo").isEnabled(), "View change does not enable Undo");
   const classicTest = await testPlayAspect(page, canvas, CLASSIC);
   await button(page, "Undo").click();
-  check((await viewSetting(page).inputValue()) === "wide", "Undo did not restore wide");
+  await expectViewValue(page, "wide", "Undo did not restore wide");
   await button(page, "Redo").click();
-  check((await viewSetting(page).inputValue()) === "classic", "Redo did not restore classic");
+  await expectViewValue(page, "classic", "Redo did not restore classic");
 
   // A built-in map is an original Hitbox map: classic, with its own arena (the code is kept for the room preview).
   await button(page, "Menu").click();
@@ -128,4 +140,56 @@ async function expectAspect(locator, want, label) {
   check(false, `${label}: box ${box ? (box.width / box.height).toFixed(3) : "none"}, bitmap ${bitmap.toFixed(3)}, want ${want.toFixed(3)}`);
 }
 
-export const mapAspectScenarios = [{ name: "map aspect", run: mapAspectEditor }];
+/** H-01: a match on a classic map fills the window around the view with the map's own background, extended past the view's edges (no white or black surround). */
+async function matchStageSurround(s) {
+  const user = await signedIn(s, "stage", undefined, { viewport: { width: 1920, height: 1080 } });
+  const { page } = user;
+  await page.evaluate(() => {
+    document.documentElement.dataset.theme = "light";
+  });
+  await navTo(page, "Map editor");
+  const canvas = page.locator("canvas.editor-canvas");
+  await canvas.waitFor({ state: "visible" });
+  await button(page, "Menu").click();
+  await page.locator(".editor-list .editor-item").first().click();
+  const replace = page.getByRole("alertdialog", { name: "Replace the current map?", exact: true });
+  if (await replace.waitFor({ timeout: 1500 }).then(() => true, () => false)) await replace.getByRole("button", { name: "Replace map", exact: true }).click();
+  await page.locator(".editor-menu").waitFor({ state: "hidden" });
+  await button(page, "Test play").click();
+  await page.locator(".offline.playing .offline-title").waitFor();
+  await sleep(1500);
+
+  const view = await page.evaluate(() => {
+    const cs = getComputedStyle(document.documentElement);
+    const n = (name) => parseFloat(cs.getPropertyValue(name));
+    return { x: n("--view-x"), y: n("--view-y"), w: n("--view-w"), h: n("--view-h") };
+  });
+  check(near(view.w / view.h, CLASSIC), `classic match view is ${(view.w / view.h).toFixed(3)}, want ${CLASSIC}`);
+  check(view.y > 0 && view.y + view.h <= 1080, "match view is not inside the window");
+
+  const shot = PNG.sync.read(await page.screenshot({ fullPage: false }));
+  check(shot.width === 1920 && shot.height === 1080, `screenshot is ${shot.width}x${shot.height}`);
+  const px = (x, y) => {
+    const i = (Math.round(y) * shot.width + Math.round(x)) * 4;
+    return [shot.data[i], shot.data[i + 1], shot.data[i + 2]];
+  };
+  const close = (a, b, tol) => a.every((v, k) => Math.abs(v - b[k]) <= tol);
+  const bottom = view.y + view.h;
+  // The surround beside the view's top-left and bottom-left corners continues the arena's own colour there.
+  const topSurround = px(4, 4);
+  const topArena = px(view.x + 4, view.y + 4);
+  const sideTop = px(4, view.y + 4);
+  const sideBottom = px(4, bottom - 4);
+  const arenaBottom = px(view.x + 4, bottom - 4);
+  check(close(sideTop, topArena, 12), `surround ${sideTop} does not continue arena top ${topArena}`);
+  check(close(sideBottom, arenaBottom, 12), `surround ${sideBottom} does not continue arena bottom ${arenaBottom}`);
+  check(!close(topSurround, [10, 10, 10], 3), `surround is the #0a0a0a letterbox ${topSurround}`);
+  check(!close(topSurround, [247, 247, 247], 3), `surround is the page ground ${topSurround}`);
+  await button(page, "Edit").click();
+  return `classic match view ${(view.w / view.h).toFixed(3)}; surround ${sideTop} continues arena ${topArena}, bottom ${sideBottom}`;
+}
+
+export const mapAspectScenarios = [
+  { name: "map aspect", run: mapAspectEditor },
+  { name: "map aspect match stage", run: matchStageSurround },
+];
