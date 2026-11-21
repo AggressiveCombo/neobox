@@ -137,8 +137,8 @@ export function openNews(): () => void {
   list.replaceChildren(...pages);
   const counter = h("span", { class: "news-count", "aria-live": "polite" });
   const prev = h("button", { type: "button", onclick: () => show(index - 1) }, icon("arrow-left", 18), "Previous");
-  const next = h("button", { type: "button", class: "primary", onclick: () => show(index + 1) }, "Next", icon("arrow-right", 18));
-  const done = h("button", { type: "button", onclick: () => close() }, "Close");
+  const next = h("button", { type: "button", class: "primary", onclick: () => show(index + 1) }, icon("arrow-right", 18), "Next");
+  const done = h("button", { type: "button", onclick: () => close() }, icon("x", 18), "Close");
 
   // Every page sits in one grid cell; only the current one is visible. The body is as tall as the
   // tallest page, so the modal (and its buttons) keeps its place as the player pages through.

@@ -135,7 +135,7 @@ export const aboutScreen: ScreenFactory = (ctx) => {
       h(
         "section",
         { class: "info-credits" },
-        h("h2", null, "Third-party assets"),
+        h("h2", null, icon("book-open", 20), "Third-party assets"),
         h(
           "ul",
           { class: "boxed-list" },

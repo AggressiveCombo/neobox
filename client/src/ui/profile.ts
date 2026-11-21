@@ -36,7 +36,7 @@ export function profileSummary(name: string): HTMLElement {
 }
 
 function status(text: string, ...extra: Node[]): HTMLElement {
-  return h("p", { class: "profile-status", role: "status" }, text, ...extra);
+  return h("p", { class: "profile-status", role: "status" }, icon("triangle-alert", 18), text, ...extra);
 }
 
 /** Not found is a fact about the name; anything else is worth a retry. */
@@ -117,8 +117,8 @@ function card(p: PlayerProfile): HTMLElement {
 }
 
 function mapsSection(p: PlayerProfile): HTMLElement {
-  const body = p.maps.length === 0 ? h("p", { class: "muted small" }, "No listed maps yet.") : h("ul", {}, p.maps.map(mapRow));
-  return h("section", { class: "profile-maps" }, h("h3", {}, "Top maps"), body);
+  const body = p.maps.length === 0 ? h("p", { class: "muted small empty" }, icon("map", 40), "No listed maps yet.") : h("ul", {}, p.maps.map(mapRow));
+  return h("section", { class: "profile-maps" }, h("h3", {}, icon("map", 20), "Top maps"), body);
 }
 
 function mapRow(m: PlayerMap): HTMLElement {

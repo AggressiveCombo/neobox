@@ -5,6 +5,7 @@
 // (--toast-clear, style.css), so a toast does not cover them.
 
 import { h } from "./dom";
+import { icon } from "./icons";
 
 const MAX_TOASTS = 4;
 const TOAST_MS = 3500;
@@ -41,6 +42,7 @@ export function showToast(host: HTMLElement, text: string, kind: "info" | "error
   const el = h(
     "div",
     { class: `toast toast-${kind}`, role: kind === "error" ? "alert" : "status" },
+    icon(kind === "error" ? "triangle-alert" : "info", 18),
     text,
   );
   host.appendChild(el);

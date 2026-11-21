@@ -163,7 +163,7 @@ export const accountScreen: ScreenFactory = (ctx) => {
       h(
         "form",
         { class: "panel account-form", onsubmit: signIn },
-        h("h2", null, "Sign in"),
+        h("h2", null, icon("log-in", 20), "Sign in"),
         field("Name", name, "1 to 15 letters, numbers, spaces or _."),
         field("Password", password, PASSWORD_HINT),
         toggle("Stay signed in", false, (on) => {
@@ -181,7 +181,7 @@ export const accountScreen: ScreenFactory = (ctx) => {
       h(
         "section",
         { class: "account-aside" },
-        h("h2", null, "Your level"),
+        h("h2", null, icon("star", 20), "Your level"),
         levelMeter(guestXp()),
         h(
           "ul",
@@ -240,7 +240,7 @@ export const accountScreen: ScreenFactory = (ctx) => {
         h(
           "form",
           { class: "account-subform", onsubmit: changeSubmit },
-          h("h3", null, "Change password"),
+          h("h3", null, icon("key-round", 20), "Change password"),
           field("Current password", oldPassword),
           field("New password", newPassword, PASSWORD_HINT),
           h("div", { class: "actions" }, h("button", { type: "submit", class: "primary" }, icon("key-round", 18), "Change password")),
@@ -248,7 +248,7 @@ export const accountScreen: ScreenFactory = (ctx) => {
         h(
           "form",
           { class: "account-subform danger-zone", onsubmit: deleteSubmit },
-          h("h3", null, "Delete account"),
+          h("h3", null, icon("trash-2", 20), "Delete account"),
           h("p", { class: "field-hint" }, "Deletes your account, friends and uploaded maps. This can't be undone."),
           field("Your name, to confirm", confirmName),
           field("Password", deletePassword),

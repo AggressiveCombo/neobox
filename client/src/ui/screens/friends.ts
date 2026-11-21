@@ -144,7 +144,7 @@ export const friendsScreen: ScreenFactory = (ctx) => {
   function sectionFor(title: string, name: IconName): { el: HTMLElement; head: HTMLElement; list: HTMLElement; empty: HTMLElement } {
     let s = sections.get(title);
     if (s === undefined) {
-      const head = h("h2", null, icon(name, 18), title);
+      const head = h("h2", null, icon(name, 20), title);
       const list = h("ul", { class: "friend-list", "aria-label": title });
       const empty = h("p", { class: "empty" });
       s = { el: h("section", { class: "section friend-section" }, head, list), head, list, empty };
@@ -185,7 +185,7 @@ export const friendsScreen: ScreenFactory = (ctx) => {
       });
     const group = (title: string, name: IconName, items: HTMLElement[], empty: string): void => {
       const s = sectionFor(title, name);
-      s.empty.textContent = empty;
+      s.empty.replaceChildren(icon(name, 40), empty);
       order(s.list, items);
       order(s.el, [s.head, items.length > 0 ? s.list : s.empty]);
       shown.push(s.el);

@@ -3,6 +3,7 @@
 
 import { type EngineState, engineLoader } from "../engine-loader";
 import { h } from "./dom";
+import { icon } from "./icons";
 import "./engine-status.css";
 
 export interface EngineStatus {
@@ -15,7 +16,7 @@ export interface EngineStatus {
 export function engineStatus(onReady?: () => void): EngineStatus {
   const label = h("span", { class: "engine-status-text" });
   const bar = h("progress", { class: "engine-status-bar" });
-  const retry = h("button", { type: "button", class: "engine-status-retry", onclick: () => engineLoader.retry() }, "Try again");
+  const retry = h("button", { type: "button", class: "engine-status-retry", onclick: () => engineLoader.retry() }, icon("refresh-cw", 18), "Try again");
   const el = h("div", { class: "engine-status", role: "status" }, label, bar, retry);
 
   const render = (state: EngineState): void => {
@@ -33,7 +34,7 @@ export function engineStatus(onReady?: () => void): EngineStatus {
         label.textContent = "Loading the game engine…";
       }
     } else if (state.status === "failed") {
-      label.textContent = `The game engine failed to load: ${state.error}`;
+      label.replaceChildren(icon("triangle-alert", 18), `The game engine failed to load: ${state.error}`);
     }
   };
 

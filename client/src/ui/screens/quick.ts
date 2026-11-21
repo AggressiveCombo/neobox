@@ -131,7 +131,7 @@ export const quickScreen: ScreenFactory = (ctx) => {
   function buildCards(modes: QuickMode[]): void {
     cards.clear();
     if (modes.length === 0) {
-      cardBox.replaceChildren(h("p", { class: "muted" }, "This server has no quick play."));
+      cardBox.replaceChildren(h("p", { class: "empty" }, icon("inbox", 40), "This server has no quick play."));
       return;
     }
     cardBox.replaceChildren(
@@ -146,7 +146,7 @@ export const quickScreen: ScreenFactory = (ctx) => {
         const el = h(
           "article",
           { class: "quick-card" },
-          h("div", { class: "quick-card-head" }, h("h2", null, mode.title), count),
+          h("div", { class: "quick-card-head" }, h("h2", null, icon("swords", 20), mode.title), count),
           h("p", { class: "quick-text", title: mode.description }, mode.description),
           carousel(mode),
           playButton,
@@ -181,7 +181,7 @@ export const quickScreen: ScreenFactory = (ctx) => {
       if (!waitShown) {
         waitBox.replaceChildren(
           loading("Finding a room…"),
-          h("button", { type: "button", class: "quiet", onclick: () => cancel() }, "Cancel"),
+          h("button", { type: "button", class: "quiet", onclick: () => cancel() }, icon("x", 18), "Cancel"),
         );
         waitShown = true;
       }
@@ -247,7 +247,7 @@ export const quickScreen: ScreenFactory = (ctx) => {
       if (!destroyed) buildCards(modes);
     },
     () => {
-      if (!destroyed) cardBox.replaceChildren(h("p", { class: "muted" }, "Could not load quick play. Try again later."));
+      if (!destroyed) cardBox.replaceChildren(h("p", { class: "empty" }, icon("triangle-alert", 40), "Could not load quick play. Try again later."));
     },
   );
   void refresh();

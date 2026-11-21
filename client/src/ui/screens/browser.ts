@@ -114,7 +114,7 @@ export const browserScreen: ScreenFactory = (ctx) => {
       codeJoin.disabled = !ROOM_CODE_RE.test(codeInput.value);
     },
   });
-  const codeJoin = h("button", { type: "submit", class: "primary", disabled: true }, icon("log-in", 18), "Join");
+  const codeJoin = h("button", { type: "submit", class: "primary", disabled: true }, icon("door-open", 18), "Join");
   const codeForm = h(
     "form",
     {
@@ -210,7 +210,7 @@ export const browserScreen: ScreenFactory = (ctx) => {
     const modal = openModal({
       title: "Create a room",
       body: [form],
-      actions: [h("button", { type: "button", onclick: () => modal.close() }, "Cancel"), submit],
+      actions: [h("button", { type: "button", onclick: () => modal.close() }, icon("x", 18), "Cancel"), submit],
     });
   }
 
@@ -225,7 +225,7 @@ export const browserScreen: ScreenFactory = (ctx) => {
         join.disabled = input.value === "";
       },
     });
-    const join = h("button", { type: "submit", class: "primary", disabled: true }, "Join");
+    const join = h("button", { type: "submit", class: "primary", disabled: true }, icon("door-open", 18), "Join");
     return h(
       "form",
       {
@@ -236,13 +236,13 @@ export const browserScreen: ScreenFactory = (ctx) => {
           ctx.joinRoom(code, input.value);
         },
       },
-      h("h2", null, `Room ${code} needs a password`),
+      h("h2", null, icon("key-round", 20), `Room ${code} needs a password`),
       h("p", { class: "muted" }, "Enter the room's password to join."),
       h("div", { class: "room-password" }, input, join),
       h(
         "div",
         { class: "actions" },
-        h("button", { type: "button", onclick: () => store.set({ invite: null }) }, "Cancel"),
+        h("button", { type: "button", onclick: () => store.set({ invite: null }) }, icon("x", 18), "Cancel"),
       ),
     );
   }
@@ -257,7 +257,7 @@ export const browserScreen: ScreenFactory = (ctx) => {
         "section",
         { class: "panel browser-notice", role: "alert" },
         h("p", null, text),
-        h("button", { type: "button", onclick: () => store.set({ notice: null }) }, "Dismiss"),
+        h("button", { type: "button", onclick: () => store.set({ notice: null }) }, icon("x", 18), "Dismiss"),
       ),
     );
   }
@@ -279,7 +279,7 @@ export const browserScreen: ScreenFactory = (ctx) => {
         join.disabled = input.value === "";
       },
     });
-    const join = h("button", { type: "submit", class: "primary", "data-focus-key": "join", disabled: true }, "Join");
+    const join = h("button", { type: "submit", class: "primary", "data-focus-key": "join", disabled: true }, icon("door-open", 18), "Join");
     return h(
       "form",
       {
@@ -331,6 +331,7 @@ export const browserScreen: ScreenFactory = (ctx) => {
       h(
         "span",
         { class: "room-name" },
+        icon("door-open", 18),
         room.name,
         room.password ? lockIcon() : null,
         room.quick !== null ? h("span", { class: "chip" }, "Quick") : null,
@@ -352,7 +353,7 @@ export const browserScreen: ScreenFactory = (ctx) => {
       h(
         "span",
         { class: "room-count" },
-        h("span", { class: "room-players" }, `${room.players}/${room.max_players}`),
+        h("span", { class: "room-players" }, icon("users", 14), `${room.players}/${room.max_players}`),
         room.in_match ? h("span", { class: "chip ink" }, "In match") : null,
       ),
     );
@@ -419,10 +420,11 @@ export const browserScreen: ScreenFactory = (ctx) => {
     refreshBtn.disabled = busy;
     newRoomBtn.disabled = busy;
     total.textContent = busy ? "" : shown.length === rooms.length ? `${rooms.length} open` : `${shown.length} of ${rooms.length} open`;
-    emptyHint.textContent =
+    const hint =
       rooms.length === 0
         ? "No open rooms right now. Create one and invite friends."
         : "No rooms match. Clear the search or show full rooms.";
+    emptyHint.replaceChildren(icon(rooms.length === 0 ? "door-open" : "search", 40), hint);
     emptyHint.hidden = busy || shown.length > 0;
     roomList.hidden = busy;
     const failure = store.state.pending?.kind === "list" ? store.state.pending.error : null;

@@ -17,7 +17,7 @@ export const privacyScreen: ScreenFactory = (ctx) => {
     h(
       "article",
       { class: "doc" },
-      PRIVACY_SECTIONS.map((s) => h("section", { class: "doc-section" }, h("h2", null, s.heading), s.paragraphs.map((p) => h("p", null, p)))),
+      PRIVACY_SECTIONS.map((s) => h("section", { class: "doc-section" }, h("h2", null, icon("shield", 20), s.heading), s.paragraphs.map((p) => h("p", null, p)))),
     ),
   );
 
