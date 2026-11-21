@@ -654,6 +654,20 @@ svg.icon {
   vertical-align: -0.125em;
 }
 
+/* A heading's leading icon sits on the text; an empty state's large icon (40px) is centred above it. */
+h2 > svg.icon,
+h3 > svg.icon {
+  margin-right: 0.4em;
+}
+
+.empty:has(> svg.icon) {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  text-align: center;
+}
+
 /* ----------------------------------------------------------------- forms */
 
 .field {
