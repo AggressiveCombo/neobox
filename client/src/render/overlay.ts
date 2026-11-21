@@ -6,7 +6,7 @@
 import type { Camera, ViewRect } from "../camera";
 import { findLocal, worldXf } from "../camera";
 import type { Scene } from "../frame";
-import { FLAG_LOCAL, HIT_KIND_PLAYER } from "../frame";
+import { FLAG_AIR_JUMP, FLAG_FROZEN, FLAG_LOCAL, HIT_KIND_PLAYER } from "../frame";
 import { TEAM_BLUE, TEAM_RED, TEAM_SPECTATOR, isTeamMode } from "../protocol";
 import { reducedMotion } from "../ui/a11y";
 import { AWAY_RING_BELOW_LUM, cssHex, playerRgb, relLuminance } from "./geometry";
@@ -81,7 +81,14 @@ const NAME_STACK_MAX = 4;
 const MARKER_GAP = 4; // box top to marker tip, CSS px (the original: about 4 device rows)
 const MARKER_HEIGHT = 0.38; // of the body side
 const MARKER_HALF_WIDTH = 0.31; // of the body side
-const MARKER_FILL = "#ffd440"; // the original's marker is this yellow in every state, air jump used or not
+/** The original's marker fill by body state (client bundle, marker draw): frozen blue, air jump ready yellow, air jump spent grey. */
+const MARKER_FROZEN_FILL = "#6b8aff";
+const MARKER_READY_FILL = "#ffd440";
+const MARKER_SPENT_FILL = "#bbbbbb";
+function markerFill(flags: number): string {
+  if ((flags & FLAG_FROZEN) !== 0) return MARKER_FROZEN_FILL;
+  return (flags & FLAG_AIR_JUMP) !== 0 ? MARKER_READY_FILL : MARKER_SPENT_FILL;
+}
 const MARKER_OUTLINE = "#000222";
 /** The strip above a label that the leader's crown (drawCrown, 9 px above its anchor) occupies. */
 const CROWN_RISE = 16;
@@ -375,7 +382,7 @@ export class Overlay {
         ctx.lineTo(l.x - hw, tipY - h);
         ctx.lineTo(l.x + hw, tipY - h);
         ctx.closePath();
-        ctx.fillStyle = MARKER_FILL;
+        ctx.fillStyle = markerFill(l.player.flags);
         ctx.fill();
         ctx.lineWidth = 1;
         ctx.strokeStyle = MARKER_OUTLINE;

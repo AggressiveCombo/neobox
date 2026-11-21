@@ -280,11 +280,12 @@ const staminaOn = async (pg) => {
       const mx0 = Math.round(mark.box.left * sx), mx1 = Math.round(mark.box.right * sx);
       const my0 = Math.round(mark.box.top * sy), my1 = Math.round(mark.box.bottom * sy);
       const md = ctx.getImageData(mx0, my0, mx1 - mx0, my1 - my0).data;
-      let yellow = 0;
+      let yellow = 0, grey = 0;
       for (let i = 0; i < md.length; i += 4) {
         if (md[i + 3] === 255 && Math.abs(md[i] - 255) <= 3 && Math.abs(md[i + 1] - 212) <= 3 && Math.abs(md[i + 2] - 64) <= 3) yellow++;
+        else if (md[i + 3] === 255 && Math.abs(md[i] - 187) <= 3 && Math.abs(md[i + 1] - 187) <= 3 && Math.abs(md[i + 2] - 187) <= 3) grey++;
       }
-      marker = { top: my0, bottom: my1, yellow };
+      marker = { top: my0, bottom: my1, yellow, grey };
     }
     return { dpr, labelW: lab.box.right - lab.box.left, width: x1 - x0, yBase, yEnd, rows, boxRows, boxH: yEnd - yBase - dpr, marker };
   }, me.id) : null;
@@ -313,6 +314,29 @@ await ctx3.close();
 const staminaPass = staminaPassOf(stamina1.probe) && staminaPassOf(stamina3.probe);
 const boxPass = boxPassOf(stamina1.probe) && boxPassOf(stamina3.probe);
 const markerPass = markerPassOf(stamina1.probe) && markerPassOf(stamina3.probe);
+// --- marker-air-jump: the marker is yellow while the air jump is ready and grey once it is spent (the original's marker
+// fill: frozen blue, ready #ffd440, spent #bbbbbb). Samples the frame flags (air jump bit) and the overlay marker together.
+async function markerAirJumpOf(pg) {
+  // Repeated up-presses: the air jump fires on a fresh press once the body is past its apex (sim jump(): v.y > -2) and spends
+  // the bit; a landing re-arms it. Each press is followed by samples of the frame flags and the overlay marker.
+  const samples = [];
+  const until = Date.now() + 5000;
+  while (Date.now() < until) {
+    await pg.keyboard.down("ArrowUp"); await sleep(80); await pg.keyboard.up("ArrowUp");
+    for (let k = 0; k < 3; k++) {
+      const before = (await frameOf(pg))?.players[0] ?? null;
+      const { probe } = await staminaOn(pg);
+      const after = (await frameOf(pg))?.players[0] ?? null;
+      if (before && after && before.flags === after.flags && probe?.marker) samples.push({ ready: (before.flags & 256) !== 0, marker: probe.marker });
+      await sleep(100);
+    }
+  }
+  return samples;
+}
+const airJumpSamples = await markerAirJumpOf(page);
+const markerAirJumpPass = airJumpSamples.some((s) => s.ready && s.marker.yellow > 0 && s.marker.grey === 0)
+  && airJumpSamples.some((s) => !s.ready && s.marker.grey > 0 && s.marker.yellow === 0);
+
 
 // --- corpse-colour: walk left off the platform; the player's debris keeps the player's colour ---
 // The frame's colour keys are packed low byte first (see LAUNCHER_RGB): swap red and blue from playerRgb's RRGGBB.
@@ -382,7 +406,7 @@ for (const palette of ["deuteranopia", "protanopia", "tritanopia"]) {
 }
 const cvdPass = Object.values(cvd).every((row) => row.pass);
 
-const pass = rocketPass && batPass && dashPass && trailPass && pushPass && staminaPass && boxPass && markerPass && corpsePass && paletteDefaultPass && cvdPass && errors.length === 0;
+const pass = rocketPass && batPass && dashPass && trailPass && pushPass && staminaPass && boxPass && markerPass && markerAirJumpPass && corpsePass && paletteDefaultPass && cvdPass && errors.length === 0;
 const result = {
   pass,
   actions: {
@@ -402,6 +426,7 @@ const result = {
     "stamina-bar": { pass: staminaPass, dpr1: stamina1.probe, dpr3: stamina3.probe },
     "label-box": { pass: boxPass, dpr1: stamina1.probe?.boxRows, dpr3: stamina3.probe?.boxRows },
     "label-marker": { pass: markerPass, dpr1: stamina1.probe?.marker, dpr3: stamina3.probe?.marker },
+    "marker-air-jump": { pass: markerAirJumpPass, samples: airJumpSamples.slice(0, 12) },
   },
   pageErrors: errors,
 };
@@ -418,6 +443,7 @@ for (const [palette, row] of Object.entries(cvd)) console.log(`${row.pass ? "PAS
 console.log(`${staminaPass ? "PASS" : "FAIL"} stamina-bar dpr1 ${JSON.stringify(stamina1.probe?.rows.filter((r) => r.green || r.opaque || r.other))} dpr3 ${JSON.stringify(stamina3.probe?.rows.filter((r) => r.green || r.opaque || r.other))} box top ${stamina1.probe?.yBase ?? "none"}`);
 console.log(`${boxPass ? "PASS" : "FAIL"} label-box dpr1 ${stamina1.probe?.boxRows ?? "none"}/${stamina1.probe?.boxH ?? "none"} dpr3 ${stamina3.probe?.boxRows ?? "none"}/${stamina3.probe?.boxH ?? "none"}`);
 console.log(`${markerPass ? "PASS" : "FAIL"} label-marker dpr1 ${JSON.stringify(stamina1.probe?.marker ?? null)} dpr3 ${JSON.stringify(stamina3.probe?.marker ?? null)} box top ${stamina1.probe?.yBase ?? "none"}`);
+console.log(`${markerAirJumpPass ? "PASS" : "FAIL"} marker-air-jump samples ${JSON.stringify(airJumpSamples.slice(0, 4))}`);
 await srv.stop();
 await runCleanups();
 process.exitCode = pass ? 0 : 1;
