@@ -1,6 +1,7 @@
 // Map editor drawing: grid, bodies, joints, markers, selection and the preview
 // of the gesture in progress. The canvas is sized to its CSS box times the
 // device pixel ratio (capped at 2) and drawn in CSS pixels.
+import { aspectFor } from "../map-aspect";
 
 import { type Pt } from "./geom";
 import {
@@ -74,8 +75,6 @@ const EDGE = "rgba(255, 255, 255, 0.35)";
 const ACCENT = "#0095ff";
 const ACCENT_FILL = "rgba(0, 149, 255, 0.14)";
 const FRAME = "rgba(0, 149, 255, 0.6)";
-/** The game's default view aspect; the editor frames the map at it. */
-const EDITOR_VIEW_ASPECT = 1.6;
 const JOINT_COLOUR = ["#e8a33b", "#5ab38b", "#4fa3d1"] as const;
 const MARKER_COLOUR: Record<(typeof MARKER_KINDS)[number], string> = {
   spawn: "#5ab38b",
@@ -357,7 +356,7 @@ function drawGrid(c: CanvasRenderingContext2D, v: View, w: number, h: number): v
 function frameOf(doc: Obj): { cx: number; cy: number; width: number; height: number } {
   const set = asObj(doc.set);
   const width = num(set, "3", 30);
-  const height = width / EDITOR_VIEW_ASPECT;
+  const height = width / aspectFor(set.aspect === "wide");
   const arenaW = num(set, "15", 0);
   const arenaH = num(set, "16", 0);
   return { cx: clampAxis(arenaW / 2, width, arenaW), cy: clampAxis(arenaH / 2, height, arenaH), width, height };

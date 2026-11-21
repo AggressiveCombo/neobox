@@ -817,13 +817,13 @@
     },
     {
       "id": "news-view-aspect",
-      "text": "16:10 on computers, 2:1 on phones and tablets",
+      "text": "16:10 for the original's maps and 16:9 for maps that chose wide",
       "basis": "code",
       "source": { "file": "client/src/ui/news.ts" },
       "truth": {
-        "check": "The game view uses 2:1 for mobile user agents (MOBILE_UA covers phones and tablets) and 1.6:1 (16:10) otherwise.",
+        "check": "The game view takes the map's aspect: 16:10 for classic maps and 16:9 for wide maps (map-aspect.ts CLASSIC_ASPECT and WIDE_ASPECT).",
         "value": true,
-        "evidence": [{ "file": "client/src/camera.ts", "contains": "const VIEW_ASPECT = MOBILE_UA.test(navigator.userAgent) ? 2 : 1.6;" }]
+        "evidence": [{ "file": "client/src/map-aspect.ts", "contains": "export const CLASSIC_ASPECT = 1.6;" }]
       }
     },
     {

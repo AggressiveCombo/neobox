@@ -3,10 +3,6 @@
 import type { PlayerRec, Scene } from "./frame";
 import { TEAM_SPECTATOR } from "./protocol";
 
-/** The original's view is `viewWidth` wide and `viewWidth / VIEW_ASPECT` high: 2:1 for its mobile user agents, 1.6:1 otherwise. */
-const MOBILE_UA = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i;
-const VIEW_ASPECT = MOBILE_UA.test(navigator.userAgent) ? 2 : 1.6;
-
 /** PlayerRec.flags bit 2: a ghost body, not a live sprite (frame.rs). */
 const FLAG_GHOST = 2;
 /** Widest the framing zooms out, as a multiple of the original view width (sprites and name tags stay legible). */
@@ -16,7 +12,7 @@ const SAFE_TOP = 0.2;
 const SAFE_BOTTOM = 0.1;
 const SAFE_SIDE = 0.08;
 
-/** The game view's rect in window CSS px: the largest `VIEW_ASPECT` rectangle, centred (the rest is letterbox). */
+/** The game view's rect in window CSS px: the largest `aspect` rectangle, centred (the rest is letterbox). */
 export interface ViewRect {
   x: number;
   y: number;
@@ -24,13 +20,13 @@ export interface ViewRect {
   h: number;
 }
 
-export function fitView(winW: number, winH: number): ViewRect {
+export function fitView(winW: number, winH: number, aspect: number): ViewRect {
   if (winW <= 0 || winH <= 0) return { x: 0, y: 0, w: 0, h: 0 };
   let w = winW;
-  let h = w / VIEW_ASPECT;
+  let h = w / aspect;
   if (h > winH) {
     h = winH;
-    w = h * VIEW_ASPECT;
+    w = h * aspect;
   }
   w = Math.floor(w);
   h = Math.floor(h);
@@ -38,8 +34,8 @@ export function fitView(winW: number, winH: number): ViewRect {
 }
 
 /** The largest view rect of the aspect inside the window's column [freeLeft, freeRight) (full height): landscape touch controls sit beside it. */
-export function fitViewBetween(winH: number, freeLeft: number, freeRight: number): ViewRect {
-  const v = fitView(freeRight - freeLeft, winH);
+export function fitViewBetween(winH: number, freeLeft: number, freeRight: number, aspect: number): ViewRect {
+  const v = fitView(freeRight - freeLeft, winH, aspect);
   return { x: freeLeft + v.x, y: v.y, w: v.w, h: v.h };
 }
 
@@ -144,7 +140,7 @@ export function computeCamera(scene: Scene, local?: PlayerRec): Camera {
     }
   }
   const w0 = scene.viewWidth;
-  const h0 = w0 / VIEW_ASPECT;
+  const h0 = w0 / scene.viewAspect;
   // The camera's bounds are the arena, as in the original: a map whose arena fits the base view has a fixed camera
   // centred on it (no follow, no zoom pumping), and a larger arena is followed and clamped to its edges. Ground or
   // map machinery past the arena edge is not framed.
@@ -153,9 +149,9 @@ export function computeCamera(scene: Scene, local?: PlayerRec): Camera {
   const fitsY = bounds.y1 - bounds.y0 <= h0;
   // The narrowest view that keeps the group inside the insets, on the axes that move.
   const needX = fitsX ? 0 : (maxX - minX) / (1 - 2 * SAFE_SIDE);
-  const needY = fitsY ? 0 : ((maxY - minY) * VIEW_ASPECT) / (1 - SAFE_TOP - SAFE_BOTTOM);
+  const needY = fitsY ? 0 : ((maxY - minY) * scene.viewAspect) / (1 - SAFE_TOP - SAFE_BOTTOM);
   const w = Math.min(Math.max(needX, needY, w0), w0 * MAX_ZOOM_OUT);
-  const h = w / VIEW_ASPECT;
+  const h = w / scene.viewAspect;
   const cx = fitsX ? (bounds.x0 + bounds.x1) / 2 : axisCentre(sx, minX, maxX, w, w * SAFE_SIDE, w * SAFE_SIDE, bounds.x0, bounds.x1);
   const cy = fitsY ? (bounds.y0 + bounds.y1) / 2 : axisCentre(sy, minY, maxY, h, h * SAFE_TOP, h * SAFE_BOTTOM, bounds.y0, bounds.y1);
   const away: number[] = [];

@@ -291,6 +291,15 @@ const MAP_GROUPS: Group[] = [
           { value: 10, label: "10" },
         ],
       },
+      {
+        key: "aspect",
+        label: "View",
+        kind: "select",
+        options: [
+          { value: "classic", label: "Classic 16:10" },
+          { value: "wide", label: "Wide 16:9" },
+        ],
+      },
     ],
   ],
   [

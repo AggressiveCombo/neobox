@@ -12,18 +12,20 @@ const WORDS_PER_TRIANGLE = 3 * WORDS_PER_VERTEX;
 export function drawMapPreview(canvas: HTMLCanvasElement, fb: FrameView): void {
   const ctx = canvas.getContext("2d");
   if (!ctx) return;
+  const scene = readScene(fb);
+  // The frame takes the map's own view aspect (16:10 classic, 16:9 wide) and the arena covers it: no letterbox stubs.
+  canvas.style.aspectRatio = String(scene.viewAspect);
   const dpr = Math.min(window.devicePixelRatio || 1, MAX_DPR);
   const cssW = canvas.clientWidth > 0 ? canvas.clientWidth : canvas.width / dpr;
-  const cssH = canvas.clientHeight > 0 ? canvas.clientHeight : canvas.height / dpr;
+  const cssH = canvas.clientHeight > 0 ? canvas.clientHeight : cssW / scene.viewAspect;
   canvas.width = Math.max(1, Math.round(cssW * dpr));
   canvas.height = Math.max(1, Math.round(cssH * dpr));
   const w = canvas.width;
   const h = canvas.height;
 
-  const scene = readScene(fb);
   const aw = Math.max(scene.arenaW, 1);
   const ah = Math.max(scene.arenaH, 1);
-  const scale = Math.min(w / aw, h / ah);
+  const scale = Math.max(w / aw, h / ah);
   const ox = (w - aw * scale) / 2;
   const oy = (h - ah * scale) / 2;
 

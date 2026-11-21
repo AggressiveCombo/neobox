@@ -153,9 +153,11 @@ damage threshold, at the body's interpolated position.
 ## Camera
 
 The original shows a view `W` = header word 9 world units wide and `W / A` high,
-where `A` = 1.6, or 2 for its mobile user agents (`VIEW_ASPECT` in `camera.ts`,
-the same user-agent test). The game view is that rect, as large as the window
-allows and centred: `fitView(winW, winH)` returns it. On a landscape window with touch
+where `A` is the map's view aspect: 1.6 (16:10) for classic maps, 16/9 for wide maps. The sim decides it per map
+(`MapSettings.wide`, the settings key `aspect` = `"wide"`; absent or `"classic"` is 16:10); the frame carries it as
+header word 42 (`Scene.viewAspect` in `frame.ts`, `aspectFor` in `map-aspect.ts`). Imported Hitbox maps are classic;
+new Neobox maps are wide. The game view is that rect, as large as the window
+allows and centred: `fitView(winW, winH, aspect)` returns it. On a landscape window with touch
 controls, it is instead the largest such rect between the two control clusters
 (`fitViewBetween`, the band the clusters leave free), so the arena stays clear of them.
 `publishView` sets

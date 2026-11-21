@@ -559,7 +559,6 @@ button.room-menu-item[aria-checked="true"] {
 .room-map-preview {
   width: 100%;
   height: auto;
-  aspect-ratio: 2 / 1;
   background: var(--surface-2);
 }
 
@@ -593,7 +592,6 @@ button.room-menu-item[aria-checked="true"] {
   display: block;
   width: 100%;
   height: auto;
-  aspect-ratio: 2 / 1;
   background: var(--surface-2);
 }
 

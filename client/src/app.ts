@@ -8,6 +8,7 @@ import type { AppCtx, HudHandle, Present, ScreenFactory, ScreenHandle, WasmTools
 import type { Engine } from "./engine";
 import { engineLoader } from "./engine-loader";
 import { readScene } from "./frame";
+import { CLASSIC_ASPECT } from "./map-aspect";
 import { MatchLoop, type SnapshotBytes } from "./game";
 import { Input } from "./input";
 import { Net, type CloseNotice, type NetStatus } from "./net";
@@ -238,6 +239,9 @@ export function start(): Store<AppState> {
     if (performance.now() - lastPresent > VIEW_IDLE_MS) setViewShown(false);
   }, VIEW_IDLE_MS);
 
+  /** The view aspect of the map being shown (scene.viewAspect of the last match, replay or local game frame). */
+  let viewAspect = CLASSIC_ASPECT;
+
   /** Draw the engine's current frame buffer (built by a match, replay or local game). */
   const present: Present = (names, tickHz, chrome = true) => {
     const fb = engine?.framebuffer();
@@ -247,6 +251,10 @@ export function start(): Store<AppState> {
     // is told nothing was shown (a clip's first frame would otherwise go live as an empty page-colour square).
     if (!renderer) return null;
     const scene = readScene(fb);
+    if (!backdrop && scene.viewAspect !== viewAspect) {
+      viewAspect = scene.viewAspect;
+      resizeAll();
+    }
     scene.localKeys = input.mask();
     const local = computeCamera(scene, findLocal(scene));
     if (backdrop) syncBackdropView();
@@ -598,7 +606,7 @@ export function start(): Store<AppState> {
         if (r.left + r.width / 2 < winW / 2) left = Math.max(left, r.right);
         else right = Math.min(right, r.left);
       }
-      if (right > left && right - left < winW) return fitViewBetween(winH, left, right);
+      if (right > left && right - left < winW) return fitViewBetween(winH, left, right, viewAspect);
     }
     // Bars and panels over the arena (.playfield-clear) bound the vertical band the view fits in: nothing covers the arena.
     let top = 0;
@@ -611,10 +619,10 @@ export function start(): Store<AppState> {
     }
     // A band under 40% of the window is too small to play in (short phone landscape): the arena keeps the whole window and the bars sit over it, as before.
     if (bottom - top >= winH * 0.4 && (top > 0 || bottom < winH)) {
-      const v = fitView(winW, bottom - top);
+      const v = fitView(winW, bottom - top, viewAspect);
       return { x: v.x, y: top + v.y, w: v.w, h: v.h };
     }
-    return fitView(winW, winH);
+    return fitView(winW, winH, viewAspect);
   }
 
   /** Size the game canvases to the view rect (the original's aspect, centred in the window) and publish it. */

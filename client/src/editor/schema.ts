@@ -168,10 +168,11 @@ export const SETTINGS_DEFAULTS: Obj = {
   "17": 16777215,
   "18": 15,
   "19": false,
+  aspect: "classic",
 };
 
 export function emptyDoc(): Obj {
-  return { b: [], j: [], s: [], tu: [], gp: [], c: [], set: {} };
+  return { b: [], j: [], s: [], tu: [], gp: [], c: [], set: { aspect: "wide" } };
 }
 
 /** A new body or entity: the given fields, with default-equal ones dropped. */

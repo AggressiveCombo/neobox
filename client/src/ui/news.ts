@@ -21,7 +21,7 @@ const NEWS: NewsEntry[] = [
     items: [
       "The blue logo is back, and blue is the accent colour again. Buttons and menus have icons, and screens fade into each other.",
       "The main menu is simpler and fills the screen: your name, Quick play, Browse rooms and a grid of buttons on one side, the match replay on the other.",
-      "The game view keeps the original's shape: 16:10 on computers, 2:1 on phones and tablets, with black bars around it instead of a stretched or cropped view.",
+      "The game view keeps each map's shape: 16:10 for the original's maps and 16:9 for maps that chose wide, with black bars around it instead of a stretched or cropped view.",
       "New menu and match music, real sound effects for jumps, hits and deaths, and soft interface sounds for hovers and clicks that you can turn off (Settings, Sound).",
       "Profiles: open a player from the room or your friends list to see their level, games, wins, kills, deaths, time played and maps.",
       "In lives mode, a bar at the top shows how many lives you have left.",

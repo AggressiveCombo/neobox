@@ -99,6 +99,8 @@ export interface SoundRec {
 export interface Scene {
   version: number;
   viewWidth: number;
+  /** The map's view width over height (1.6 classic, 16/9 wide); header word 42. */
+  viewAspect: number;
   arenaW: number;
   arenaH: number;
   bgTop: number;
@@ -239,6 +241,7 @@ export function readScene(fb: FrameView): Scene {
   return {
     version: u32[0] ?? 0,
     viewWidth: f32[9] ?? 0,
+    viewAspect: f32[42] ?? 1.6,
     arenaW: f32[10] ?? 0,
     arenaH: f32[11] ?? 0,
     bgTop: u32[12] ?? 0,
