@@ -300,6 +300,14 @@ button,
   pointer-events: none;
 }
 
+/* Engines without scrollbar-gutter (older Safari) would add the scrollbar's width only when a page scrolls, and the
+   centred column would move sideways. There the scrollbar is always shown, so its room is always reserved. */
+@supports not (scrollbar-gutter: stable) {
+  #ui {
+    overflow-y: scroll;
+  }
+}
+
 #ui > * {
   pointer-events: auto;
 }
