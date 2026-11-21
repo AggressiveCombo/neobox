@@ -38,7 +38,8 @@ fn community_maps() {
             }
         };
         match MapData::from_code(&map.to_code()) {
-            Ok(again) if again == map => {}
+            // Compared as canonical JSON: a missing y (odd-length `p`) is NaN, and NaN != NaN.
+            Ok(again) if again.to_json() == map.to_json() => {}
             Ok(_) => failures.push(format!("{label}: round trip changed the map")),
             Err(e) => failures.push(format!("{label}: re-decode: {e}")),
         }

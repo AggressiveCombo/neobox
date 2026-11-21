@@ -1167,9 +1167,13 @@ fn encode_shape(s: &MapShape) -> Value {
     o.b("14", s.no_physics, d.no_physics);
     o.n("15", s.z_index, d.z_index);
     let mut p = Vec::with_capacity(s.points.len() * 2);
-    for v in &s.points {
+    for (i, v) in s.points.iter().enumerate() {
         p.push(num_value(v[0]));
-        p.push(num_value(v[1]));
+        // A trailing point with no y (odd-length `p`) is written without it:
+        // the original reads the missing y as undefined, not null.
+        if i + 1 < s.points.len() || !v[1].is_nan() {
+            p.push(num_value(v[1]));
+        }
     }
     o.always("p", Value::Array(p));
     o.extra(&s.extra)
