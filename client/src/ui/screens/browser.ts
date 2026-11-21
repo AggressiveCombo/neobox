@@ -13,13 +13,11 @@ import {
 } from "../../protocol";
 import { clear, h } from "../dom";
 import { countryName, flagUrl, formatDistance, sortRooms } from "../../rooms";
-import { field, openModal, page, pageHead, toggle } from "../kit";
+import { field, openModal, page, pageHead, toggle, uid } from "../kit";
 import { icon } from "../icons";
 
 const SVG_NS = "http://www.w3.org/2000/svg";
 const DEFAULT_MAX_PLAYERS = 8;
-/** Id of the create-room form; its Create room button in the modal's action row submits it. */
-const CREATE_FORM_ID = "create-room-form";
 /** Room codes: 6 characters from the server's alphabet (no I, O, 0 or 1). */
 const ROOM_CODE_RE = /^[A-HJ-NP-Z2-9]{6}$/;
 /** YouTube video ids: 11 characters from the URL-safe alphabet (anything else gets no thumbnail). */
@@ -175,10 +173,12 @@ export const browserScreen: ScreenFactory = (ctx) => {
       },
     });
 
+    // Each modal gets its own id: a closing modal stays in the DOM for its exit animation, so a shared id would match it.
+    const formId = uid("create-room");
     const form = h(
       "form",
       {
-        id: CREATE_FORM_ID,
+        id: formId,
         class: "create-form",
         onsubmit: (e: Event) => {
           e.preventDefault();
@@ -206,7 +206,7 @@ export const browserScreen: ScreenFactory = (ctx) => {
     );
     // The submit button sits in the modal's action row, outside the form, so it names the form.
     const submit = h("button", { type: "submit", class: "primary" }, icon("plus", 18), "Create room");
-    submit.setAttribute("form", CREATE_FORM_ID);
+    submit.setAttribute("form", formId);
     const modal = openModal({
       title: "Create a room",
       body: [form],
