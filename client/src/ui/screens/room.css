@@ -703,14 +703,9 @@ button.room-menu-item[aria-checked="true"] {
 .room-setting {
   display: flex;
   flex-wrap: wrap;
-  align-items: baseline;
+  align-items: center;
   justify-content: space-between;
   gap: 8px;
-}
-
-.room-setting input[type="checkbox"] {
-  width: 24px;
-  height: 24px;
 }
 
 .room-setting-label {
@@ -732,12 +727,6 @@ button.room-menu-item[aria-checked="true"] {
   .room-setting {
     min-height: 48px;
     align-items: center;
-  }
-
-  .room-setting input[type="checkbox"] {
-    width: 48px;
-    height: 48px;
-    margin: 0;
   }
 
   .room-setting input[type="number"] {

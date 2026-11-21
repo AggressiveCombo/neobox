@@ -367,7 +367,7 @@ function fieldRow(f: Field, value: Value, apply: Apply): HTMLElement {
     return h(
       "label",
       { class: "check" },
-      h("input", { type: "checkbox", checked: value === true, onchange: (e: Event) => apply((e.target as HTMLInputElement).checked) }),
+      h("input", { type: "checkbox", role: "switch", checked: value === true, onchange: (e: Event) => apply((e.target as HTMLInputElement).checked) }),
       h("span", null, f.label),
     );
   }
@@ -668,6 +668,7 @@ function shapeBlock(bodyIdx: number, body: Obj, si: number, shape: Obj, commit: 
       { class: "check" },
       h("input", {
         type: "checkbox",
+        role: "switch",
         checked: own,
         onchange: (e: Event) => {
           const on = (e.target as HTMLInputElement).checked;

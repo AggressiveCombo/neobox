@@ -1369,6 +1369,7 @@ export const roomScreen: ScreenFactory = (ctx: AppCtx) => {
     if (def.kind === "b") {
       const box = h("input", {
         type: "checkbox",
+        role: "switch",
         checked: value === true,
         "data-focus-key": def.field,
         disabled: !host,
