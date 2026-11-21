@@ -36,6 +36,8 @@ const STEP_DEG = 14;
 const SIN_STEP = Math.sin((STEP_DEG * Math.PI) / 180);
 /** Options turned past this from the front are on the far side of the cylinder and not drawn. */
 const FRONT_DEG = 60;
+/** A row shorter than this (px) is drawn as a peek but is not a click target: it is too small to hit. */
+const MIN_HIT_PX = 24;
 /** Wheel and trackpad travel that rolls one option, px. */
 const WHEEL_PX_PER_OPTION = 100;
 /** How far past an end the target may be pushed (in options): the bump that springs back once the input stops. */
@@ -74,7 +76,7 @@ export function mountDrum(items: DrumItem[], label: string, initial = 0): Drum {
   let pitch = PITCH_FALLBACK_PX;
   let radius = pitch / SIN_STEP;
   let half = 0;
-  let optHalf = 0;
+  let optH = 0;
   let frame = 0;
   let last = 0;
   let settleTimer = 0;
@@ -185,26 +187,40 @@ export function mountDrum(items: DrumItem[], label: string, initial = 0): Drum {
     scheduleSettle();
   }
 
+  /** Where option i sits on the cylinder, px from the window centre. */
+  function yAt(i: number): number {
+    return radius * Math.sin(((i - pos) * STEP_DEG * Math.PI) / 180);
+  }
+
   /** Place every option for the current `pos`: the cylinder, turned to face the viewer. */
   function render(): void {
     for (let i = 0; i < n; i += 1) {
       const deg = (i - pos) * STEP_DEG;
       const rad = (deg * Math.PI) / 180;
-      const y = radius * Math.sin(rad);
+      const y = yAt(i);
       const style = opts[i].style;
-      // How far the option's box pokes past the window edge on its side: 0 or less while it sits fully inside.
-      const over = Math.abs(y) + optHalf - half;
-      if (Math.abs(deg) >= FRONT_DEG || over >= 2 * optHalf) {
+      const front = Math.abs(deg) < FRONT_DEG;
+      // The box is as tall as its projected share of the cylinder: the gap to the nearer neighbour, undone for the
+      // foreshortening of the turn. Boxes then never overlap, and a row's hit area is the part that is drawn.
+      let gap = Infinity;
+      if (i > 0) gap = Math.min(gap, Math.abs(y - yAt(i - 1)));
+      if (i < n - 1) gap = Math.min(gap, Math.abs(y - yAt(i + 1)));
+      const h = front ? Math.min(optH, gap / Math.cos(rad / 2)) : 0;
+      // How far the box pokes past the window edge on its side: 0 or less while it sits fully inside.
+      const over = Math.abs(y) + h / 2 - half;
+      if (!front || over >= h) {
         // Off the window: invisible and inert, but not display:none or visibility:hidden, so screen readers still list it.
         style.opacity = "0";
         style.pointerEvents = "none";
         continue;
       }
       const z = radius * (Math.cos(rad) - 1);
-      style.pointerEvents = "";
+      style.pointerEvents = h < MIN_HIT_PX ? "none" : "";
+      style.height = `${h.toFixed(2)}px`;
+      style.marginTop = `${(-h / 2).toFixed(2)}px`;
       style.transform = `translate3d(0, ${y.toFixed(2)}px, ${z.toFixed(2)}px) rotateX(${(-deg / 2).toFixed(2)}deg)`;
       // Fully inside: full label contrast. A row the window edge cuts fades with the share still visible: "more below", not disabled.
-      style.opacity = over <= 0 ? "1" : (1 - over / (2 * optHalf)).toFixed(3);
+      style.opacity = over <= 0 ? "1" : (1 - over / h).toFixed(3);
     }
   }
 
@@ -215,8 +231,8 @@ export function mountDrum(items: DrumItem[], label: string, initial = 0): Drum {
     pitch = Number.isFinite(p) && p > 0 ? p : PITCH_FALLBACK_PX;
     radius = pitch / SIN_STEP;
     half = listbox.clientHeight / 2;
-    const optH = parseFloat(getComputedStyle(listbox).getPropertyValue("--drum-opt-h")) * rem;
-    optHalf = Number.isFinite(optH) && optH > 0 ? optH / 2 : 0;
+    const full = parseFloat(getComputedStyle(listbox).getPropertyValue("--drum-opt-h")) * rem;
+    optH = Number.isFinite(full) && full > 0 ? full : 0;
     render();
   }
 
