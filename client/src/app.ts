@@ -432,11 +432,7 @@ export function start(): Store<AppState> {
     mounted = screen;
     const wasBackdrop = backdrop;
     backdrop = screen === "menu";
-    if (backdrop !== wasBackdrop) {
-      glHost.classList.toggle("is-backdrop", backdrop);
-      overlayCanvas.classList.toggle("is-backdrop", backdrop);
-      resizeAll();
-    }
+    if (backdrop !== wasBackdrop) resizeAll();
     uiRoot.replaceChildren(handle.el);
     if (from !== null) playScreenTransition(uiRoot, leaving, handle.el, scrollTop);
     // The controls of a new screen (and the transition's motion) set the band the game view fits between.

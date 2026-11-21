@@ -211,17 +211,27 @@ function axisCentre(l: number, lo: number, hi: number, len: number, a: number, b
 }
 
 /**
- * Backdrop camera (the main menu's clip). The GL view is the menu card itself, un-turned: `box` is its rect in CSS px
- * (the card's turn is a CSS transform on the view, so the scene tilts with the card). The card is the arena's rect: the view
- * is centred on the arena's centre and scaled so the arena fills the card edge to edge. What stands past the arena's edge
- * (boundary walls, bumpers, stubs) is clipped by the card's edge. `fill` is the card's world rect:
- * the backdrop's background covers it, so the card shows the map's own background past the arena (no page colour, no
- * void). Fixed on the arena's centre: no follow, no zoom, so the clip holds still from its first frame.
- * Also publishes the live players' ids and world positions to the QA hook (qaView.live).
+ * The world inset the backdrop stops short of the arena's edge: the boundary walls stand about one world unit thick on that
+ * edge, so the card's edge falls past them and no white frame shows.
+ */
+const BACKDROP_INSET = 1.25;
+
+/** The part of the arena the backdrop shows: the arena inside its boundary walls, in world units. */
+export function backdropSize(arenaW: number, arenaH: number): { w: number; h: number } {
+  return { w: arenaW - 2 * BACKDROP_INSET, h: arenaH - 2 * BACKDROP_INSET };
+}
+
+/**
+ * Backdrop camera (the main menu's clip). The GL view is the menu card itself, untilted: `box` is its rect in CSS px.
+ * The card is the rect backdropSize gives: the view is centred on the arena's centre and scaled so that rect fills the card
+ * edge to edge, and the boundary walls fall outside it. `fill` is the card's world rect: the backdrop's background covers it,
+ * so the card shows the map's own background (no page colour, no void). Fixed on the arena's centre: no follow, no zoom, so
+ * the clip holds still from its first frame. Also publishes the live players' ids and world positions to the QA hook (qaView.live).
  */
 export function backdropCamera(scene: Scene, box: { w: number; h: number }): Camera {
-  // World units per CSS px: the larger of the arena's ratios to the card, so the whole arena fits on both axes.
-  const k = Math.max(scene.arenaW / box.w, scene.arenaH / box.h);
+  // World units per CSS px: the larger of the shown rect's ratios to the card, so the whole shown rect fits on both axes.
+  const shown = backdropSize(scene.arenaW, scene.arenaH);
+  const k = Math.max(shown.w / box.w, shown.h / box.h);
   const w = box.w * k;
   const h = box.h * k;
   const cx = scene.arenaW / 2;

@@ -206,10 +206,9 @@ button.home-account {
   display: none;
 }
 
-/* Right column: the card square, centred in it and as large as the height allows. The card takes the arena's shape
-   (menu.ts) and turns by --menu-angle, its corners reaching about 13% past its box on each side, which the column's
-   spare width takes. The height also leaves room for the clip caption under the card's lowest corner (about 0.63 of
-   the side below the centre, a gap, a 28px bar) and 16px to the viewport bottom: side <= (100vh - 104px) / 1.28. */
+/* Right column: the card, centred in the art square and as large as the height allows. The card takes the arena's shape
+   (menu.ts) and fills the square's longer side, so the panel is the square's size. The height keeps 16px to the viewport
+   bottom: side <= (100vh - 104px) / 1.28 (the budget the old tilted card and its caption needed; the panel keeps it). */
 .menu-art {
   grid-column: 2;
   grid-row: 2 / 6;
@@ -231,13 +230,16 @@ button.home-account {
   top: 50%;
   width: calc(var(--card-w, 1) * 100%);
   height: calc(var(--card-h, 1) * 100%);
-  transform: translate(-50%, -50%) rotate(var(--menu-angle));
+  transform: translate(-50%, -50%);
   display: grid;
   place-items: center;
   overflow: hidden;
+  /* The panel's corners: the GL view is masked to the same radius (menu.ts CARD_CLIP). */
+  border-radius: 18px;
+  box-shadow: 0 18px 48px -18px rgb(0 0 0 / 0.55);
 }
 
-/* No clip can play (menu.ts: is-idle): the brand tile, the mark in the middle, counter-rotated to stand upright. */
+/* No clip can play (menu.ts: is-idle): the brand tile, the mark in the middle. */
 .menu-square.is-idle {
   background: var(--brand-tile);
 }
@@ -245,21 +247,11 @@ button.home-account {
 .menu-square .mark {
   width: 34%;
   height: 34%;
-  transform: rotate(calc(-1 * var(--menu-angle)));
   opacity: 0;
 }
 
 .menu-square.is-idle .mark {
   opacity: 1;
-}
-
-/* The clip credit, under the card: menu.ts sets its top to the card's lowest corner plus a gap, so it never covers the arena. */
-.menu-credit {
-  position: absolute;
-  left: 10%;
-  right: 10%;
-  transform: rotate(0deg);
-  pointer-events: none;
 }
 
 /* The destinations: a drum. menu-drum.ts puts each option on a cylinder (transform and opacity only);
@@ -510,10 +502,8 @@ button.home-privacy {
 
   .menu-art {
     order: 3;
-    width: min(44vw, 22vh);
+    width: min(88vw, 44vh);
     align-self: center;
-    /* The clip caption hangs under the card (.menu-credit): this keeps the footer clear of it. */
-    margin-bottom: 64px;
   }
 
   .home-foot {

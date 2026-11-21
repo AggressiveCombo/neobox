@@ -3,15 +3,15 @@
 // drawn through ctx.present (the GL canvas sits behind the UI). Clips come newest first,
 // 10 per page; the list wraps to the start. Scene sounds stay muted while a clip plays.
 // A server with no clips yet plays the bundled demo (public/clips/demo.json).
+// Reduced motion (the OS preference or Settings > Motion) holds the clip on one still frame: that is its motion control; the menu has no pause.
 
 import type { AppCtx } from "../ctx";
 import type { Engine, ReplayInfo } from "../engine";
 import { fetchClipReplay, listClips, type ClipSummary } from "../clips";
+import { backdropSize } from "../camera";
 import { fetchPrecached } from "../precached";
 import { HttpError } from "../http-error";
 import { reducedMotion } from "./a11y";
-import { h, labelSwap, showLabel } from "./dom";
-import { icon } from "./icons";
 
 /** Clips per page; matches the server's page size, so a short page means the end. */
 const PAGE_SIZE = 10;
@@ -39,7 +39,7 @@ interface Playing {
   names: ReadonlyMap<number, string>;
   follow: number;
   tick: number;
-  /** Set once its first frame reached the screen: the card is live and shows the caption. */
+  /** Set once its first frame reached the screen: the card is live. */
   shown: boolean;
 }
 
@@ -47,7 +47,7 @@ export type ClipState = "loading" | "live" | "idle";
 
 /**
  * Start the background clip playback in `host`. `onState` reports what the card shows: "loading" (blank, no clip
- * frame yet), "live" (a clip is drawn, with its caption), "idle" (no clip can play: the brand tile). `onAspect` reports
+ * frame yet), "live" (a clip is drawn), "idle" (no clip can play: the brand tile). `onAspect` reports
  * the arena's width over its height whenever a drawn clip's arena has a new shape. Returns the cleanup function (stops it).
  */
 export function mountMenuClips(ctx: AppCtx, host: HTMLElement, onState?: (state: ClipState) => void, onAspect?: (aspect: number) => void): () => void {
@@ -57,10 +57,7 @@ export function mountMenuClips(ctx: AppCtx, host: HTMLElement, onState?: (state:
   let atEnd = false;
   let cursor = 0;
   let playing: Playing | null = null;
-  /** Held on one frame by the pause button; starts held under reduced motion. The clip does not advance while true. */
-  let paused = reducedMotion();
-  let lastReduce = paused;
-  /** The clip last drawn still while paused: it is drawn once, not every frame. */
+  /** The clip last drawn while reduced motion held it: it is drawn once, not every frame. */
   let frozenFor: Playing | null = null;
   let loading = false;
   let state: ClipState = "loading";
@@ -71,32 +68,6 @@ export function mountMenuClips(ctx: AppCtx, host: HTMLElement, onState?: (state:
   let retryTimer = 0;
   // One controller per mount, aborted when the menu closes. Page-leave fetches (pageFetch) also stop at beforeunload.
   const net = new AbortController();
-
-  // The clip's caption and its pause control. The bar is hidden until a clip plays; the button is the only part that takes clicks.
-  const credit = h("p", { class: "menu-clip-credit" });
-  // The icon shows the state; the sr-only name is the button's accessible name ("Pause clip" / "Play clip").
-  const pauseIcon = labelSwap([[icon("pause", 16)], [icon("play", 16)]], paused ? 1 : 0);
-  const pauseLabel = labelSwap([["Pause clip"], ["Play clip"]], paused ? 1 : 0);
-  const showPaused = (): void => {
-    showLabel(pauseIcon, paused ? 1 : 0);
-    showLabel(pauseLabel, paused ? 1 : 0);
-  };
-  const pauseBtn = h(
-    "button",
-    {
-      type: "button",
-      class: "menu-clip-pause",
-      onclick: () => {
-        paused = !paused;
-        showPaused();
-      },
-    },
-    pauseIcon,
-    h("span", { class: "menu-clip-pause-name" }, pauseLabel),
-  );
-  const bar = h("div", { class: "menu-clip-bar" }, credit, pauseBtn);
-  bar.hidden = true;
-  host.append(bar);
 
   const soundWasMuted = ctx.sfx.sceneMuted;
   ctx.sfx.sceneMuted = true;
@@ -159,24 +130,20 @@ export function mountMenuClips(ctx: AppCtx, host: HTMLElement, onState?: (state:
     if (state === "idle") setState("loading");
   }
 
-  /** Draw the clip's frame at its tick. The first frame that reaches the screen makes the card live and shows the caption. */
+  /** Draw the clip's frame at its tick. The first frame that reaches the screen makes the card live. */
   function draw(engine: Engine, p: Playing): boolean {
     // null: a seek waits for keyframes not yet built; nothing is presented, so an empty buffer never shows as the clip.
     if (engine.replayFrame(p.tick, p.follow) === null) return false;
     const scene = ctx.present(p.names, p.info.hz, false);
     if (!scene) return false;
-    const aspect = scene.arenaW / scene.arenaH;
+    const shown = backdropSize(scene.arenaW, scene.arenaH);
+    const aspect = shown.w / shown.h;
     if (aspect !== reportedAspect && Number.isFinite(aspect)) {
       reportedAspect = aspect;
       onAspect?.(aspect);
     }
     if (!p.shown) {
       p.shown = true;
-      const caption = `${p.clip.map_name} · recorded by ${p.clip.recorder}`;
-      // The credit span hides on coarse pointers (menu-clips.css); the title keeps the full caption.
-      credit.replaceChildren(h("span", { class: "menu-clip-map" }, p.clip.map_name), h("span", { class: "menu-clip-by" }, ` · recorded by ${p.clip.recorder}`));
-      credit.title = caption;
-      bar.hidden = false;
       setState("live");
     }
     return true;
@@ -190,7 +157,6 @@ export function mountMenuClips(ctx: AppCtx, host: HTMLElement, onState?: (state:
 
   /** Nothing can play (no clips, offline, every load failed): the card shows the brand tile. */
   function showIdle(): void {
-    bar.hidden = true;
     setState("idle");
   }
 
@@ -239,20 +205,15 @@ export function mountMenuClips(ctx: AppCtx, host: HTMLElement, onState?: (state:
     // The host sits in the clip square, which is display:none in short landscape: nothing is drawn, so the clip holds.
     if (!playing || !eng || document.hidden || host.getClientRects().length === 0) return;
     const p = playing;
-    // The system's reduce-motion choice can change while the menu is open: follow it, then the button shows the state.
+    // Reduced motion holds the clip on one frame (the still frame is the control); the card follows the system choice live.
     const reduce = reducedMotion();
-    if (reduce !== lastReduce) {
-      lastReduce = reduce;
-      paused = reduce;
-      showPaused();
-    }
     // A modal over the menu covers the clip: its last frame stays up undrawn, so the modal's open and close animations
     // get the frame budget. The clip resumes from the same tick when the modal closes (last is kept current above).
     if (document.querySelector("dialog.modal[open]")) {
       ctx.holdView();
       return;
     }
-    if (paused) {
+    if (reduce) {
       ctx.holdView();
       // Held on one frame: drawn once, and again until it reaches the screen.
       if (frozenFor !== p && draw(eng, p)) frozenFor = p;
@@ -263,7 +224,7 @@ export function mountMenuClips(ctx: AppCtx, host: HTMLElement, onState?: (state:
     qaClip.tick = p.tick;
     qaClip.dtMs = dt;
     if (p.tick >= p.info.end) {
-      // The last frame stays up with its caption until the next clip's first frame (or the tile, when none plays).
+      // The last frame stays up until the next clip's first frame (or the tile, when none plays).
       playing = null;
       qaClip.tick = -1;
       startNext();
@@ -285,7 +246,6 @@ export function mountMenuClips(ctx: AppCtx, host: HTMLElement, onState?: (state:
     playing = null;
     qaClip.tick = -1;
     eng?.replayClose();
-    bar.remove();
     ctx.sfx.sceneMuted = soundWasMuted;
   };
 }

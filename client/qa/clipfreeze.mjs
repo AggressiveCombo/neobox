@@ -1,9 +1,10 @@
-// Menu clip pause check (RUBRIC D08 motion control): the Pause control must freeze the visible clip.
+// Menu clip hold check (RUBRIC D08 motion control): reduced motion (the OS preference or Settings > Motion) holds the
+// menu clip on one still frame.
 //
 // Cases (per engine, desktop 1280x800, home menu):
-//   clip.pauseFreezes  the clip area (largest canvas behind the UI) is screenshot while playing and while paused.
-//                      Playing: consecutive frames differ (control: the clip really moves). Paused: the frame stays
-//                      identical for 2 s and is not blank (a blank frame would mean pause cleared the picture).
+//   clip.holdsReduced  the clip area (largest canvas behind the UI) is screenshot while playing and after reduced motion
+//                      is emulated. Playing: consecutive frames differ (control: the clip really moves). Reduced: the frame
+//                      stays identical for 2 s and is not blank (a blank frame would mean the hold cleared the picture).
 //
 // Usage: cd client && QA_OUT=<dir> node qa/clipfreeze.mjs   (QA_ENGINES=chromium narrows the engines)
 
@@ -42,12 +43,12 @@ async function main() {
     const browser = await launchEngine(engine);
     try {
       await results.case(
-        "clip.pauseFreezes",
+        "clip.holdsReduced",
         async (s) => {
           const h = await s.open("clipfreeze", { name: "clipqa" });
           await h.page.goto(base);
           await menuName(h.page).waitFor({ timeout: 20000 });
-          await h.page.locator(".menu-clip-bar").waitFor({ state: "visible", timeout: 20000 });
+          await h.page.locator(".menu-square.is-live").waitFor({ state: "attached", timeout: 20000 });
           await h.page.waitForTimeout(1500);
           const box = await clipBox(h.page);
           if (!box) throw new Error("no clip canvas on the home menu");
@@ -56,22 +57,22 @@ async function main() {
           await h.page.waitForTimeout(1000);
           const playingB = await snap(h, box, path.join(out, `${engine}-playing-b.png`));
 
-          await h.page.locator(".menu-clip-pause").click();
+          await h.page.emulateMedia({ reducedMotion: "reduce" });
           await h.page.waitForTimeout(300);
-          const label = (await h.page.locator(".menu-clip-pause").textContent())?.trim();
-          const pausedA = await snap(h, box, path.join(out, `${engine}-paused-a.png`));
+          const heldA = await snap(h, box, path.join(out, `${engine}-held-a.png`));
           await h.page.waitForTimeout(1000);
-          const pausedB = await snap(h, box, path.join(out, `${engine}-paused-b.png`));
+          const heldB = await snap(h, box, path.join(out, `${engine}-held-b.png`));
           await h.page.waitForTimeout(1000);
-          const pausedC = await snap(h, box, path.join(out, `${engine}-paused-c.png`));
+          const heldC = await snap(h, box, path.join(out, `${engine}-held-c.png`));
 
-          const frozen = pausedA.hash === pausedB.hash && pausedB.hash === pausedC.hash;
+          const held = heldA.hash === heldB.hash && heldB.hash === heldC.hash;
           const moving = playingA.hash !== playingB.hash;
-          const pass = moving && frozen;
+          const notBlank = heldA.bytes > 1000;
+          const pass = moving && held && notBlank;
           return {
             pass,
-            detail: !moving ? "clip did not move while playing" : !frozen ? "clip changed while paused" : undefined,
-            metrics: { label, box, moving, frozen, playingBytes: playingA.bytes, pausedBytes: pausedA.bytes },
+            detail: !moving ? "clip did not move while playing" : !held ? "clip changed under reduced motion" : !notBlank ? "held frame is blank" : undefined,
+            metrics: { box, moving, held, notBlank, playingBytes: playingA.bytes, heldBytes: heldA.bytes },
           };
         },
         { browser, base },

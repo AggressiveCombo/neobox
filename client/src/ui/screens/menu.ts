@@ -1,7 +1,6 @@
 // Home: the first screen. The wordmark, the name field, the destinations as a drum (Quick play and
-// Browse rooms first, then every other place), and the recorded match clips playing inside a giant
-// turned square (the GL view is masked to the square). With no clip the square is a flat field with
-// the mark. Signed-in accounts play under their account name.
+// Browse rooms first, then every other place), and the recorded match clips playing in a panel (the GL view is masked to its
+// rounded corners). With no clip the panel is a flat field with the mark. Signed-in accounts play under their account name.
 
 import { lastAccountName, listMakers, refreshAccount } from "../../account";
 import { fetchStats } from "../../api";
@@ -20,6 +19,9 @@ import { REPO_URL } from "./about";
 import { type DrumItem, mountDrum } from "./menu-drum";
 
 const STATS_REFRESH_MS = 10_000;
+
+/** The view's mask while a clip plays: the card's rounded corners (menu.css .menu-square's radius). */
+const CARD_CLIP = "inset(0 round 18px)";
 
 /** The destinations, in drum order. The description is the hint shown while the option is centred. */
 const DESTINATIONS: { label: string; screen: Screen; icon: IconName; desc: string }[] = [
@@ -122,7 +124,6 @@ export const menuScreen: ScreenFactory = (ctx) => {
   const overlay = document.getElementById("overlay");
   let attempted = false;
   let nameTouched = false;
-  let liveClip = false;
   let shownAccount: Account | null | undefined;
   let statsDown = false;
 
@@ -308,11 +309,10 @@ export const menuScreen: ScreenFactory = (ctx) => {
     sync();
   }
 
-  // The clip card: the GL view behind the UI shows only inside it while a clip plays. Its shape is the arena's (setCardAspect),
-  // and it turns by --menu-angle, as its view does (style.css).
+  // The clip card: the GL view behind the UI shows only inside it while a clip plays. Its shape is the arena's inside its
+  // boundary walls (setCardAspect). It is untilted; the view's mask gives it the card's rounded corners (CARD_CLIP).
   const square = h("div", { class: "menu-square", "aria-hidden": "true" }, h("span", { class: "mark" }));
-  const creditSlot = h("div", { class: "menu-credit" });
-  const art = h("div", { class: "menu-art" }, square, creditSlot);
+  const art = h("div", { class: "menu-art" }, square);
 
   /** The card takes the arena's shape, fitted in the art square: its longer side fills the square. */
   function setCardAspect(aspect: number): void {
@@ -320,36 +320,21 @@ export const menuScreen: ScreenFactory = (ctx) => {
     square.style.setProperty("--card-h", String(Math.min(1, 1 / aspect)));
   }
 
-  /**
-   * While a clip plays the view is the card itself (app.ts), so nothing is masked. Otherwise mask all of it: a frame left on
-   * the canvas (the clip that just ended, the match before) must not flash over the whole window. The caption hangs under the
-   * card's lowest corner, a gap below it, so it never covers the arena.
-   */
-  function fitView(): void {
-    setMask(liveClip ? "" : "inset(50%)");
-    const angle = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--menu-angle")) || 0;
-    const rad = (angle * Math.PI) / 180;
-    const drop = (square.offsetWidth / 2) * Math.abs(Math.sin(rad)) + (square.offsetHeight / 2) * Math.abs(Math.cos(rad));
-    creditSlot.style.top = `${art.offsetHeight / 2 + drop + 8}px`;
-  }
-
   function setMask(clipPath: string): void {
     if (glHost) glHost.style.clipPath = clipPath;
     if (overlay) overlay.style.clipPath = clipPath;
   }
 
-  const unmountClips = mountMenuClips(ctx, creditSlot, (state) => {
-    liveClip = state === "live";
+  // Whole view masked until a clip draws: a frame left on the canvas (the clip that just ended, the match before) must not
+  // flash over the window.
+  setMask("inset(50%)");
+  const unmountClips = mountMenuClips(ctx, square, (state) => {
     square.classList.toggle("is-live", state === "live");
     square.classList.toggle("is-idle", state === "idle");
     if (state === "idle") setCardAspect(1);
-    fitView();
+    setMask(state === "live" ? CARD_CLIP : "inset(50%)");
   }, setCardAspect);
-  const resizeObserver = new ResizeObserver(() => fitView());
-  resizeObserver.observe(square);
-  fitView();
-  window.addEventListener("resize", fitView);
-  window.addEventListener("scroll", fitView, { capture: true, passive: true });
+
 
   const form = h(
     "form",
@@ -478,9 +463,6 @@ export const menuScreen: ScreenFactory = (ctx) => {
       window.removeEventListener("offline", onConnection);
       unsubPrefs();
       document.removeEventListener("fullscreenchange", syncFullscreen);
-      window.removeEventListener("resize", fitView);
-      window.removeEventListener("scroll", fitView, { capture: true });
-      resizeObserver.disconnect();
       unmountClips();
       setMask("");
       drum.destroy();

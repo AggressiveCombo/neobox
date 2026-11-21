@@ -154,7 +154,6 @@ const TOKENS = () => {
     if (c.contains("room-profile-link")) return "name"; // a player's name as a button: body text, no padding
     if (c.contains("big")) return c.contains("primary") ? "hero" : "big"; // 64px action at --step-lead; hero is the filled one
     if (c.contains("icon")) return "icon"; // square glyph button with an aria-label, no text
-    if (c.contains("menu-clip-pause")) return "clip"; // 28 px icon button on the menu's clip backdrop: no padding, its own ink
     if (c.contains("seg-option")) return "seg"; // option of a segmented control, --control high
     if (c.contains("tab")) return "tab"; // tab of a tablist, --control high, underlined when selected
     if (c.contains("ink")) return "ink"; // solid ink fill
@@ -308,14 +307,11 @@ async function idleFrames(page) {
   return frames;
 }
 
-/** The first gesture on a page unlocks audio (sound files load, the menu music starts), so a neutral key press does that before the scan reads a control. The menu's recorded clip moves in bursts no idle window can mask, so it is paused here (not counted, not clicked again): what moves on a frozen screen is the control's effect. */
+/** The first gesture on a page unlocks audio (sound files load, the menu music starts), so a neutral key press does that before the scan reads a control. The menu's recorded clip moves in bursts no idle window can mask, so reduced motion holds it on one frame here: what moves on a frozen screen is the control's effect. */
 async function warmUp(h) {
   await h.page.keyboard.press("ScrollLock");
   await requestsQuiet(h);
-  const pause = h.page.getByRole("button", { name: "Pause clip" });
-  // The clip bar shows once its list loads: a screen without one waits out the timeout and skips the pause.
-  // A modal over the bar (menu-news) leaves it unclickable; the warm-up goes on without pausing.
-  await pause.first().waitFor({ state: "visible", timeout: 3000 }).then(() => pause.first().click({ timeout: 3000 }).catch(() => undefined), () => undefined);
+  await h.page.emulateMedia({ reducedMotion: "reduce" });
   await requestsQuiet(h);
 }
 /** Waits until no request has left the page for 800 ms (or 6 s at most). */

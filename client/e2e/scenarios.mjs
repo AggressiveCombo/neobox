@@ -651,7 +651,7 @@ async function clips(s) {
   const viewer = await s.open("clip-viewer", { name: uniqueName("cv") });
   await viewer.page.goto(s.base);
   await menuName(viewer.page).waitFor();
-  await viewer.page.locator(".menu-clip-credit").filter({ hasText: /recorded by/ }).waitFor({ timeout: 20_000 });
+  await viewer.page.locator(".menu-square.is-live").waitFor({ timeout: 20_000 });
   await waitForPixels(viewer, "menu clip canvas");
   return "clip recorded and played behind the menu";
 }

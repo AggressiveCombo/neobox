@@ -608,8 +608,8 @@ async function editorActions(s, base, { cpu }) {
 /**
  * Drum roll (drum.roll): the home drum rolls five options down and five back from the keyboard, each step settled
  * before the next, at 4x CPU. Two traces: the whole frame's main-thread time with the menu clip playing behind the
- * drum (drumLive4xP95), and the same roll with the clip paused on its frame, which leaves the drum's own work and the
- * style and layout it causes (drumOwn4xP95). The pause is the clip's own button; the clip is not paused for the first trace.
+ * drum (drumLive4xP95), and the same roll with the clip held on one still frame by reduced motion (drumOwn4xP95), which
+ * leaves the drum's own work and the style and layout it causes. The hold is emulated for the second trace only.
  */
 async function drumRollCase(s, base) {
   const { page } = await s.open("drum");
@@ -618,7 +618,7 @@ async function drumRollCase(s, base) {
   const cdp = await cdpOf(page);
   const drum = page.getByRole("listbox", { name: "Destinations", exact: true });
   await drum.waitFor();
-  await page.locator(".menu-clip-bar:not([hidden])").waitFor();
+  await page.locator(".menu-square.is-live").waitFor();
   await drum.focus();
   const roll = async (key) => {
     for (let i = 0; i < 5; i++) {
@@ -635,7 +635,7 @@ async function drumRollCase(s, base) {
   let own;
   try {
     live = await traceFrames(page, cdp, rollBoth);
-    await page.locator(".menu-clip-pause").click();
+    await page.emulateMedia({ reducedMotion: "reduce" });
     await drum.focus();
     own = await traceFrames(page, cdp, rollBoth);
   } finally {

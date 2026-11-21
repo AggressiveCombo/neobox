@@ -15,7 +15,6 @@
 @import "./ui/postgame.css";
 @import "./ui/jukebox.css";
 @import "./ui/screens/training.css";
-@import "./ui/menu-clips.css";
 
 /* ------------------------------------------------------------------ type */
 
@@ -267,37 +266,6 @@ a:hover {
 #overlay {
   z-index: 1;
   pointer-events: none;
-}
-
-/* The menu card's clip view turns with the card (menu.css, --menu-angle); reduced motion stands the card upright. */
-:root {
-  --menu-angle: -18deg;
-}
-
-:root[data-motion="reduce"] {
-  --menu-angle: 0deg;
-}
-
-#gl-host.is-backdrop,
-#overlay.is-backdrop {
-  transform: rotate(var(--menu-angle));
-}
-
-#gl-host.is-backdrop {
-  box-shadow: none;
-}
-
-/* The rotated backdrop surfaces rasterise 1-2 device px past their boxes (a white hairline shows outside the card's edge, most on Firefox and WebKit): inset both 2 css px, so the card's own edge is the only one drawn. */
-#gl-host.is-backdrop canvas {
-  width: calc(100% - 4px);
-  height: calc(100% - 4px);
-  margin: 2px;
-}
-
-#overlay.is-backdrop {
-  width: calc(var(--view-w) - 4px);
-  height: calc(var(--view-h) - 4px);
-  margin: 2px;
 }
 
 /* Buttons respond at once and keep pinch zoom (WCAG 1.4.4); the game surfaces above stay touch-action: none. */

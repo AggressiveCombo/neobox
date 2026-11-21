@@ -273,9 +273,8 @@ async function menuButtons(s) {
   check(await exit.count() === 1, "the browser refused the Fullscreen request (menu toast shown); the label stayed Fullscreen");
   await page.waitForFunction(() => document.fullscreenElement !== null);
 
-  await page.getByText(/recorded by neobox/).first().waitFor();
-  check(await page.getByText("Simple Arena 1", { exact: false }).first().isVisible(), "clip name missing from the menu credit");
-  return "news dot and modal, mute toggle, fullscreen, clip credit";
+  await page.locator(".menu-square.is-live").first().waitFor();
+  return "news dot and modal, mute toggle, fullscreen, live clip";
 }
 
 async function menuClipsFailure(s) {
@@ -284,10 +283,8 @@ async function menuClipsFailure(s) {
   await page.route("**/api/clips**", (route) => route.fulfill({ status: 500, contentType: "application/json", body: '{"error":"boom"}' }));
   await Promise.all([page.waitForResponse((r) => r.url().includes("/api/clips")), goMenu(page, s.base)]);
   await sleep(300);
-  const credit = page.getByText(/recorded by neobox/);
-  check((await credit.count()) === 0 || !(await credit.first().isVisible()), "clip credit visible after a clip failure");
-  check(!(await page.getByText("Simple Arena 1", { exact: false }).count()), "clip fallback text appeared");
-  return "clip routes at 500: credit hidden, no fallback text";
+  check((await page.locator(".menu-square.is-live").count()) === 0, "clip live after a clip failure");
+  return "clip routes at 500: clip not live";
 }
 
 // ---------------------------------------------------------------------------------------------------------------------

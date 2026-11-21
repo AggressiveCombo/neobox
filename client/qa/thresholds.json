@@ -52,8 +52,6 @@
   "overlay.backdrop.page.px": { "max": 0, "runner": true },
   "overlay.backdrop.edge.px": { "max": 0, "runner": true },
   "overlay.backdrop.void.px": { "max": 2, "runner": true },
-  "overlay.backdrop.control.count": { "max": 0, "runner": true },
-  "overlay.backdrop.caption.pct": { "max": 20, "runner": true },
   "overlay.backdrop.players.out.count": { "max": 0, "runner": true },
   "overlay.backdrop.frame.count": { "max": 0, "runner": true },
   "overlay.backdrop.arena.out.count": { "max": 0, "runner": true },
