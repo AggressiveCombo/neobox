@@ -73,6 +73,25 @@
   padding: 16px var(--margin) calc(16px + env(safe-area-inset-bottom));
 }
 
+/* Wide windows: transport, step and speed share one row, so the dock takes one control's height from the arena's band. */
+@media (min-width: 1200px) {
+  .replay-dock {
+    flex-direction: row;
+    align-items: center;
+    width: min(100%, 1200px);
+    padding-block: 10px calc(10px + env(safe-area-inset-bottom));
+  }
+
+  .replay-transport {
+    flex: 1;
+  }
+
+  .replay-controls {
+    flex: none;
+    flex-wrap: nowrap;
+  }
+}
+
 .replay-transport {
   display: flex;
   align-items: center;
@@ -102,9 +121,25 @@
   font-variant-numeric: tabular-nums;
 }
 
-/* The Scores and More toggles exist on phones only (the phone block at the end of this file). */
+/* The scoreboard folds behind the bar's Scores on every screen: a shown board bounds the arena's band (app.ts gameView), so
+   open by default it shrank the replay to a third of a desktop window. More (step and speed) folds on phones only (the
+   phone block at the end of this file shows its toggle). */
 .replay-view .replay-panel-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.replay-view .replay-more {
   display: none;
+}
+
+.replay-view .replay-board {
+  display: none;
+}
+
+.replay-view.scores-open .replay-board {
+  display: block;
 }
 
 .replay-controls {
@@ -350,22 +385,12 @@
   }
 }
 
-/* Phones (touch, and a side of 600 px or less): the scoreboard and the step and speed controls fold behind the bar's
-   Scores and the dock's More, so the arena takes the middle of the screen. The dock is one row: play (icon; its label
-   stays for screen readers), seek, and the time stacked as position over total. */
+/* Phones (touch, and a side of 600 px or less): the step and speed controls also fold, behind the dock's More, so the
+   arena takes the middle of the screen. The dock is one row: play (icon; its label stays for screen readers), seek, and
+   the time stacked as position over total. */
 @media (pointer: coarse) and (max-width: 600px), (pointer: coarse) and (max-height: 600px) {
-  .replay-view .replay-panel-toggle {
+  .replay-view .replay-more {
     display: inline-flex;
-    align-items: center;
-    gap: 6px;
-  }
-
-  .replay-view .replay-board {
-    display: none;
-  }
-
-  .replay-view.scores-open .replay-board {
-    display: block;
   }
 
   .replay-view .replay-controls {

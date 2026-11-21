@@ -188,7 +188,7 @@ export const replayScreen: ScreenFactory = (ctx) => {
     syncControls();
   }
 
-  /** Phones fold the scoreboard and the step and speed controls behind the bar's Scores and the dock's More. The arena's band is refitted to what is open. */
+  /** The scoreboard folds behind the bar's Scores (every screen) and, on phones, the step and speed controls behind the dock's More. The arena's band is refitted to what is open. */
   function togglePanel(panel: "scores" | "more", btn: HTMLElement): void {
     const open = !root.classList.contains(`${panel}-open`);
     root.classList.toggle(`${panel}-open`, open);
@@ -368,7 +368,7 @@ export const replayScreen: ScreenFactory = (ctx) => {
     );
   }
 
-  /** The playback view. The bar holds Close, the title, the Scores toggle and the follow selector; the dock is one transport row (play, seek, time, More), and More opens the step and speed controls. Phones fold the scoreboard and those controls; desktop shows both. */
+  /** The playback view. The bar holds Close, the title, the Scores toggle and the follow selector; the dock is one transport row (play, seek, time, More), and More opens the step and speed controls. The scoreboard starts folded on every screen; phones also fold the step and speed controls. */
   function showPlaying(): void {
     if (!info) return;
     const loaded = info;
