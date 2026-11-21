@@ -338,7 +338,8 @@ export const libraryScreen: ScreenFactory = (ctx) => {
   function recordsSection(id: number): HTMLElement {
     const text = h("p", { class: "status", role: "status", "aria-live": "polite" }, "Fetching…");
     const body = h("div");
-    const section = h("section", { class: "map-records" }, h("h3", null, icon("trophy", 20), "Fastest Times"), text, body);
+    // It scrolls sideways when the table is wider (large text, phones): focusable and named, so the keyboard can scroll it.
+    const section = h("section", { class: "map-records", tabindex: "0", "aria-label": "Fastest Times" }, h("h3", null, icon("trophy", 20), "Fastest Times"), text, body);
     listRecords(id).then(
       (rows) => {
         if (!section.isConnected) return;
