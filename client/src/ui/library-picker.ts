@@ -37,7 +37,7 @@ export function openLibraryPicker(ctx: AppCtx, onPick: (map: PickedMap) => void)
     maxlength: 50,
     oninput: onSearch,
   });
-  const toolbar = h("div", { class: "library-search" }, searchInput);
+  const toolbar = h("div", { class: "library-search" }, icon("search", 18), searchInput);
   const grid = h("ul", { class: "map-grid", "aria-label": "maps" });
   const moreBtn = h(
     "button",
@@ -50,7 +50,7 @@ export function openLibraryPicker(ctx: AppCtx, onPick: (map: PickedMap) => void)
         void load(true);
       },
     },
-    icon("chevron-down", 16),
+    icon("chevron-down", 18),
     "More maps",
   );
 

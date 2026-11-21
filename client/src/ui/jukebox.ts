@@ -210,12 +210,12 @@ export function mountJukebox(ctx: AppCtx): void {
   const hostRow = h(
     "div",
     { class: "jukebox-host" },
-    h("div", { class: "jukebox-add" }, urlInput, h("button", { type: "button", onclick: playLink }, icon("play"), "Play")),
+    h("div", { class: "jukebox-add" }, urlInput, h("button", { type: "button", onclick: playLink }, icon("play", 18), "Play")),
     h(
       "div",
       { class: "jukebox-transport" },
       toggleBtn,
-      h("button", { type: "button", onclick: () => ctx.send({ t: "jukebox", action: "stop" }) }, icon("square"), "Stop"),
+      h("button", { type: "button", onclick: () => ctx.send({ t: "jukebox", action: "stop" }) }, icon("square", 18), "Stop"),
     ),
   );
   const volume = h("input", {
@@ -242,11 +242,11 @@ export function mountJukebox(ctx: AppCtx): void {
     panel.hidden = jb === null;
     if (jb === null) return;
     title.textContent = jb.title;
-    stateChip.textContent = unavailable ? "Unavailable" : jb.playing ? "Playing" : "Paused";
+    stateChip.replaceChildren(icon(unavailable ? "triangle-alert" : jb.playing ? "play" : "pause", 14), unavailable ? "Unavailable" : jb.playing ? "Playing" : "Paused");
     stateChip.className = jb.playing && !unavailable ? "chip ink" : "chip";
     playerMount.hidden = unavailable;
     note.hidden = !unavailable;
-    toggleBtn.replaceChildren(icon(jb.playing ? "pause" : "play"), jb.playing ? "Pause" : "Resume");
+    toggleBtn.replaceChildren(icon(jb.playing ? "pause" : "play", 18), jb.playing ? "Pause" : "Resume");
     hostRow.hidden = !isHost(state);
   }
 

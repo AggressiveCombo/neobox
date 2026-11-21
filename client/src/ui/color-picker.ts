@@ -85,7 +85,7 @@ export function openColorPicker(initial: number, onSave: (color: number) => void
     });
   }
 
-  const cancelBtn = h("button", { type: "button", onclick: () => close() }, "Cancel");
+  const cancelBtn = h("button", { type: "button", onclick: () => close() }, icon("x", 18), "Cancel");
   const saveBtn = h(
     "button",
     {
@@ -96,6 +96,7 @@ export function openColorPicker(initial: number, onSave: (color: number) => void
         close();
       },
     },
+    icon("save", 18),
     "Save colour",
   );
 

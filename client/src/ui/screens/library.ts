@@ -151,6 +151,7 @@ export const libraryScreen: ScreenFactory = (ctx) => {
         void load(true);
       },
     },
+    icon("chevron-down", 18),
     "More maps",
   );
 
@@ -223,7 +224,7 @@ export const libraryScreen: ScreenFactory = (ctx) => {
     try {
       const got = await listMakers();
       makersList.replaceChildren(
-        ...got.map((m) => h("li", null, h("span", { class: "maker-name" }, m.name), h("span", { class: "maker-score num" }, String(m.score)))),
+        ...got.map((m) => h("li", null, h("span", { class: "maker-name" }, icon("circle-user", 16), m.name), h("span", { class: "maker-score num" }, String(m.score)))),
       );
       makersStatus.textContent = got.length === 0 ? "Nobody has earned votes or plays this week yet." : "";
     } catch (err) {
@@ -282,7 +283,7 @@ export const libraryScreen: ScreenFactory = (ctx) => {
     else grid.replaceChildren(...els);
     status.textContent = "";
     const empty = maps.length === 0;
-    emptyBox.replaceChildren(...(empty ? [h("p", null, emptyText())] : []));
+    emptyBox.replaceChildren(...(empty ? [icon(tab === "browse" && q !== "" ? "search-x" : "inbox", 40), h("p", null, emptyText())] : []));
     emptyBox.hidden = !empty;
     moreBtn.hidden = !more;
   }
@@ -337,7 +338,7 @@ export const libraryScreen: ScreenFactory = (ctx) => {
   function recordsSection(id: number): HTMLElement {
     const text = h("p", { class: "status", role: "status", "aria-live": "polite" }, "Fetching…");
     const body = h("div");
-    const section = h("section", { class: "map-records" }, h("h3", null, icon("trophy", 18), "Fastest Times"), text, body);
+    const section = h("section", { class: "map-records" }, h("h3", null, icon("trophy", 20), "Fastest Times"), text, body);
     listRecords(id).then(
       (rows) => {
         if (!section.isConnected) return;
@@ -419,7 +420,7 @@ export const libraryScreen: ScreenFactory = (ctx) => {
       h("p", { class: "map-byline" }, `by ${map.author}`, map.pick ? h("span", { class: "chip" }, icon("award", 14), "Staff pick") : null),
       ...(own ? [h("p", { class: "map-state" }, mapState(map))] : []),
       h("p", { class: "map-desc" }, map.description !== "" ? map.description : "No description."),
-      h("p", { class: "map-stats num" }, `${plural(map.votes, "vote")} · ${plural(map.plays, "play")}`),
+      h("p", { class: "map-stats num" }, icon("thumbs-up", 14), plural(map.votes, "vote"), " · ", icon("play", 14), plural(map.plays, "play")),
       h(
         "div",
         { class: "map-actions" },
@@ -542,7 +543,7 @@ export const libraryScreen: ScreenFactory = (ctx) => {
     const details = h("textarea", { rows: 3, maxlength: 300, autocomplete: "off", spellcheck: "false" });
     const formError = h("p", { class: "field-error", role: "alert" });
     const send = h("button", { type: "submit", class: "primary", form: formId }, icon("send", 18), "Send report");
-    const cancel = h("button", { type: "button", onclick: () => modal?.close() }, "Cancel");
+    const cancel = h("button", { type: "button", onclick: () => modal?.close() }, icon("x", 18), "Cancel");
     const form = h(
       "form",
       {
@@ -608,7 +609,7 @@ export const libraryScreen: ScreenFactory = (ctx) => {
     const previewBox = h("div", { class: "map-preview", hidden: true }, previewCanvas);
     const formError = h("p", { class: "field-error", role: "alert" });
     const submit = h("button", { type: "submit", class: "primary", form: formId }, icon("upload", 18), "Upload map");
-    const cancel = h("button", { type: "button", onclick: () => modal?.close() }, "Cancel");
+    const cancel = h("button", { type: "button", onclick: () => modal?.close() }, icon("x", 18), "Cancel");
 
     function onCodeInput(): void {
       clearTimeout(previewTimer);

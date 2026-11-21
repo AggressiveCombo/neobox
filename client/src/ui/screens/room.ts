@@ -206,7 +206,7 @@ function chatLine(line: ChatLine, myId: number | null, text: string, onPlay: ((v
           "div",
           { class: "room-chat-suggest" },
           h("span", null, `suggests ${suggest.title}`),
-          onPlay ? h("button", { type: "button", class: "room-btn quiet", onclick: () => onPlay(suggest.video) }, "Play on jukebox") : null,
+          onPlay ? h("button", { type: "button", class: "room-btn quiet", onclick: () => onPlay(suggest.video) }, icon("play", 16), "Play on jukebox") : null,
         )
       : null,
   );
@@ -358,9 +358,9 @@ export const roomScreen: ScreenFactory = (ctx: AppCtx) => {
   function friendChip(name: string): HTMLElement | null {
     const rel = relations.get(name.toLowerCase());
     if (rel === "incoming") {
-      return h("span", { class: "chip room-friend-request", title: "sent you a friend request", "aria-label": `${name} sent you a friend request` }, "Request");
+      return h("span", { class: "chip room-friend-request", title: "sent you a friend request", "aria-label": `${name} sent you a friend request` }, icon("user-plus", 14), "Request");
     }
-    return rel === "friend" ? h("span", { class: "chip", title: "friend" }, "Friend") : null;
+    return rel === "friend" ? h("span", { class: "chip", title: "friend" }, icon("users", 14), "Friend") : null;
   }
 
   /** Friend actions for a roster row's menu, shaped by the relation with the viewer. */
@@ -393,8 +393,8 @@ export const roomScreen: ScreenFactory = (ctx: AppCtx) => {
     const formId = uid("report");
     const details = h("textarea", { rows: 3, maxlength: 300, autocomplete: "off", spellcheck: "false" });
     const formError = h("p", { class: "field-error", role: "alert" });
-    const send = h("button", { type: "submit", class: "primary", form: formId }, "Send report");
-    const cancel = h("button", { type: "button", onclick: () => modal?.close() }, "Cancel");
+    const send = h("button", { type: "submit", class: "primary", form: formId }, icon("send", 18), "Send report");
+    const cancel = h("button", { type: "button", onclick: () => modal?.close() }, icon("x", 18), "Cancel");
     const form = h(
       "form",
       {
@@ -810,7 +810,7 @@ export const roomScreen: ScreenFactory = (ctx: AppCtx) => {
       icon("link", 16),
       "Copy this link",
     );
-    const done = h("button", { type: "button", class: "quiet", onclick: () => close() }, "Close");
+    const done = h("button", { type: "button", class: "quiet", onclick: () => close() }, icon("x", 18), "Close");
     const { close } = openModal({
       title: "Copy the invite link",
       body: [h("p", null, "This connection is not secure, so the browser cannot copy for you. Select the link and copy it."), box],
@@ -908,10 +908,12 @@ export const roomScreen: ScreenFactory = (ctx: AppCtx) => {
     const menu = h(
       "div",
       { class: "room-vote-menu", role: "menu" },
-      [
-        ["Vote Up", "/upvote"],
-        ["Vote Down", "/downvote"],
-      ].map(([label, text]) =>
+      (
+        [
+          ["Vote Up", "/upvote", "thumbs-up"],
+          ["Vote Down", "/downvote", "thumbs-down"],
+        ] as const
+      ).map(([label, text, name]) =>
         h(
           "button",
           {
@@ -923,6 +925,7 @@ export const roomScreen: ScreenFactory = (ctx: AppCtx) => {
               closeVoteMenu();
             },
           },
+          icon(name, 16),
           label,
         ),
       ),
@@ -1169,7 +1172,7 @@ export const roomScreen: ScreenFactory = (ctx: AppCtx) => {
     { class: "room-joining", role: "status", "aria-live": "polite" },
     h("span", { class: "room-joining-dot", "aria-hidden": "true" }),
     joiningText,
-    h("button", { type: "button", onclick: () => ctx.cancelJoin() }, "Cancel"),
+    h("button", { type: "button", onclick: () => ctx.cancelJoin() }, icon("x", 18), "Cancel"),
   );
   const startButton = h("button", { type: "button", class: "room-btn primary", onclick: () => void start() }, icon("play", 16), "Start");
   const dockStatus = h("p", { class: "room-dock-status", role: "status" });
@@ -1296,7 +1299,7 @@ export const roomScreen: ScreenFactory = (ctx: AppCtx) => {
   const chatPanel = h(
     "section",
     { class: "room-panel room-chat" },
-    h("h2", { class: "room-panel-title" }, "Chat"),
+    h("h2", { class: "room-panel-title" }, icon("message-square", 20), "Chat"),
     chatLog,
     h(
       "div",
@@ -1527,7 +1530,7 @@ export const roomScreen: ScreenFactory = (ctx: AppCtx) => {
   function startNoticeNodes(host: boolean): Node[] {
     return [
       h("span", null, "Match starting"),
-      ...(host ? [h("button", { type: "button", class: "room-btn room-btn-small", "data-focus-key": "abort", onclick: abortStart }, "Abort start")] : []),
+      ...(host ? [h("button", { type: "button", class: "room-btn room-btn-small", "data-focus-key": "abort", onclick: abortStart }, icon("x", 16), "Abort start")] : []),
     ];
   }
 
