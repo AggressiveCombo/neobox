@@ -693,13 +693,16 @@ function bannerText(scene: Scene, names: ReadonlyMap<number, string>): Banner | 
   const matchOver = scene.gameOver >= 0;
   if (!matchOver && scene.roundOver < 0) return null;
   const sub = matchOver ? null : "New round incoming…";
+  // The original's round-end texts: a team round with no team to score reads "New round incoming" (-1) or "Draw" (-2);
+  // a non-team round with nobody left reads "New round incoming..." (-1) or "Draw!" (-2). Neither has a second line.
   if (isTeamMode(scene.mode)) {
     if (scene.objectiveTeam === TEAM_RED) return { title: matchOver ? "Red team wins the match" : "Red team scores", sub };
     if (scene.objectiveTeam === TEAM_BLUE) return { title: matchOver ? "Blue team wins the match" : "Blue team scores", sub };
-    return { title: "Draw!", sub };
+    if (matchOver) return { title: "Draw!", sub: null };
+    return { title: scene.objectiveTeam === -1 ? "New round incoming" : "Draw", sub: null };
   }
-  if (scene.winner === -1) return { title: "Draw!", sub };
-  if (scene.winner < 0) return { title: matchOver ? "Match over" : "Round over", sub };
+  if (scene.winner === -1) return { title: matchOver ? "Draw!" : "New round incoming...", sub: null };
+  if (scene.winner < 0) return { title: matchOver ? "Match over" : "Draw!", sub: null };
   const name = nameOf(names, scene.winner);
   return { title: matchOver ? `${name} wins the match` : `${name} wins the round`, sub };
 }
