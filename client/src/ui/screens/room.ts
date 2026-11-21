@@ -663,33 +663,44 @@ export const roomScreen: ScreenFactory = (ctx: AppCtx) => {
     ];
   }
 
-  /** Host-only room controls: team lock, end the running match, and the ban list. */
+  /** Host-only room controls: team lock and ending the running match. */
   function buildManage(): Node[] {
     const room = st.room;
     if (room === null || !isHost()) return [];
     return [
       h(
         "div",
-        { class: "actions" },
+        { class: "room-control" },
         h("button", { type: "button", class: "room-btn", "data-focus-key": "lock", disabled: st.reconnecting, onclick: () => setLock(!room.locked) }, icon(room.locked ? "lock-open" : "lock", 16), room.locked ? "Unlock teams" : "Lock teams"),
-        h("button", { type: "button", class: "room-btn danger", disabled: !room.in_match, onclick: endMatch }, icon("x", 16), "End match"),
+        h("p", { class: "room-muted" }, room.locked ? "Players cannot change team." : "Players can change team."),
       ),
-      h("p", { class: "room-muted" }, room.locked ? "Players cannot change team." : "Players can change team."),
-      h("h3", { class: "room-subtitle" }, "Bans"),
-      room.bans.length === 0
-        ? h("p", { class: "room-muted" }, "No one is banned.")
-        : h(
-            "ul",
-            { class: "room-bans" },
-            room.bans.map((name) =>
-              h(
-                "li",
-                { class: "room-ban" },
-                h("span", { class: "room-player-name" }, name),
-                h("button", { type: "button", class: "room-btn", onclick: () => unban(name) }, "Unban"),
-              ),
-            ),
+      h(
+        "div",
+        { class: "room-danger" },
+        h("button", { type: "button", class: "room-btn danger", disabled: !room.in_match, onclick: endMatch }, icon("x", 16), "End match"),
+        h("p", { class: "room-muted" }, room.in_match ? "Stops the match for everyone." : "No match is running."),
+      ),
+    ];
+  }
+
+  /** Host-only ban list; each banned player can be unbanned. */
+  function buildBans(): Node[] {
+    const room = st.room;
+    if (room === null || !isHost()) return [];
+    if (room.bans.length === 0) return [h("p", { class: "room-muted" }, "No one is banned.")];
+    return [
+      h(
+        "ul",
+        { class: "room-bans" },
+        room.bans.map((name) =>
+          h(
+            "li",
+            { class: "room-ban" },
+            h("span", { class: "room-player-name" }, name),
+            h("button", { type: "button", class: "room-btn", onclick: () => unban(name) }, "Unban"),
           ),
+        ),
+      ),
     ];
   }
 
@@ -1247,6 +1258,10 @@ export const roomScreen: ScreenFactory = (ctx: AppCtx) => {
   const renderManage = keyed(manageBody, buildManage);
   const managePanel = h("section", { class: "room-panel room-manage" }, h("h2", { class: "room-panel-title" }, "Manage"), manageBody);
 
+  const bansBody = h("div", { class: "room-bans-body" });
+  const renderBans = keyed(bansBody, buildBans);
+  const bansPanel = h("section", { class: "room-panel room-bans-panel" }, h("h2", { class: "room-panel-title" }, "Bans"), bansBody);
+
   const settingsBody = h("div", { class: "room-settings-body" });
   let settingsOpen = false;
   const renderSettings = keyed(settingsBody, buildSettings);
@@ -1295,7 +1310,7 @@ export const roomScreen: ScreenFactory = (ctx: AppCtx) => {
     "div",
     { class: "room-main" },
     h("div", { class: "room-col room-col-roster" }, playersPanel),
-    h("div", { class: "room-col room-col-match" }, modePanel, mapPanel, managePanel, settingsPanel),
+    h("div", { class: "room-col room-col-match" }, modePanel, mapPanel, managePanel, bansPanel, settingsPanel),
     h("div", { class: "room-col room-col-chat" }, chatPanel),
   );
   // The tabs, header, notice and sections scroll together; the tabs come first so the phone's sticky switch is always in view (320x256 zoomed: the header above it hid them under the dock) and DOM order matches the layout. The dock sits outside the scroller so it never covers content.
@@ -1491,7 +1506,9 @@ export const roomScreen: ScreenFactory = (ctx: AppCtx) => {
     mapName.textContent = room.map_name;
     renderMapInfo(JSON.stringify([room.map, host, st.account !== null, room.map === null ? null : ageText(room.map.created)]));
     managePanel.hidden = !host;
-    renderManage(JSON.stringify([host, room.locked, room.in_match, room.bans, st.reconnecting]));
+    renderManage(JSON.stringify([host, room.locked, room.in_match, st.reconnecting]));
+    bansPanel.hidden = !host;
+    renderBans(JSON.stringify([host, room.bans]));
     // a picker's list is built when it opens; while open it follows builtins, the current map and the mode
     if (closeMapPicker !== null) refreshMapList();
     if (closeModePicker !== null) refreshModeList();
