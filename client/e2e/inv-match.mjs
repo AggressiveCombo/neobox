@@ -1,7 +1,7 @@
 // Inventory rows for the match HUD, its menu, chat, input, offline, phone and editor screens. Each scenario names
 // the rows it proves in `inv`; every check asserts a row's "shows" column, with role/name locators where they exist.
 
-import { builtinMaps, button, createRoom, dismissPhoneSplash, joinByInvite, matchWithGuest, menuName, navTo, playFromMenu, probeChanges, roomTitle, signedIn, sleep, startMatch, uniqueName, waitForPixels, waitQuiet, waitStable } from "./lib.mjs";
+import { builtinMaps, button, createRoom, dismissPhoneSplash, dismissRotateGate, joinByInvite, matchWithGuest, menuName, navTo, playFromMenu, probeChanges, roomTitle, signedIn, sleep, startMatch, uniqueName, waitForPixels, waitQuiet, waitStable } from "./lib.mjs";
 import { mkdtempSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -690,21 +690,32 @@ async function matchBoot(s) {
   return "boot card (status, Loading neobox) shown on load, hidden once the menu is up";
 }
 
-/** phone-splash-play and phone-splash-dismiss: a touch-only first visit shows the Welcome sheet; Play closes it and it stays gone after a reload. */
+/** phone-splash-play and phone-splash-dismiss: a touch-only first visit shows no Welcome on the menu; the first match shows it, Play closes it, and it stays gone in a later match. */
 async function matchPhoneSplash(s) {
   const h = await s.open("splash", { phone: true });
   const { page } = h;
   await page.goto(s.base);
+  await menuName(page).waitFor();
+  check((await page.getByRole("dialog", { name: "Welcome", exact: true }).count()) === 0, "the menu shows the Welcome sheet");
+  await playFromMenu(page, null, { quick: true });
+  await page.locator(".quick-choose").first().click();
+  await page.locator(".hud-leave").waitFor({ state: "attached", timeout: 30_000 });
+  await dismissRotateGate(page);
   const welcome = page.getByRole("dialog", { name: "Welcome", exact: true });
   await welcome.waitFor({ state: "visible" });
   await welcome.getByRole("button", { name: "Play", exact: true }).click();
   await welcome.waitFor({ state: "detached" });
+  await page.locator(".hud-leave").click();
+  await page.locator(".hud-leave").waitFor({ state: "hidden" });
+  await page.goto(s.base);
   await menuName(page).waitFor();
-  await page.reload();
-  await menuName(page).waitFor();
+  await playFromMenu(page, null, { quick: true });
+  await page.locator(".quick-choose").first().click();
+  await page.locator(".hud-leave").waitFor({ state: "attached", timeout: 30_000 });
+  await dismissRotateGate(page);
   await sleep(800);
-  check((await welcome.count()) === 0, "the Welcome sheet came back after a reload");
-  return "Welcome sheet: Play closes it to the menu; it stays gone after reload";
+  check((await welcome.count()) === 0, "the Welcome sheet came back in a later match");
+  return "Welcome sheet: first match shows it, Play closes it, a later match has none";
 }
 
 /** practice-setup and practice-play: the setup lists the built-in maps with Start; a map plays, Leave returns to setup, Back to the menu. */

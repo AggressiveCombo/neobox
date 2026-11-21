@@ -113,7 +113,8 @@ async function quickPage(s) {
   }
   check((await page.locator(".quick-card h2").allTextContents()).join("|") === "Sweaty Bois|Team Madness", "quick play cards are not Sweaty Bois and Team Madness");
   const playSweaty = quickCard(page, "Sweaty Bois").getByRole("button", { name: "Play Sweaty Bois", exact: true });
-  check(await playSweaty.isDisabled(), "Play is enabled before a guest name is typed");
+  check((await quickName(page).inputValue()).trim() !== "", "quick name is not prefilled with the menu's suggested name");
+  check(!(await playSweaty.isDisabled()), "Play is disabled although the quick name is prefilled");
   await quickName(page).fill(uniqueName("quick"));
   await playSweaty.waitFor({ state: "visible" });
 
