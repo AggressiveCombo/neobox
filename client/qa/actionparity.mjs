@@ -10,12 +10,15 @@
 // - stamina-bar: the local player's stamina is a bar on a black track on the overlay canvas, one CSS px tall (devicePixelRatio
 //   device rows) and the label's width, directly above the name label (overlay.ts drawStamina). Checked at DPR1 and DPR3: the
 //   rows just above the label hold only green or black, and no other row does. A bar under the body fails it.
+// - bat-charge: the body keeps its playerRgb colour while the bat swings (the original draws no bat lift). Its exact-colour
+//   pixel count in screenshots before and after holding C must not fall; a lifted body colour fails it.
 //
 // Usage:  cd client && QA_OUT=<dir> node qa/actionparity.mjs --dist <dist>
 // Output: <QA_OUT>/actionparity.json; exit code 1 on FAIL. Needs a build with the __qaEngine and __qaPlayerRgb hooks.
 
 import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
+import { PNG } from "pngjs";
 import { launchEngine, startServer, startPractice, runCleanups, sleep, outDir } from "./lib-qa.mjs";
 
 // packRgba (geometry.ts) packs r, g, b into the low 24 bits and alpha into the top byte.
@@ -46,7 +49,7 @@ const frameOf = (pg) => pg.evaluate(() => {
   const np = u[3], rec = u[4];
   for (let i = 0; i < np; i++) {
     const b = rec + i * 14;
-    players.push({ id: u[b], team: u[b + 4], x: f[b + 1], rocket: f[b + 10] });
+    players.push({ id: u[b], team: u[b + 4], x: f[b + 1], rocket: f[b + 10], flags: u[b + 6] });
   }
   return { colours, players };
 });
@@ -75,6 +78,38 @@ const rocketGrew = idle && held ? grownColours(idle, held) : [];
 const rocketAdded = rocketGrew.filter((row) => !LAUNCHER_RGB.has(Number(row.rgb)));
 const charging = !!held && held.players.some((p) => p.rocket > 0);
 const rocketPass = idle !== null && held !== null && charging && rocketAdded.length === 0;
+
+// Pixels in a PNG screenshot whose RGB is exactly rgb (the living body is drawn by geometry.ts, outside the wasm vertex buffer).
+function pixelsOf(buf, rgb) {
+  const { data } = PNG.sync.read(buf);
+  const r = (rgb >> 16) & 0xff, g = (rgb >> 8) & 0xff, b = rgb & 0xff;
+  let n = 0;
+  for (let i = 0; i < data.length; i += 4) if (data[i] === r && data[i + 1] === g && data[i + 2] === b) n++;
+  return n;
+}
+
+// --- bat-charge: the body keeps its colour while the bat swings (the original draws no bat lift) ---
+await sleep(3000); // let the rocket check settle
+const batIdle = await frame();
+const batIdleShot = await page.screenshot();
+const batMe = batIdle?.players[0] ?? null;
+const batRgb = batMe ? await page.evaluate(([team, id]) => globalThis.__qaPlayerRgb?.(team, id) ?? null, [batMe.team, batMe.id]) : null;
+await page.keyboard.down("c");
+let batHeld = null;
+let batHeldShot = null;
+for (let i = 0; i < 10 && batHeld === null; i++) {
+  await sleep(100);
+  const f = await frame();
+  if ((f?.players[0]?.flags & 16) !== 0) {
+    batHeld = f;
+    batHeldShot = await page.screenshot();
+  }
+}
+await page.keyboard.up("c");
+const batting = batHeld !== null;
+const batBody = { idle: batRgb === null ? 0 : pixelsOf(batIdleShot, batRgb), held: batRgb === null || batHeldShot === null ? 0 : pixelsOf(batHeldShot, batRgb) };
+for (const [name, shot] of [["bat-idle", batIdleShot], ["bat-held", batHeldShot]]) if (shot) writeFileSync(path.join(outDir(), "evidence", `${name}.png`), shot);
+const batPass = batting && batBody.idle > 0 && batBody.held >= batBody.idle;
 
 // --- stamina-bar: one CSS px tall and the label's width, on the rows just above the local label; nothing else there ---
 // Probes the overlay pixels above the local label of page pg.
@@ -156,7 +191,7 @@ const corpse = {
   debrisColours: corpseGrew.sort((a, b) => b.added - a.added).slice(0, 8),
 };
 
-const pass = rocketPass && staminaPass && corpsePass && errors.length === 0;
+const pass = rocketPass && batPass && staminaPass && corpsePass && errors.length === 0;
 const result = {
   pass,
   actions: {
@@ -167,6 +202,7 @@ const result = {
       addedNonLauncher: rocketAdded,
       grew: rocketGrew.sort((a, b) => b.added - a.added).slice(0, 12),
     },
+    "bat-charge": { pass: batPass, batting, flags: batHeld?.players[0]?.flags ?? null, body: batBody, rgb: batRgb === null ? null : `0x${batRgb.toString(16).padStart(6, "0")}` },
     "corpse-colour": corpse,
     "stamina-bar": { pass: staminaPass, dpr1: stamina1.probe, dpr3: stamina3.probe },
   },
@@ -176,6 +212,7 @@ mkdirSync(outDir(), { recursive: true });
 writeFileSync(path.join(outDir(), "actionparity.json"), JSON.stringify(result, null, 2));
 console.log(`${rocketPass ? "PASS" : "FAIL"} rocket-charge ${JSON.stringify(rocketAdded)}${idle && held ? "" : " (no __qaEngine: build lacks the hook)"}`);
 console.log(`${corpsePass ? "PASS" : "FAIL"} corpse-colour expected ${corpse.expected} debris ${JSON.stringify(corpse.debrisColours.slice(0, 3))}${dead ? "" : " (player did not fall)"}`);
+console.log(`${batPass ? "PASS" : "FAIL"} bat-charge body ${JSON.stringify(batBody)} rgb ${batRgb === null ? "none" : batRgb.toString(16)}${batting ? "" : " (bat did not swing)"}`);
 console.log(`${staminaPass ? "PASS" : "FAIL"} stamina-bar dpr1 ${JSON.stringify(stamina1.probe?.rows.filter((r) => r.green || r.black || r.other))} dpr3 ${JSON.stringify(stamina3.probe?.rows.filter((r) => r.green || r.black || r.other))} label top ${stamina1.probe?.yBase ?? "none"}`);
 await srv.stop();
 await runCleanups();

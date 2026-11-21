@@ -4,7 +4,7 @@
 // shrink, so steady-state frames allocate nothing here.
 
 import type { PlayerRec, Scene } from "../frame";
-import { FLAG_AIR_JUMP, FLAG_BAT, FLAG_DASH, FLAG_FROZEN, FLAG_GHOST, FLAG_LOCAL, FLAG_TELEPORT } from "../frame";
+import { FLAG_AIR_JUMP, FLAG_DASH, FLAG_FROZEN, FLAG_GHOST, FLAG_LOCAL, FLAG_TELEPORT } from "../frame";
 import { backdropBounds, findLocal, type Bounds } from "../camera";
 import { TEAM_BLUE, TEAM_FFA, TEAM_RED, TEAM_SPECTATOR } from "../protocol";
 import { prefs, type Palette } from "../prefs";
@@ -157,7 +157,6 @@ function bodyRgb(flags: number, rgb: number): number {
   let c = rgb;
   if ((flags & FLAG_FROZEN) !== 0) c = mixRgb(c, ICE_RGB, FROZEN_MIX);
   let lift = 0;
-  if ((flags & FLAG_BAT) !== 0) lift += 0.15;
   if ((flags & FLAG_DASH) !== 0) lift += 0.3;
   return mixRgb(c, WHITE_RGB, Math.min(lift, 0.5));
 }
