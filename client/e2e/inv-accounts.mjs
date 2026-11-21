@@ -204,10 +204,14 @@ async function accountSecurity(s) {
   await page.getByRole("button", { name: /^Account, Level \d+$/ }).click();
   const security = page.locator("summary", { hasText: "Security" });
   await security.waitFor();
-  // closed panel: the Change password button is not on screen until the panel opens
-  check(!(await page.getByRole("button", { name: "Change password", exact: true }).isVisible()), "closed Security panel shows its body");
-  await security.click();
+  // Security starts open (it is a column of the signed-in page); its summary closes and reopens it
   const changeBtn = page.getByRole("button", { name: "Change password", exact: true });
+  await changeBtn.waitFor();
+  check(await changeBtn.isVisible(), "open Security panel does not show its body");
+  await security.click();
+  await changeBtn.waitFor({ state: "hidden" });
+  check(!(await changeBtn.isVisible()), "closed Security panel shows its body");
+  await security.click();
   await changeBtn.waitFor();
   check(await changeBtn.isVisible(), "Change password is not visible after the panel opens");
 

@@ -21,13 +21,16 @@ export function showProfile(_ctx: AppCtx, name: string): void {
   modal.dialog.classList.add("profile-dialog");
 }
 
-/** The profile card for `name`, loading itself: safe to embed in any screen. */
-export function profileSummary(name: string): HTMLElement {
+/** The profile card for `name`, loading itself: safe to embed in any screen. `loaded` gets the profile once it has arrived. */
+export function profileSummary(name: string, loaded?: (p: PlayerProfile) => void): HTMLElement {
   const root = h("div", { class: "profile enter" });
   const load = (): void => {
     root.replaceChildren(status("Loading profile…"));
     getPlayer(name).then(
-      (p) => root.replaceChildren(card(p)),
+      (p) => {
+        root.replaceChildren(card(p));
+        loaded?.(p);
+      },
       (err: unknown) => root.replaceChildren(failure(name, err, load)),
     );
   };
@@ -76,7 +79,6 @@ function card(p: PlayerProfile): HTMLElement {
   requestAnimationFrame(() => requestAnimationFrame(() => (fill.style.width = `${(100 * into) / (to - from)}%`)));
 
   const s = p.stats;
-  const joined = new Date(p.joined);
 
   return h(
     "div",
@@ -107,7 +109,7 @@ function card(p: PlayerProfile): HTMLElement {
     h(
       "ul",
       { class: "profile-facts" },
-      h("li", {}, icon("calendar", 16), `Joined ${joined.toLocaleDateString(undefined, { year: "numeric", month: "long", day: "numeric" })}`),
+      h("li", {}, icon("calendar", 16), `Joined ${joinedDate(p.joined)}`),
       h("li", {}, icon("map", 16), plural(p.published, "map published", "maps published")),
       h("li", {}, icon("crown", 16), plural(p.records, "fastest time", "fastest times")),
       h("li", {}, icon("users", 16), plural(p.friends, "friend", "friends")),
@@ -170,6 +172,11 @@ function playTime(seconds: number): string {
   return `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
 }
 
-function plural(n: number, one: string, many: string): string {
+export function plural(n: number, one: string, many: string): string {
   return `${n.toLocaleString()} ${n === 1 ? one : many}`;
+}
+
+/** A join date, written out in the viewer's locale. */
+export function joinedDate(iso: string): string {
+  return new Date(iso).toLocaleDateString(undefined, { year: "numeric", month: "long", day: "numeric" });
 }

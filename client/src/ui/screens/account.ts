@@ -1,7 +1,6 @@
 // Account screen: signed out, one form signs in or creates an account. Signed in, the
-// profile (level and XP) leads, with sign out beside it and the password and delete
-// actions behind a Security disclosure. Signing in or out re-opens the live connection
-// so the server knows the identity.
+// profile (level and XP) leads, with Security (password, delete), friends and sign out beside it.
+// Signing in or out re-opens the live connection so the server knows the identity.
 
 import { applyAccount, changePassword, deleteAccount, errorText, login, register, returnScreen, signOutAccount } from "../../account";
 import type { AppCtx, ScreenFactory } from "../../ctx";
@@ -11,7 +10,7 @@ import { type Account, type AppState } from "../../state";
 import { h, type Child } from "../dom";
 import { icon } from "../icons";
 import { field, page, pageHead, setFieldError, toggle } from "../kit";
-import { profileSummary } from "../profile";
+import { joinedDate, plural, profileSummary } from "../profile";
 import { privacyLink } from "./privacy";
 
 const NAME_ERROR = "Names are 1 to 15 letters, numbers, spaces or _.";
@@ -237,7 +236,7 @@ export const accountScreen: ScreenFactory = (ctx) => {
 
     const security = h(
       "details",
-      { class: "panel account-security" },
+      { class: "panel account-security", open: true },
       h("summary", null, icon("shield", 18), h("span", null, "Security"), icon("chevron-down", 18)),
       h(
         "div",
@@ -262,25 +261,49 @@ export const accountScreen: ScreenFactory = (ctx) => {
       ),
     );
 
+    const friendCount = h("p", { class: "account-count num" });
+    const joined = h("p", { class: "field-hint" });
+    const signOutBtn = h("button", { type: "button", class: "quiet", onclick: signOut }, icon("log-out", 18), "Sign out");
+
     return h(
       "div",
       { class: "account-member" },
-      h("h2", { class: "sr-only" }, "Profile"),
-      profileSummary(account.name),
       h(
-        "div",
-        { class: "account-side" },
-        h("h2", { class: "sr-only" }, "Security"),
-        security,
-        status,
+        "section",
+        { class: "panel account-profile" },
+        h("h2", { class: "sr-only" }, "Profile"),
+        profileSummary(account.name, (p) => {
+          friendCount.textContent = plural(p.friends, "friend", "friends");
+          joined.textContent = `Joined ${joinedDate(p.joined)}`;
+        }),
       ),
+      h("h2", { class: "sr-only" }, "Security"),
+      security,
+      h(
+        "section",
+        { class: "panel account-friends" },
+        h("h2", { class: "panel-title" }, icon("users", 20), "Friends"),
+        friendCount,
+        h(
+          "div",
+          { class: "actions" },
+          h("button", { type: "button", class: "quiet", onclick: () => store.set({ screen: "friends" }) }, icon("users", 18), "Open friends"),
+        ),
+      ),
+      h(
+        "section",
+        { class: "panel account-session" },
+        h("h2", { class: "panel-title" }, icon("user", 20), "Account"),
+        joined,
+        h("div", { class: "actions" }, signOutBtn),
+      ),
+      status,
     );
   }
 
   function render(state: AppState): void {
     shownId = state.account?.id ?? null;
     body.replaceChildren(state.account ? memberView(state.account) : guestView());
-    signOutBtn.hidden = state.account === null;
     say("");
   }
 
@@ -291,11 +314,9 @@ export const accountScreen: ScreenFactory = (ctx) => {
     }, "Signed out.");
   }
 
-  const signOutBtn = h("button", { type: "button", class: "quiet", hidden: true, onclick: signOut }, icon("log-out", 18), "Sign out");
-
   const el = page(
     "account-page",
-    pageHead({ title: "Account", back: () => store.set({ screen: returnScreen(store.state) }), actions: [signOutBtn] }),
+    pageHead({ title: "Account", back: () => store.set({ screen: returnScreen(store.state) }) }),
     body,
   );
 

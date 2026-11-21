@@ -13,7 +13,7 @@
   border: 0;
 }
 
-/* The header's Sign out is hidden for guests. */
+/* A hidden element stays hidden, whatever display the layout gives it. */
 .account-page [hidden] {
   display: none !important;
 }
@@ -95,18 +95,55 @@
   color: var(--accent);
 }
 
-/* Signed in: the profile card, with Security in the column beside it (one column on narrow screens). */
+/* Signed in: on desktop the profile, friends and account stack on the left and Security takes the right column. On a phone
+   the panels read in order, one column. */
 .account-member {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 340px);
-  gap: 32px;
+  gap: 16px 32px;
   align-items: start;
 }
 
-.account-side {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
+@media (min-width: 861px) {
+  .account-profile {
+    grid-column: 1;
+    grid-row: 1;
+  }
+
+  .account-friends {
+    grid-column: 1;
+    grid-row: 2;
+  }
+
+  .account-session {
+    grid-column: 1;
+    grid-row: 3;
+  }
+
+  .account-member > .account-security {
+    grid-column: 2;
+    grid-row: 1 / span 3;
+  }
+
+  .account-member > .status {
+    grid-column: 1;
+    grid-row: 4;
+  }
+}
+
+/* The friends figure under its heading: body size, like the level figure. */
+.account-count {
+  margin: 0;
+  font-size: var(--step-body);
+  font-weight: 600;
+  line-height: 1.3;
+}
+
+/* No top maps yet: the empty line sits flush left with the rest of the profile panel, not centred. */
+.account-profile .profile-maps .empty:has(> svg.icon) {
+  align-items: flex-start;
+  padding: 8px 0;
+  text-align: left;
 }
 
 .account-subform > h3 {
