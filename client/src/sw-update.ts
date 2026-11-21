@@ -1,5 +1,5 @@
-// Service worker updates. The browser checks /sw.js on load and whenever the tab regains focus;
-// updateViaCache "none" keeps that check off the HTTP cache. A new worker takes over at once
+// Service worker updates. The page asks the browser for /sw.js on load, on focus, when the tab shows again and every
+// minute; updateViaCache "none" keeps that check off the HTTP cache. A new worker takes over at once
 // (install skips waiting, activate claims the page). A page on an older build learns of it from the new worker's
 // controllerchange, or from the server's refusal (app.ts, "outdated"): both call newVersionOut, which shows a prompt
 // and reloads once the player is idle on the menu. Nothing reloads a match, room, editor or replay. A page loaded less
@@ -12,6 +12,8 @@ import type { AppState, Store } from "./state";
 const NEW_VERSION_TEXT = "A new version of neobox is out. Reload to play.";
 /** How long the menu must stay idle before the automatic reload, so the prompt can be read. */
 const RELOAD_DELAY_MS = 2500;
+/** How often an open page asks the browser for a new /sw.js: a deploy reaches a tab left open on the menu. */
+const UPDATE_CHECK_MS = 60_000;
 /** A page this young does not reload itself (see the header). */
 const LOOP_GUARD_MS = 30_000;
 
@@ -43,6 +45,8 @@ export function watchServiceWorker(store: Store<AppState>): void {
         document.addEventListener("visibilitychange", () => {
           if (document.visibilityState === "visible") void check();
         });
+        window.addEventListener("focus", () => void check());
+        window.setInterval(() => void check(), UPDATE_CHECK_MS);
       })
       .catch((err: unknown) => {
         if (!pageLeaving()) console.warn("service worker:", err);
