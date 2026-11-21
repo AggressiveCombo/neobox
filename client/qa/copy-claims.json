@@ -908,6 +908,56 @@
       }
     },
     {
+      "id": "app-you-ended",
+      "text": "You ended the match. No experience was awarded.",
+      "basis": "code",
+      "source": { "file": "client/src/app.ts" },
+      "truth": {
+        "check": "The host who sent the end-match command is told it was them; the same host-ended path awards no XP (outcome other than MatchOver).",
+        "value": true,
+        "evidence": [
+          { "file": "client/src/app.ts", "contains": "toast(iEnded ? \"You ended the match. No experience was awarded.\"" },
+          { "file": "crates/server/src/room.rs", "contains": "self.end_match(\"ended by the host\");" },
+          { "file": "crates/server/src/room.rs", "contains": "if outcome == Outcome::MatchOver {" }
+        ]
+      }
+    },
+    {
+      "id": "room-no-match-running",
+      "text": "No match is running.",
+      "basis": "code",
+      "source": { "file": "client/src/ui/screens/room.ts" },
+      "truth": {
+        "check": "Shown under End match only while the room reports no match (room.in_match false).",
+        "value": true,
+        "evidence": [{ "file": "client/src/ui/screens/room.ts", "contains": "room.in_match ? \"Stops the match for everyone.\" : \"No match is running.\"" }]
+      }
+    },
+    {
+      "id": "settings-egg-delay-1",
+      "text": "Egg delay 1",
+      "basis": "design",
+      "design": "A setting's name, not a claim: the first of the egg's two delay settings (key egDelay1), numbered as in the room settings list.",
+      "source": { "file": "client/src/settings.ts" },
+      "truth": {
+        "check": "The entry names the egDelay1 setting.",
+        "value": true,
+        "evidence": [{ "file": "client/src/settings.ts", "contains": "{ label: \"egDelay1\", name: \"Egg delay 1\"" }]
+      }
+    },
+    {
+      "id": "settings-egg-delay-2",
+      "text": "Egg delay 2",
+      "basis": "design",
+      "design": "A setting's name, not a claim: the second of the egg's two delay settings (key egDelay2).",
+      "source": { "file": "client/src/settings.ts" },
+      "truth": {
+        "check": "The entry names the egDelay2 setting.",
+        "value": true,
+        "evidence": [{ "file": "client/src/settings.ts", "contains": "{ label: \"egDelay2\", name: \"Egg delay 2\"" }]
+      }
+    },
+    {
       "id": "app-admin-ended",
       "text": "An administrator ended the match. No experience was awarded.",
       "basis": "code",
