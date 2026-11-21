@@ -358,7 +358,8 @@ function markdownFor(sum) {
 export function writeIndex() {
   const dir = outDir();
   const files = readdirSync(dir).filter((f) => f.endsWith(".json") && f !== "summary.json");
-  const runs = files.map((f) => JSON.parse(readFileSync(path.join(dir, f), "utf8")));
+  // Run records have a cases array; other JSON in the output directory (server bench files) is not a run.
+  const runs = files.map((f) => JSON.parse(readFileSync(path.join(dir, f), "utf8"))).filter((run) => Array.isArray(run.cases));
   const rows = [];
   let fails = 0;
   let navErrors = 0;
