@@ -465,7 +465,7 @@ export const editorScreen: ScreenFactory = (ctx) => {
     try {
       const maps = await ctx.maps();
       builtinList.replaceChildren(
-        ...maps.map((m) => h("button", { type: "button", class: "editor-item", onclick: () => void openCode(m.code, m.name) }, icon("map", 18), m.name)),
+        ...maps.map((m) => h("button", { type: "button", class: "editor-item list-row", onclick: () => void openCode(m.code, m.name) }, icon("map", 18), m.name)),
       );
     } catch (err) {
       builtinList.replaceChildren(h("p", { class: "editor-status error" }, errorText(err)));
@@ -484,7 +484,7 @@ export const editorScreen: ScreenFactory = (ctx) => {
     if (result.status === "rejected") return [h("p", { class: "editor-status error" }, errorText(result.reason))];
     if (result.value.length === 0) return [h("p", { class: "editor-status" }, empty)];
     return result.value.map((m) =>
-      h("button", { type: "button", class: "editor-item", onclick: () => openLibraryMap(m, owned) }, icon("map", 18), `${m.name} · ${VISIBILITY_LABELS[m.visibility]}`),
+      h("button", { type: "button", class: "editor-item list-row", onclick: () => openLibraryMap(m, owned) }, icon("map", 18), `${m.name} · ${VISIBILITY_LABELS[m.visibility]}`),
     );
   }
 

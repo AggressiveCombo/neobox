@@ -212,7 +212,7 @@ export const practiceScreen: ScreenFactory = (ctx) => {
           "button",
           {
             type: "button",
-            class: "offline-choice",
+            class: "offline-choice list-row",
             "aria-pressed": String(selected),
             onclick: () => {
               choice = { name: m.name, code: m.code };
