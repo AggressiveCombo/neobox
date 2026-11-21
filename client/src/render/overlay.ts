@@ -1,5 +1,5 @@
-// Canvas2D overlay above the renderer canvas: player names (with the FFA leader's crown
-// and the local stamina bar), intro countdown, round/match banners, the local player's
+// Canvas2D overlay above the renderer canvas: player names (with the local
+// stamina bar), intro countdown, round/match banners, the local player's
 // kill line, the kill feed and the objective bar. Drawn in CSS pixels; resize() takes
 // device pixels.
 
@@ -25,7 +25,6 @@ const FEED_FONT = "600 12px system-ui, sans-serif";
 const OUTLINE = "rgba(0, 0, 0, 0.7)";
 const PANEL = "rgba(0, 0, 0, 0.5)";
 const TEXT = "#ffffff";
-const CROWN_FILL = "#ffd24a";
 /** Stamina bar above the local name: the original's green fill on a black track, one CSS px tall like the label's fixed-size text. */
 const STAMINA_FILL = "#34ba56";
 const STAMINA_TRACK = "#000000";
@@ -90,8 +89,6 @@ function markerFill(flags: number): string {
   return (flags & FLAG_AIR_JUMP) !== 0 ? MARKER_READY_FILL : MARKER_SPENT_FILL;
 }
 const MARKER_OUTLINE = "#000222";
-/** The strip above a label that the leader's crown (drawCrown, 9 px above its anchor) occupies. */
-const CROWN_RISE = 16;
 /** A name label for this frame: anchor (box bottom-centre, CSS px) and its draw data. */
 interface NameLabel {
   player: Scene["players"][number];
@@ -303,7 +300,6 @@ export class Overlay {
     const ctx = this.ctx;
     const [sx, sy, ox, oy] = worldXf(cam);
     const pxPerUnit = cssW / cam.w;
-    const leader = leaderId(scene);
     const followed = findLocal(scene);
     const dpr = window.devicePixelRatio || 1;
     // Device px, so the box, bar and marker edges sit on the pixel grid.
@@ -334,12 +330,10 @@ export class Overlay {
     // The marker stands above the box (the bar is on its top row): a label's extent includes the marker.
     const hasBar = (l: NameLabel): boolean => l.local && scene.maxStamina > 0;
     const extent = (l: NameLabel): Box => {
-      const crown = !l.local && l.player.id === leader ? CROWN_RISE : 0;
       const above = l.marked ? MARKER_GAP + MARKER_HEIGHT * l.unit : 0;
-      return { left: l.x - l.w / 2, right: l.x + l.w / 2, top: l.y - NAME_BOX_H - crown - above, bottom: l.y };
+      return { left: l.x - l.w / 2, right: l.x + l.w / 2, top: l.y - NAME_BOX_H - above, bottom: l.y };
     };
     // The local player's label keeps its place and is drawn last, on top. Others stack upward off it and off each other.
-    // The leader's crown sits above its label, so its box includes that strip; no label is stacked over a crown.
     const placed: Box[] = [];
     const drawn: DrawRect[] = [];
     for (const l of [...labels].sort((a, b) => Number(b.local) - Number(a.local))) {
@@ -370,7 +364,6 @@ export class Overlay {
       // The text is centred on the box and blitted at device px so the copy is 1:1.
       const s = this.labelSprite(l.font, l.name, dpr);
       ctx.drawImage(s.canvas, snap(l.x - s.ax), snap((top + bottom) / 2 - s.ay), s.w, s.h);
-      if (l.player.id === leader && !l.local) this.drawCrown(l.x, top - 6);
       // The local player's status: the stamina bar, one CSS px tall, on the box's top row at the box width.
       if (hasBar(l)) this.drawStamina(l.player.stamina / scene.maxStamina, left, right - left, top);
       if (l.marked) {
@@ -465,25 +458,6 @@ export class Overlay {
   /** QA hook (like __qaCam): this frame's name labels and the followed player's marker, in window CSS px, with their z order. */
   private publishDraw(tick: number, rects: DrawRect[]): void {
     Object.assign(globalThis, { __qaDraw: { tick, rects } });
-  }
-
-  /** Small crown centred on (x, y), for the FFA leader. */
-  private drawCrown(x: number, y: number): void {
-    const ctx = this.ctx;
-    ctx.beginPath();
-    ctx.moveTo(x - 6, y + 4);
-    ctx.lineTo(x - 7, y - 4);
-    ctx.lineTo(x - 3, y);
-    ctx.lineTo(x, y - 5);
-    ctx.lineTo(x + 3, y);
-    ctx.lineTo(x + 7, y - 4);
-    ctx.lineTo(x + 6, y + 4);
-    ctx.closePath();
-    ctx.fillStyle = CROWN_FILL;
-    ctx.strokeStyle = OUTLINE;
-    ctx.lineWidth = 1.5;
-    ctx.fill();
-    ctx.stroke();
   }
 
   /**
@@ -775,27 +749,4 @@ function objectiveProgress(scene: Scene): number | null {
       return null;
   }
   return Math.min(1, Math.max(0, value / scene.objectiveLimit));
-}
-
-/**
- * FFA leader: the unique top scorer above zero (lives, wins or kills by mode); null on a tie,
- * at zero, or in team modes. Spectators are never leaders.
- */
-function leaderId(scene: Scene): number | null {
-  if (isTeamMode(scene.mode)) return null;
-  let id: number | null = null;
-  let top = 0;
-  let ties = 0;
-  for (const r of scene.scores) {
-    if (r.team === TEAM_SPECTATOR) continue;
-    const v = scene.mode === 1 ? r.lives : scene.mode === 2 ? r.wins : r.kills;
-    if (v > top) {
-      top = v;
-      id = r.id;
-      ties = 1;
-    } else if (v === top && v > 0) {
-      ties++;
-    }
-  }
-  return ties === 1 ? id : null;
 }
