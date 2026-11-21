@@ -1240,7 +1240,7 @@ dialog.modal::backdrop {
 dialog.modal[open] {
   display: flex;
   flex-direction: column;
-  animation: appear 220ms var(--ease);
+  animation: appear 180ms var(--ease);
 }
 
 /* Already closed (the page is live again): drawn in place, with its scrim as a spread shadow, while it fades. */
@@ -1259,7 +1259,7 @@ dialog.modal.is-closing {
 }
 
 dialog.modal[open]::backdrop {
-  animation: fade-in 220ms var(--ease);
+  animation: fade-in 180ms var(--ease);
 }
 
 @keyframes modal-out {
