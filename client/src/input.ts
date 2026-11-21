@@ -192,7 +192,8 @@ export class Input {
   private repressDue = false;
   /** This readiness already re-pressed; reset when the air jump is spent. */
   private repressed = false;
-  private repressFrames = 0;
+  /** Sim tick through which touch Jump stays lifted for a re-press (see `mask`). */
+  private repressUntil = -1;
   /** Physical keys currently down (bound or not), so bits stay right after a rebind. */
   private held = new Set<string>();
   private codeBits = buildCodeBits(prefs.value.keys);
@@ -284,14 +285,13 @@ export class Input {
     const due = this.repressDue;
     this.repressDue = false;
     const touch = this.stick.get() | this.buttons.get();
-    if ((touch & BIT.UP) === 0) this.repressFrames = 0;
+    if ((touch & BIT.UP) === 0) this.repressUntil = -1;
     else if (due && !this.repressed) {
       this.repressed = true;
-      this.repressFrames = PAD_REPRESS_FRAMES;
+      this.repressUntil = this.lastTick + REPRESS_TICKS;
     }
     // Only the touch Jump lifts: a held keyboard or gamepad Jump keeps its own press.
-    const lifting = this.repressFrames > 0;
-    if (lifting) this.repressFrames--;
+    const lifting = this.lastTick < this.repressUntil;
     return this.keys | readPad() | (lifting ? touch & ~BIT.UP : touch);
   }
 
@@ -331,6 +331,6 @@ const PAD_BUTTONS: [number, number][] = [
   [4, BIT.GRAB],
 ];
 const STICK_DEAD = 0.5;
+/** Sim ticks touch Jump stays lifted for a re-press. Two, so the sim sees at least one tick with Jump up at any frame rate. */
+const REPRESS_TICKS = 2;
 
-/** Render frames Jump stays lifted for a touch re-press. `mask` runs once per frame, so a lift of one frame could fall between two simulation ticks and be lost. */
-const PAD_REPRESS_FRAMES = 3;
