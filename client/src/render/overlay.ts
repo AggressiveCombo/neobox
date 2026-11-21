@@ -1,4 +1,4 @@
-// Canvas2D overlay above the renderer canvas: player names (with the local
+// Canvas2D overlay above the renderer canvas: player names (each with its
 // stamina bar), intro countdown, round/match banners, the local player's
 // kill line, the kill feed and the objective bar. Drawn in CSS pixels; resize() takes
 // device pixels.
@@ -38,7 +38,7 @@ const FEED_FONT = "600 12px system-ui, sans-serif";
 const OUTLINE = "rgba(0, 0, 0, 0.7)";
 const PANEL = "rgba(0, 0, 0, 0.5)";
 const TEXT = "#ffffff";
-/** Stamina bar above the local name: the original's green fill on a black track, one CSS px tall like the label's fixed-size text. */
+/** Stamina bar on every name label: the original's green fill on a black track, one CSS px tall like the label's fixed-size text. */
 const STAMINA_FILL = "#34ba56";
 const STAMINA_TRACK = "#000000";
 const STAMINA_H = 1; // CSS px
@@ -344,7 +344,8 @@ export class Overlay {
       });
     }
     // The marker stands above the box (the bar is on its top row): a label's extent includes the marker.
-    const hasBar = (l: NameLabel): boolean => l.local && scene.maxStamina > 0;
+    // Every player's label carries its stamina bar (E45: opponents' stamina was hidden), not only the local one.
+    const hasBar = (_l: NameLabel): boolean => scene.maxStamina > 0;
     const extent = (l: NameLabel): Box => {
       const above = l.marked ? MARKER_GAP + MARKER_HEIGHT * l.unit : 0;
       return { left: l.x - l.w / 2, right: l.x + l.w / 2, top: l.y - NAME_BOX_H - above, bottom: l.y };

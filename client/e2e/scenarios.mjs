@@ -643,6 +643,38 @@ async function trainingCamera(s) {
   return `view width ${min.toFixed(1)} held while the player walked right (x ${start.x.toFixed(1)} -> ${x.toFixed(1)})`;
 }
 
+/**
+ * E45: every player's name label carries its stamina bar, the opponent's included (only the local label had one). On the
+ * host's screen the guest's label (overlay.ts __qaDraw rect, id != the followed local id) must have the bar's green fill
+ * on its top row of the overlay canvas.
+ */
+async function opponentStamina(s) {
+  const { host } = await matchWithGuest(s, { clipboard: false });
+  const { page } = host;
+  await page.waitForFunction(() => (globalThis.__qaDraw?.rects ?? []).filter((r) => r.kind === "label").length === 2, null, { timeout: 20_000 });
+  // The bar's fill is #34ba56 (overlay.ts STAMINA_FILL) on the box's top CSS px row; read it from the overlay's device pixels.
+  const rows = await page.evaluate(() => {
+    const ov = document.getElementById("overlay");
+    const ctx = ov.getContext("2d");
+    const kx = ov.width / parseFloat(getComputedStyle(ov).width);
+    const local = globalThis.__qaCam?.follow ?? -1;
+    return globalThis.__qaDraw.rects
+      .filter((r) => r.kind === "label")
+      .map((r) => {
+        const x0 = Math.round(r.box.left * kx);
+        const w = Math.max(1, Math.round((r.box.right - r.box.left) * kx));
+        const { data } = ctx.getImageData(x0, Math.round(r.box.top * kx), w, 1);
+        let green = 0;
+        for (let i = 0; i < data.length; i += 4) if (Math.abs(data[i] - 0x34) < 8 && Math.abs(data[i + 1] - 0xba) < 8 && Math.abs(data[i + 2] - 0x56) < 8) green++;
+        return { id: r.id, local: r.id === local, green, width: w };
+      });
+  });
+  const other = rows.find((r) => !r.local);
+  check(other !== undefined, `no opponent label on the host's screen: ${JSON.stringify(rows)}`);
+  check(other.green > other.width / 2, `the opponent's label shows no stamina bar: ${JSON.stringify(rows)}`);
+  return `stamina bars: ${rows.map((r) => `${r.local ? "you" : "opponent"} ${r.green}/${r.width} px green`).join(", ")}`;
+}
+
 /** In-match menu (the original's): the lobby and the controls while the match runs, then back to the game. */
 async function matchMenu(s) {
   const { host } = await matchWithGuest(s, { clipboard: false });
@@ -1989,6 +2021,7 @@ export const scenarios = [
   { name: "lobby signals", run: lobbySignals },
   { name: "training", run: training },
   { name: "training camera", run: trainingCamera },
+  { name: "opponent stamina", run: opponentStamina },
   { name: "news", run: news },
   { name: "clips", run: clips },
   { name: "clips leave quietly", run: clipsLeaveQuietly },
