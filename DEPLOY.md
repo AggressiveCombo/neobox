@@ -199,6 +199,8 @@ Stopping ends running matches; players reconnect from the menu. Accounts,
 friends and the map library are kept (they live in `/var/lib/neobox`, which
 updates never touch).
 
+Each build writes its id to `build-id.txt` in the client files, and the server reads it from the same folder. A player still on the old build is refused at the next connect (`outdated`) and sees "A new version of neobox is out. Reload to play.": an open tab, or an installed copy, reloads itself once it is on the menu (a match or the editor is never interrupted). A match in progress ends when the server stops. So always copy `neobox-server` and `client/` from the same build, as above: a mismatched pair refuses every player.
+
 `/opt/neobox/maps/rotation/maps2.json` (the fixed quick-play rotation) is
 never overwritten, so your edits survive. When a release changes it, compare
 with `diff ~/neobox/dist-server/maps/rotation/maps2.json /opt/neobox/maps/rotation/maps2.json`

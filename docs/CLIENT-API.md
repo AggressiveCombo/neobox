@@ -31,6 +31,8 @@ Typical flow: connect → send `hello` → `welcome` → `list_rooms`/`rooms` �
 `match_start` (or `snapshot` when joining a running match) → binary frames
 both ways → `match_end` → back to lobby (`room`).
 
+`hello` carries `build`: the client's build id (the `build-id.txt` written next to its files; `null` in dev runs). A server with a build id (its static dir's `build-id.txt`) refuses a hello whose `build` is missing or differs: it sends `error` with code `outdated` (message "A new version of neobox is out. Reload to play.") and closes the socket with reason `outdated`. Every other message needs a hello first, so no game connection of another build gets in, and a client never shares a room with another build. A server without `build-id.txt` (dev runs, tests) checks nothing.
+
 ## WASM exports
 
 All pointers are offsets into the module's linear memory (`memory` export).

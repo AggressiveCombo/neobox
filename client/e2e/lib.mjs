@@ -293,8 +293,11 @@ function lanExe(exe) {
 
 const isLoopbackBind = (v) => v === undefined || v === "off" || /^(127\.|\[?::1\]?:|localhost:)/.test(v);
 
-/** Starts the built server (on `port`, or a free one) with a fresh database and `extraEnv` on top; stopped and cleaned at exit. */
-export async function startServer({ port: wantPort, extraEnv = {} } = {}) {
+/**
+ * Starts the built server (on `port`, or a free one) with a fresh database and `extraEnv` on top; stopped and cleaned at exit.
+ * `staticDir` serves another client build (default: the dist's own client), whose `build-id.txt` sets the server's build.
+ */
+export async function startServer({ port: wantPort, extraEnv = {}, staticDir = path.join(DIST_DIR, "client") } = {}) {
   const distExe = path.join(DIST_DIR, process.platform === "win32" ? "neobox-server.exe" : "neobox-server");
   if (!existsSync(distExe) || !existsSync(path.join(DIST_DIR, "client", "index.html"))) {
     throw new Error(`no server build in ${DIST_DIR}: run \`bash deploy/build.sh\` first (or set NEOBOX_DIST)`);
@@ -307,7 +310,7 @@ export async function startServer({ port: wantPort, extraEnv = {} } = {}) {
     NEOBOX_BIND: `127.0.0.1:${port}`,
     NEOBOX_RTC_BIND: "off",
     NEOBOX_DATA: path.join(dataDir, "neobox.db"),
-    NEOBOX_STATIC: path.join(DIST_DIR, "client"),
+    NEOBOX_STATIC: staticDir,
     NEOBOX_MAPS: path.join(DIST_DIR, "maps"),
     NEOBOX_ADMIN_PASSWORD: ADMIN_PASSWORD,
     NEOBOX_MAX_CONNS_PER_IP: "64",
