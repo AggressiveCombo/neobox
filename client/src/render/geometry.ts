@@ -313,9 +313,10 @@ export class Geometry {
     this.putTrail(p, now);
     // The trail took room from the up-front reservation: make sure this player's parts still fit.
     this.reserve(PLAYER_MAX_VERTICES);
+    this.putBody(p, rgb);
+    // The launcher and egg aim are drawn over the body, as the original's are (its bar crosses the body).
     this.putLauncher(p);
     this.putEgg(p);
-    this.putBody(p, rgb);
     if ((p.flags & FLAG_LOCAL) !== 0 && scene.intro > -1 && (scene.localKeys & HIGHLIGHT_KEYS) !== 0) this.putHighlight(p);
     if (p === followed) this.putMarker(p);
   }
