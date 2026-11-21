@@ -4,6 +4,7 @@
 // on-screen buttons and gamepads use the standard mapping below.
 
 import { ACTIONS, prefs, type Action, type KeyBindings } from "./prefs";
+import { armedAxis } from "./pad-axis";
 
 export const BIT = {
   LEFT: 1,
@@ -156,8 +157,8 @@ function readPad(): number {
   for (const pad of navigator.getGamepads()) {
     if (!pad) continue;
     for (const [button, bit] of PAD_BUTTONS) if (pad.buttons[button]?.pressed === true) m |= bit;
-    const x = pad.axes[0] ?? 0;
-    const y = pad.axes[1] ?? 0;
+    const x = armedAxis(pad, 0);
+    const y = armedAxis(pad, 1);
     if (x < -STICK_DEAD) m |= BIT.LEFT;
     if (x > STICK_DEAD) m |= BIT.RIGHT;
     if (y < -STICK_DEAD) m |= BIT.UP;

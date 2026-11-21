@@ -274,7 +274,7 @@ async function matchPad(s) {
     window.__e2ePad = pad;
     Object.defineProperty(navigator, "getGamepads", { value: () => [pad], configurable: true });
     // A browser fires gamepadconnected when a pad appears; the game polls only while one is connected.
-    window.dispatchEvent(new Event("gamepadconnected"));
+    window.dispatchEvent(Object.assign(new Event("gamepadconnected"), { gamepad: pad }));
   });
   const pressPad = (index, down) =>
     page.evaluate(([i, d]) => {
@@ -421,7 +421,7 @@ async function installPad(page) {
     };
     window.__e2ePad = pad;
     Object.defineProperty(navigator, "getGamepads", { value: () => [pad], configurable: true });
-    window.dispatchEvent(new Event("gamepadconnected"));
+    window.dispatchEvent(Object.assign(new Event("gamepadconnected"), { gamepad: pad }));
   });
 }
 
@@ -432,6 +432,55 @@ const pressPad = (page, index, down) =>
     },
     [index, down],
   );
+
+/**
+ * A pedal or wheel axis that reads -1 from the start (mapping ""): the engine gets no direction bits. Once the stick has
+ * been seen at rest, moving it to +1 sets RIGHT in the engine mask.
+ */
+async function matchPedalAxis(s) {
+  withMaskHook(s);
+  const { host } = await matchWithGuest(s, { clipboard: true });
+  const { page } = host;
+  await waitForPixels(host, "match canvas");
+  // Frames freeze during the start countdown (see roomMatch in scenarios.mjs); wait it out before pressing the pad.
+  await sleep(4000);
+  await page.evaluate(() => {
+    const pad = {
+      id: "qa-pedal (no mapping)",
+      index: 0,
+      connected: true,
+      mapping: "",
+      buttons: [],
+      axes: [0, -1, 0, 0],
+    };
+    window.__e2ePad = pad;
+    Object.defineProperty(navigator, "getGamepads", { value: () => [pad], configurable: true });
+    window.dispatchEvent(Object.assign(new Event("gamepadconnected"), { gamepad: pad }));
+  });
+  await waitQuiet(page);
+  await page.evaluate(() => {
+    window.__mask.seen = 0;
+  });
+  await sleep(1500);
+  const idle = await page.evaluate(() => window.__mask.seen);
+  check(idle === 0, `a pedal axis at -1 set engine mask bits ${idle}`);
+  await page.evaluate(() => {
+    window.__e2ePad.axes = [0, 0, 0, 0];
+  });
+  await sleep(200);
+  await waitQuiet(page);
+  await page.evaluate(() => {
+    window.__mask.seen = 0;
+    window.__e2ePad.axes = [1, 0, 0, 0];
+  });
+  await sleep(500);
+  await page.evaluate(() => {
+    window.__e2ePad.axes = [0, 0, 0, 0];
+  });
+  const moved = await page.evaluate(() => window.__mask.seen);
+  check((moved & 2) !== 0, `the stick moved right did not set the RIGHT bit (mask seen ${moved})`);
+  return "pedal axis at -1 from the start sets no engine direction bits; the stick, once at rest, sets RIGHT";
+}
 
 /** gamepad-push, -bat, -rocket, -grab: each standard-mapping button sets its action's mask bit in the engine (input.ts BIT). */
 async function matchPadActions(s) {
@@ -1078,6 +1127,7 @@ export const matchInvScenarios = [
   { name: "inv match spectate", inv: ["hud-spectate", "chat-spectate-step"], run: matchSpectate },
   { name: "inv match spectate join", inv: ["hud-spectate"], run: matchSpectateJoin },
   { name: "inv match gamepad actions", inv: ["gamepad-push", "gamepad-bat", "gamepad-rocket", "gamepad-grab"], run: matchPadActions },
+  { name: "match pedal axis", run: matchPedalAxis },
   { name: "inv match blur", inv: ["kb-blur-clear"], run: matchBlurClear },
   { name: "inv match record", inv: ["NEW-chat-record"], run: matchChatRecord },
   { name: "inv match rotate gate", inv: ["hud-rotate"], run: matchRotateGate },
