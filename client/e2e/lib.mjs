@@ -423,8 +423,10 @@ export class Scenario {
    * Service workers are blocked unless `serviceWorkers` is "allow": once the app's worker controls a page, Firefox and WebKit
    * send even the requests it passes through from the worker, where page and context routes cannot see them, so a scenario's
    * route would hold or miss by timing. The QA offline-load state allows it: it needs the worker to serve the app shell.
+   * `route: false` skips the catch-all route below: it breaks the service worker's update fetch of /sw.js, which the
+   * version-skew scenarios need (version.mjs).
    */
-  async open(label, { phone = false, viewport, name, clipboard = false, ip: forcedIp, serviceWorkers = "block" } = {}) {
+  async open(label, { phone = false, viewport, name, clipboard = false, ip: forcedIp, serviceWorkers = "block", route = true } = {}) {
     // `ip` is the client address the browser sends as X-Forwarded-For (picks its GeoIP location).
     const ip = forcedIp ?? nextClientIp();
     const context = await this.env.browser.newContext({
@@ -436,13 +438,15 @@ export class Scenario {
     });
     // The test-only X-Forwarded-For must not reach third-party origins: their CORS preflight rejects it, and the
     // embedded YouTube player then fails with an unhandled NetworkError (a pageerror). The server origin keeps it.
-    await context.route("**/*", (route) => {
-      const req = route.request();
-      if (new URL(req.url()).origin === new URL(this.base).origin) return route.fallback();
-      const h = { ...req.headers() };
-      delete h["x-forwarded-for"];
-      return route.continue({ headers: h });
-    });
+    if (route) {
+      await context.route("**/*", (r) => {
+        const req = r.request();
+        if (new URL(req.url()).origin === new URL(this.base).origin) return r.fallback();
+        const h = { ...req.headers() };
+        delete h["x-forwarded-for"];
+        return r.continue({ headers: h });
+      });
+    }
     // The jukebox loads YouTube's IFrame API. Its widget code posts messages from our page to a frame that is not
     // YouTube's, which the browser logs as console errors; only the API's UI-facing behavior matters to the suite,
     // so the API is served locally: a player that reports ready and ignores every call.

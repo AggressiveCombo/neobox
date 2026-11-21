@@ -7,7 +7,7 @@
 import { cpSync, existsSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { DIST_DIR, menuName, sleep, startServer, uniqueName } from "./lib.mjs";
+import { DIST_DIR, button, matchWithGuest, menuName, navTo, sleep, startServer, uniqueName } from "./lib.mjs";
 
 const check = (ok, message) => {
   if (!ok) throw new Error(message);
@@ -139,7 +139,7 @@ async function versionWire(s) {
  * shows, and the page reloads itself once idle on the menu, landing on the new client (no prompt after it).
  */
 async function versionReload(s) {
-  const { page } = await s.open("desktop");
+  const { page } = await s.open("desktop", { serviceWorkers: "allow", route: false });
   await page.goto(s.base);
   await menuName(page).waitFor();
   const reloaded = page.waitForEvent("load", { timeout: RELOAD_MS });
@@ -159,7 +159,79 @@ async function versionReload(s) {
   return "prompt shown, page reloaded to the new build on the menu";
 }
 
+/**
+ * A player in a match when the server deploys a new build: the match ends, the reconnect is refused, and the player
+ * lands on the menu under the prompt, where the page reloads itself onto the new build.
+ */
+async function versionMatch(s) {
+  const { host } = await matchWithGuest(s);
+  const { page } = host;
+  const reloaded = page.waitForEvent("load", { timeout: RELOAD_MS });
+  await deploy(s, deployCopy(distBuildId()));
+  const prompt = page.locator("#update-ready");
+  await prompt.waitFor({ state: "visible", timeout: RELOAD_MS }).catch(() => {
+    throw new Error("the player in the match was not told a new version is out (no prompt)");
+  });
+  const text = await prompt.textContent();
+  check(text?.includes(NEW_VERSION), `prompt text "${text}" (want "${NEW_VERSION}")`);
+  await reloaded.catch(() => {
+    throw new Error("the match player did not reload onto the new build");
+  });
+  await menuName(page).waitFor();
+  check((await page.locator(".hud-leave").count()) === 0, "the match is still on screen after the server restarted");
+  await sleep(3_000);
+  check((await page.locator("#update-ready").count()) === 0, "the page on the new build shows the prompt again");
+  return "match ended, prompt shown, page reloaded to the new build on the menu";
+}
+
+/**
+ * A player with unsaved work in the map editor when the server deploys a new build: the prompt shows, but the page
+ * stays in the editor, does not reload, and keeps the work. The reload waits for the menu.
+ */
+async function versionEditor(s) {
+  const { page } = await s.open("editor", { serviceWorkers: "allow", route: false });
+  await page.goto(s.base);
+  await menuName(page).waitFor();
+  await navTo(page, "Map editor");
+  const canvas = page.locator("canvas.editor-canvas");
+  await canvas.waitFor({ state: "visible" });
+  let box = await canvas.boundingBox();
+  for (let settled = 0; settled < 3; ) {
+    await sleep(100);
+    const next = await canvas.boundingBox();
+    settled = next && box && next.x === box.x && next.y === box.y && next.width === box.width && next.height === box.height ? settled + 1 : 0;
+    box = next;
+  }
+  check(box && box.width > 100 && box.height > 100, "editor canvas has no size");
+  const cx = box.x + box.width / 2;
+  const cy = box.y + box.height / 2;
+  await button(page, "Box").click();
+  await page.mouse.move(cx - 80, cy - 50);
+  await page.mouse.down();
+  await page.mouse.move(cx, cy, { steps: 8 });
+  await page.mouse.move(cx + 80, cy + 50, { steps: 8 });
+  await page.mouse.up();
+  check(await button(page, "Undo").isEnabled(), "box drawn does not enable Undo");
+  let reloads = 0;
+  page.on("load", () => reloads++);
+  await deploy(s, deployCopy(distBuildId()));
+  const prompt = page.locator("#update-ready");
+  await prompt.waitFor({ state: "visible", timeout: RELOAD_MS }).catch(() => {
+    throw new Error("the editor was not told a new version is out (no prompt)");
+  });
+  const text = await prompt.textContent();
+  check(text?.includes(NEW_VERSION), `prompt text "${text}" (want "${NEW_VERSION}")`);
+  // Longer than the reload delay the menu would take: an editor that reloads would have done so by now.
+  await sleep(6_000);
+  check(reloads === 0, `the editor page reloaded ${reloads} time(s) under unsaved work`);
+  check(await canvas.isVisible(), "the editor left the screen under unsaved work");
+  check(await button(page, "Undo").isEnabled(), "the unsaved box is gone after the prompt");
+  return "prompt shown; editor kept its unsaved box and did not reload";
+}
+
 export const versionScenarios = [
   { name: "version refused on the wire", run: versionWire },
   { name: "version prompt and reload", run: versionReload, topology: versionTopology },
+  { name: "version mid-match restart", run: versionMatch, topology: versionTopology },
+  { name: "version editor keeps unsaved work", run: versionEditor, topology: versionTopology },
 ];
