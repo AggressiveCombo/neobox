@@ -7,9 +7,9 @@
 // - corpse-colour: a player who falls out of the arena leaves debris (wasm frame.rs, source_player). Its colour must be
 //   the client's colour for that player (globalThis.__qaPlayerRgb, geometry.ts playerRgb), the colour the living body
 //   is drawn in. The wasm colour table of 02f3b72 draws it in another colour: the check fails there.
-// - stamina-bar: the local player's stamina is a 1 px green bar on a black track on the overlay canvas, directly above the
-//   name label (the original's bar; overlay.ts drawStamina). The check reads the overlay pixels above the label box: the row
-//   just above it holds only green or black, and no other row does. A bar under the body fails it.
+// - stamina-bar: the local player's stamina is a bar on a black track on the overlay canvas, one CSS px tall (devicePixelRatio
+//   device rows) and the label's width, directly above the name label (overlay.ts drawStamina). Checked at DPR1 and DPR3: the
+//   rows just above the label hold only green or black, and no other row does. A bar under the body fails it.
 //
 // Usage:  cd client && QA_OUT=<dir> node qa/actionparity.mjs --dist <dist>
 // Output: <QA_OUT>/actionparity.json; exit code 1 on FAIL. Needs a build with the __qaEngine and __qaPlayerRgb hooks.
@@ -33,7 +33,7 @@ await startPractice({ page }, srv.base, null, { pixels: false });
 await sleep(3000);
 
 // One frame: the vertex count per RGB and the player records (rocket charge < 0 when idle).
-const frame = () => page.evaluate(() => {
+const frameOf = (pg) => pg.evaluate(() => {
   const fb = globalThis.__qaEngine?.framebuffer?.();
   if (!fb) return null;
   const u = fb.u32, f = fb.f32, n = u[1], h = u[2];
@@ -50,6 +50,7 @@ const frame = () => page.evaluate(() => {
   }
   return { colours, players };
 });
+const frame = () => frameOf(page);
 
 // Colours that grew between two frames by at least MIN_ADDED vertices (launcher colours excluded when asked).
 function grownColours(before, after, skip = new Set()) {
@@ -75,35 +76,53 @@ const rocketAdded = rocketGrew.filter((row) => !LAUNCHER_RGB.has(Number(row.rgb)
 const charging = !!held && held.players.some((p) => p.rocket > 0);
 const rocketPass = idle !== null && held !== null && charging && rocketAdded.length === 0;
 
-// --- stamina-bar: the row just above the local label is the stamina track (green fill, black rest), nothing else ---
-const me0 = idle?.players[0] ?? null;
-const staminaProbe = me0 ? await page.evaluate((id) => {
-  const c = document.getElementById("overlay");
-  const lab = globalThis.__qaDraw?.rects.find((r) => r.kind === "label" && r.id === id);
-  if (!c || !lab) return null;
-  const r = c.getBoundingClientRect();
-  const sx = c.width / r.width, sy = c.height / r.height;
-  const ctx = c.getContext("2d", { willReadFrequently: true });
-  // The draw rects are in the view's CSS px (the overlay canvas covers the view): scale them to canvas pixels.
-  const x0 = Math.round(lab.box.left * sx), x1 = Math.round(lab.box.right * sx);
-  const yBase = Math.round(lab.box.top * sy);
-  const rows = [];
-  for (let y = yBase - 6; y <= yBase + 1; y++) {
-    const d = ctx.getImageData(x0, y, x1 - x0, 1).data;
-    let green = 0, black = 0, other = 0;
-    for (let i = 0; i < d.length; i += 4) {
-      const [R, G, B, A] = [d[i], d[i + 1], d[i + 2], d[i + 3]];
-      if (A === 255 && Math.abs(R - 52) <= 3 && Math.abs(G - 186) <= 3 && Math.abs(B - 86) <= 3) green++;
-      else if (A === 255 && R + G + B === 0) black++;
-      else other++;
+// --- stamina-bar: one CSS px tall and the label's width, on the rows just above the local label; nothing else there ---
+// Probes the overlay pixels above the local label of page pg.
+const staminaOn = async (pg) => {
+  const me = (await frameOf(pg))?.players[0] ?? null;
+  const probe = me ? await pg.evaluate((id) => {
+    const c = document.getElementById("overlay");
+    const lab = globalThis.__qaDraw?.rects.find((r) => r.kind === "label" && r.id === id);
+    if (!c || !lab) return null;
+    const r = c.getBoundingClientRect();
+    const sx = c.width / r.width, sy = c.height / r.height;
+    const ctx = c.getContext("2d", { willReadFrequently: true });
+    // The draw rects are in the view's CSS px (the overlay canvas covers the view): scale them to canvas pixels.
+    const x0 = Math.round(lab.box.left * sx), x1 = Math.round(lab.box.right * sx);
+    const yBase = Math.round(lab.box.top * sy);
+    const rows = [];
+    for (let y = yBase - 6; y < yBase; y++) {
+      const d = ctx.getImageData(x0, y, x1 - x0, 1).data;
+      let green = 0, black = 0, other = 0;
+      for (let i = 0; i < d.length; i += 4) {
+        const [R, G, B, A] = [d[i], d[i + 1], d[i + 2], d[i + 3]];
+        if (A === 255 && Math.abs(R - 52) <= 3 && Math.abs(G - 186) <= 3 && Math.abs(B - 86) <= 3) green++;
+        else if (A >= 128 && R + G + B <= 6) black++; // the track is black at 70% opacity over the label plate
+        else other++;
+      }
+      rows.push({ y, green, black, other });
     }
-    rows.push({ y, green, black, other });
-  }
-  return { yBase, width: x1 - x0, rows };
-}, me0.id) : null;
-const barRows = staminaProbe ? staminaProbe.rows.filter((row) => row.green > 0 || row.black > 0) : [];
-const staminaPass = !!staminaProbe && barRows.length === 1 && barRows[0].y === staminaProbe.yBase - 1
-  && barRows[0].green > 0 && barRows[0].other <= 1 && barRows[0].green + barRows[0].black + barRows[0].other === staminaProbe.width;
+    return { dpr: window.devicePixelRatio, labelW: lab.box.right - lab.box.left, yBase, width: x1 - x0, rows };
+  }, me.id) : null;
+  return { me, probe };
+};
+// One CSS px = dpr device rows, each full bar width (a fractional fill edge may blend one pixel per row).
+const staminaPassOf = (probe) => {
+  if (!probe) return false;
+  // Full-width rows only: the label's outline stroke (black, partly transparent) can touch the rows above the bar.
+  const bars = probe.rows.filter((row) => row.green + row.black >= probe.width - 1);
+  return bars.length === probe.dpr && bars[0].y === probe.yBase - probe.dpr && bars[bars.length - 1].y === probe.yBase - 1
+    && bars.every((row) => row.other <= 1) && bars.reduce((sum, row) => sum + row.green, 0) > 0 && Math.abs(probe.width - probe.labelW * probe.dpr) <= 1;
+};
+const stamina1 = await staminaOn(page);
+const ctx3 = await browser.newContext({ viewport: { width: 1366, height: 768 }, deviceScaleFactor: 3 });
+const page3 = await ctx3.newPage();
+await startPractice({ page: page3 }, srv.base, null, { pixels: false });
+await sleep(3000);
+const stamina3 = await staminaOn(page3);
+await ctx3.close();
+const me0 = stamina1.me;
+const staminaPass = staminaPassOf(stamina1.probe) && staminaPassOf(stamina3.probe);
 
 // --- corpse-colour: walk left off the platform; the player's debris keeps the player's colour ---
 await sleep(500);
@@ -149,7 +168,7 @@ const result = {
       grew: rocketGrew.sort((a, b) => b.added - a.added).slice(0, 12),
     },
     "corpse-colour": corpse,
-    "stamina-bar": { pass: staminaPass, player: me0, probe: staminaProbe },
+    "stamina-bar": { pass: staminaPass, dpr1: stamina1.probe, dpr3: stamina3.probe },
   },
   pageErrors: errors,
 };
@@ -157,7 +176,7 @@ mkdirSync(outDir(), { recursive: true });
 writeFileSync(path.join(outDir(), "actionparity.json"), JSON.stringify(result, null, 2));
 console.log(`${rocketPass ? "PASS" : "FAIL"} rocket-charge ${JSON.stringify(rocketAdded)}${idle && held ? "" : " (no __qaEngine: build lacks the hook)"}`);
 console.log(`${corpsePass ? "PASS" : "FAIL"} corpse-colour expected ${corpse.expected} debris ${JSON.stringify(corpse.debrisColours.slice(0, 3))}${dead ? "" : " (player did not fall)"}`);
-console.log(`${staminaPass ? "PASS" : "FAIL"} stamina-bar ${JSON.stringify(staminaProbe?.rows.filter((r) => r.green || r.black || r.other))} label top ${staminaProbe?.yBase ?? "none"}`);
+console.log(`${staminaPass ? "PASS" : "FAIL"} stamina-bar dpr1 ${JSON.stringify(stamina1.probe?.rows.filter((r) => r.green || r.black || r.other))} dpr3 ${JSON.stringify(stamina3.probe?.rows.filter((r) => r.green || r.black || r.other))} label top ${stamina1.probe?.yBase ?? "none"}`);
 await srv.stop();
 await runCleanups();
 process.exitCode = pass ? 0 : 1;
