@@ -9,6 +9,9 @@
 //   is drawn in. The wasm colour table of 02f3b72 draws it in another colour: the check fails there.
 // - bat-charge: the body keeps its playerRgb colour while the bat swings (the original draws no bat lift). Its exact-colour
 //   pixel count in screenshots before and after holding C must not fall; a lifted body colour fails it.
+// - dash-body: the body keeps its playerRgb colour while a dash runs (the original draws no dash lift). Its exact-colour
+//   pixel count on the body's lowest 8 rows must not fall while holding D+Z (the bat and aim overlay cross its top rows in
+//   both games); needs a build with dashEnabled on (the Free play preset leaves it off).
 // - movement-trail: a jumping body draws no trail (the original's jump frames show none); trail-coloured pixels must be absent.
 // - stamina-bar, label-box, label-marker: the local label is drawn as in the original (overlay.ts drawNames). Its box is black
 //   at 60%, 18 CSS px tall. Its top row is the stamina bar: one CSS px (devicePixelRatio device rows) at the box width, green
@@ -112,6 +115,68 @@ const batting = batHeld !== null;
 const batBody = { idle: batRgb === null ? 0 : pixelsOf(batIdleShot, batRgb), held: batRgb === null || batHeldShot === null ? 0 : pixelsOf(batHeldShot, batRgb) };
 for (const [name, shot] of [["bat-idle", batIdleShot], ["bat-held", batHeldShot]]) if (shot) writeFileSync(path.join(outDir(), "evidence", `${name}.png`), shot);
 const batPass = batting && batBody.idle > 0 && batBody.held >= batBody.idle;
+
+// The local label box (CSS px -> device px): the stamina bar is drawn in its top row and changes colour as a dash spends stamina.
+const labelBoxOf = (id) => page.evaluate((pid) => {
+  const r = globalThis.__qaDraw?.rects.find((q) => q.kind === "label" && q.id === pid);
+  const d = devicePixelRatio;
+  return r ? { x0: r.box.left * d, y0: r.box.top * d, x1: r.box.right * d, y1: r.box.bottom * d } : null;
+}, id);
+// Body-coloured pixels outside the label box.
+function bodyOutside(buf, rgb, box, y0 = 0, y1 = Infinity) {
+  const { data, width } = PNG.sync.read(buf);
+  const r = (rgb >> 16) & 0xff, g = (rgb >> 8) & 0xff, b = rgb & 0xff;
+  let n = 0;
+  for (let i = 0; i < data.length; i += 4) {
+    const p = i / 4, x = p % width, y = (p - x) / width;
+    if (box && x >= box.x0 && x < box.x1 && y >= box.y0 && y < box.y1) continue;
+    if (y < y0 || y > y1) continue;
+    if (data[i] === r && data[i + 1] === g && data[i + 2] === b) n++;
+  }
+  return n;
+}
+// Lowest row holding body-coloured pixels outside the label box (-1 when none).
+function bodyLowest(buf, rgb, box) {
+  const { data, width } = PNG.sync.read(buf);
+  const r = (rgb >> 16) & 0xff, g = (rgb >> 8) & 0xff, b = rgb & 0xff;
+  let low = -1;
+  for (let i = 0; i < data.length; i += 4) {
+    const p = i / 4, x = p % width, y = (p - x) / width;
+    if (box && x >= box.x0 && x < box.x1 && y >= box.y0 && y < box.y1) continue;
+    if (data[i] === r && data[i + 1] === g && data[i + 2] === b) low = Math.max(low, y);
+  }
+  return low;
+}
+
+// --- dash-body: the body keeps its colour while a dash runs (the original draws no dash lift). Dash needs the dashEnabled
+// rule, which the Free play preset leaves off: the build must enable it. ---
+await sleep(3000); // the bat swing and its stamina settle; a dash needs 30 stamina
+const dashIdle = await frame();
+const dashIdleShot = await page.screenshot();
+const dashMe = dashIdle?.players[0] ?? null;
+const dashIdleBox = dashMe ? await labelBoxOf(dashMe.id) : null;
+const dashRgb = dashMe ? await page.evaluate(([team, id]) => globalThis.__qaPlayerRgb?.(team, id) ?? null, [dashMe.team, dashMe.id]) : null;
+await page.keyboard.down("d");
+await page.keyboard.down("z");
+let dashHeld = null;
+let dashHeldShot = null;
+let dashHeldBox = null;
+for (let i = 0; i < 40 && dashHeld === null; i++) {
+  await sleep(50);
+  const f = await frame();
+  if ((f?.players[0]?.flags & 64) !== 0) {
+    dashHeld = f;
+    dashHeldShot = await page.screenshot();
+    dashHeldBox = await labelBoxOf(f.players[0].id);
+  }
+}
+await page.keyboard.up("z");
+await page.keyboard.up("d");
+const dashing = dashHeld !== null;
+const dashFoot = dashRgb === null ? -1 : bodyLowest(dashIdleShot, dashRgb, dashIdleBox);
+const dashBody = { idle: dashFoot < 0 ? 0 : bodyOutside(dashIdleShot, dashRgb, dashIdleBox, dashFoot - 7, dashFoot), held: dashFoot < 0 || dashHeldShot === null ? 0 : bodyOutside(dashHeldShot, dashRgb, dashHeldBox, dashFoot - 7, dashFoot) };
+for (const [name, shot] of [["dash-idle", dashIdleShot], ["dash-held", dashHeldShot]]) if (shot) writeFileSync(path.join(outDir(), "evidence", `${name}.png`), shot);
+const dashPass = dashing && dashBody.idle > 0 && dashBody.held >= dashBody.idle;
 
 // --- movement-trail: the original draws no motion trail behind a moving body (its jump and dash frames show none), so no
 // trail-coloured pixels appear while the body rises. The body must move, or the check passes vacuously. ---
@@ -238,7 +303,7 @@ const corpse = {
   debrisColours: corpseGrew.sort((a, b) => b.added - a.added).slice(0, 8),
 };
 
-const pass = rocketPass && batPass && trailPass && staminaPass && boxPass && markerPass && corpsePass && errors.length === 0;
+const pass = rocketPass && batPass && dashPass && trailPass && staminaPass && boxPass && markerPass && corpsePass && errors.length === 0;
 const result = {
   pass,
   actions: {
@@ -251,6 +316,7 @@ const result = {
     },
     "bat-charge": { pass: batPass, batting, flags: batHeld?.players[0]?.flags ?? null, body: batBody, rgb: batRgb === null ? null : `0x${batRgb.toString(16).padStart(6, "0")}` },
     "movement-trail": { pass: trailPass, moved: trailMoved, y: jumpYs, trailPixels },
+    "dash-body": { pass: dashPass, dashing, flags: dashHeld?.players[0]?.flags ?? null, body: dashBody, rgb: dashRgb === null ? null : `0x${dashRgb.toString(16).padStart(6, "0")}` },
     "corpse-colour": corpse,
     "stamina-bar": { pass: staminaPass, dpr1: stamina1.probe, dpr3: stamina3.probe },
     "label-box": { pass: boxPass, dpr1: stamina1.probe?.boxRows, dpr3: stamina3.probe?.boxRows },
@@ -264,6 +330,7 @@ console.log(`${rocketPass ? "PASS" : "FAIL"} rocket-charge ${JSON.stringify(rock
 console.log(`${corpsePass ? "PASS" : "FAIL"} corpse-colour expected ${corpse.expected} debris ${JSON.stringify(corpse.debrisColours.slice(0, 3))}${dead ? "" : " (player did not fall)"}`);
 console.log(`${batPass ? "PASS" : "FAIL"} bat-charge body ${JSON.stringify(batBody)} rgb ${batRgb === null ? "none" : batRgb.toString(16)}${batting ? "" : " (bat did not swing)"}`);
 console.log(`${trailPass ? "PASS" : "FAIL"} movement-trail moved ${trailMoved} y ${JSON.stringify(jumpYs)} trail pixels per shot ${JSON.stringify(trailPixels)}`);
+console.log(`${dashPass ? "PASS" : "FAIL"} dash-body body ${JSON.stringify(dashBody)} rgb ${dashRgb === null ? "none" : dashRgb.toString(16)}${dashing ? "" : " (dash did not start)"}`);
 console.log(`${staminaPass ? "PASS" : "FAIL"} stamina-bar dpr1 ${JSON.stringify(stamina1.probe?.rows.filter((r) => r.green || r.opaque || r.other))} dpr3 ${JSON.stringify(stamina3.probe?.rows.filter((r) => r.green || r.opaque || r.other))} box top ${stamina1.probe?.yBase ?? "none"}`);
 console.log(`${boxPass ? "PASS" : "FAIL"} label-box dpr1 ${stamina1.probe?.boxRows ?? "none"}/${stamina1.probe?.boxH ?? "none"} dpr3 ${stamina3.probe?.boxRows ?? "none"}/${stamina3.probe?.boxH ?? "none"}`);
 console.log(`${markerPass ? "PASS" : "FAIL"} label-marker dpr1 ${JSON.stringify(stamina1.probe?.marker ?? null)} dpr3 ${JSON.stringify(stamina3.probe?.marker ?? null)} box top ${stamina1.probe?.yBase ?? "none"}`);
