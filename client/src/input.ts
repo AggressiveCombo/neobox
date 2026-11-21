@@ -331,6 +331,6 @@ const PAD_BUTTONS: [number, number][] = [
   [4, BIT.GRAB],
 ];
 const STICK_DEAD = 0.5;
-/** Sim ticks touch Jump stays lifted for a re-press. Two, so the sim sees at least one tick with Jump up at any frame rate. */
-const REPRESS_TICKS = 2;
+/** Sim ticks touch Jump stays lifted for a re-press. Four, so the release reaches the sim even when input arrives in bursts. */
+const REPRESS_TICKS = 4;
 
