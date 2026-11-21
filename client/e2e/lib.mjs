@@ -147,11 +147,19 @@ export async function resolveChromium() {
   );
 }
 
-/** Headless browser with audio muted; closed at exit. */
-export async function launchBrowser() {
+/**
+ * Headless browser with audio muted; closed at exit. `scrollbars` keeps Chromium's classic scrollbars:
+ * Playwright's headless default (--hide-scrollbars) removes them, so a scrollbar never takes width.
+ */
+export async function launchBrowser({ scrollbars = false } = {}) {
   const { chromium } = await import("playwright-core");
   const executablePath = await resolveChromium();
-  const browser = await chromium.launch({ executablePath, headless: true, args: ["--mute-audio"] });
+  const browser = await chromium.launch({
+    executablePath,
+    headless: true,
+    args: ["--mute-audio"],
+    ...(scrollbars ? { ignoreDefaultArgs: ["--hide-scrollbars"] } : {}),
+  });
   onCleanup(() => browser.close());
   return browser;
 }
@@ -206,10 +214,10 @@ export async function muteAudio(context) {
  * Any engine ("chromium" | "firefox" | "webkit"), headless and muted; closed at exit. Every
  * context it creates (newContext, newPage) is passed through muteAudio automatically.
  */
-export async function launchEngine(name) {
+export async function launchEngine(name, { scrollbars = false } = {}) {
   const pw = await import("playwright-core");
   let browser;
-  if (name === "chromium") browser = await launchBrowser();
+  if (name === "chromium") browser = await launchBrowser({ scrollbars });
   else if (name === "firefox") {
     // media.cubeb.force_null_context: audio renders into a null device, so nothing reaches the speakers.
     const firefoxUserPrefs = { "media.volume_scale": "0.0", "media.cubeb.force_null_context": true };

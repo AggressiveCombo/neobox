@@ -86,6 +86,16 @@ Transition settle time (RUBRIC D20 `motion.transition.ms`): menu modal open and 
 - Self-test (`QA_SELF_TEST=janky`): every CSS animation and transition is stretched to 1500 ms with `!important`, so every case must FAIL. Use a separate `QA_OUT`.
 - Not covered here: `motion.cls` (layout shift; CDP-only, chromium) and `reducedMotion.pixelDiff` (D08).
 
+## layout.mjs (layout shift from content growth and scrollbar appearance)
+
+- Command: `cd client && QA_OUT=<dir> bun qa/layout.mjs` (`QA_ENGINES=chromium` to limit; `QA_CASES=chat,scroll.settings` narrows by prefix). Self-test: `QA_SELF_TEST=shift` adds a 40 px margin under the chat panel after the messages, so `chat.desktop` must FAIL on every engine (separate `QA_OUT`).
+- Why it exists: `motion.mjs`, `temporal.mjs`, `escapes.mjs` and the dead-control scans watch pixels, element state or clickability. None of them compares where regions sit before and after content grows or a scrollbar appears, so those shifts passed every one of them.
+- Method: the bounding boxes (x, y, width, height) of the layout regions are recorded before and after the action. A region that moves or resizes by more than 0.5 px fails the case; the detail names each region with its before and after box.
+- Cases: `chat.desktop` (1280x800) and `chat.phone` (390x844, Chat tab) send 10 messages in the room lobby. The server allows 3 messages in a burst and one more every 3 s, so the sends are paced; the roster, match and chat panels, chat log, dock and tabs must not move. A case that drops a message fails with the count that reached the log.
+- `scroll.<screen>.<native|nogutter>` for Settings, Friends, Library, About, Privacy and Account at 1280 wide: the menu is measured first with no scrollbar; the screen is then opened and the viewport is shortened (900, 700, 540 px) until its page scrolls. Every heading, panel, page block, button and input must keep its x and width. Chromium runs with classic scrollbars (`launchEngine(..., { scrollbars: true })`), because Playwright's default `--hide-scrollbars` makes a scrollbar take no width. `nogutter` serves the stylesheet with `scrollbar-gutter` renamed, which is what an engine without that rule (older Safari) does; the layout must hold there too. Friends has no seeded data and does not scroll: it is `info`, not a pass.
+- Keys: `layout.moved` (regions that moved or resized), `layout.regions` (regions compared), `layout.scrolls` (scroll cases: the page really scrolled after the resize), `layout.moved.px` (largest move).
+- Not covered here: pixel animation (`motion.mjs`) and the content of each screen.
+
 ## playfield.mjs (RUBRIC D16; play-field HUD, sprite contrast, camera, hit feedback)
 
 - Command: `cd client && QA_OUT=<dir> bun qa/playfield.mjs` (`QA_ENGINES=chromium` to limit; `PALETTES=default` to limit palettes). Env: `QA_CAM_MS` (15000), `QA_PLAY_MS` (30000).
