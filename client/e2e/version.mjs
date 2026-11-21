@@ -142,6 +142,8 @@ async function versionReload(s) {
   const { page } = await s.open("desktop", { serviceWorkers: "allow", route: false });
   await page.goto(s.base);
   await menuName(page).waitFor();
+  // An update reaches only a page the worker controls: the first install must have claimed it before the deploy.
+  await page.waitForFunction(() => navigator.serviceWorker.controller !== null, null, { timeout: 30_000 });
   const reloaded = page.waitForEvent("load", { timeout: RELOAD_MS });
   await deploy(s, deployCopy(distBuildId()));
   const prompt = page.locator("#update-ready");
