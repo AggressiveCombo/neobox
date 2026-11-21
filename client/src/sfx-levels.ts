@@ -11,6 +11,9 @@ export const UI_LEVEL = 0.5;
 /** Hover ticks play under the other interface sounds: they fire far more often. */
 export const HOVER_LEVEL = 0.4;
 
+/** Background music level per track, relative to the music volume (music.ts). Both tracks sit at the music class target in game. */
+export const MUSIC_LEVEL = { menu: 0.4, match: 0.5 };
+
 /** The clip for each key, a file name in client/public/sfx (without `.mp3`); no two actions share a clip. Kind 5 (push click, wasm frame.rs) has no clip and is silent. */
 export const CLIPS: Partial<Record<SoundKey, string>> = {
   1: "maximize_002", // jump

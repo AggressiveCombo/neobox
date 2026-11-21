@@ -1,7 +1,8 @@
-// Sound-effect loudness check (metric sfx.loudness.failing). Measures every way a clip reaches the speakers, as
-// heard in game: the clip file (K-weighted, BS.1770) x the bus master (prefs defaults) x the caller's volume x the
-// clip's mastering gain (CLIP_GAIN_DB in client/src/sfx-levels.ts). Each usage must sit within its class tolerance of
-// the class target, and no usage may peak above the mastered ceiling (no clipping).
+// Audio loudness check (metric audio.loudness.failing): sound effects and background music, as heard in game.
+// Sound effects: each usage's clip file (K-weighted, BS.1770) x the bus master (prefs defaults) x the caller's volume x the
+// clip's mastering gain (CLIP_GAIN_DB in client/src/sfx-levels.ts). Music: each track's integrated file loudness (ffmpeg
+// ebur128) x the master x the music volume x the track level (MUSIC_LEVEL). Each usage and track must sit within its class
+// tolerance of the class target; no sound effect may peak above the mastered ceiling (no clipping).
 // Run: cd client && bun qa/sfx-loudness.mjs   (needs ffmpeg on PATH; exit 1 on any failure)
 //
 // Loudness is short-term: energy over the clip, its window floored at 400 ms (a one-shot is shorter than a gating
@@ -9,7 +10,7 @@
 import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { CLIPS, CLIP_GAIN_DB, HOVER_LEVEL, UI_LEVEL } from "../src/sfx-levels.ts";
+import { CLIPS, CLIP_GAIN_DB, HOVER_LEVEL, MUSIC_LEVEL, UI_LEVEL } from "../src/sfx-levels.ts";
 
 const SFX_DIR = fileURLToPath(new URL("../public/sfx/", import.meta.url));
 const SR = 48000;
@@ -19,12 +20,23 @@ const SFX_LEVEL = 0.8;
 /** Peak ceiling of the mastered clips (neobox-scratch/audio-work/build_sfx.py); no usage may exceed it in game. */
 const CEILING_DB = -1;
 
+const MUSIC_DIR = fileURLToPath(new URL("../public/music/", import.meta.url));
+/** Prefs default for the music volume (client/src/prefs.ts DEFAULT_PREFS.musicVolume). */
+const MUSIC_VOLUME = 0.6;
+/** Background tracks as music.ts plays them (files in client/public/music). */
+const TRACKS = [
+  { name: "music: menu", file: "menu.mp3", level: MUSIC_LEVEL.menu },
+  { name: "music: match 1", file: "match-1.mp3", level: MUSIC_LEVEL.match },
+  { name: "music: match 2", file: "match-2.mp3", level: MUSIC_LEVEL.match },
+];
+
 /** Loudness classes: target in-game level (dB) and the tolerance around it. */
 export const CLASSES = {
   game: { target: -34, tol: 3, what: "gameplay effects" },
   jingle: { target: -30, tol: 3, what: "fanfares and match-end jingles" },
   interface: { target: -38, tol: 3, what: "clicks, tabs, switches, dialogs" },
   tick: { target: -43, tol: 3, what: "high-rate ticks (hover, post-game tally)" },
+  music: { target: -35, tol: 1, what: "background music tracks" },
 };
 
 // Each usage: the key it plays, its bus (game = sfx bus, ui = interface bus), the caller volume on top of the bus,
@@ -140,8 +152,31 @@ export function evaluate() {
   });
 }
 
+/** Integrated loudness (LUFS, BS.1770 gated) of a whole track: the ffmpeg ebur128 meter. */
+function integrated(path) {
+  const r = spawnSync("ffmpeg", ["-hide_banner", "-nostats", "-i", path, "-af", "ebur128", "-f", "null", "-"], { encoding: "utf8", maxBuffer: 1 << 24 });
+  if (r.error) throw new Error(`ffmpeg is required for the music loudness check: ${r.error.message}`);
+  const found = [...(r.stderr ?? "").matchAll(/I:\s+(-?\d+(?:\.\d+)?) LUFS/g)];
+  if (r.status !== 0 || found.length === 0) throw new Error(`ffmpeg could not measure ${path}: ${r.stderr}`);
+  return Number(found.at(-1)[1]);
+}
+
+/** Evaluates every background track: in-game level = integrated file loudness + master + music volume + track level. */
+export function evaluateMusic() {
+  const cls = CLASSES.music;
+  return TRACKS.map((t) => {
+    const fileLufs = integrated(MUSIC_DIR + t.file);
+    const inGame = fileLufs + db(MASTER * MUSIC_VOLUME * t.level);
+    const dev = inGame - cls.target;
+    let failed = null;
+    if (Math.abs(dev) > cls.tol) failed = `${dev > 0 ? "too loud" : "too quiet"} by ${Math.abs(dev).toFixed(1)} dB`;
+    return { name: t.name, key: "-", file: t.file, cls: "music", fileLufs, inGame, target: cls.target, dev, failed };
+  });
+}
+
 if (import.meta.main) {
-  const rows = evaluate();
+  const sfx = evaluate();
+  const rows = [...sfx, ...evaluateMusic()];
   const fmt = (n, w = 7) => (Number.isFinite(n) ? n.toFixed(1) : "-").padStart(w);
   console.log(["usage".padEnd(28), "key".padEnd(8), "clip".padEnd(26), "class".padEnd(10), "file".padStart(7), "game".padStart(7), "target".padStart(7), "dev".padStart(7), "peak".padStart(7)].join(" "));
   for (const r of rows) {
@@ -151,13 +186,13 @@ if (import.meta.main) {
   for (const r of bad) console.log(`FAIL ${r.name} (key ${r.key}): ${r.failed}`);
   // Suggested per-key gain: the class target minus the in-game level without the clip gain, averaged over the key's usages.
   const byKey = new Map();
-  for (const r of rows) {
+  for (const r of sfx) {
     if (r.inGame === undefined) continue;
     const want = r.target - (r.inGame - gainOf(r.key));
     byKey.set(r.key, [...(byKey.get(r.key) ?? []), want]);
   }
   const suggestions = [...byKey].map(([key, wants]) => `${key}: ${(wants.reduce((a, b) => a + b, 0) / wants.length).toFixed(1)}`);
-  console.log(`sfx.loudness.failing: ${bad.length} of ${rows.length} usages`);
+  console.log(`audio.loudness.failing: ${bad.length} of ${rows.length} usages and tracks`);
   if (bad.length) console.log(`suggested CLIP_GAIN_DB (dB, per key): ${suggestions.join(", ")}`);
   process.exitCode = bad.length ? 1 : 0;
 }

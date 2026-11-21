@@ -239,12 +239,14 @@ The menu backdrop (E04, `overlay.backdrop.players.out.count`) asks the camera to
 - Command: `cd client && QA_OUT=<dir> node qa/actionparity.mjs --dist <dist>`. Writes `<QA_OUT>/actionparity.json`; exit 1 on FAIL. Needs a build with the `__qaEngine` and `__qaPlayerRgb` hooks.
 - Not yet covered: the other actions (jump, push, bat, egg, grab, parachute, freeze, ghost, damage, spawn, teleport, countdown, team and FFA palettes) and the oracle side of each comparison. Their rows are in neobox-scratch/actionparity/report.md.
 
-## sfx-loudness.mjs (sound-effect loudness, no browser)
+## sfx-loudness.mjs (sound-effect and music loudness, no browser)
 
 Measures every sound effect as heard in game: clip file (K-weighted, BS.1770 short-term loudness and sample peak) x bus master (prefs defaults) x caller volume x the clip's mastering gain (`CLIP_GAIN_DB` in `client/src/sfx-levels.ts`). Each usage must sit within its class tolerance of the class target, and no usage may peak above -1 dBFS.
 
-- Command: `cd client && bun qa/sfx-loudness.mjs` (needs `ffmpeg` on PATH; exit 1 on any failure). Prints one row per usage and, on failure, a suggested gain per key.
-- Classes: `game` -34 dB (gameplay effects), `jingle` -30 (fanfares, win/lose), `interface` -38 (clicks, tabs, dialogs), `tick` -43 (hover, post-game tally). Tolerance +-3 dB.
+Measures every background music track as heard in game: integrated file loudness (ffmpeg ebur128) x master x music volume x the track level (`MUSIC_LEVEL` in `client/src/sfx-levels.ts`, the same values music.ts plays). All tracks sit within +-1 dB of the shared music target (-35 dB).
+
+- Command: `cd client && bun qa/sfx-loudness.mjs` (needs `ffmpeg` on PATH; exit 1 on any failure). Prints one row per usage and track and, on failure, a suggested gain per key.
+- Classes: `game` -34 dB (gameplay effects), `jingle` -30 (fanfares, win/lose), `interface` -38 (clicks, tabs, dialogs), `tick` -43 (hover, post-game tally), `music` -35 (background tracks). Tolerance +-3 dB, music +-1 dB.
 - Shared keys: one clip, one gain. Key 10 (countdown and post-game tick) and key 20 (fanfare and level up) are checked against both classes; key 16 (rocket fire, both players' copies) too.
-- Metric: `sfx.loudness.failing` (usages out of class tolerance or over the peak ceiling; must be 0). Kind 5 (push click) has no clip and is silent; it is not a usage here.
-- Adding an effect: add its usage to `USAGES` in `qa/sfx-loudness.mjs` with the sim or caller volume, then set its gain in `CLIP_GAIN_DB`.
+- Metric: `audio.loudness.failing` (usages and tracks out of class tolerance, or sound effects over the peak ceiling; must be 0). Kind 5 (push click) has no clip and is silent; it is not a usage here.
+- Adding an effect: add its usage to `USAGES` in `qa/sfx-loudness.mjs` with the sim or caller volume, then set its gain in `CLIP_GAIN_DB`. Adding a track: add it to `TRACKS` with its `MUSIC_LEVEL` key.

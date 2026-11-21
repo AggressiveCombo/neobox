@@ -5,6 +5,7 @@
 // refused start waits for the next pointer or key press.
 
 import { prefs } from "./prefs";
+import { MUSIC_LEVEL } from "./sfx-levels";
 
 /** Which music the screen wants: the menu track, the match playlist, or none. */
 export type MusicScene = "menu" | "match" | null;
@@ -18,8 +19,8 @@ interface ChannelOptions {
   level: number;
 }
 
-const MENU: ChannelOptions = { tracks: ["/music/menu.mp3"], loop: true, level: 0.7 };
-const MATCH: ChannelOptions = { tracks: ["/music/match-1.mp3", "/music/match-2.mp3"], loop: false, level: 0.5 };
+const MENU: ChannelOptions = { tracks: ["/music/menu.mp3"], loop: true, level: MUSIC_LEVEL.menu };
+const MATCH: ChannelOptions = { tracks: ["/music/match-1.mp3", "/music/match-2.mp3"], loop: false, level: MUSIC_LEVEL.match };
 const FADE_MS = 2000;
 const FADE_TICK_MS = 50;
 
