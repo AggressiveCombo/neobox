@@ -114,6 +114,8 @@ export class Engine {
 
   constructor(raw: RawEngine) {
     this.x = raw.exports;
+    // QA hook (like __qaCam): the engine, so instruments can read its frame buffer (vertices and player records) in any mode.
+    Object.assign(globalThis, { __qaEngine: this });
   }
 
   private bytes(): Uint8Array {
