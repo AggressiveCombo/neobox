@@ -1003,8 +1003,50 @@ async function localPlayer(page) {
   });
 }
 
-/** A landscape phone joins a match and drives the touch stick and Jump with real touch events. */
-async function phoneLandscapeTouch(s) {
+/** Centre and radius of the element at `selector`. */
+async function centre(page, selector) {
+  const box = await page.locator(selector).boundingBox();
+  check(box && box.width > 0, `${selector} has no size`);
+  return { x: box.x + box.width / 2, y: box.y + box.height / 2, r: box.width / 2, box };
+}
+
+/** The local player's first reading that satisfies `pred` within `ms`; the last reading otherwise. */
+async function awaitPlayer(page, pred, ms) {
+  const end = Date.now() + ms;
+  let p = null;
+  do {
+    p = await localPlayer(page);
+    if (p && pred(p)) return p;
+    await sleep(50);
+  } while (Date.now() < end);
+  return p;
+}
+
+/** Waits for the local player's apex: at least a unit above `y0`, then no longer rising. */
+async function awaitApex(page, y0, ms) {
+  const end = Date.now() + ms;
+  let prev = null;
+  let stalls = 0;
+  while (Date.now() < end) {
+    const p = await localPlayer(page);
+    if (p && prev && p.y <= y0 - 1 && p.y >= prev.y) {
+      if (++stalls >= 2) return p;
+    } else stalls = 0;
+    if (p) prev = p;
+    await sleep(30);
+  }
+  return null;
+}
+
+/** Presses Jump with a real touch for 120 ms. */
+async function tapJump(send, jump) {
+  await send("touchStart", [{ x: jump.x, y: jump.y }]);
+  await sleep(120);
+  await send("touchEnd", []);
+}
+
+/** A landscape phone in a started match, touching with real touch events: its page, touch driver and Jump button. */
+async function touchMatch(s) {
   const roomName = uniqueName("touch room");
   const host = await s.open("host", { name: uniqueName("host") });
   const code = await createRoom(host, s.base, roomName, { isPublic: true });
@@ -1021,17 +1063,17 @@ async function phoneLandscapeTouch(s) {
   await sleep(4000);
   await ensureProbe(page);
   const send = await touchDriver(page, s.env.browser);
-  const centre = async (selector) => {
-    const box = await page.locator(selector).boundingBox();
-    check(box && box.width > 0, `${selector} has no size`);
-    return { x: box.x + box.width / 2, y: box.y + box.height / 2, r: box.width / 2, box };
-  };
+  return { page, send, jump: await centre(page, '.hud-touch[data-action="up"]') };
+}
 
+/** A landscape phone joins a match and drives the touch stick and Jump with real touch events. */
+async function phoneLandscapeTouch(s) {
+  const { page, send, jump } = await touchMatch(s);
+  const stick = await centre(page, ".hud-stick");
+  const actions = await centre(page, ".hud-actions");
   const geom = (c) => `${Math.round(c.box.x)},${Math.round(c.box.y)} ${Math.round(c.box.width)}x${Math.round(c.box.height)}`;
   // Live size, not the emulated one: entering fullscreen (the landscape splash) makes headless Firefox use the screen size.
   const vp = await page.evaluate(() => ({ width: innerWidth, height: innerHeight }));
-  const stick = await centre(".hud-stick");
-  const actions = await centre(".hud-actions");
   check(stick.box.x + stick.box.width <= actions.box.x, "touch stick and action buttons overlap");
   check(
     stick.box.y + stick.box.height <= vp.height && actions.box.y + actions.box.height <= vp.height,
@@ -1067,34 +1109,58 @@ async function phoneLandscapeTouch(s) {
   check(stickHold.moved > 5, `guest frames barely changed while holding the touch stick right (${stickHold.moved} changes over ${stickHold.ticks} sim ticks)`);
 
   // Jump is a touch button of its own: holding it makes the player leap.
-  const jump = await centre('.hud-touch[data-action="up"]');
   const jumpHold = await holdUntilMoved(() => send("touchStart", [{ x: jump.x, y: jump.y }]));
   check(jumpHold.ticks >= 10, `the simulation did not advance while holding Jump (${jumpHold.ticks} ticks)`);
   check(jumpHold.moved > 5, `guest frames barely changed while holding Jump (${jumpHold.moved} changes over ${jumpHold.ticks} sim ticks)`);
-  // Holding Jump through an air jump: once the air jump is ready again (the emblem turns yellow, flag 256), the
-  // held thumb must jump again. Spend the air jump with two taps, then hold Jump until it is ready.
-  const tap = async () => {
-    await send("touchStart", [{ x: jump.x, y: jump.y }]);
-    await sleep(120);
-    await send("touchEnd", []);
-  };
-  const awaitPlayer = async (pred, ms) => {
-    const end = Date.now() + ms;
-    let p = null;
-    do {
-      p = await localPlayer(page);
-      if (p && pred(p)) return p;
-      await sleep(50);
-    } while (Date.now() < end);
-    return p;
-  };
-  check((await awaitPlayer((p) => p.ready, 5000))?.ready, "the local player never showed the air jump as ready");
-  await tap();
-  await sleep(250);
-  await tap();
-  check((await awaitPlayer((p) => !p.ready, 3000))?.ready === false, "two Jump taps did not spend the air jump");
+  return `stick right: ${stickHold.moved} frame changes; Jump: ${jumpHold.moved} frame changes`;
+}
+
+/** Holding Jump from the ground: the ground jump, then the air jump at its apex (the held thumb must not wait for a re-press). */
+async function touchJumpHoldGround(s) {
+  const { page, send, jump } = await touchMatch(s);
+  check((await awaitPlayer(page, (p) => p.ready, 5000))?.ready, "the local player never showed the air jump as ready");
+  await sleep(500);
+  const ground = await localPlayer(page);
   await send("touchStart", [{ x: jump.x, y: jump.y }]);
-  const landed = await awaitPlayer((p) => p.ready, 6000);
+  let top = ground.y;
+  let spent = null;
+  const end = Date.now() + 4000;
+  while (Date.now() < end && !spent) {
+    const p = await localPlayer(page);
+    if (p) {
+      top = Math.min(top, p.y);
+      if (!p.ready) spent = p;
+    }
+    await sleep(30);
+  }
+  check(top <= ground.y - 1, `holding Jump from the ground did not jump (y ${ground.y.toFixed(1)} -> ${top.toFixed(1)})`);
+  check(spent !== null, "holding Jump from the ground never spent the air jump at the apex");
+  let highest = spent.y;
+  const endAir = Date.now() + 1500;
+  while (Date.now() < endAir) {
+    const p = await localPlayer(page);
+    if (p) highest = Math.min(highest, p.y);
+    await sleep(30);
+  }
+  await send("touchEnd", []);
+  check(highest <= spent.y - 1, `the air jump at the apex gave no height (y ${spent.y.toFixed(1)} -> ${highest.toFixed(1)})`);
+  return `held Jump from the ground: y ${ground.y.toFixed(1)} -> ${top.toFixed(1)} (ground jump), air jump at the apex -> ${highest.toFixed(1)}`;
+}
+
+/** Holding Jump through a landing: after the air jump is spent in the air, the held thumb must jump again once the air jump is ready on landing. */
+async function touchJumpHoldLanding(s) {
+  const { page, send, jump } = await touchMatch(s);
+  check((await awaitPlayer(page, (p) => p.ready, 5000))?.ready, "the local player never showed the air jump as ready");
+  await sleep(500);
+  const ground = await localPlayer(page);
+  // The sim refuses an air jump while the player still rises fast, so the spending tap waits for the apex.
+  await tapJump(send, jump);
+  check(await awaitApex(page, ground.y, 4000), "the Jump tap never lifted the player to an apex");
+  await tapJump(send, jump);
+  check((await awaitPlayer(page, (p) => !p.ready, 3000))?.ready === false, "tapping Jump at the apex did not spend the air jump");
+  // The thumb stays down through the fall; the air jump is ready again on landing.
+  await send("touchStart", [{ x: jump.x, y: jump.y }]);
+  const landed = await awaitPlayer(page, (p) => p.ready, 6000);
   check(landed?.ready, "the air jump never became ready again while Jump was held");
   let yMin = landed.y;
   const endAt = Date.now() + 2500;
@@ -1104,8 +1170,8 @@ async function phoneLandscapeTouch(s) {
     await sleep(50);
   }
   await send("touchEnd", []);
-  check(yMin <= landed.y - 1, `holding Jump gave no second jump once ready (y ${landed.y.toFixed(1)} -> ${yMin.toFixed(1)})`);
-  return `stick right: ${stickHold.moved} frame changes; Jump: ${jumpHold.moved} frame changes; held Jump re-jumps once ready`;
+  check(yMin <= landed.y - 1, `holding Jump through a landing gave no second jump once ready (y ${landed.y.toFixed(1)} -> ${yMin.toFixed(1)})`);
+  return `held Jump through a landing: second jump once ready (y ${landed.y.toFixed(1)} -> ${yMin.toFixed(1)})`;
 }
 
 async function latency(s) {
@@ -2156,6 +2222,8 @@ export const scenarios = [
   { name: "practice", run: practice },
   { name: "phone", run: phone },
   { name: "phone landscape touch", run: phoneLandscapeTouch },
+  { name: "phone landscape touch jump hold ground", run: touchJumpHoldGround },
+  { name: "phone landscape touch jump hold landing", run: touchJumpHoldLanding },
   { name: "input latency", run: latency, serial: true },
   { name: "map editor", run: editor },
   { name: "map editor phone", run: editorPhone },

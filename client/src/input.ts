@@ -182,9 +182,16 @@ export class Input {
   /** Stick and buttons have their own bits: Jump (UP) and the stick's up share a bit, so one must not clear the other. */
   private stick = new TouchMask();
   private buttons = new TouchMask();
-  /** Air jump ready as of the last frame, and whether it rose since `mask` last ran; frames left with Jump lifted. */
+  /** Air jump ready as of the last sim tick, and that tick's local screen y (NaN before the first). */
   private airReady = false;
-  private airReadyRose = false;
+  private lastTick = -1;
+  private lastY = NaN;
+  /** The local player's screen y was shrinking (rising) at the last tick. */
+  private rising = false;
+  /** A touch re-press is wanted (see `setLocalFrame`); consumed by `mask`. */
+  private repressDue = false;
+  /** This readiness already re-pressed; reset when the air jump is spent. */
+  private repressed = false;
   private repressFrames = 0;
   /** Physical keys currently down (bound or not), so bits stay right after a rebind. */
   private held = new Set<string>();
@@ -274,11 +281,14 @@ export class Input {
   }
 
   mask(): number {
-    const rose = this.airReadyRose;
-    this.airReadyRose = false;
+    const due = this.repressDue;
+    this.repressDue = false;
     const touch = this.stick.get() | this.buttons.get();
     if ((touch & BIT.UP) === 0) this.repressFrames = 0;
-    else if (rose) this.repressFrames = PAD_REPRESS_FRAMES;
+    else if (due && !this.repressed) {
+      this.repressed = true;
+      this.repressFrames = PAD_REPRESS_FRAMES;
+    }
     // Only the touch Jump lifts: a held keyboard or gamepad Jump keeps its own press.
     const lifting = this.repressFrames > 0;
     if (lifting) this.repressFrames--;
@@ -286,12 +296,23 @@ export class Input {
   }
 
   /**
-   * The local player's air jump is ready (the yellow emblem). A rise while the thumb already holds Jump lifts
-   * Jump for `PAD_REPRESS_FRAMES` render frames, so the next press jumps again (see `mask`).
+   * The local player at sim tick `tick`: air jump ready (the yellow emblem) and screen y. A rise to ready, or the apex
+   * of a jump made while ready, queues a touch re-press: the thumb lifts Jump and presses it again (see `mask`).
+   * Once per readiness: spending the air jump ends it.
    */
-  setAirReady(ready: boolean): void {
-    this.airReadyRose = ready && !this.airReady;
+  setLocalFrame(ready: boolean, y: number, tick: number): void {
+    if (!ready) this.repressed = false;
+    else if (!this.airReady) this.repressDue = true;
     this.airReady = ready;
+    if (tick === this.lastTick) return;
+    this.lastTick = tick;
+    const dy = y - this.lastY;
+    this.lastY = y;
+    if (dy < 0) this.rising = true;
+    else {
+      if (ready && this.rising) this.repressDue = true;
+      this.rising = false;
+    }
   }
 }
 

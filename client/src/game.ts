@@ -138,7 +138,7 @@ export class MatchLoop {
       qaTick.tick = scene.tick;
       this.lastScene = scene;
       const local = scene.players.find((p) => (p.flags & FLAG_LOCAL) !== 0);
-      input.setAirReady(local !== undefined && (local.flags & FLAG_AIR_JUMP) !== 0);
+      if (local) input.setLocalFrame((local.flags & FLAG_AIR_JUMP) !== 0, local.y, scene.tick);
       this.d.hud()?.onFrame(scene);
     }
 
