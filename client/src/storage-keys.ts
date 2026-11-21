@@ -19,6 +19,8 @@ export const PHONE_SPLASH_SEEN_KEY = "neobox.phoneSplashSeen";
 export const TRAINING_SEEN_KEY = "neobox.hintSeen";
 /** The account id whose settings changed on this device and were not saved yet: a reload before the save lands keeps this copy. */
 export const PREFS_PENDING_KEY = "neobox.prefsPending";
+/** The jukebox shows its video at 16:9 (not the compact thumbnail): a choice made on this device. */
+export const JUKEBOX_VIDEO_KEY = "neobox.jukeboxVideo";
 
 export interface StorageKey {
   key: string;
@@ -39,5 +41,6 @@ export const STORAGE_KEYS: readonly StorageKey[] = [
   { key: DRAFT_KEY, scope: "local", purpose: "an unsaved map draft from the editor" },
   { key: PHONE_SPLASH_SEEN_KEY, scope: "local", purpose: "whether you have seen the phone welcome" },
   { key: TRAINING_SEEN_KEY, scope: "local", purpose: "whether you have dismissed the Training badge" },
+  { key: JUKEBOX_VIDEO_KEY, scope: "local", purpose: "whether the jukebox shows its video large" },
   { key: SEAT_STORAGE_KEY, scope: "session", purpose: "the room seat you hold, so a reload can rejoin the match" },
 ];

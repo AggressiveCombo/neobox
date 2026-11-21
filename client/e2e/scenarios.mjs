@@ -777,6 +777,81 @@ async function jukebox(s) {
   return "suggestion line, host play, jukebox on both pages";
 }
 
+/** Jukebox panel: a 200x200 player beside the title (the title comes first), who suggested the video, "Show video"
+ *  for 16:9, and the choice kept on this device across a reload. */
+async function jukeboxPanel(s) {
+  const need = (ok, message) => {
+    if (!ok) throw new Error(message);
+  };
+  const roomName = uniqueName("jbp");
+  const host = await s.open("jbp-host", { name: uniqueName("jph") });
+  const code = await createRoom(host, s.base, roomName, { isPublic: true });
+  const guestName = uniqueName("jpg");
+  const guest = await s.open("jbp-guest", { name: guestName });
+  await joinByInvite(guest, s.base, code, roomName);
+  const chat = guest.page.getByLabel("Chat message", { exact: true });
+  await chat.fill("https://www.youtube.com/watch?v=dQw4w9WgXcQ");
+  await chat.press("Enter");
+  const play = host.page.getByRole("button", { name: "Play on jukebox" });
+  await play.waitFor({ timeout: 15_000 });
+  await play.click();
+  const panel = host.page.getByLabel("Jukebox", { exact: true });
+  await panel.waitFor({ state: "visible" });
+  await panel.getByText(`suggested by ${guestName}`, { exact: true }).waitFor({ state: "visible" });
+  const frame = panel.locator("iframe");
+  await frame.waitFor({ state: "attached", timeout: 15_000 });
+  const small = await frame.boundingBox();
+  need(small !== null && Math.round(small.width) === 200 && Math.round(small.height) === 200, `the player is ${small?.width}x${small?.height}, not the 200x200 thumbnail`);
+  const titleFirst = await panel.evaluate((p) => {
+    const title = p.querySelector(".jukebox-title");
+    const video = p.querySelector("iframe");
+    return title !== null && video !== null && (title.compareDocumentPosition(video) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0;
+  });
+  need(titleFirst, "the title does not come before the player");
+  await host.page.getByRole("button", { name: "Show video", exact: true }).click();
+  const big = await frame.boundingBox();
+  need(big !== null && big.width > 200 && Math.abs(big.width / big.height - 16 / 9) < 0.02, `Show video made the player ${big?.width}x${big?.height}, not 16:9`);
+  await host.page.reload();
+  await panel.waitFor({ state: "visible", timeout: 30_000 });
+  await frame.waitFor({ state: "attached", timeout: 15_000 });
+  const again = await frame.boundingBox();
+  need(again !== null && Math.abs(again.width / again.height - 16 / 9) < 0.02, "the 16:9 choice was not kept after a reload");
+  return `200x200 thumbnail beside the title, suggested by ${guestName}; Show video goes 16:9 and stays after a reload`;
+}
+
+/** The WIP mark sits in the app shell's corner, takes no pointer events, and covers no control on the menu or in a room. */
+async function wipMark(s) {
+  const need = (ok, message) => {
+    if (!ok) throw new Error(message);
+  };
+  const h = await s.open("wip", { name: uniqueName("wip") });
+  const mark = h.page.locator("[data-wip]");
+  const covered = () =>
+    h.page.evaluate(() => {
+      const box = document.querySelector("[data-wip]").getBoundingClientRect();
+      return [...document.querySelectorAll("button, a[href], input, select, textarea, [role=button], [role=link]")]
+        .filter((el) => {
+          const r = el.getBoundingClientRect();
+          return (
+            r.width > 0 && r.height > 0 && getComputedStyle(el).visibility !== "hidden" &&
+            r.left < box.right && r.right > box.left && r.top < box.bottom && r.bottom > box.top
+          );
+        })
+        .map((el) => (el.textContent || el.getAttribute("aria-label") || el.tagName).trim().slice(0, 40));
+    });
+  await h.page.goto(s.base, { waitUntil: "commit", timeout: 60_000 });
+  await menuName(h.page).waitFor();
+  await mark.waitFor({ state: "visible" });
+  need((await mark.evaluate((el) => getComputedStyle(el).pointerEvents)) === "none", "the WIP mark takes pointer events");
+  const onMenu = await covered();
+  need(onMenu.length === 0, `the WIP mark covers on the menu: ${onMenu.join(", ")}`);
+  await createRoom(h, s.base, uniqueName("wip"));
+  await mark.waitFor({ state: "visible" });
+  const inRoom = await covered();
+  need(inRoom.length === 0, `the WIP mark covers in a room: ${inRoom.join(", ")}`);
+  return "corner mark, no pointer events, covers no control on the menu or in a room";
+}
+
 /** Every sound and music file the page requests exists, and a UI click fetches a sound effect. */
 async function sounds(s) {
   const h = await s.open("desktop");
@@ -2018,6 +2093,8 @@ export const scenarios = [
   { name: "quick play name", run: quickPlayName },
   { name: "levels", run: levels },
   { name: "jukebox", run: jukebox },
+  { name: "jukebox panel", run: jukeboxPanel },
+  { name: "wip mark", run: wipMark },
   { name: "lobby signals", run: lobbySignals },
   { name: "training", run: training },
   { name: "training camera", run: trainingCamera },

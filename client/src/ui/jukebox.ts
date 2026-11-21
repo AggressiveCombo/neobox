@@ -1,13 +1,22 @@
 // Jukebox: a YouTube video the whole room hears together. The app mounts it once; a small
-// panel shows while the room has a jukebox. The host plays a link, pauses, resumes or stops
-// it. Everyone hears it at the jukebox volume: the master volume times the jukebox slider.
+// panel shows while the room has a jukebox. The panel leads with what is playing (the title,
+// who suggested it) and the transport; the player is a compact thumbnail beside them, and
+// "Show video" enlarges it to 16:9. The host plays a link, pauses, resumes or stops it.
+// Everyone hears it at the jukebox volume: the master volume times the jukebox slider.
 // The video plays through YouTube's IFrame player API, loaded on first use.
+//
+// YouTube's embed rules, which the panel keeps: the player is at least 200x200 and visible (never
+// hidden, tiny or covered), so the compact thumbnail is the smallest allowed size. Playback the
+// browser does not start on its own waits for a gesture: a click or key press on the page, or
+// the "Tap to play" button.
 
 import type { AppCtx } from "../ctx";
 import { music } from "../music";
 import { prefs } from "../prefs";
 import type { JukeboxState } from "../protocol";
 import type { AppState } from "../state";
+import { local } from "../storage";
+import { JUKEBOX_VIDEO_KEY } from "../storage-keys";
 import { h } from "./dom";
 import { icon } from "./icons";
 
@@ -17,6 +26,8 @@ const DRIFT_S = 2;
 /** Seconds to wait for the player to report ready before the jukebox is marked unavailable. */
 const PLAYER_READY_MS = 15000;
 const VIDEO_ID_RE = /^[A-Za-z0-9_-]{11}$/;
+/** YouTube player states that mean "not playing yet": unstarted, paused, cued. */
+const NOT_PLAYING = new Set([-1, 2, 5]);
 
 interface YtPlayer {
   cueVideoById(id: string, start: number): void;
@@ -25,6 +36,7 @@ interface YtPlayer {
   pauseVideo(): void;
   seekTo(seconds: number, allowAhead: boolean): void;
   getCurrentTime(): number;
+  getPlayerState(): number;
   setVolume(volume: number): void;
   mute(): void;
   unMute(): void;
@@ -33,7 +45,12 @@ interface YtPlayer {
 interface YtApi {
   Player: new (
     el: HTMLElement,
-    options: { width: string; height: string; playerVars: { origin: string }; events: { onReady: () => void; onError: () => void } },
+    options: {
+      width: string;
+      height: string;
+      playerVars: { origin: string };
+      events: { onReady: () => void; onError: () => void; onStateChange: (e: { data: number }) => void };
+    },
   ) => YtPlayer;
 }
 
@@ -87,6 +104,23 @@ function isHost(state: AppState): boolean {
   return room !== null && room.quick === null && room.players.some((p) => p.id === state.myId && p.host);
 }
 
+/** Whether the video is shown at 16:9 rather than as the compact thumbnail. Remembered on this device. */
+function readLarge(): boolean {
+  try {
+    return local.getItem(JUKEBOX_VIDEO_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function writeLarge(large: boolean): void {
+  try {
+    local.setItem(JUKEBOX_VIDEO_KEY, large ? "1" : "0");
+  } catch {
+    // Storage blocked: the choice simply resets on the next visit.
+  }
+}
+
 /** Mounts the jukebox panel on the page and keeps the player in step with the room. */
 export function mountJukebox(ctx: AppCtx): void {
   let player: YtPlayer | null = null;
@@ -98,12 +132,32 @@ export function mountJukebox(ctx: AppCtx): void {
   let heardAt = 0;
   /** The player could not load: the panel says so, and the room's music is not silenced for it. */
   let unavailable = false;
+  /** The video is shown at 16:9 (the "Show video" choice), not as the compact thumbnail. */
+  let large = readLarge();
+  /** The player's YouTube state: -1 unstarted, 1 playing, 2 paused, 3 buffering, 5 cued. */
+  let playerState = -1;
 
   // The player frame lives in this mount (ensurePlayer gives YouTube an inner node to replace).
   const playerMount = h("div", { class: "jukebox-screen" });
   const title = h("strong", { class: "jukebox-title" });
+  const by = h("p", { class: "jukebox-by", hidden: true });
   const note = h("p", { class: "jukebox-note", hidden: true }, "The video player could not load, so the jukebox is silent.");
   const stateChip = h("span", { class: "chip", role: "status", "aria-live": "polite" });
+  const sizeBtn = h("button", {
+    type: "button",
+    class: "jukebox-size",
+    onclick: () => {
+      large = !large;
+      writeLarge(large);
+      render(ctx.store.state);
+    },
+  });
+  const tapBtn = h(
+    "button",
+    { type: "button", class: "jukebox-tap", hidden: true, onclick: () => player?.playVideo() },
+    icon("play", 18),
+    "Tap to play",
+  );
 
   function applyVolume(): void {
     if (player === null) return;
@@ -135,6 +189,10 @@ export function mountJukebox(ctx: AppCtx): void {
             onReady: () => resolve(created),
             // removed, private or not embeddable: like the original, ask for another song
             onError: () => ctx.toast("The jukebox could not play this video. Try another one.", "error"),
+            onStateChange: (e) => {
+              playerState = e.data;
+              render(ctx.store.state);
+            },
           },
         });
       } catch (err) {
@@ -180,6 +238,13 @@ export function mountJukebox(ctx: AppCtx): void {
     if (jb.playing) player.playVideo();
     else player.pauseVideo();
   }
+
+  // A click or key press is a gesture: the browser lets the player start then, so a playing room's video starts.
+  function onGesture(): void {
+    if (player !== null && current?.playing === true && NOT_PLAYING.has(playerState)) player.playVideo();
+  }
+  document.addEventListener("pointerdown", onGesture, true);
+  document.addEventListener("keydown", onGesture, true);
 
   function playLink(): void {
     const id = parseYouTubeId(urlInput.value);
@@ -230,9 +295,14 @@ export function mountJukebox(ctx: AppCtx): void {
   const panel = h(
     "section",
     { class: "jukebox", "aria-label": "Jukebox", hidden: true },
-    h("header", { class: "jukebox-head" }, title, stateChip),
-    playerMount,
-    note,
+    h(
+      "div",
+      { class: "jukebox-top" },
+      h("div", { class: "jukebox-info" }, title, by, h("div", { class: "jukebox-meta" }, stateChip, sizeBtn)),
+      playerMount,
+      note,
+    ),
+    tapBtn,
     hostRow,
     h("label", { class: "jukebox-volume" }, h("span", { title: "Volume" }, icon("volume-2", 18)), volume),
   );
@@ -242,10 +312,18 @@ export function mountJukebox(ctx: AppCtx): void {
     panel.hidden = jb === null;
     if (jb === null) return;
     title.textContent = jb.title;
+    // The latest chat line that pasted the room's link names its suggester; the server does not send one.
+    const suggests = state.chat.filter((line) => line.suggest?.video === jb.video);
+    const suggester = suggests.length > 0 ? suggests[suggests.length - 1].name : null;
+    by.hidden = suggester === null;
+    by.textContent = suggester === null ? "" : `suggested by ${suggester}`;
     stateChip.replaceChildren(icon(unavailable ? "triangle-alert" : jb.playing ? "play" : "pause", 14), unavailable ? "Unavailable" : jb.playing ? "Playing" : "Paused");
     stateChip.className = jb.playing && !unavailable ? "chip ink" : "chip";
+    panel.classList.toggle("is-large", large);
+    sizeBtn.textContent = large ? "Make smaller" : "Show video";
     playerMount.hidden = unavailable;
     note.hidden = !unavailable;
+    tapBtn.hidden = unavailable || !jb.playing || !NOT_PLAYING.has(playerState);
     toggleBtn.replaceChildren(icon(jb.playing ? "pause" : "play", 18), jb.playing ? "Pause" : "Resume");
     hostRow.hidden = !isHost(state);
   }
@@ -262,7 +340,7 @@ export function mountJukebox(ctx: AppCtx): void {
       apply();
       music.setJukebox(jb?.playing === true && !unavailable);
     }
-    if (next.room !== prev.room || next.myId !== prev.myId) render(next);
+    if (next.room !== prev.room || next.myId !== prev.myId || next.chat !== prev.chat) render(next);
   });
   render(ctx.store.state);
 }

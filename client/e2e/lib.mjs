@@ -51,12 +51,19 @@ const YOUTUBE_COOKIE_RE = /Cookie .* has been rejected/;
 /** Firefox's report of a WebSocket closed by a page load that had not finished (a reload right after a match joins). */
 const RELOAD_SOCKET_RE = /^The connection to wss?:\/\/\S+ was interrupted while the page was loading\.$/;
 const YOUTUBE_ORIGIN_RE = /^https:\/\/(www\.)?youtube\.com\//;
-/** A stand-in for YouTube's IFrame API: `YT.Player` reports ready on the next tick and has no-op controls. */
+/** A stand-in for YouTube's IFrame API: `YT.Player` replaces its target with an iframe and reports ready on the next
+ *  tick, and has no-op controls. The player starts unstarted (-1), as a browser that blocked autoplay leaves it. */
 const YOUTUBE_API_STUB = `window.YT = { Player: function (el, opts) {
-  setTimeout(() => opts.events.onReady(), 0);
   const noop = () => {};
+  setTimeout(() => {
+    const frame = document.createElement("iframe");
+    frame.width = opts.width;
+    frame.height = opts.height;
+    el.replaceWith(frame);
+    opts.events.onReady();
+  }, 0);
   return { cueVideoById: noop, loadVideoById: noop, playVideo: noop, pauseVideo: noop, seekTo: noop,
-    getCurrentTime: () => 0, setVolume: noop, mute: noop, unMute: noop };
+    getCurrentTime: () => 0, getPlayerState: () => -1, setVolume: noop, mute: noop, unMute: noop };
 } };
 window.onYouTubeIframeAPIReady();`;
 

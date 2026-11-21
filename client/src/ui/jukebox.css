@@ -1,11 +1,11 @@
-/* Jukebox panel: the room's YouTube player, now-playing state and transport. Floats over the page, mounted once on document.body. */
+/* Jukebox panel: what is playing (title, who suggested it), the player and the transport. Floats over the page, mounted once on document.body. */
 
 .jukebox {
   position: fixed;
   right: 16px;
   bottom: 16px;
   z-index: 40;
-  width: min(360px, calc(100vw - 32px));
+  width: min(480px, calc(100vw - 32px));
   display: flex;
   flex-direction: column;
   gap: 16px;
@@ -28,15 +28,26 @@
   background: var(--surface-3);
 }
 
-.jukebox-head {
+/* What is playing sits beside the compact player; it wraps under the player when the panel is narrow. */
+.jukebox-top {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
+  flex-wrap: wrap;
+  align-items: flex-start;
   gap: 12px;
   min-width: 0;
 }
 
+.jukebox-info {
+  flex: 1 1 200px;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+}
+
 .jukebox-title {
+  max-width: 100%;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -45,15 +56,45 @@
   font-weight: 500;
 }
 
-.jukebox-head .chip {
+.jukebox-by {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--step-small);
+  overflow-wrap: anywhere;
+}
+
+.jukebox-by[hidden] {
+  display: none;
+}
+
+.jukebox-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.jukebox-meta .chip {
   flex: none;
 }
 
-/* The player is a 16:9 frame with square corners; the video is the only thing in it. */
-.jukebox-screen {
-  aspect-ratio: 16 / 9;
-  width: 100%;
+.jukebox-size {
+  min-height: var(--control);
+  padding: 0 12px;
+  font-size: var(--step-small);
+}
+
+/* The player is a square thumbnail of YouTube's minimum size (200 by 200 CSS pixels), visible and never covered.
+   "Show video" makes it a 16:9 frame across the panel. */
+.jukebox-screen,
+.jukebox-note {
+  flex: none;
+  width: 200px;
+  height: 200px;
   background: #000;
+}
+
+.jukebox-screen {
   overflow: hidden;
 }
 
@@ -63,20 +104,40 @@
   border: 0;
 }
 
+.jukebox.is-large .jukebox-screen,
+.jukebox.is-large .jukebox-note {
+  flex-basis: 100%;
+  width: 100%;
+  height: auto;
+  aspect-ratio: 16 / 9;
+}
+
 /* Shown in place of the player when it could not load. */
 .jukebox-note {
   margin: 0;
   padding: 16px 12px;
   text-align: center;
   color: var(--ink-2, inherit);
-  aspect-ratio: 16 / 9;
   display: flex;
   align-items: center;
   justify-content: center;
-  background: #000;
 }
 
 .jukebox-note[hidden] {
+  display: none;
+}
+
+/* YouTube's state is not playing although the room is: the browser blocked the start, so a click starts it. */
+.jukebox-tap {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: var(--control);
+  padding: 0 12px;
+}
+
+.jukebox-tap[hidden] {
   display: none;
 }
 
