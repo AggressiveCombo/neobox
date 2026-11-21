@@ -9,7 +9,7 @@ import type { Scene } from "../frame";
 import { FLAG_LOCAL, HIT_KIND_PLAYER } from "../frame";
 import { TEAM_BLUE, TEAM_RED, TEAM_SPECTATOR, isTeamMode } from "../protocol";
 import { reducedMotion } from "../ui/a11y";
-import { AWAY_RING_BELOW_LUM, MARKER_GAP, MARKER_HALF_WIDTH, MARKER_HEIGHT, cssHex, playerRgb, relLuminance } from "./geometry";
+import { AWAY_RING_BELOW_LUM, cssHex, playerRgb, relLuminance } from "./geometry";
 
 const NAME_FONT = "500 12px system-ui, sans-serif";
 const LOCAL_NAME_FONT = "700 13px system-ui, sans-serif";
@@ -68,26 +68,37 @@ const AWAY_CHIP_GAP = 4;
 const AWAY_SWATCH = 6;
 /** One drawn edge chip, in window CSS px (QA hook). */
 interface AwayChip { id: number; x: number; y: number; w: number; h: number }
+/** Name box, as the original's: 60% black, 18 CSS px tall, 3 px above the body, 3 px padding each side; white 80% text, no outline. */
+const NAME_BOX_H = 18;
+const NAME_BOX_GAP = 3;
+const NAME_BOX_PAD = 3;
+const NAME_BOX_FILL = "rgba(0, 0, 0, 0.6)";
+const NAME_TEXT = "rgba(255, 255, 255, 0.8)";
 /** Name labels: px gap between stacked labels, and the most upward shifts tried before a label stays overlapped. */
 const NAME_GAP = 2;
-/** Height of the world marker (the jump emblem) above a body's centre, in body sizes: geometry's marker top. Labels clear it. */
-const MARKER_RISE = 0.89;
 const NAME_STACK_MAX = 4;
+/** The followed player's marker (the original's jump emblem) above the box: tip gap in CSS px, height and half width in player sides, and its 1 px outline. */
+const MARKER_GAP = 4; // box top to marker tip, CSS px (the original: about 4 device rows)
+const MARKER_HEIGHT = 0.38; // of the body side
+const MARKER_HALF_WIDTH = 0.31; // of the body side
+const MARKER_FILL = "#ffd440"; // the original's marker is this yellow in every state, air jump used or not
+const MARKER_OUTLINE = "#000222";
 /** The strip above a label that the leader's crown (drawCrown, 9 px above its anchor) occupies. */
 const CROWN_RISE = 16;
-/** A name label for this frame: anchor (baseline centre), measured box and draw data (CSS px). */
+/** A name label for this frame: anchor (box bottom-centre, CSS px) and its draw data. */
 interface NameLabel {
   player: Scene["players"][number];
   name: string;
   x: number;
   y: number;
-  centreY: number;
-  bodyHalf: number;
   local: boolean;
+  /** The followed player: its marker sits above the box. */
+  marked: boolean;
   font: string;
-  colour: string;
+  /** Box width: the text plus NAME_BOX_PAD each side. */
   w: number;
-  h: number;
+  /** CSS px per player side at this zoom: the marker's scale. */
+  unit: number;
 }
 /** Axis-aligned box of a placed name label, in CSS px. */
 interface Box { left: number; right: number; top: number; bottom: number }
@@ -102,17 +113,17 @@ interface KillEntry {
 }
 
 const METRIC_CACHE_MAX = 512;
-/** Name label sprites: room past the ink box for the 3 px outline and its antialiasing; and the entries kept. */
+/** Name label sprites: room past the ink box for antialiasing; and the entries kept. */
 const LABEL_PAD = 3;
 const LABEL_SPRITE_MAX = 64;
-/** A name label rendered once (outline and fill) in device px; (ax, ay) is the text anchor (centre, bottom baseline) in it, CSS px. */
+/** A name label rendered once in device px; (ax, ay) is the text centre in it, CSS px. */
 interface LabelSprite { canvas: HTMLCanvasElement; w: number; h: number; ax: number; ay: number }
 
 export class Overlay {
   private readonly ctx: CanvasRenderingContext2D;
   private readonly cssCache = new Map<number, string>();
   private readonly metricCache = new Map<string, { w: number; h: number }>();
-  /** Stroked text is the overlay's costliest call, so each label is drawn once into a sprite and blitted per frame. */
+  /** Name text is the overlay's costliest draw, so each label is drawn once into a sprite and blitted per frame. */
   private readonly labelSprites = new Map<string, LabelSprite>();
   private readonly feed: KillEntry[] = [];
   private readonly hitFlashes: { id: number; at: number }[] = [];
@@ -249,9 +260,9 @@ export class Overlay {
     return m;
   }
 
-  /** The sprite for `name` in `font` and `colour` at `dpr`, made on first use. */
-  private labelSprite(font: string, colour: string, name: string, dpr: number): LabelSprite {
-    const key = `${font}\u0000${colour}\u0000${dpr}\u0000${name}`;
+  /** The sprite for `name` in `font` at `dpr`, made on first use: white name text centred on its anchor, no outline. */
+  private labelSprite(font: string, name: string, dpr: number): LabelSprite {
+    const key = `${font}\u0000${dpr}\u0000${name}`;
     let s = this.labelSprites.get(key);
     if (s !== undefined) return s;
     const canvas = document.createElement("canvas");
@@ -260,10 +271,10 @@ export class Overlay {
     const setup = (): void => {
       ctx.font = font;
       ctx.textAlign = "center";
-      ctx.textBaseline = "bottom";
+      ctx.textBaseline = "middle";
     };
     // The ink box around the anchor, measured as drawn: engines place descenders and overhangs differently
-    // relative to the "bottom" baseline (Firefox puts descender ink below it), so neither the advance nor the font box holds it.
+    // relative to the baseline, so neither the advance nor the font box holds it.
     setup();
     const t = ctx.measureText(name);
     const ax = Math.ceil(t.actualBoundingBoxLeft) + LABEL_PAD;
@@ -273,11 +284,7 @@ export class Overlay {
     // Resizing reset the context state.
     setup();
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    ctx.lineJoin = "round";
-    ctx.lineWidth = 3;
-    ctx.strokeStyle = OUTLINE;
-    ctx.strokeText(name, ax, ay);
-    ctx.fillStyle = colour;
+    ctx.fillStyle = NAME_TEXT;
     ctx.fillText(name, ax, ay);
     s = { canvas, w: canvas.width / dpr, h: canvas.height / dpr, ax, ay };
     if (this.labelSprites.size >= LABEL_SPRITE_MAX) this.labelSprites.clear();
@@ -290,8 +297,10 @@ export class Overlay {
     const [sx, sy, ox, oy] = worldXf(cam);
     const pxPerUnit = cssW / cam.w;
     const leader = leaderId(scene);
-    ctx.textAlign = "center";
-    ctx.textBaseline = "bottom";
+    const followed = findLocal(scene);
+    const dpr = window.devicePixelRatio || 1;
+    // Device px, so the box, bar and marker edges sit on the pixel grid.
+    const snap = (v: number): number => Math.round(v * dpr) / dpr;
     ctx.lineJoin = "round";
     const labels: NameLabel[] = [];
     for (const p of scene.players) {
@@ -299,79 +308,80 @@ export class Overlay {
       const name = names.get(p.id);
       if (name === undefined) continue;
       const x = ((p.x * sx + ox) + 1) * cssW / 2;
-      const centreY = (1 - (p.y * sy + oy)) * cssH / 2;
-      const bodyHalf = (p.size / 2) * pxPerUnit;
+      // The box sits NAME_BOX_GAP above the body's top edge.
+      const bodyTop = (1 - (p.y * sy + oy)) * cssH / 2 - (p.size / 2) * pxPerUnit;
       const local = (p.flags & FLAG_LOCAL) !== 0;
       const font = local ? LOCAL_NAME_FONT : NAME_FONT;
-      const m = this.textSize(font, name);
       labels.push({
         player: p,
         name,
         x,
-        y: centreY - p.size * MARKER_RISE * pxPerUnit - 4,
-        centreY,
-        bodyHalf,
+        y: bodyTop - NAME_BOX_GAP,
         local,
+        marked: followed?.id === p.id,
         font,
-        colour: this.colourCss(playerRgb(p.team, p.id)),
-        w: m.w,
-        h: m.h,
+        w: this.textSize(font, name).w + 2 * NAME_BOX_PAD,
+        unit: p.size * pxPerUnit,
       });
     }
+    // The marker stands above the box (the bar is on its top row): a label's extent includes the marker.
+    const hasBar = (l: NameLabel): boolean => l.local && scene.maxStamina > 0;
+    const extent = (l: NameLabel): Box => {
+      const crown = !l.local && l.player.id === leader ? CROWN_RISE : 0;
+      const above = l.marked ? MARKER_GAP + MARKER_HEIGHT * l.unit : 0;
+      return { left: l.x - l.w / 2, right: l.x + l.w / 2, top: l.y - NAME_BOX_H - crown - above, bottom: l.y };
+    };
     // The local player's label keeps its place and is drawn last, on top. Others stack upward off it and off each other.
     // The leader's crown sits above its label, so its box includes that strip; no label is stacked over a crown.
     const placed: Box[] = [];
     const drawn: DrawRect[] = [];
     for (const l of [...labels].sort((a, b) => Number(b.local) - Number(a.local))) {
-      const crown = !l.local && l.player.id === leader ? CROWN_RISE : 0;
       if (!l.local) {
         for (let step = 0; step < NAME_STACK_MAX; step++) {
-          const hit = placed.some((b) => b.left < l.x + l.w / 2 && l.x - l.w / 2 < b.right && b.top < l.y && l.y - l.h - crown < b.bottom);
+          const e = extent(l);
+          const hit = placed.some((b) => b.left < e.right && e.left < b.right && b.top < e.bottom && e.top < b.bottom);
           if (!hit) break;
-          l.y -= l.h + NAME_GAP;
+          l.y -= NAME_BOX_H + NAME_GAP;
         }
       }
-      const box = { left: l.x - l.w / 2, right: l.x + l.w / 2, top: l.y - l.h - crown, bottom: l.y };
       // A label past the view's edge moves in (the view clips what it leaves out): on small cards the name stays whole.
-      const dx = box.left < 0 ? -box.left : box.right > cssW ? cssW - box.right : 0;
-      const dy = box.top < 0 ? -box.top : box.bottom > cssH ? cssH - box.bottom : 0;
+      const e = extent(l);
+      const dx = e.left < 0 ? -e.left : e.right > cssW ? cssW - e.right : 0;
+      const dy = e.top < 0 ? -e.top : e.bottom > cssH ? cssH - e.bottom : 0;
       l.x += dx;
       l.y += dy;
-      box.left += dx;
-      box.right += dx;
-      box.top += dy;
-      box.bottom += dy;
-      placed.push(box);
-      drawn.push({ kind: "label", id: l.player.id, z: 1, box });
+      placed.push(extent(l));
+      drawn.push({ kind: "label", id: l.player.id, z: 1, box: { left: l.x - l.w / 2, right: l.x + l.w / 2, top: l.y - NAME_BOX_H, bottom: l.y } });
     }
-    const dpr = window.devicePixelRatio || 1;
     for (const l of labels.sort((a, b) => Number(a.local) - Number(b.local))) {
-      // Snapped to device pixels so the blit copies the sprite 1:1 instead of resampling it.
-      const s = this.labelSprite(l.font, l.colour, l.name, dpr);
-      const left = Math.round((l.x - s.ax) * dpr) / dpr;
-      const top = Math.round((l.y - s.ay) * dpr) / dpr;
-      ctx.drawImage(s.canvas, left, top, s.w, s.h);
-      // The local player reads its own status from the stamina bar and kill line instead.
-      if (l.player.id === leader && !l.local) this.drawCrown(l.x, l.y - l.h - 6);
-      if (l.local && scene.maxStamina > 0) {
-        // Fixed CSS px like the label (the original's canvas is fixed-size too): one CSS px tall, the label's width.
-        const left = Math.round((l.x - l.w / 2) * dpr) / dpr;
-        const top = Math.round((l.y - l.h - STAMINA_H) * dpr) / dpr;
-        this.drawStamina(l.player.stamina / scene.maxStamina, left, l.w, top);
+      const left = snap(l.x - l.w / 2);
+      const right = snap(l.x + l.w / 2);
+      const top = snap(l.y - NAME_BOX_H);
+      const bottom = snap(l.y);
+      ctx.fillStyle = NAME_BOX_FILL;
+      ctx.fillRect(left, top, right - left, bottom - top);
+      // The text is centred on the box and blitted at device px so the copy is 1:1.
+      const s = this.labelSprite(l.font, l.name, dpr);
+      ctx.drawImage(s.canvas, snap(l.x - s.ax), snap((top + bottom) / 2 - s.ay), s.w, s.h);
+      if (l.player.id === leader && !l.local) this.drawCrown(l.x, top - 6);
+      // The local player's status: the stamina bar, one CSS px tall, on the box's top row at the box width.
+      if (hasBar(l)) this.drawStamina(l.player.stamina / scene.maxStamina, left, right - left, top);
+      if (l.marked) {
+        const tipY = top - MARKER_GAP;
+        const h = MARKER_HEIGHT * l.unit;
+        const hw = MARKER_HALF_WIDTH * l.unit;
+        ctx.beginPath();
+        ctx.moveTo(l.x, tipY);
+        ctx.lineTo(l.x - hw, tipY - h);
+        ctx.lineTo(l.x + hw, tipY - h);
+        ctx.closePath();
+        ctx.fillStyle = MARKER_FILL;
+        ctx.fill();
+        ctx.lineWidth = 1;
+        ctx.strokeStyle = MARKER_OUTLINE;
+        ctx.stroke();
+        drawn.push({ kind: "marker", id: l.player.id, z: 1, box: { left: l.x - hw, right: l.x + hw, top: tipY - h, bottom: tipY } });
       }
-    }
-    // The followed player's jump emblem: geometry's putMarker triangle in the same world transform, on the GL layer under the overlay.
-    const followed = findLocal(scene);
-    if (followed !== undefined) {
-      const size = followed.size;
-      const tipY = followed.y - size / 2 - size * MARKER_GAP;
-      const topY = tipY - size * MARKER_HEIGHT;
-      const hw = size * MARKER_HALF_WIDTH;
-      const x0 = ((followed.x - hw) * sx + ox + 1) * cssW / 2;
-      const x1 = ((followed.x + hw) * sx + ox + 1) * cssW / 2;
-      const y0 = (1 - (topY * sy + oy)) * cssH / 2;
-      const y1 = (1 - (tipY * sy + oy)) * cssH / 2;
-      drawn.push({ kind: "marker", id: followed.id, z: 0, box: { left: Math.min(x0, x1), right: Math.max(x0, x1), top: Math.min(y0, y1), bottom: Math.max(y0, y1) } });
     }
     return drawn;
   }

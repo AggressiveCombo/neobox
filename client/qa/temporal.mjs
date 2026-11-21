@@ -26,7 +26,7 @@
 //   E11 interaction.promptedInput.reacts  training: share of prompts whose named key lights its .key within 150 ms
 //   E12 editor.perf.dragP95Frames: editor: p95 rAF interval while a shape is dragged, in 60 Hz vsync frames (1 = on time), 1x CPU
 //                                  editor.perf.drag4xP95ms: the same drag at 4x CPU on the stress map (ms)
-//   E06 overlay.marker.underLabel: frames where a name label is drawn over the followed player's marker (__qaDraw)
+//   E06 overlay.marker.underLabel: frames where a name label's box overlaps the followed player's marker (__qaDraw)
 //
 // Trace: an init script on each context records the camera (globalThis.__qaCam, camera.ts) and the
 // engine tick (globalThis.__qaTick, game.ts) per animation frame, and marks when the replay view or the
@@ -1110,7 +1110,7 @@ async function editorDrag4x(s) {
   return { metrics: { "editor.perf.drag4xP95ms": p95 }, detail: `frames=${frames.length} p50=${percentile(frames, 50).toFixed(1)} max=${Math.max(...frames).toFixed(1)}` };
 }
 
-/** E06: frames where a name label (overlay, z 1) is drawn over the followed player's marker (GL, z 0). Window CSS px. */
+/** E06: frames where a name label's box overlaps the followed player's marker. Both are on the overlay canvas (z 1). Window CSS px. */
 async function renderOrder(s) {
   const h = await stateById("practice-running").prepare(traced(s));
   await sleep(6000);

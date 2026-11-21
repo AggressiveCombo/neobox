@@ -7,11 +7,12 @@
 // - corpse-colour: a player who falls out of the arena leaves debris (wasm frame.rs, source_player). Its colour must be
 //   the client's colour for that player (globalThis.__qaPlayerRgb, geometry.ts playerRgb), the colour the living body
 //   is drawn in. The wasm colour table of 02f3b72 draws it in another colour: the check fails there.
-// - stamina-bar: the local player's stamina is a bar on a black track on the overlay canvas, one CSS px tall (devicePixelRatio
-//   device rows) and the label's width, directly above the name label (overlay.ts drawStamina). Checked at DPR1 and DPR3: the
-//   rows just above the label hold only green or black, and no other row does. A bar under the body fails it.
 // - bat-charge: the body keeps its playerRgb colour while the bat swings (the original draws no bat lift). Its exact-colour
 //   pixel count in screenshots before and after holding C must not fall; a lifted body colour fails it.
+// - stamina-bar, label-box, label-marker: the local label is drawn as in the original (overlay.ts drawNames). Its box is black
+//   at 60%, 18 CSS px tall. Its top row is the stamina bar: one CSS px (devicePixelRatio device rows) at the box width, green
+//   over a black track, with nothing green above the box. The followed player's yellow marker (#ffd440, outlined) tip sits
+//   4 CSS px above the box top. Checked at DPR1 and DPR3 on the overlay canvas.
 //
 // Usage:  cd client && QA_OUT=<dir> node qa/actionparity.mjs --dist <dist>
 // Output: <QA_OUT>/actionparity.json; exit code 1 on FAIL. Needs a build with the __qaEngine and __qaPlayerRgb hooks.
@@ -111,44 +112,69 @@ const batBody = { idle: batRgb === null ? 0 : pixelsOf(batIdleShot, batRgb), hel
 for (const [name, shot] of [["bat-idle", batIdleShot], ["bat-held", batHeldShot]]) if (shot) writeFileSync(path.join(outDir(), "evidence", `${name}.png`), shot);
 const batPass = batting && batBody.idle > 0 && batBody.held >= batBody.idle;
 
-// --- stamina-bar: one CSS px tall and the label's width, on the rows just above the local label; nothing else there ---
-// Probes the overlay pixels above the local label of page pg.
+// --- stamina-bar, label box and marker: the local label's box is black at 60%, 18 CSS px tall (overlay.ts drawNames) ---
+// The bar is the box's top row; the followed player's marker (yellow, outlined) tip sits 4 CSS px above the box.
+// Probes the overlay canvas around the local label of page pg.
 const staminaOn = async (pg) => {
   const me = (await frameOf(pg))?.players[0] ?? null;
   const probe = me ? await pg.evaluate((id) => {
     const c = document.getElementById("overlay");
     const lab = globalThis.__qaDraw?.rects.find((r) => r.kind === "label" && r.id === id);
+    const mark = globalThis.__qaDraw?.rects.find((r) => r.kind === "marker" && r.id === id) ?? null;
     if (!c || !lab) return null;
     const r = c.getBoundingClientRect();
     const sx = c.width / r.width, sy = c.height / r.height;
+    const dpr = window.devicePixelRatio;
     const ctx = c.getContext("2d", { willReadFrequently: true });
     // The draw rects are in the view's CSS px (the overlay canvas covers the view): scale them to canvas pixels.
     const x0 = Math.round(lab.box.left * sx), x1 = Math.round(lab.box.right * sx);
-    const yBase = Math.round(lab.box.top * sy);
+    const yBase = Math.round(lab.box.top * sy), yEnd = Math.round(lab.box.bottom * sy);
     const rows = [];
-    for (let y = yBase - 6; y < yBase; y++) {
+    for (let y = yBase - 2 * dpr; y < yBase + 2 * dpr; y++) {
       const d = ctx.getImageData(x0, y, x1 - x0, 1).data;
-      let green = 0, black = 0, other = 0;
+      let green = 0, opaque = 0, box = 0, other = 0;
       for (let i = 0; i < d.length; i += 4) {
         const [R, G, B, A] = [d[i], d[i + 1], d[i + 2], d[i + 3]];
         if (A === 255 && Math.abs(R - 52) <= 3 && Math.abs(G - 186) <= 3 && Math.abs(B - 86) <= 3) green++;
-        else if (A >= 128 && R + G + B <= 6) black++; // the track is black at 70% opacity over the label plate
+        else if (A === 255 && R + G + B <= 6) opaque++; // the bar's black track
+        else if (A >= 140 && A <= 166 && R + G + B <= 6) box++; // the label box: black at 60% (alpha 153)
         else other++;
       }
-      rows.push({ y, green, black, other });
+      rows.push({ y, green, opaque, box, other });
     }
-    return { dpr: window.devicePixelRatio, labelW: lab.box.right - lab.box.left, yBase, width: x1 - x0, rows };
+    // Box fill: the left padding column (no text), below the bar: black at 60% (alpha 153).
+    const col = ctx.getImageData(x0 + 1, yBase + dpr, 1, yEnd - yBase - dpr).data;
+    let boxRows = 0;
+    for (let i = 0; i < col.length; i += 4) if (col[i + 3] >= 140 && col[i + 3] <= 166 && col[i] + col[i + 1] + col[i + 2] <= 6) boxRows++;
+    // The followed player's marker: its yellow pixels in its box.
+    let marker = null;
+    if (mark) {
+      const mx0 = Math.round(mark.box.left * sx), mx1 = Math.round(mark.box.right * sx);
+      const my0 = Math.round(mark.box.top * sy), my1 = Math.round(mark.box.bottom * sy);
+      const md = ctx.getImageData(mx0, my0, mx1 - mx0, my1 - my0).data;
+      let yellow = 0;
+      for (let i = 0; i < md.length; i += 4) {
+        if (md[i + 3] === 255 && Math.abs(md[i] - 255) <= 3 && Math.abs(md[i + 1] - 212) <= 3 && Math.abs(md[i + 2] - 64) <= 3) yellow++;
+      }
+      marker = { top: my0, bottom: my1, yellow };
+    }
+    return { dpr, labelW: lab.box.right - lab.box.left, width: x1 - x0, yBase, yEnd, rows, boxRows, boxH: yEnd - yBase - dpr, marker };
   }, me.id) : null;
   return { me, probe };
 };
-// One CSS px = dpr device rows, each full bar width (a fractional fill edge may blend one pixel per row).
+// The bar: dpr device rows from the box top, each full width (a fractional fill edge may blend one pixel), with nothing above it.
 const staminaPassOf = (probe) => {
   if (!probe) return false;
-  // Full-width rows only: the label's outline stroke (black, partly transparent) can touch the rows above the bar.
-  const bars = probe.rows.filter((row) => row.green + row.black >= probe.width - 1);
-  return bars.length === probe.dpr && bars[0].y === probe.yBase - probe.dpr && bars[bars.length - 1].y === probe.yBase - 1
-    && bars.every((row) => row.other <= 1) && bars.reduce((sum, row) => sum + row.green, 0) > 0 && Math.abs(probe.width - probe.labelW * probe.dpr) <= 1;
+  const bars = probe.rows.filter((row) => row.y >= probe.yBase && row.y < probe.yBase + probe.dpr);
+  const above = probe.rows.filter((row) => row.y < probe.yBase && (row.green > 0 || row.opaque > 0));
+  return bars.length === probe.dpr && bars.every((row) => row.green + row.opaque >= probe.width - 1 && row.other <= 1)
+    && bars.reduce((sum, row) => sum + row.green, 0) > 0 && above.length === 0
+    && Math.abs(probe.width - probe.labelW * probe.dpr) <= 1;
 };
+// The box is black at 60% over its interior below the bar.
+const boxPassOf = (probe) => !!probe && probe.boxH > 0 && probe.boxRows === probe.boxH;
+// The marker has yellow pixels, and its tip sits 4 CSS px above the box top.
+const markerPassOf = (probe) => !!probe?.marker && probe.marker.yellow > 0 && Math.abs(probe.yBase - probe.marker.bottom - 4 * probe.dpr) <= 1;
 const stamina1 = await staminaOn(page);
 const ctx3 = await browser.newContext({ viewport: { width: 1366, height: 768 }, deviceScaleFactor: 3 });
 const page3 = await ctx3.newPage();
@@ -156,8 +182,9 @@ await startPractice({ page: page3 }, srv.base, null, { pixels: false });
 await sleep(3000);
 const stamina3 = await staminaOn(page3);
 await ctx3.close();
-const me0 = stamina1.me;
 const staminaPass = staminaPassOf(stamina1.probe) && staminaPassOf(stamina3.probe);
+const boxPass = boxPassOf(stamina1.probe) && boxPassOf(stamina3.probe);
+const markerPass = markerPassOf(stamina1.probe) && markerPassOf(stamina3.probe);
 
 // --- corpse-colour: walk left off the platform; the player's debris keeps the player's colour ---
 await sleep(500);
@@ -191,7 +218,7 @@ const corpse = {
   debrisColours: corpseGrew.sort((a, b) => b.added - a.added).slice(0, 8),
 };
 
-const pass = rocketPass && batPass && staminaPass && corpsePass && errors.length === 0;
+const pass = rocketPass && batPass && staminaPass && boxPass && markerPass && corpsePass && errors.length === 0;
 const result = {
   pass,
   actions: {
@@ -205,6 +232,8 @@ const result = {
     "bat-charge": { pass: batPass, batting, flags: batHeld?.players[0]?.flags ?? null, body: batBody, rgb: batRgb === null ? null : `0x${batRgb.toString(16).padStart(6, "0")}` },
     "corpse-colour": corpse,
     "stamina-bar": { pass: staminaPass, dpr1: stamina1.probe, dpr3: stamina3.probe },
+    "label-box": { pass: boxPass, dpr1: stamina1.probe?.boxRows, dpr3: stamina3.probe?.boxRows },
+    "label-marker": { pass: markerPass, dpr1: stamina1.probe?.marker, dpr3: stamina3.probe?.marker },
   },
   pageErrors: errors,
 };
@@ -213,7 +242,9 @@ writeFileSync(path.join(outDir(), "actionparity.json"), JSON.stringify(result, n
 console.log(`${rocketPass ? "PASS" : "FAIL"} rocket-charge ${JSON.stringify(rocketAdded)}${idle && held ? "" : " (no __qaEngine: build lacks the hook)"}`);
 console.log(`${corpsePass ? "PASS" : "FAIL"} corpse-colour expected ${corpse.expected} debris ${JSON.stringify(corpse.debrisColours.slice(0, 3))}${dead ? "" : " (player did not fall)"}`);
 console.log(`${batPass ? "PASS" : "FAIL"} bat-charge body ${JSON.stringify(batBody)} rgb ${batRgb === null ? "none" : batRgb.toString(16)}${batting ? "" : " (bat did not swing)"}`);
-console.log(`${staminaPass ? "PASS" : "FAIL"} stamina-bar dpr1 ${JSON.stringify(stamina1.probe?.rows.filter((r) => r.green || r.black || r.other))} dpr3 ${JSON.stringify(stamina3.probe?.rows.filter((r) => r.green || r.black || r.other))} label top ${stamina1.probe?.yBase ?? "none"}`);
+console.log(`${staminaPass ? "PASS" : "FAIL"} stamina-bar dpr1 ${JSON.stringify(stamina1.probe?.rows.filter((r) => r.green || r.opaque || r.other))} dpr3 ${JSON.stringify(stamina3.probe?.rows.filter((r) => r.green || r.opaque || r.other))} box top ${stamina1.probe?.yBase ?? "none"}`);
+console.log(`${boxPass ? "PASS" : "FAIL"} label-box dpr1 ${stamina1.probe?.boxRows ?? "none"}/${stamina1.probe?.boxH ?? "none"} dpr3 ${stamina3.probe?.boxRows ?? "none"}/${stamina3.probe?.boxH ?? "none"}`);
+console.log(`${markerPass ? "PASS" : "FAIL"} label-marker dpr1 ${JSON.stringify(stamina1.probe?.marker ?? null)} dpr3 ${JSON.stringify(stamina3.probe?.marker ?? null)} box top ${stamina1.probe?.yBase ?? "none"}`);
 await srv.stop();
 await runCleanups();
 process.exitCode = pass ? 0 : 1;

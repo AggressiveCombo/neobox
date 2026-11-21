@@ -855,16 +855,16 @@
     },
     {
       "id": "training-stamina-bar",
-      "text": "Your stamina is the bar above your name: abilities spend it, and only you can see it.",
+      "text": "Your stamina is the bar on your name: abilities spend it, and only you can see it.",
       "basis": "code",
       "source": { "file": "client/src/ui/screens/training.ts" },
       "truth": {
-        "check": "The stamina bar is drawn only for the local player, above the name label.",
+        "check": "The stamina bar is drawn only for the local player, on the top edge of the name label box.",
         "value": true,
         "evidence": [
-          { "file": "client/src/render/overlay.ts", "contains": "if (l.local && scene.maxStamina > 0) {" },
-          { "file": "client/src/render/overlay.ts", "contains": "const left = Math.round((l.x - l.w / 2) * dpr) / dpr;" },
-          { "file": "client/src/render/overlay.ts", "contains": "this.drawStamina(l.player.stamina / scene.maxStamina, left, l.w, top);" }
+          { "file": "client/src/render/overlay.ts", "contains": "const hasBar = (l: NameLabel): boolean => l.local && scene.maxStamina > 0;" },
+          { "file": "client/src/render/overlay.ts", "contains": "const left = snap(l.x - l.w / 2);" },
+          { "file": "client/src/render/overlay.ts", "contains": "this.drawStamina(l.player.stamina / scene.maxStamina, left, right - left, top);" }
         ]
       }
     },

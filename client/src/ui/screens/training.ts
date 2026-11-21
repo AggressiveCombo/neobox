@@ -75,7 +75,7 @@ function lessons(): Child[][] {
       right,
       " to aim a rocket.",
     ],
-    ["Your stamina is the bar above your name: abilities spend it, and only you can see it. Hold ", grab, " next to a moving object to hang on."],
+    ["Your stamina is the bar on your name: abilities spend it, and only you can see it. Hold ", grab, " next to a moving object to hang on."],
     ["Abilities combine, and objects move too. Mix them until you can hit the dummies at will, then Finish."],
   ];
 }

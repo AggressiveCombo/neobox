@@ -4,7 +4,7 @@
 // shrink, so steady-state frames allocate nothing here.
 
 import type { PlayerRec, Scene } from "../frame";
-import { FLAG_AIR_JUMP, FLAG_DASH, FLAG_FROZEN, FLAG_GHOST, FLAG_LOCAL, FLAG_TELEPORT } from "../frame";
+import { FLAG_DASH, FLAG_FROZEN, FLAG_GHOST, FLAG_LOCAL, FLAG_TELEPORT } from "../frame";
 import { backdropBounds, findLocal, type Bounds } from "../camera";
 import { TEAM_BLUE, TEAM_FFA, TEAM_RED, TEAM_SPECTATOR } from "../protocol";
 import { prefs, type Palette } from "../prefs";
@@ -17,8 +17,8 @@ export const VOID_RGB = [10 / 255, 10 / 255, 10 / 255, 1] as const;
 const WORDS_PER_VERTEX = 3;
 const INITIAL_CAPACITY = 1024;
 const BACKGROUND_VERTICES = 18;
-/** Body (6), launcher (90), egg (6), highlight ring (24), marker fill and outline (21). The trail reserves its own. */
-const PLAYER_MAX_VERTICES = 147;
+/** Body (6), launcher (90), egg (6) and highlight ring (24). The trail reserves its own. */
+const PLAYER_MAX_VERTICES = 126;
 
 /** Clip transform (sx, sy, ox, oy): clip = (x*sx + ox, y*sy + oy). */
 export type Xf = [number, number, number, number];
@@ -50,12 +50,7 @@ export const AWAY_RING_BELOW_LUM = 0.25;
 
 const ICE_RGB = 0xbfe9ff;
 const WHITE_RGB = 0xffffff;
-/** Local marker: frozen, air jump ready, air jump spent (the original's colours). */
-const MARKER_FROZEN_RGB = 0x6b8aff;
-const MARKER_READY_RGB = 0xffd240;
-const MARKER_SPENT_RGB = 0xbbbbbb;
 const GHOST_ALPHA = 0.35;
-const MARKER_ALPHA = 0.9;
 const FROZEN_MIX = 0.5;
 /** Launcher and egg aim lines, and the countdown outline: the original's light grey, half-opaque lines. */
 const LINE_RGB = 0xdddddd;
@@ -80,12 +75,6 @@ const TRAIL_RGB = 0x4d6d73;
 /** Countdown outline stroke, and the keys that light it (the original's push, rocket, bat and grab). */
 const HIGHLIGHT_STROKE = 0.08;
 const HIGHLIGHT_KEYS = BIT.PUSH | BIT.ROCKET | BIT.BAT | BIT.GRAB;
-/** Marker gap, height, half width and 1 px outline, in player sides. */
-export const MARKER_GAP = 0.15;
-export const MARKER_HEIGHT = 0.24;
-export const MARKER_HALF_WIDTH = 0.2;
-const MARKER_STROKE = 0.025;
-const MARKER_STROKE_RGB = 0x000222;
 /** Spawn preview: alpha and the vertices of its square. */
 const SPAWN_ALPHA = 0.6;
 const SPAWN_VERTICES = 6;
@@ -295,7 +284,7 @@ export class Geometry {
     this.putSpawn(scene, followed);
     for (let i = 0; i < players.length; i++) {
       const p = players[i];
-      if (p.team !== TEAM_SPECTATOR) this.putPlayer(scene, p, followed, now);
+      if (p.team !== TEAM_SPECTATOR) this.putPlayer(scene, p, now);
     }
     this.pruneTrails();
     this.players.count = this.used - this.players.first;
@@ -308,7 +297,7 @@ export class Geometry {
     }
   }
 
-  private putPlayer(scene: Scene, p: PlayerRec, followed: PlayerRec | undefined, now: number): void {
+  private putPlayer(scene: Scene, p: PlayerRec, now: number): void {
     const rgb = playerRgb(p.team, p.id);
     this.putTrail(p, now);
     // The trail took room from the up-front reservation: make sure this player's parts still fit.
@@ -318,7 +307,6 @@ export class Geometry {
     this.putLauncher(p);
     this.putEgg(p);
     if ((p.flags & FLAG_LOCAL) !== 0 && scene.intro > -1 && (scene.localKeys & HIGHLIGHT_KEYS) !== 0) this.putHighlight(p);
-    if (p === followed) this.putMarker(p);
   }
 
   /**
@@ -506,28 +494,6 @@ export class Geometry {
     this.put(x - h, y - h, colour);
     this.put(x + h, y + h, colour);
     this.put(x - h, y + h, colour);
-  }
-
-  /**
-   * The original's marker over the followed player: a triangle whose tip sits just above the body and
-   * whose flat edge is above the tip, with a thin dark outline.
-   */
-  private putMarker(p: PlayerRec): void {
-    const size = p.size;
-    const tipY = p.y - size / 2 - size * MARKER_GAP;
-    const topY = tipY - size * MARKER_HEIGHT;
-    const hw = size * MARKER_HALF_WIDTH;
-    const rgb =
-      (p.flags & FLAG_FROZEN) !== 0 ? MARKER_FROZEN_RGB : (p.flags & FLAG_AIR_JUMP) !== 0 ? MARKER_READY_RGB : MARKER_SPENT_RGB;
-    const colour = packRgba(rgb, MARKER_ALPHA);
-    this.put(p.x, tipY, colour);
-    this.put(p.x - hw, topY, colour);
-    this.put(p.x + hw, topY, colour);
-    const stroke = packRgba(MARKER_STROKE_RGB, 1);
-    const sh = (size * MARKER_STROKE) / 2;
-    this.putSegment(p.x, tipY, p.x - hw, topY, sh, stroke);
-    this.putSegment(p.x - hw, topY, p.x + hw, topY, sh, stroke);
-    this.putSegment(p.x + hw, topY, p.x, tipY, sh, stroke);
   }
 
   /** Grow the store (doubling) so `extra` more vertices fit. Keeps the vertices written so far. */
