@@ -447,7 +447,8 @@ async function libraryFlow(s) {
 
   await button(page, "Upload a map").click();
   await button(page, "Upload map").click();
-  await page.getByText("Give the map a name and paste its code.", { exact: true }).waitFor();
+  await page.getByText("Give the map a name.", { exact: true }).waitFor();
+  await page.getByText("Paste the map code.", { exact: true }).waitFor();
   await page.getByPlaceholder("Map name", { exact: true }).fill(name);
   await page.getByLabel("map code", { exact: true }).fill(map.code);
   await page.getByRole("radiogroup", { name: "Visibility", exact: true }).getByRole("radio", { name: "Public", exact: true }).click();

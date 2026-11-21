@@ -25,7 +25,7 @@ import type { AppCtx, ScreenFactory } from "../../ctx";
 import type { AppState } from "../../state";
 import { h, type Child } from "../dom";
 import { icon } from "../icons";
-import { confirmDialog, field, openModal, page, pageHead, seg, uid, type SegOption } from "../kit";
+import { confirmDialog, field, openModal, page, pageHead, seg, setFieldError, uid, type SegOption } from "../kit";
 import {
   SORT_LABELS,
   VISIBILITY_LABELS,
@@ -624,10 +624,10 @@ export const libraryScreen: ScreenFactory = (ctx) => {
       const code = codeInput.value.trim();
       previewBox.hidden = code === "";
       if (code === "") {
-        formError.textContent = "";
+        setFieldError(codeInput, null);
         return;
       }
-      formError.textContent = (await previewCode(ctx, previewCanvas, code)) ?? "";
+      setFieldError(codeInput, (await previewCode(ctx, previewCanvas, code)) ?? null);
     }
 
     async function onUpload(e: Event): Promise<void> {
@@ -636,7 +636,8 @@ export const libraryScreen: ScreenFactory = (ctx) => {
       const name = nameInput.value.trim();
       const code = codeInput.value.trim();
       if (name === "" || code === "") {
-        formError.textContent = "Give the map a name and paste its code.";
+        setFieldError(nameInput, name === "" ? "Give the map a name." : null);
+        setFieldError(codeInput, code === "" ? "Paste the map code." : null);
         return;
       }
       busy = true;

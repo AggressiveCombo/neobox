@@ -17,7 +17,7 @@ import type { Screen } from "../../state";
 import { h } from "../dom";
 import { engineStatus, type EngineStatus } from "../engine-status";
 import { icon, type IconName } from "../icons";
-import { confirmDialog, field, openModal, seg, uid } from "../kit";
+import { confirmDialog, field, openModal, seg, setFieldError, uid } from "../kit";
 import { VISIBILITY_LABELS, mapCode } from "../map-list";
 import { signInPrompt } from "./account";
 
@@ -540,12 +540,22 @@ export const editorScreen: ScreenFactory = (ctx) => {
     const done = (): void => modal?.close();
     const cancel = h("button", { type: "button", class: "quiet" }, "Cancel");
     cancel.addEventListener("click", done);
+    /** Checks the name in its field, then saves. */
+    const save = (mode: "new" | "overwrite", btn: HTMLButtonElement): void => {
+      setFieldError(name, null);
+      if (name.value.trim() === "") {
+        setFieldError(name, "Give the map a name.");
+        name.focus();
+        return;
+      }
+      void saveToLibrary(mode, fields(), btn, done);
+    };
     const primary = h("button", { type: "button", class: "primary" }, icon(current ? "save" : "upload", 18), current ? "Overwrite" : "Upload");
-    primary.addEventListener("click", () => void saveToLibrary(current ? "overwrite" : "new", fields(), primary, done));
+    primary.addEventListener("click", () => save(current ? "overwrite" : "new", primary));
     const actions = [cancel, primary];
     if (current) {
       const asNew = h("button", { type: "button" }, icon("save", 18), "Save as new");
-      asNew.addEventListener("click", () => void saveToLibrary("new", fields(), asNew, done));
+      asNew.addEventListener("click", () => save("new", asNew));
       actions.push(asNew);
     }
     modal = openModal({
@@ -560,13 +570,9 @@ export const editorScreen: ScreenFactory = (ctx) => {
     });
   }
 
-  /** `overwrite` updates the open library map (after a confirm); `new` uploads a copy. `done` closes the dialog on success. */
+  /** `overwrite` updates the open library map (after a confirm); `new` uploads a copy. `done` closes the dialog on success. The caller checks the name. */
   async function saveToLibrary(mode: "new" | "overwrite", f: SaveFields, btn: HTMLButtonElement, done: () => void): Promise<void> {
     const title = f.name.trim();
-    if (!title) {
-      ctx.toast("Give the map a name", "error");
-      return;
-    }
     const target = mode === "overwrite" ? libraryMap : null;
     if (target) {
       const ok = await confirmDialog({

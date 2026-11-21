@@ -67,12 +67,27 @@ export function page(className: string, head: HTMLElement, ...content: Child[]):
   return pg;
 }
 
-/** A labelled control with an optional hint under it. The label is tied to the control. */
-export function field(label: string, control: HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement, hint?: string): HTMLElement {
+/** A form control a `field()` wraps; its error line is found through `fieldErrors`. */
+type FormControl = HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement;
+const fieldErrors = new WeakMap<FormControl, HTMLElement>();
+
+/** A labelled control with an optional hint under it and an error line under both. The label and hint are tied to the control. */
+export function field(label: string, control: FormControl, hint?: string): HTMLElement {
   if (!control.id) control.id = uid("f");
   const hintEl = hint ? h("span", { class: "field-hint", id: uid("h") }, hint) : null;
-  if (hintEl) control.setAttribute("aria-describedby", hintEl.id);
-  return h("div", { class: "field" }, h("label", { class: "field-label", for: control.id }, label), control, hintEl);
+  const errorEl = h("p", { class: "field-error", id: uid("e"), role: "alert" });
+  control.setAttribute("aria-describedby", [hintEl?.id, errorEl.id].filter(Boolean).join(" "));
+  fieldErrors.set(control, errorEl);
+  return h("div", { class: "field" }, h("label", { class: "field-label", for: control.id }, label), control, hintEl, errorEl);
+}
+
+/** Shows `message` under the control's field (null or "" clears it) and marks the control invalid. */
+export function setFieldError(control: FormControl, message: string | null): void {
+  const errorEl = fieldErrors.get(control);
+  if (!errorEl) throw new Error("setFieldError: the control is not in a field()");
+  errorEl.textContent = message ?? "";
+  if (message) control.setAttribute("aria-invalid", "true");
+  else control.removeAttribute("aria-invalid");
 }
 
 /** A labelled on/off switch (a checkbox with role="switch"). */

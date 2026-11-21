@@ -10,7 +10,7 @@ import type { ScreenFactory } from "../../ctx";
 import { MAX_NAME_LEN } from "../../protocol";
 import type { AppState } from "../../state";
 import { h } from "../dom";
-import { field, loading, page, pageHead } from "../kit";
+import { field, loading, page, pageHead, setFieldError } from "../kit";
 import { icon } from "../icons";
 import { previewCode } from "../map-list";
 import { nameProblem, readStoredName, saveTypedName, writeStoredName } from "./menu";
@@ -69,8 +69,7 @@ export const quickScreen: ScreenFactory = (ctx) => {
     },
     onblur: () => sync(),
   });
-  const nameError = h("p", { class: "field-error", role: "alert", hidden: true });
-  const nameBlock = h("div", { class: "quick-name" }, field("Name", nameInput), nameError);
+  const nameBlock = h("div", { class: "quick-name" }, field("Name", nameInput));
 
   const cards = new Map<string, Card>();
   const cardBox = h("div", { class: "quick-cards" }, h("p", { class: "muted" }, "Loading…"));
@@ -165,8 +164,7 @@ export const quickScreen: ScreenFactory = (ctx) => {
     for (const card of cards.values()) {
       card.choose.disabled = problem !== null || waiting;
     }
-    nameError.textContent = problem ?? "";
-    nameError.hidden = problem === null;
+    setFieldError(nameInput, problem);
     renderStatus();
   }
 

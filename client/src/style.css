@@ -655,6 +655,11 @@ h3 > svg.icon {
   font-size: var(--step-small);
 }
 
+/* An empty error line takes no space: the field has no message until setFieldError sets one. */
+.field-error:empty {
+  display: none;
+}
+
 input[type="text"],
 input[type="password"],
 input[type="number"],

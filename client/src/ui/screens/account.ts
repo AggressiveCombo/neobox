@@ -10,7 +10,7 @@ import { MAX_NAME_LEN, NAME_RE } from "../../protocol";
 import { type Account, type AppState } from "../../state";
 import { h, type Child } from "../dom";
 import { icon } from "../icons";
-import { field, page, pageHead, toggle } from "../kit";
+import { field, page, pageHead, setFieldError, toggle } from "../kit";
 import { profileSummary } from "../profile";
 import { privacyLink } from "./privacy";
 
@@ -120,16 +120,18 @@ export const accountScreen: ScreenFactory = (ctx) => {
     // off by default: the session ends with the browser
     let remember = false;
 
-    /** Validated name and password, or null with the problem in the status line. */
+    /** Validated name and password, or null with each problem under its field. */
     function credentials(): { name: string; password: string } | null {
       const who = name.value.trim();
+      setFieldError(name, null);
+      setFieldError(password, null);
       if (!NAME_RE.test(who)) {
-        say(NAME_ERROR, true);
+        setFieldError(name, NAME_ERROR);
         name.focus();
         return null;
       }
       if (password.value === "") {
-        say("Enter a password.", true);
+        setFieldError(password, "Enter a password.");
         password.focus();
         return null;
       }
@@ -149,7 +151,7 @@ export const accountScreen: ScreenFactory = (ctx) => {
       const creds = credentials();
       if (creds === null) return;
       if (!passwordOk(creds.password)) {
-        say(PASSWORD_ERROR, true);
+        setFieldError(password, PASSWORD_ERROR);
         return;
       }
       void act(async () => {
@@ -202,8 +204,9 @@ export const accountScreen: ScreenFactory = (ctx) => {
 
     function changeSubmit(e: Event): void {
       e.preventDefault();
+      setFieldError(newPassword, null);
       if (!passwordOk(newPassword.value)) {
-        say(newPassword.value === "" ? "Enter a new password." : PASSWORD_ERROR, true);
+        setFieldError(newPassword, newPassword.value === "" ? "Enter a new password." : PASSWORD_ERROR);
         return;
       }
       void act(() => changePassword(oldPassword.value, newPassword.value), "Password changed.").then((done) => {
@@ -216,12 +219,14 @@ export const accountScreen: ScreenFactory = (ctx) => {
 
     function deleteSubmit(e: Event): void {
       e.preventDefault();
+      setFieldError(confirmName, null);
+      setFieldError(deletePassword, null);
       if (confirmName.value.trim() !== account.name) {
-        say(`Type your name, ${account.name}, to confirm.`, true);
+        setFieldError(confirmName, `Type your name, ${account.name}, to confirm.`);
         return;
       }
       if (deletePassword.value === "") {
-        say("Enter your password to delete the account.", true);
+        setFieldError(deletePassword, "Enter your password to delete the account.");
         return;
       }
       void act(async () => {
