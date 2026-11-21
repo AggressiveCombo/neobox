@@ -80,6 +80,15 @@ async function regionBoxes(page, selectors) {
   }, selectors);
 }
 
+// The lobby's own scroller (.room-content): its scroll offset and its scrollable height. Messages that grow the lobby
+// change the height; a focus that scrolls it changes the offset.
+async function lobbyScroll(page) {
+  return page.evaluate(() => {
+    const c = document.querySelector(".room-content");
+    return c ? { top: c.scrollTop, height: c.scrollHeight } : { top: 0, height: 0 };
+  });
+}
+
 // Compares two box lists by key. `axes` picks what must stay put: a chat growth moves y and h too.
 function compare(before, after, axes) {
   const byKey = new Map(after.map((b) => [b.key, b]));
@@ -112,8 +121,13 @@ async function chatCase(s, base, { phone }) {
   await createRoom(h, base, uniqueName("layout"));
   if (phone) await page.locator("button[role=tab][data-tab=chat]").click();
   await sleep(SETTLE_MS);
-  const before = await regionBoxes(page, ROOM_REGIONS);
   const chat = page.getByLabel("Chat message", { exact: true });
+  // The lobby scrolls its own content, and at 1280x800 the chat input sits below the fold. A user reveals it before
+  // typing, which scrolls the lobby once; pin that first so the baseline is settled and only the messages are measured.
+  await chat.scrollIntoViewIfNeeded();
+  await sleep(SETTLE_MS);
+  const before = await regionBoxes(page, ROOM_REGIONS);
+  const scrollBefore = await lobbyScroll(page);
   const start = await page.locator("div.room-chat-log .room-chat-line").count();
   let sent = 0;
   try {
@@ -130,8 +144,13 @@ async function chatCase(s, base, { phone }) {
   if (mode === "shift") await page.addStyleTag({ content: SHIFT_CSS });
   await sleep(SETTLE_MS);
   const after = await regionBoxes(page, ROOM_REGIONS);
-  const metrics = { "layout.messages": MESSAGES };
-  return report(before, after, ["x", "y", "w", "h"], metrics);
+  const scrollAfter = await lobbyScroll(page);
+  const metrics = { "layout.messages": MESSAGES, "lobby.height": scrollAfter.height };
+  const r = report(before, after, ["x", "y", "w", "h"], metrics);
+  const grew = scrollAfter.height !== scrollBefore.height;
+  const scrolled = Math.abs(scrollAfter.top - scrollBefore.top) > TOL;
+  const extra = [grew && `lobby content ${scrollBefore.height}→${scrollAfter.height} px tall`, scrolled && `lobby scrolled ${scrollBefore.top}→${scrollAfter.top} px`].filter(Boolean);
+  return { ...r, pass: r.pass && !grew && !scrolled, detail: [r.detail, ...extra].filter(Boolean).join("; ") || undefined };
 }
 
 async function scrollCase(s, base, screen, { nogutter }) {
