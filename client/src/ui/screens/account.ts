@@ -81,6 +81,8 @@ export const accountScreen: ScreenFactory = (ctx) => {
     // The same message again (a repeated press on an invalid form) would look unchanged: flash the line so the press shows.
     const again = text !== "" && status.textContent === text;
     status.textContent = text;
+    // A failed form's message sits under the fold on a tall panel: bring it into view, or the press shows nothing.
+    if (error) status.scrollIntoView({ block: "nearest" });
     status.classList.toggle("field-error", error);
     if (again) {
       status.classList.remove("is-repeat");
