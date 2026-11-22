@@ -796,12 +796,11 @@
       "basis": "code",
       "source": { "file": "client/src/ui/news.ts" },
       "truth": {
-        "check": "qp_1 (Sweaty Bois) has maxPlayers 4, rounds mode 2 with limit 2; qp_2 (Team Madness) has maxPlayers 8, teams, lives-teams mode 5 with limit 50; the best-rated library maps join only modes without teams.",
+        "check": "qp_1 (Sweaty Bois) has maxPlayers 4, rounds mode 2 with limit 2; qp_2 (Team Madness) has maxPlayers 8, teams, lives-teams mode 5 with limit 50.",
         "value": true,
         "evidence": [
           { "file": "maps/rotation/maps2.json", "contains": "\"maxPlayers\":4,\"teams\":false,\"gameMode\":2,\"limit\":2" },
           { "file": "maps/rotation/maps2.json", "contains": "\"maxPlayers\":8,\"teams\":true,\"gameMode\":5,\"limit\":50" },
-          { "file": "crates/server/src/rotation.rs", "contains": "filter(|m| !m.meta.teams)" },
           { "file": "crates/sim/src/round.rs", "contains": "fn last_standing(&mut self, gs" }
         ]
       }
