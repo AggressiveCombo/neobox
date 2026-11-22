@@ -1,14 +1,9 @@
-// Jukebox: a YouTube video the whole room hears together. The app mounts it once; a small
-// panel shows while the room has a jukebox. The panel leads with what is playing (the title,
-// who suggested it) and the transport; the player is a compact thumbnail beside them, and
-// "Show video" enlarges it to 16:9. The host plays a link, pauses, resumes or stops it.
+// Jukebox: a YouTube video the whole room hears together. A small panel shows while the room has one:
+// the title, who suggested it, and the transport. The host plays a link, pauses, resumes or stops it.
 // Everyone hears it at the jukebox volume: the master volume times the jukebox slider.
 // The video plays through YouTube's IFrame player API, loaded on first use.
-//
-// YouTube's embed rules, which the panel keeps: the player is at least 200x200 and visible (never
-// hidden, tiny or covered), so the compact thumbnail is the smallest allowed size. Playback the
-// browser does not start on its own waits for a gesture: a click or key press on the page, or
-// the "Tap to play" button.
+// Audio first by default: the owner chose this over YouTube's embed rules. The player stays in the page
+// (clipped out of view) so the audio keeps playing; "Show video" turns on the 16:9 picture.
 
 import type { AppCtx } from "../ctx";
 import { music } from "../music";
@@ -104,7 +99,7 @@ function isHost(state: AppState): boolean {
   return room !== null && room.quick === null && room.players.some((p) => p.id === state.myId && p.host);
 }
 
-/** Whether the video is shown at 16:9 rather than as the compact thumbnail. Remembered on this device. */
+/** Whether the video's picture is shown at 16:9 (the "Show video" choice). Off by default; remembered on this device. */
 function readLarge(): boolean {
   try {
     return local.getItem(JUKEBOX_VIDEO_KEY) === "1";
@@ -132,7 +127,7 @@ export function mountJukebox(ctx: AppCtx): void {
   let heardAt = 0;
   /** The player could not load: the panel says so, and the room's music is not silenced for it. */
   let unavailable = false;
-  /** The video is shown at 16:9 (the "Show video" choice), not as the compact thumbnail. */
+  /** The video's picture is shown at 16:9 (the "Show video" choice); otherwise the player runs hidden. */
   let large = readLarge();
   /** The player's YouTube state: -1 unstarted, 1 playing, 2 paused, 3 buffering, 5 cued. */
   let playerState = -1;
@@ -320,7 +315,9 @@ export function mountJukebox(ctx: AppCtx): void {
     stateChip.replaceChildren(icon(unavailable ? "triangle-alert" : jb.playing ? "play" : "pause", 14), unavailable ? "Unavailable" : jb.playing ? "Playing" : "Paused");
     stateChip.className = jb.playing && !unavailable ? "chip ink" : "chip";
     panel.classList.toggle("is-large", large);
-    sizeBtn.textContent = large ? "Make smaller" : "Show video";
+    panel.dataset.playerState = String(playerState);
+    playerMount.toggleAttribute("inert", !large);
+    sizeBtn.textContent = large ? "Hide video" : "Show video";
     playerMount.hidden = unavailable;
     note.hidden = !unavailable;
     tapBtn.hidden = unavailable || !jb.playing || !NOT_PLAYING.has(playerState);

@@ -881,8 +881,28 @@ async function jukebox(s) {
   return "suggestion line, host play, jukebox on both pages";
 }
 
-/** Jukebox panel: a 200x200 player beside the title (the title comes first), who suggested the video, "Show video"
- *  for 16:9, and the choice kept on this device across a reload. */
+/** The page area of an element that is on screen: its box clipped by the viewport and every overflow ancestor. */
+const shownArea = (locator) =>
+  locator.evaluate((node) => {
+    const box = node.getBoundingClientRect();
+    let left = Math.max(box.left, 0);
+    let top = Math.max(box.top, 0);
+    let right = Math.min(box.right, innerWidth);
+    let bottom = Math.min(box.bottom, innerHeight);
+    for (let p = node.parentElement; p !== null; p = p.parentElement) {
+      const style = getComputedStyle(p);
+      if (style.overflowX === "visible" && style.overflowY === "visible") continue;
+      const clip = p.getBoundingClientRect();
+      left = Math.max(left, clip.left);
+      top = Math.max(top, clip.top);
+      right = Math.min(right, clip.right);
+      bottom = Math.min(bottom, clip.bottom);
+    }
+    return Math.max(0, right - left) * Math.max(0, bottom - top);
+  });
+
+/** Jukebox panel, audio first: by default the room's video plays with no picture on screen and its state reads
+ *  playing; "Show video" shows it at 16:9 and that choice is kept on this device across a reload. */
 async function jukeboxPanel(s) {
   const need = (ok, message) => {
     if (!ok) throw new Error(message);
@@ -903,8 +923,6 @@ async function jukeboxPanel(s) {
   await panel.waitFor({ state: "visible" });
   const frame = panel.locator("iframe");
   await frame.waitFor({ state: "attached", timeout: 15_000 });
-  const small = await frame.boundingBox();
-  need(small !== null && Math.round(small.width) === 200 && Math.round(small.height) === 200, `the player is ${small?.width}x${small?.height}, not the 200x200 thumbnail`);
   const titleFirst = await panel.evaluate((p) => {
     const title = p.querySelector(".jukebox-title");
     const video = p.querySelector("iframe");
@@ -912,15 +930,21 @@ async function jukeboxPanel(s) {
   });
   need(titleFirst, "the title does not come before the player");
   await panel.getByText(`suggested by ${guestName}`, { exact: true }).waitFor({ state: "visible" });
+  const quiet = await shownArea(frame);
+  need(quiet <= 1, `by default ${quiet} px² of the video shows; the room should hear music only`);
+  const playing = host.page.locator('section.jukebox[aria-label="Jukebox"][data-player-state="1"]');
+  await playing.waitFor({ state: "attached", timeout: 15_000 });
   await host.page.getByRole("button", { name: "Show video", exact: true }).click();
   const big = await frame.boundingBox();
   need(big !== null && big.width > 200 && Math.abs(big.width / big.height - 16 / 9) < 0.02, `Show video made the player ${big?.width}x${big?.height}, not 16:9`);
+  need((await shownArea(frame)) >= 0.95 * big.width * big.height, "Show video did not show the 16:9 player on screen");
   await host.page.reload();
   await panel.waitFor({ state: "visible", timeout: 30_000 });
   await frame.waitFor({ state: "attached", timeout: 15_000 });
   const again = await frame.boundingBox();
   need(again !== null && Math.abs(again.width / again.height - 16 / 9) < 0.02, "the 16:9 choice was not kept after a reload");
-  return `200x200 thumbnail beside the title, suggested by ${guestName}; Show video goes 16:9 and stays after a reload`;
+  need((await shownArea(frame)) >= 0.95 * again.width * again.height, "the 16:9 player is not on screen after a reload");
+  return `no video shows by default while the player reads playing; Show video goes 16:9 and stays after a reload (suggested by ${guestName})`;
 }
 
 /** The WIP strip: one full-width band across the top of every screen, reserved in layout, hiding no control and moving nothing. */

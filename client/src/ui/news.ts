@@ -28,7 +28,7 @@ const NEWS: NewsEntry[] = [
       "The camera follows you at the normal size instead of zooming out to keep other players in view.",
       "Training hall: landing on a dummy completes that lesson.",
       "Phones: hold Jump to jump again once your air jump is ready, and the stick steers in eight directions without flicking between them.",
-      "Jukebox: music comes first. The video stays small next to the title; Show video makes it big.",
+      "Jukebox: music only by default; Show video turns the video on.",
       "Sounds and music are evened out, so no effect is much louder or quieter than the others.",
       "The lobby fits your window: new chat messages and More settings no longer push things around.",
       "When a new version is out, the game tells you and reloads on the menu, so you never join a room on an old version.",

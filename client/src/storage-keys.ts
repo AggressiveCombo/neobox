@@ -19,7 +19,7 @@ export const PHONE_SPLASH_SEEN_KEY = "neobox.phoneSplashSeen";
 export const TRAINING_SEEN_KEY = "neobox.hintSeen";
 /** The account id whose settings changed on this device and were not saved yet: a reload before the save lands keeps this copy. */
 export const PREFS_PENDING_KEY = "neobox.prefsPending";
-/** The jukebox shows its video at 16:9 (not the compact thumbnail): a choice made on this device. */
+/** The jukebox shows its video at 16:9: a choice made on this device, off by default so the room hears music only. */
 export const JUKEBOX_VIDEO_KEY = "neobox.jukeboxVideo";
 
 export interface StorageKey {

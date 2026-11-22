@@ -59,9 +59,12 @@ const YOUTUBE_COOKIE_RE = /Cookie .* has been rejected/;
 const RELOAD_SOCKET_RE = /(The connection to wss?:\/\/\S+ was interrupted while the page was loading\.|WebSocket connection to 'wss?:\/\/\S+' failed: WebSocket network error: error code \d+)/;
 const YOUTUBE_ORIGIN_RE = /^https:\/\/(www\.)?youtube\.com\//;
 /** A stand-in for YouTube's IFrame API: `YT.Player` replaces its target with an iframe and reports ready on the next
- *  tick, and has no-op controls. The player starts unstarted (-1), as a browser that blocked autoplay leaves it. */
+ *  tick. Its state follows its calls, as YouTube's does: loading or playing reports playing (1), pausing paused (2),
+ *  cueing cued (5); it starts unstarted (-1). */
 const YOUTUBE_API_STUB = `window.YT = { Player: function (el, opts) {
   const noop = () => {};
+  let state = -1;
+  const change = (next) => { state = next; opts.events.onStateChange({ data: next }); };
   setTimeout(() => {
     const frame = document.createElement("iframe");
     frame.width = opts.width;
@@ -69,8 +72,9 @@ const YOUTUBE_API_STUB = `window.YT = { Player: function (el, opts) {
     el.replaceWith(frame);
     opts.events.onReady();
   }, 0);
-  return { cueVideoById: noop, loadVideoById: noop, playVideo: noop, pauseVideo: noop, seekTo: noop,
-    getCurrentTime: () => 0, getPlayerState: () => -1, setVolume: noop, mute: noop, unMute: noop };
+  return { cueVideoById: () => change(5), loadVideoById: () => change(1), playVideo: () => change(1),
+    pauseVideo: () => change(2), seekTo: noop, getCurrentTime: () => 0, getPlayerState: () => state,
+    setVolume: noop, mute: noop, unMute: noop };
 } };
 window.onYouTubeIframeAPIReady();`;
 

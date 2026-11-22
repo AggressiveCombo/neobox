@@ -84,9 +84,24 @@
   font-size: var(--step-small);
 }
 
-/* The player is a square thumbnail of YouTube's minimum size (200 by 200 CSS pixels), visible and never covered.
+/* Audio first: the player stays in the page at YouTube's minimum size (200 by 200 CSS pixels) inside a 0-by-0
+   clip, so no picture shows. display:none and visibility:hidden can stop playback, so the player is clipped, not hidden.
    "Show video" makes it a 16:9 frame across the panel. */
-.jukebox-screen,
+.jukebox-screen {
+  flex: none;
+  position: absolute;
+  width: 0;
+  height: 0;
+  overflow: hidden;
+  background: #000;
+}
+
+.jukebox-screen iframe {
+  width: 200px;
+  height: 200px;
+  border: 0;
+}
+
 .jukebox-note {
   flex: none;
   width: 200px;
@@ -94,17 +109,19 @@
   background: #000;
 }
 
-.jukebox-screen {
-  overflow: hidden;
+.jukebox.is-large .jukebox-screen {
+  position: static;
+  flex-basis: 100%;
+  width: 100%;
+  height: auto;
+  aspect-ratio: 16 / 9;
 }
 
-.jukebox-screen iframe {
+.jukebox.is-large .jukebox-screen iframe {
   width: 100%;
   height: 100%;
-  border: 0;
 }
 
-.jukebox.is-large .jukebox-screen,
 .jukebox.is-large .jukebox-note {
   flex-basis: 100%;
   width: 100%;
