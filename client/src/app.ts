@@ -139,9 +139,9 @@ interface NavState {
   modal?: string;
 }
 
-/** The room's screens: the room, its match, and the map editor the host opened from the room. */
+/** The room's screens: the room, its match, Settings opened from the lobby or the match, and the map editor the host opened from the room. */
 function inRoomScreen(screen: Screen, editorForRoom: boolean): boolean {
-  return screen === "room" || screen === "match" || (screen === "editor" && editorForRoom);
+  return screen === "room" || screen === "match" || screen === "settings" || (screen === "editor" && editorForRoom);
 }
 
 export function start(): Store<AppState> {

@@ -1351,6 +1351,8 @@ export const roomScreen: ScreenFactory = (ctx: AppCtx) => {
               "Save replay",
             )
           : null,
+        // the player's Settings, the same screen as the main menu's: the room stays connected behind it and Back returns here
+        h("button", { type: "button", class: "room-btn", "data-focus-key": "settings", onclick: () => ctx.store.set({ screen: "settings" }) }, icon("settings", 16), "Settings"),
         h("button", { type: "button", class: "room-btn quiet", "data-focus-key": "leave", disabled: st.reconnecting, onclick: leave }, icon("log-out", 16), "Leave"),
       ),
     ];
