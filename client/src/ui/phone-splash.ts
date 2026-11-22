@@ -23,7 +23,14 @@ export function showPhoneSplash(): void {
     "div",
     { class: "phone-splash", role: "dialog", "aria-label": "Welcome" },
     h("div", { class: "phone-splash-head" }, wordmark()),
-    h("p", { class: "phone-splash-lead" }, "Turn your phone sideways to play. Play goes fullscreen where the browser allows it."),
+    h(
+      "p",
+      { class: "phone-splash-lead" },
+      // A phone already held sideways is not told to turn it.
+      matchMedia("(orientation: portrait)").matches
+        ? "Turn your phone sideways to play. Play goes fullscreen where the browser allows it."
+        : "Play goes fullscreen where the browser allows it.",
+    ),
     h("div", { class: "phone-splash-actions" }, notNow, play),
   );
   const close = (): void => {
