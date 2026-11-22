@@ -791,6 +791,67 @@
       }
     },
     {
+      "id": "news-team-only-maps",
+      "text": "Quick play no longer picks team-only maps for free-for-all modes.",
+      "basis": "code",
+      "source": { "file": "client/src/ui/news.ts" },
+      "truth": {
+        "check": "rotation.rs routes a library map with team-only objects to team modes and every other map to free-for-all modes.",
+        "value": true,
+        "evidence": [{ "file": "crates/server/src/rotation.rs", "contains": "let join = if team_only(&data) { &team_ids } else { &free_ids };" }]
+      }
+    },
+    {
+      "id": "news-everyone-stamina",
+      "text": "Everyone's stamina bar shows on their name, not only yours.",
+      "basis": "code",
+      "source": { "file": "client/src/ui/news.ts" },
+      "truth": {
+        "check": "overlay.ts draws the stamina bar on every name label whenever the match has stamina.",
+        "value": true,
+        "evidence": [{ "file": "client/src/render/overlay.ts", "contains": "const hasBar = (_l: NameLabel): boolean => scene.maxStamina > 0;" }]
+      }
+    },
+    {
+      "id": "news-sounds-evened",
+      "text": "Sounds and music are evened out, so no effect is much louder or quieter than the others.",
+      "basis": "code",
+      "source": { "file": "client/src/ui/news.ts" },
+      "truth": {
+        "check": "Per-clip gains (sfx-levels.ts CLIP_GAIN_DB) put every effect within the tolerance of its class target, checked by qa/sfx-loudness.mjs.",
+        "value": true,
+        "evidence": [
+          { "file": "client/src/sfx-levels.ts", "contains": "export const CLIP_GAIN_DB" },
+          { "file": "client/qa/sfx-loudness.mjs", "contains": "Loudness classes: target in-game level (dB) and the tolerance around it." }
+        ]
+      }
+    },
+    {
+      "id": "news-lobby-fits",
+      "text": "The lobby fits your window: new chat messages and More settings no longer push things around.",
+      "basis": "code",
+      "source": { "file": "client/src/ui/news.ts" },
+      "truth": {
+        "check": "qa/layout.mjs fails when chat messages or the More settings fold move a lobby region; it passes on this build.",
+        "value": true,
+        "evidence": [{ "file": "client/qa/layout.mjs", "contains": "room lobby at 1280x720, 1280x800 and 1440x900: the lobby must fit its window before any message" }]
+      }
+    },
+    {
+      "id": "news-version-reload",
+      "text": "When a new version is out, the game tells you and reloads on the menu, so you never join a room on an old version.",
+      "basis": "code",
+      "source": { "file": "client/src/ui/news.ts" },
+      "truth": {
+        "check": "The server refuses a hello from another build with \"outdated\"; the client shows the new-version prompt and reloads once idle on the menu.",
+        "value": true,
+        "evidence": [
+          { "file": "crates/server/src/conn.rs", "contains": "self.error(\"outdated\", \"A new version of neobox is out. Reload to play.\");" },
+          { "file": "client/src/sw-update.ts", "contains": "and reloads once the player is idle on the menu." }
+        ]
+      }
+    },
+    {
       "id": "news-quick-sweaty-bois",
       "text": "Sweaty Bois (up to 4 players",
       "basis": "code",
