@@ -30,6 +30,13 @@ function resolveDist() {
   return abs;
 }
 export const DIST_DIR = resolveDist();
+
+/** The build id of the dist client, or null for a build made before ids (dist-r48). A raw hello must carry it. */
+export function distBuildId() {
+  const file = path.join(DIST_DIR, "client", "build-id.txt");
+  return existsSync(file) ? readFileSync(file, "utf8").trim() : null;
+}
+
 export const ADMIN_PASSWORD = "e2e-admin";
 export const PASSWORD = "e2e-password";
 export const ROOM_CODE_RE = /^[A-HJ-NP-Z2-9]{6}$/;
@@ -48,8 +55,8 @@ const STEP_TIMEOUT = 15_000;
 const FONT_ABORT_RE = /downloadable font: download failed .*status=2152398850\b/;
 /** YouTube's jukebox embed logs rejected third-party cookies; only that message from a YouTube-origin file is noise. */
 const YOUTUBE_COOKIE_RE = /Cookie .* has been rejected/;
-/** Firefox's report of a WebSocket closed by a page load that had not finished (a reload right after a match joins). */
-const RELOAD_SOCKET_RE = /^The connection to wss?:\/\/\S+ was interrupted while the page was loading\.$/;
+/** A WebSocket closed by a reload or a server restart the scenario asked for: Firefox and WebKit report that close as a console error. */
+const RELOAD_SOCKET_RE = /(The connection to wss?:\/\/\S+ was interrupted while the page was loading\.|WebSocket connection to 'wss?:\/\/\S+' failed: WebSocket network error: error code \d+)/;
 const YOUTUBE_ORIGIN_RE = /^https:\/\/(www\.)?youtube\.com\//;
 /** A stand-in for YouTube's IFrame API: `YT.Player` replaces its target with an iframe and reports ready on the next
  *  tick, and has no-op controls. The player starts unstarted (-1), as a browser that blocked autoplay leaves it. */

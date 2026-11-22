@@ -57,7 +57,7 @@ import {
   watchPage,
   writeIndex,
 } from "./lib-qa.mjs";
-import { drumOption, joinByInvite, navTo, playFromMenu } from "../e2e/lib.mjs";
+import { distBuildId, drumOption, joinByInvite, navTo, playFromMenu } from "../e2e/lib.mjs";
 
 const MODE = selfTestMode();
 const want = (key) => MODE === null || MODE === key;
@@ -349,7 +349,7 @@ async function nameCase(base) {
   const name = MODE === "namelimit" ? "ABCDEFGHIJKLMNO" : "ABCDEFGHIJKLMNOP";
   const ws = await connect(base);
   if (!ws.raw) return { pass: false, metrics: { "sec.server.nameLimit": 0 }, detail: `upgrade status ${ws.status}` };
-  ws.raw.send({ t: "hello", version: 1, name });
+  ws.raw.send({ t: "hello", version: 1, name, build: distBuildId() });
   const reply = await ws.raw.until((f) => f.t === "welcome" || f.t === "error", 4000);
   ws.raw.close();
   const rejected = reply?.t === "error" && reply.code === "invalid_playername" ? 1 : 0;
@@ -366,7 +366,7 @@ async function originCase(base) {
   let refused = ws.raw === null;
   let detail = `upgrade status ${ws.status}`;
   if (ws.raw) {
-    ws.raw.send({ t: "hello", version: 1, name: "QAOrigin" });
+    ws.raw.send({ t: "hello", version: 1, name: "QAOrigin", build: distBuildId() });
     const first = await ws.raw.until(() => true, 3000);
     refused = ws.raw.closed && ws.raw.frames.length === 0;
     detail += first ? `; first frame ${first.t}` : refused ? "; closed with no frame" : "; open, no frame in 3s";
@@ -403,7 +403,7 @@ async function modCase(base) {
       [g, `QAGuest${nonce}`],
       [w, `QAWatch${nonce}`],
     ]) {
-      x.send({ t: "hello", version: 1, name });
+      x.send({ t: "hello", version: 1, name, build: distBuildId() });
       await x.until((f) => f.t === "welcome" || f.t === "error", 4000);
     }
     h.send({ t: "create_room", name: `QA mod ${nonce}`, password: null, max_players: 8, public: false });
@@ -488,7 +488,7 @@ async function multiSocketCase(base) {
       [host, `QAHost${nonce}`],
       ...tabs.map((x, i) => [x, `QATab${i}${nonce}`]),
     ]) {
-      x.send({ t: "hello", version: 1, name });
+      x.send({ t: "hello", version: 1, name, build: distBuildId() });
       await x.until((f) => f.t === "welcome" || f.t === "error", 4000);
     }
     host.send({ t: "create_room", name: `QA sockets ${nonce}`, password: null, max_players: 8, public: false });
@@ -531,7 +531,7 @@ async function commandCase(base) {
   if (!sock.raw) return { pass: false, metrics: { "sec.chat.commandReplies": 0 }, detail: `upgrade status ${sock.status}` };
   const raw = sock.raw;
   try {
-    raw.send({ t: "hello", version: 1, name: `QACmd${nonce}` });
+    raw.send({ t: "hello", version: 1, name: `QACmd${nonce}`, build: distBuildId() });
     await raw.until((f) => f.t === "welcome" || f.t === "error", 4000);
     raw.send({ t: "create_room", name: `QA commands ${nonce}`, password: null, max_players: 8, public: false });
     if (!(await raw.until((f) => f.t === "room", 4000))) {
@@ -575,7 +575,7 @@ async function presenceFloodCase(base) {
       [f1, "Flick1"],
       [f2, "Flick2"],
     ]) {
-      x.send({ t: "hello", version: 1, name: `QA${tag}${nonce}` });
+      x.send({ t: "hello", version: 1, name: `QA${tag}${nonce}`, build: distBuildId() });
       await x.until((f) => f.t === "welcome" || f.t === "error", 4000);
     }
     h.send({ t: "create_room", name: `QA flood ${nonce}`, password: null, max_players: 8, public: false });
@@ -653,7 +653,7 @@ async function profanityCase(s, base, { phone = false } = {}) {
   const sender = await connect(base);
   if (!sender.raw) return { pass: false, metrics: { "sec.profanity.viewerMasked": 0 }, detail: `upgrade status ${sender.status}` };
   const raw = sender.raw;
-  raw.send({ t: "hello", version: 1, name: "QAProfanity" });
+  raw.send({ t: "hello", version: 1, name: "QAProfanity", build: distBuildId() });
   await raw.until((f) => f.t === "welcome" || f.t === "error", 4000);
   raw.send({ t: "create_room", name: "QA profanity room", password: null, max_players: 8, public: false });
   const created = await raw.until((f) => f.t === "room", 4000);

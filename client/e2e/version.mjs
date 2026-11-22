@@ -4,10 +4,10 @@
 // restarted on the same port from that copy. Raw-socket cases assert the wire; the browser case asserts what the player
 // sees and the reload.
 
-import { cpSync, existsSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { cpSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { DIST_DIR, button, matchWithGuest, menuName, navTo, sleep, startServer, uniqueName } from "./lib.mjs";
+import { DIST_DIR, button, distBuildId, matchWithGuest, menuName, navTo, sleep, startServer, uniqueName } from "./lib.mjs";
 
 const check = (ok, message) => {
   if (!ok) throw new Error(message);
@@ -20,12 +20,6 @@ const RELOAD_MS = 90_000;
 
 /** Live servers of this run, by base URL: a deploy stops the one on a port and starts the new build on the same port. */
 const servers = new Map();
-
-/** The build id of the dist client, or null for a build made before ids (dist-r48). */
-function distBuildId() {
-  const file = path.join(DIST_DIR, "client", "build-id.txt");
-  return existsSync(file) ? readFileSync(file, "utf8").trim() : null;
-}
 
 /** Every file under `dir`. */
 function walk(dir) {
@@ -166,7 +160,10 @@ async function versionReload(s) {
  * lands on the menu under the prompt, where the page reloads itself onto the new build.
  */
 async function versionMatch(s) {
-  const { host } = await matchWithGuest(s);
+  const { host, guest } = await matchWithGuest(s);
+  // The server stops mid-match: both sockets close, which Firefox and WebKit report as console errors.
+  host.reloading = true;
+  guest.reloading = true;
   const { page } = host;
   const reloaded = page.waitForEvent("load", { timeout: RELOAD_MS });
   await deploy(s, deployCopy(distBuildId()));

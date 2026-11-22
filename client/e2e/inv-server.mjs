@@ -2,7 +2,7 @@
 // errors. Each scenario names the rows it proves in `inv`. Raw-socket scenarios assert the wire (close code and
 // reason, error code and text) and run on chromium only; browser scenarios assert the text the player sees.
 
-import { adminPost, builtinMaps, ipIn, PASSWORD, regionServers, sleep, startServer, uniqueName } from "./lib.mjs";
+import { adminPost, builtinMaps, distBuildId, ipIn, PASSWORD, regionServers, sleep, startServer, uniqueName } from "./lib.mjs";
 
 const check = (ok, message) => {
   if (!ok) throw new Error(message);
@@ -59,7 +59,7 @@ function socket(base, { ip, cookie } = {}) {
     },
     async hello(name) {
       const from = msgs.length;
-      sock.send({ t: "hello", version: 1, name });
+      sock.send({ t: "hello", version: 1, name, build: distBuildId() });
       const w = await sock.until((m) => m.t === "welcome" || m.t === "error", from);
       check(w.t === "welcome", `hello ${name}: ${w.code} ${w.message}`);
       return w;
@@ -118,13 +118,13 @@ async function protocolErrors(s) {
   // stale protocol version
   c = socket(base);
   await c.opening;
-  await c.expectError({ t: "hello", version: 0, name: "Stale" }, "version", "Please reload the page: the game was updated");
+  await c.expectError({ t: "hello", version: 0, name: "Stale", build: distBuildId() }, "version", "Please reload the page: the game was updated");
   c.shut();
 
   // invalid player name
   c = socket(base);
   await c.opening;
-  await c.expectError({ t: "hello", version: 1, name: "bad!name" }, "invalid_playername", "Names are 1-15 letters, digits, spaces or underscores");
+  await c.expectError({ t: "hello", version: 1, name: "bad!name", build: distBuildId() }, "invalid_playername", "Names are 1-15 letters, digits, spaces or underscores");
   c.shut();
 
   // unknown quick-play queue
@@ -362,7 +362,7 @@ async function idleKick(s) {
 async function badTicket(s) {
   const c = socket(s.env.nodeBase);
   check(await c.opening, "could not open the node socket");
-  await c.expectError({ t: "hello", version: 1, name: uniqueName("Tix"), ticket: "forged.ticket" }, "bad_ticket", "Sign in again");
+  await c.expectError({ t: "hello", version: 1, name: uniqueName("Tix"), ticket: "forged.ticket", build: distBuildId() }, "bad_ticket", "Sign in again");
   c.shut();
   return "node hello with a forged ticket: bad_ticket";
 }
