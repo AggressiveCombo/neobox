@@ -412,6 +412,45 @@ async function roomLobby(s) {
   return `lock, kick, ban/unban, chat recall (room ${code})`;
 }
 
+/**
+ * The lobby's Settings opens the player's Settings without leaving the room: the room code, the players and the connection
+ * stay, and a volume changed there is applied. Back (desktop) or Escape (phone) returns to the same lobby.
+ */
+async function roomSettingsRoundTrip(s, phone) {
+  const label = phone ? "phone" : "desktop";
+  const hostName = uniqueName(`host${label}`);
+  const guestName = uniqueName(`guest${label}`);
+  const roomName = uniqueName(`settings${label}`);
+  const host = await s.open(`host-${label}`, { name: hostName, phone });
+  const code = await createRoom(host, s.base, roomName, { isPublic: true });
+  const guest = await s.open(`guest-${label}`, { name: guestName });
+  await joinByInvite(guest, s.base, code, roomName);
+  const { page } = host;
+  await playerRow(page, guestName).waitFor();
+
+  await button(page, "Settings").click();
+  const back = page.locator(".page-head .page-back");
+  await back.waitFor({ state: "visible" });
+  await page.locator(".settings-nav-item", { hasText: "Sound" }).click();
+  await page.getByRole("slider", { name: "Volume", exact: true }).fill("30");
+  const volume = await page.evaluate(() => JSON.parse(localStorage.getItem("neobox.prefs") || "null")?.volume);
+  check(volume === 0.3, `Volume did not apply in Settings on ${label} (stored ${volume})`);
+
+  if (phone) await page.keyboard.press("Escape");
+  else await back.click();
+  await roomTitle(page, roomName).waitFor();
+  check((await roomCode(page)) === code, `Settings left room ${code} on ${label}`);
+  await playerRow(page, guestName).waitFor();
+  await connectedSeat(s.base, code, hostName);
+  check((await page.evaluate(() => JSON.parse(localStorage.getItem("neobox.prefs") || "null")?.volume)) === 0.3, `Volume was lost on closing Settings on ${label}`);
+}
+
+async function roomSettingsFromLobby(s) {
+  await roomSettingsRoundTrip(s, false);
+  await roomSettingsRoundTrip(s, true);
+  return "lobby Settings: same room code, players and connection after Back/Escape; volume applied (desktop, phone)";
+}
+
 /** Polls the admin view (refreshed about once a second) until `name` holds exactly one connected seat in room `code`. */
 async function connectedSeat(base, code, name) {
   const end = Date.now() + 5000;
@@ -2406,6 +2445,7 @@ export const scenarios = [
   { name: "drum enter on load", run: drumEnterOnLoad },
   { name: "settings back stays", run: settingsBackStays },
   { name: "escape goes back", run: escapeGoesBack },
+  { name: "room settings", run: roomSettingsFromLobby },
   { name: "pinned parts hold still", run: pinnedPartsHoldStill },
   { name: "game view fills window", run: gameViewFillsWindow },
   { name: "quick play shows name", run: quickPlayShowsName },
