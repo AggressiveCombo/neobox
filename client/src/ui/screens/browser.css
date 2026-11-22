@@ -295,13 +295,13 @@ button.room-row {
 
 /* No rows yet: the empty line sits in the middle of the space below the tools, not in a strip at the top. */
 .room-browser:has(> .empty:not([hidden])) {
-  min-height: calc(100dvh - 280px);
+  min-height: calc(100dvh - var(--wip-h) - 280px);
 }
 
 /* Wide screens: the list is framed and fills the space below the tools, so a few rooms do not leave the lower screen blank. */
 @media (min-width: 901px) {
   .room-browser {
-    min-height: calc(100dvh - 280px);
+    min-height: calc(100dvh - var(--wip-h) - 280px);
     padding: 16px 24px 24px;
     border: 1px solid var(--line);
   }

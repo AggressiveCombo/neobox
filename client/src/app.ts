@@ -308,7 +308,8 @@ export function start(): Store<AppState> {
       const r = el.getBoundingClientRect();
       return { x: r.left + r.width / 2 - w / 2, y: r.top + r.height / 2 - h / 2, w, h };
     }
-    return { x: 0, y: 0, w: window.innerWidth, h: window.innerHeight };
+    const top = wipHeight();
+    return { x: 0, y: top, w: window.innerWidth, h: window.innerHeight - top };
   }
 
   /** The card moves with the page and changes size with its art: the view follows it, and the canvases resize only when its rect changed. */
@@ -629,10 +630,16 @@ export function start(): Store<AppState> {
     if (store.state.inMatch) ensureRenderer(true);
   }
 
+  /** The work-in-progress strip's height (CSS --wip-h): the game view and the menu fallback sit below it. */
+  function wipHeight(): number {
+    return parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--wip-h")) || 0;
+  }
+
   /** The game view rect. Landscape touch controls sit at the arena's two ends, so there the view is the largest rect between the two clusters (the arena then stays clear of them at any Control size). Elsewhere the view is the largest rect between the `.playfield-clear` bars and panels that cross the window's centre line (a top bar, the replay scoreboard and dock), or the largest rect of the window when none. */
   function gameView(): ViewRect {
     const winW = window.innerWidth;
     const winH = window.innerHeight;
+    const top0 = wipHeight();
     if (backdrop) return menuBox();
     if (winW > winH) {
       let left = 0;
@@ -643,10 +650,13 @@ export function start(): Store<AppState> {
         if (r.left + r.width / 2 < winW / 2) left = Math.max(left, r.right);
         else right = Math.min(right, r.left);
       }
-      if (right > left && right - left < winW) return fitViewBetween(winH, left, right, viewAspect);
+      if (right > left && right - left < winW) {
+        const v = fitViewBetween(winH - top0, left, right, viewAspect);
+        return { ...v, y: v.y + top0 };
+      }
     }
     // Bars and panels over the arena (.playfield-clear) bound the vertical band the view fits in: nothing covers the arena.
-    let top = 0;
+    let top = top0;
     let bottom = winH;
     for (const el of document.querySelectorAll<HTMLElement>(".playfield-clear")) {
       const r = el.getBoundingClientRect();
@@ -655,11 +665,12 @@ export function start(): Store<AppState> {
       else bottom = Math.min(bottom, r.top);
     }
     // A band under 40% of the window is too small to play in (short phone landscape): the arena keeps the whole window and the bars sit over it, as before.
-    if (bottom - top >= winH * 0.4 && (top > 0 || bottom < winH)) {
+    if (bottom - top >= winH * 0.4 && (top > top0 || bottom < winH)) {
       const v = fitView(winW, bottom - top, viewAspect);
       return { x: v.x, y: top + v.y, w: v.w, h: v.h };
     }
-    return fitView(winW, winH, viewAspect);
+    const v = fitView(winW, winH - top0, viewAspect);
+    return { ...v, y: v.y + top0 };
   }
 
   /** Size the game canvases to the view rect (the original's aspect, centred in the window) and publish it. */

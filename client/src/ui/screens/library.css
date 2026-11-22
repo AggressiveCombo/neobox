@@ -80,7 +80,7 @@
   align-items: center;
   justify-content: center;
   gap: 12px;
-  min-height: calc(100dvh - 300px);
+  min-height: calc(100dvh - var(--wip-h) - 300px);
   padding: 32px 0;
   color: var(--muted);
   text-align: center;

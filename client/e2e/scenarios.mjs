@@ -9,6 +9,7 @@ import {
   builtinMaps,
   createRoom,
   expectNoOverflow,
+  gotoApp,
   matchWithGuest,
   menuName,
   measureFirstChange,
@@ -922,38 +923,118 @@ async function jukeboxPanel(s) {
   return `200x200 thumbnail beside the title, suggested by ${guestName}; Show video goes 16:9 and stays after a reload`;
 }
 
-/** The WIP mark sits in the app shell's corner, takes no pointer events, and covers no control on the menu or in a room. */
+/** The WIP strip: one full-width band across the top of every screen, reserved in layout, hiding no control and moving nothing. */
+const WIP_VIEWPORTS = [
+  { label: "desktop", phone: false, viewport: { width: 1440, height: 900 } },
+  { label: "phone", phone: true, viewport: { width: 390, height: 844 } },
+  { label: "landscape phone", phone: true, viewport: { width: 844, height: 390 } },
+];
+/** Each screen, with the drum label that opens it. The lobby and the match are made by creating a room. */
+const WIP_SCREENS = [
+  ["menu", null],
+  ["settings", "Settings"],
+  ["replay", "Replay"],
+  ["training", "Training"],
+  ["editor", "Map editor"],
+  ["lobby", null],
+  ["hud", null],
+];
+
+/** Layout facts for the WIP strip: its box, the visible text, controls and canvases that touch it, and a layout signature. Null when the page has no strip. */
+function wipProbe() {
+  const strip = document.querySelector("[data-wip]");
+  if (!strip) return null;
+  const span = strip.firstElementChild;
+  const sr = strip.querySelector(".wip-mark-sr");
+  const r = strip.getBoundingClientRect();
+  const visible = (el) => (el.checkVisibility ? el.checkVisibility({ visibilityProperty: true, opacityProperty: true }) : true);
+  const touches = (rc) =>
+    rc.width > 0.5 && rc.height > 0.5 && rc.left < r.right - 0.5 && rc.right > r.left + 0.5 && rc.top < r.bottom - 0.5 && rc.bottom > r.top + 0.5;
+  const hits = new Set();
+  const layout = [];
+  const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+  for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+    const text = n.nodeValue.trim();
+    const el = n.parentElement;
+    if (!text || !el || el.closest("[data-wip], script, style, template") || !visible(el)) continue;
+    const range = document.createRange();
+    range.selectNodeContents(n);
+    for (const rc of range.getClientRects()) {
+      // Live text (the match timer, the kill feed) changes every second, so only text overlap is checked here; the controls and canvases below show any shift.
+      if (touches(rc)) hits.add(`text "${text.slice(0, 30)}"`);
+    }
+  }
+  const CONTROL = "button,a[href],input,select,textarea,canvas,[role=button],[role=link],[role=tab],[role=option],[role=checkbox],[role=switch],[role=slider],[role=menuitem]";
+  for (const el of document.querySelectorAll(CONTROL)) {
+    if (el.closest("[data-wip]") || !visible(el)) continue;
+    const rc = el.getBoundingClientRect();
+    layout.push([rc.left, rc.top, rc.width, rc.height].map(Math.round));
+    if (touches(rc)) hits.add(`${el.tagName.toLowerCase()} "${(el.getAttribute("aria-label") || el.textContent || "").trim().slice(0, 30)}"`);
+  }
+  const srRect = sr.getBoundingClientRect();
+  return {
+    strip: { left: r.left, top: r.top, width: r.width, height: r.height },
+    want: parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--wip-h")),
+    vw: document.documentElement.clientWidth,
+    lines: span.getClientRects().length,
+    fits: strip.scrollWidth <= strip.clientWidth + 0.5,
+    srText: sr.textContent.trim().length,
+    srHidden: srRect.width <= 1.5 && srRect.height <= 1.5,
+    pointerEvents: getComputedStyle(strip).pointerEvents,
+    ariaHidden: span.getAttribute("aria-hidden"),
+    hits: [...hits],
+    layout: JSON.stringify(layout),
+  };
+}
+
+/** Opens one screen from a fresh load of the app. */
+async function openWipScreen(h, s, screen, label) {
+  const { page } = h;
+  await gotoApp(page, s.base);
+  await menuName(page).waitFor();
+  await dismissPhoneSplash(page);
+  if (screen === "lobby" || screen === "hud") await createRoom(h, s.base, uniqueName("wip"));
+  else if (label) await navTo(page, label);
+  if (screen === "hud") await startMatch(h, []);
+  await sleep(700);
+}
+
+/** The WIP strip is a full-width band at the top, reserved in layout: no visible text, control or canvas under it, and nothing moves after load. */
 async function wipMark(s) {
   const need = (ok, message) => {
     if (!ok) throw new Error(message);
   };
-  const h = await s.open("wip", { name: uniqueName("wip") });
-  const mark = h.page.locator("[data-wip]");
-  const covered = () =>
-    h.page.evaluate(() => {
-      const box = document.querySelector("[data-wip]").getBoundingClientRect();
-      return [...document.querySelectorAll("button, a[href], input, select, textarea, [role=button], [role=link]")]
-        .filter((el) => {
-          const r = el.getBoundingClientRect();
-          return (
-            r.width > 0 && r.height > 0 && getComputedStyle(el).visibility !== "hidden" &&
-            r.left < box.right && r.right > box.left && r.top < box.bottom && r.bottom > box.top
-          );
-        })
-        .map((el) => (el.textContent || el.getAttribute("aria-label") || el.tagName).trim().slice(0, 40));
-    });
-  await h.page.goto(s.base, { waitUntil: "commit", timeout: 60_000 });
-  await menuName(h.page).waitFor();
-  need((await mark.count()) > 0, "the page has no WIP mark ([data-wip] is absent)");
-  await mark.waitFor({ state: "visible" });
-  need((await mark.evaluate((el) => getComputedStyle(el).pointerEvents)) === "none", "the WIP mark takes pointer events");
-  const onMenu = await covered();
-  need(onMenu.length === 0, `the WIP mark covers on the menu: ${onMenu.join(", ")}`);
-  await createRoom(h, s.base, uniqueName("wip"));
-  await mark.waitFor({ state: "visible" });
-  const inRoom = await covered();
-  need(inRoom.length === 0, `the WIP mark covers in a room: ${inRoom.join(", ")}`);
-  return "corner mark, no pointer events, covers no control on the menu or in a room";
+  const problems = [];
+  for (const vp of WIP_VIEWPORTS) {
+    const h = await s.open(`wip-${vp.label}`, { phone: vp.phone, viewport: vp.viewport, name: uniqueName("wip") });
+    for (const theme of ["light", "dark"]) {
+      await h.page.emulateMedia({ colorScheme: theme });
+      for (const [screen, label] of WIP_SCREENS) {
+        const where = `${vp.label} ${theme} ${screen}`;
+        await openWipScreen(h, s, screen, label);
+        const first = await h.page.evaluate(wipProbe);
+        await sleep(1000);
+        const second = await h.page.evaluate(wipProbe);
+        const bad = [];
+        if (!first) bad.push("the page has no WIP strip ([data-wip] is absent)");
+        else {
+          const { strip } = first;
+          if (Math.abs(strip.top) > 0.5 || Math.abs(strip.left) > 0.5) bad.push(`strip at ${strip.left},${strip.top}, not the top-left corner`);
+          if (Math.abs(strip.width - first.vw) > 0.5) bad.push(`strip ${strip.width}px wide on a ${first.vw}px viewport`);
+          if (Math.abs(strip.height - first.want) > 0.5) bad.push(`strip ${strip.height}px tall, --wip-h is ${first.want}px`);
+          if (first.lines !== 1 || !first.fits) bad.push("strip text wraps or overflows");
+          if (first.srText === 0 || !first.srHidden) bad.push("no visually hidden status text");
+          if (first.pointerEvents !== "none") bad.push("strip takes pointer events");
+          if (first.ariaHidden !== "true") bad.push("visual strip text is not aria-hidden");
+          if (first.hits.length) bad.push(`strip covers ${first.hits.slice(0, 6).join(", ")}`);
+          if (!second || first.layout !== second.layout || second.strip.top !== strip.top || second.strip.height !== strip.height) bad.push("layout moved within 1s after load");
+        }
+        if (bad.length) problems.push(`${where}: ${bad.join("; ")}`);
+      }
+    }
+  }
+  need(problems.length === 0, `WIP strip problems (${problems.length}):\n${problems.join("\n")}`);
+  return "full-width top strip reserved in layout; no text, control or canvas under it; layout stable on 7 screens x 3 viewports x 2 themes";
 }
 
 /** Every sound and music file the page requests exists, and a UI click fetches a sound effect. */
