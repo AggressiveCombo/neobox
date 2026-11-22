@@ -1229,8 +1229,11 @@ async function tapJump(send, jump) {
   await send("touchEnd", []);
 }
 
-/** A landscape phone in a started match, touching with real touch events: its page, touch driver and Jump button. */
-async function touchMatch(s) {
+/** Two spawns over a flat floor with nothing above them: the hold steps do not depend on the spawn height or a ceiling. */
+const FLAT_MAP = '{"b":[{"1":20,"2":8,"3":21,"s":[{"7":3754574,"p":[-20,-0.5,20,-0.5,20,0.5,-20,0.5]}]}],"j":[],"s":[{"1":15,"2":9.5},{"1":25,"2":9.5}],"p":[],"tu":[],"tc":[],"gp":[],"c":[],"set":{"3":40,"15":40,"16":25}}';
+
+/** A landscape phone in a started match, touching with real touch events: its page, touch driver and Jump button. A map code, when given, replaces the room's map. */
+async function touchMatch(s, map) {
   const roomName = uniqueName("touch room");
   const host = await s.open("host", { name: uniqueName("host") });
   const code = await createRoom(host, s.base, roomName, { isPublic: true });
@@ -1240,6 +1243,11 @@ async function touchMatch(s) {
   await joinByInvite(guest, s.base, code, roomName);
   await dismissPhoneSplash(page);
   await roomTitle(page, roomName).waitFor();
+  if (map) {
+    await button(host.page, "Change map").click();
+    await host.page.getByLabel("Map code or JSON", { exact: true }).fill(map);
+    await button(host.page, "Use code").click();
+  }
   await startMatch(host, [guest]);
   await page.locator(".hud-touch-layer").waitFor({ state: "visible" });
   await waitForPixels(guest, "landscape canvas");
@@ -1303,7 +1311,7 @@ async function phoneLandscapeTouch(s) {
 
 /** Holding Jump from the ground: the ground jump, then the air jump at its apex (the held thumb must not wait for a re-press). */
 async function touchJumpHoldGround(s) {
-  const { page, send, jump } = await touchMatch(s);
+  const { page, send, jump } = await touchMatch(s, FLAT_MAP);
   check((await awaitPlayer(page, (p) => p.ready, 5000))?.ready, "the local player never showed the air jump as ready");
   await sleep(500);
   const ground = await localPlayer(page);
