@@ -172,6 +172,22 @@
   min-width: 0;
 }
 
+/* Desktop: the columns fill the window under the header and scroll inside themselves (a fold that grows the roster, a
+   long match list), so the lobby never grows. The chat takes the row's height and its log scrolls inside it. */
+@media (min-width: 1100px) {
+  .room-main {
+    flex: 1 1 auto;
+    min-height: 480px;
+    grid-template-rows: minmax(0, 1fr);
+    align-items: stretch;
+  }
+
+  .room-col {
+    overflow-y: auto;
+    scrollbar-gutter: stable;
+  }
+}
+
 .room-col-roster {
   grid-area: roster;
 }
@@ -182,11 +198,7 @@
 
 .room-col-chat {
   grid-area: chat;
-  /* the row's height, not the chat's own content: the log scrolls inside it instead of growing the lobby */
-  align-self: stretch;
-  position: sticky;
-  top: var(--margin);
-  max-height: calc(100dvh - var(--wip-h, 0px) - 2 * var(--margin));
+  min-height: 0;
 }
 
 .room-panel {
@@ -833,11 +845,6 @@ button.room-menu-item[aria-checked="true"] {
     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   }
 
-  .room-col-chat {
-    position: static;
-    max-height: none;
-  }
-
   /* stacked, the chat takes its content's height; 100% would size it to the grid row and the log would cover the form */
   .room-chat {
     height: auto;
@@ -878,10 +885,6 @@ button.room-menu-item[aria-checked="true"] {
     scroll-margin: 0;
   }
 
-  .room-col-chat {
-    min-height: 0;
-  }
-
   .room-screen[data-tab="players"] .room-col-match,
   .room-screen[data-tab="players"] .room-col-chat,
   .room-screen[data-tab="match"] .room-col-roster,
@@ -893,6 +896,34 @@ button.room-menu-item[aria-checked="true"] {
 
   .room-chat-log {
     height: 50vh;
+  }
+
+  /* The chat tab fills the room's scroll box: the log gives up height rather than pushing the input under the dock. */
+  .room-screen[data-tab="chat"] .room-main {
+    flex: 1 1 auto;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .room-screen[data-tab="chat"] .room-col-chat {
+    flex: 1 1 auto;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .room-screen[data-tab="chat"] .room-chat {
+    flex: 1 1 auto;
+    height: auto;
+    min-height: 0;
+  }
+
+  .room-screen[data-tab="chat"] .room-chat-log {
+    flex: 1 1 0;
+    height: auto;
+    min-height: 120px;
   }
 
   .room-more {

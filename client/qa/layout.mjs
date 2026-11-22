@@ -8,7 +8,8 @@
 // scrollbar appears, passes every one of them.
 //
 // Cases (every selected engine):
-//   chat.desktop        room lobby, 1280x800: 10 chat messages; the roster, match, chat panel, log and dock must not move or resize
+//   chat.desktop.WxH    room lobby at 1280x720, 1280x800 and 1440x900: the lobby must fit its window before any message,
+//                       then 10 chat messages must not move a region, grow the lobby or scroll it
 //   chat.phone          room lobby, 390x844 on the Chat tab: the same, for the phone tab layout
 //   scroll.<screen>.<mode>  Settings, Friends, Library, About, Privacy, Account at 1280 wide. The menu is measured with
 //                       no scrollbar; then the screen is opened and the viewport is shortened until its page scrolls (a
@@ -17,6 +18,9 @@
 //                       engine as it is; mode `nogutter` serves the stylesheet with `scrollbar-gutter` renamed, which is
 //                       what an engine without that rule (older Safari) does. The layout must still hold. A screen that
 //                       does not scroll with the data at hand is info, not a pass.
+//   room.settings.WxH   room lobby at 1920x1080, 1366x768 and 1280x720: opening "More settings" must not move a region
+//   editor.menu.WxH     map editor at 1366x768 and 1280x720: opening the Menu must not move the editor's header or panels
+//   match.menu.WxH      in a match at 1920x1080 and 1366x768: opening the in-match Menu must not move a region
 //
 // Keys: layout.moved (regions that moved or resized), layout.regions (regions compared), layout.scrolls
 // (scroll cases: the page really scrolled after the resize), layout.moved.px (largest move in px).
@@ -37,7 +41,7 @@ import {
   uniqueName,
   writeIndex,
 } from "./lib-qa.mjs";
-import { createRoom, gotoApp, menuName, navTo, Scenario, signedIn } from "../e2e/lib.mjs";
+import { createRoom, gotoApp, matchWithGuest, menuName, navTo, Scenario, signedIn } from "../e2e/lib.mjs";
 
 const mode = selfTestMode();
 const TOL = 0.5; // px: below this a sub-pixel difference is not a move
@@ -80,12 +84,12 @@ async function regionBoxes(page, selectors) {
   }, selectors);
 }
 
-// The lobby's own scroller (.room-content): its scroll offset and its scrollable height. Messages that grow the lobby
-// change the height; a focus that scrolls it changes the offset.
+// The lobby's own scroller (.room-content): its scroll offset, its scrollable height and its window height. A lobby
+// taller than its window has a bar; messages that grow it change the height; a focus that scrolls it changes the offset.
 async function lobbyScroll(page) {
   return page.evaluate(() => {
     const c = document.querySelector(".room-content");
-    return c ? { top: c.scrollTop, height: c.scrollHeight } : { top: 0, height: 0 };
+    return c ? { top: c.scrollTop, height: c.scrollHeight, client: c.clientHeight } : { top: 0, height: 0, client: 0 };
   });
 }
 
@@ -115,19 +119,21 @@ function report(before, after, axes, metrics, pass = true) {
   return { pass: pass && r.moved.length === 0 && r.compared > 0, detail: r.moved.slice(0, 6).join("; ") || (r.compared === 0 ? "no regions compared" : undefined), metrics };
 }
 
-async function chatCase(s, base, { phone }) {
+// width and height: the window the desktop lobby must fit (the phone keeps its tabs and is measured at its own size).
+async function chatCase(s, base, { phone, width, height }) {
   const h = await s.open(phone ? "room-phone" : "room", { name: uniqueName("layout"), phone });
   const { page } = h;
   await createRoom(h, base, uniqueName("layout"));
   if (phone) await page.locator("button[role=tab][data-tab=chat]").click();
+  else await page.setViewportSize({ width, height });
   await sleep(SETTLE_MS);
   const chat = page.getByLabel("Chat message", { exact: true });
-  // The lobby scrolls its own content, and at 1280x800 the chat input sits below the fold. A user reveals it before
-  // typing, which scrolls the lobby once; pin that first so the baseline is settled and only the messages are measured.
-  await chat.scrollIntoViewIfNeeded();
-  await sleep(SETTLE_MS);
   const before = await regionBoxes(page, ROOM_REGIONS);
   const scrollBefore = await lobbyScroll(page);
+  // The desktop lobby fits its window before any message: a taller one shows a bar as soon as the chat is used.
+  if (!phone && scrollBefore.height > scrollBefore.client + TOL) {
+    return { pass: false, detail: `lobby does not fit: ${scrollBefore.height} px of content in a ${scrollBefore.client} px window`, metrics: { "lobby.height": scrollBefore.height } };
+  }
   const start = await page.locator("div.room-chat-log .room-chat-line").count();
   let sent = 0;
   try {
@@ -188,12 +194,53 @@ async function scrollCase(s, base, screen, { nogutter }) {
   return report(before, after, ["x", "w"], metrics);
 }
 
+// Options surfaces: the action that opens a fold, a menu or a settings panel must not move a region's x or width.
+// A scrollbar that appears inside a container narrows that container, so the regions beside it move sideways.
+async function shiftCase(page, selectors, act) {
+  const before = await regionBoxes(page, selectors);
+  await act();
+  await sleep(SETTLE_MS);
+  const after = await regionBoxes(page, selectors);
+  return report(before, after, ["x", "w"], {});
+}
+
+async function roomSettingsCase(s, base, { width, height }) {
+  const h = await s.open("room", { name: uniqueName("layout"), phone: false });
+  const { page } = h;
+  await createRoom(h, base, uniqueName("layout"));
+  await page.setViewportSize({ width, height });
+  await sleep(SETTLE_MS);
+  const fold = page.locator("details.room-all-settings > summary");
+  return shiftCase(page, [...ROOM_REGIONS, ".room-screen .room-col"], () => fold.click());
+}
+
+async function editorMenuCase(s, base, { width, height }) {
+  const h = await signedIn(s, "layout-editor", uniqueName("layout"));
+  const { page } = h;
+  await navTo(page, "Map editor");
+  await page.setViewportSize({ width, height });
+  await sleep(SETTLE_MS);
+  return shiftCase(page, ["#ui .editor-top", "#ui .editor-tools", "#ui .editor-side"], () => page.locator(".editor-menu-toggle").click());
+}
+
+// The in-match Menu, opened from a running match.
+async function matchCase(s, base, { width, height }) {
+  const { host } = await matchWithGuest(s);
+  const { page } = host;
+  await page.setViewportSize({ width, height });
+  await sleep(SETTLE_MS);
+  return shiftCase(page, [".hud-menu-btn", "#hud-menu"], () => page.locator(".hud-menu-btn").click());
+}
+
 const CASES = [
-  { id: "chat.desktop", run: (s, base) => chatCase(s, base, { phone: false }) },
+  ...[[1280, 720], [1280, 800], [1440, 900]].map(([width, height]) => ({ id: `chat.desktop.${width}x${height}`, run: (s, base) => chatCase(s, base, { phone: false, width, height }) })),
   { id: "chat.phone", run: (s, base) => chatCase(s, base, { phone: true }) },
   ...SCREENS.flatMap((screen) =>
     ["native", "nogutter"].map((m) => ({ id: `scroll.${screen.id}.${m}`, run: (s, base) => scrollCase(s, base, screen, { nogutter: m === "nogutter" }) })),
   ),
+  ...[[1920, 1080], [1366, 768], [1280, 720]].map(([width, height]) => ({ id: `room.settings.${width}x${height}`, run: (s, base) => roomSettingsCase(s, base, { width, height }) })),
+  ...[[1366, 768], [1280, 720]].map(([width, height]) => ({ id: `editor.menu.${width}x${height}`, run: (s, base) => editorMenuCase(s, base, { width, height }) })),
+  ...[[1920, 1080], [1366, 768]].map(([width, height]) => ({ id: `match.menu.${width}x${height}`, run: (s, base) => matchCase(s, base, { width, height }) })),
 ];
 
 const only = process.env.QA_CASES ? process.env.QA_CASES.split(",") : null;
