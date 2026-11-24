@@ -105,8 +105,8 @@ function renderRoom(r) {
   let scores = "";
   if (round) {
     scores = `<div class="row muted">round ${round.round} · intro ${round.intro} · round over ${round.round_over} · game over ${round.game_over} · red ${round.red} · blue ${round.blue} · bodies ${round.bodies} · projectiles ${round.projectiles}</div>` +
-      "<table><thead><tr><th>Player</th><th>Team</th><th>Kills</th><th>Wins</th><th>Lives</th><th>Alive</th></tr></thead><tbody>" +
-      round.players.map((p) => `<tr><td>${esc((r.players.find((q) => q.id === p.id) || {}).name || "#" + p.id)}</td><td class="t${p.team}">${teamName[p.team] || p.team}</td><td>${p.kills}</td><td>${p.wins}</td><td>${p.lives}</td><td>${p.alive ? "yes" : "no"}</td></tr>`).join("") + "</tbody></table>";
+      "<div class=\"scroll\"><table><thead><tr><th>Player</th><th>Team</th><th>Kills</th><th>Wins</th><th>Lives</th><th>Alive</th></tr></thead><tbody>" +
+      round.players.map((p) => `<tr><td>${esc((r.players.find((q) => q.id === p.id) || {}).name || "#" + p.id)}</td><td class="t${p.team}">${teamName[p.team] || p.team}</td><td>${p.kills}</td><td>${p.wins}</td><td>${p.lives}</td><td>${p.alive ? "yes" : "no"}</td></tr>`).join("") + "</tbody></table></div>";
   }
   if (!$("#roomdetail").dataset.code || $("#roomdetail").dataset.code !== r.code) {
     $("#roomdetail").dataset.code = r.code;

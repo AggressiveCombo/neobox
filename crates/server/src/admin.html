@@ -9,15 +9,20 @@
 @font-face { font-family:"Hanken Grotesk"; src:url("/fonts/hanken-grotesk-latin.woff2") format("woff2"); font-display:swap; }
 :root { color-scheme: light; --bg:#f7f7f7; --panel:#ebebeb; --fg:#0a0a0a; --muted:#5c5c5c; --rule:rgba(10,10,10,.16); --accent:#006fe0; --bad:#b3261e; }
 * { box-sizing: border-box; border-radius:0; }
-body { margin:0; font:14px/1.4 "Hanken Grotesk", system-ui, sans-serif; background:var(--bg); color:var(--fg); }
-header { display:flex; align-items:center; gap:12px; padding:10px 16px; border-bottom:1px solid var(--fg); background:var(--bg); position:sticky; top:0; z-index:2; }
-header h1 { font-size:16px; margin:0; font-weight:700; }
-header .stats { display:flex; gap:16px; flex-wrap:wrap; color:var(--muted); font-variant-numeric:tabular-nums; }
+body { margin:0; font:14px/1.4 "Hanken Grotesk", system-ui, sans-serif; background:var(--bg); color:var(--fg); overflow-x:hidden; }
+header { display:flex; flex-wrap:wrap; align-items:center; gap:8px 12px; padding:10px 16px; border-bottom:1px solid var(--fg); background:var(--bg); position:sticky; top:0; z-index:2; }
+header .brand { display:flex; align-items:center; gap:8px; }
+header h1 { font-size:16px; margin:0; font-weight:700; white-space:nowrap; }
+header .stats { display:flex; gap:6px 14px; flex-wrap:wrap; color:var(--muted); font-variant-numeric:tabular-nums; font-size:13px; }
 header .stats b { color:var(--fg); font-weight:600; }
-header .spacer { flex:1; }
-main { display:grid; grid-template-columns: minmax(320px, 1fr) minmax(360px, 1.3fr); gap:12px; padding:12px; }
-@media (max-width: 900px) { main { grid-template-columns: 1fr; } }
-section { background:var(--panel); padding:12px; min-width:0; }
+header .spacer { flex:1 1 auto; }
+header .broadcast { display:flex; align-items:center; gap:6px; flex:0 1 auto; min-width:0; }
+header .broadcast input { width:220px; min-width:0; flex:1 1 auto; }
+.admin-nav { display:none; gap:6px; overflow-x:auto; -webkit-overflow-scrolling:touch; padding:8px 10px; border-bottom:1px solid var(--rule); background:var(--bg); white-space:nowrap; }
+.admin-nav a { display:inline-flex; align-items:center; padding:6px 10px; background:var(--panel); color:var(--fg); text-decoration:none; font-size:13px; font-weight:500; }
+main { display:grid; grid-template-columns: minmax(320px, 1fr) minmax(360px, 1.3fr); gap:12px; padding:12px; max-width:100%; }
+@media (max-width: 900px) { main { grid-template-columns: minmax(0, 1fr); } }
+section { background:var(--panel); padding:12px; min-width:0; max-width:100%; scroll-margin-top:12px; }
 section h2 { margin:0 0 8px; font-size:16px; font-weight:500; color:var(--fg); }
 table { width:100%; border-collapse:collapse; font-variant-numeric:tabular-nums; }
 th, td { text-align:left; padding:6px; border-bottom:1px solid var(--rule); white-space:nowrap; }
@@ -26,24 +31,41 @@ th.num, td.num { text-align:right; }
 tr.sel td { background:rgba(0,128,255,.18); }
 tbody tr { cursor:default; }
 #rooms tbody tr { cursor:pointer; }
-button, input, select, textarea { font:inherit; color:var(--fg); background:var(--bg); border:1px solid var(--rule); padding:6px 9px; }
-button { background:#e0e0e0; border-color:#e0e0e0; font-weight:500; cursor:pointer; }
+button, input, select, textarea { font:inherit; color:var(--fg); background:var(--bg); border:1px solid var(--rule); padding:6px 9px; max-width:100%; }
+button { background:#e0e0e0; border-color:#e0e0e0; font-weight:500; cursor:pointer; touch-action:manipulation; }
 button:hover { background:#d4d4d4; border-color:#d4d4d4; }
 /* The one main action of a form: log in, send to all rooms. */
 form button, #sayallbtn { background:var(--accent); border-color:var(--accent); color:#fff; }
 form button:hover, #sayallbtn:hover { background:#005fc4; border-color:#005fc4; }
 button.bad { background:var(--bad); border-color:var(--bad); color:#fff; }
 button.bad:hover { background:#8f1e17; border-color:#8f1e17; }
-.row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin:8px 0; }
+.row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin:8px 0; min-width:0; }
+.row input[type="text"], .row input[type="password"], .row input:not([type]), .row select { min-width:0; }
 .muted { color:var(--muted); }
 .wide { grid-column: 1 / -1; }
 canvas { width:100%; aspect-ratio: 16/10; background:var(--fg); display:block; }
-#logs { height:280px; overflow:auto; font:12px/1.35 ui-monospace, monospace; background:var(--bg); border:1px solid var(--rule); padding:8px; white-space:pre-wrap; }
+#logs { height:280px; overflow:auto; -webkit-overflow-scrolling:touch; font:12px/1.35 ui-monospace, monospace; background:var(--bg); border:1px solid var(--rule); padding:8px; white-space:pre-wrap; overflow-wrap:anywhere; }
 .WARN { color:#8a5a00; } .ERROR { color:var(--bad); } .DEBUG, .TRACE { color:var(--muted); }
-#login { max-width:340px; margin:15vh auto; }
-.scroll { overflow:auto; }
+#login { max-width:360px; margin:12vh auto; padding:0 12px; }
+.scroll { overflow-x:auto; max-width:100%; -webkit-overflow-scrolling:touch; }
 .pill { display:inline-block; padding:0 6px; font-size:12px; background:var(--bg); border:1px solid var(--rule); }
 .t0 { color:var(--muted); } .t2 { color:var(--bad); } .t3 { color:#1d4fa3; }
+@media (max-width: 720px) {
+  header { position:static; padding:10px; gap:8px; }
+  header .spacer { display:none; }
+  header .brand { flex:1 1 auto; }
+  header #logout { order:2; }
+  header .stats { order:3; flex:1 1 100%; font-size:12px; gap:4px 10px; }
+  header .broadcast { order:4; flex:1 1 100%; }
+  header .broadcast input { width:auto; }
+  .admin-nav { display:flex; }
+  main { padding:8px; gap:8px; }
+  section { padding:10px; }
+  button, input, select, textarea { min-height:40px; font-size:16px; }
+  td button, td select { min-height:34px; font-size:13px; padding:4px 8px; }
+  th, td { padding:6px 5px; font-size:13px; }
+  #logs { height:220px; font-size:11px; }
+}
 </style>
 </head>
 <body>
@@ -59,40 +81,51 @@ canvas { width:100%; aspect-ratio: 16/10; background:var(--fg); display:block; }
 </div>
 <div id="app" hidden>
 <header>
-  <img src="/logo.svg" width="24" height="24" alt=""><h1>neobox admin</h1>
+  <div class="brand"><img src="/logo.svg" width="24" height="24" alt=""><h1>neobox admin</h1></div>
   <div class="stats" id="srv"></div>
   <div class="spacer"></div>
-  <input id="sayall" placeholder="Message to all rooms" style="width:220px">
-  <button id="sayallbtn">Send</button>
+  <div class="broadcast"><input id="sayall" placeholder="Message to all rooms"><button id="sayallbtn">Send</button></div>
   <button id="logout">Log out</button>
 </header>
+<nav class="admin-nav" aria-label="Sections">
+  <a href="#sec-rooms">Rooms</a>
+  <a href="#sec-room">Room</a>
+  <a href="#sec-view">Live</a>
+  <a href="#sec-players">Players</a>
+  <a href="#sec-maps">Approvals</a>
+  <a href="#sec-library">Library</a>
+  <a href="#sec-clips">Clips</a>
+  <a href="#sec-reports">Reports</a>
+  <a href="#sec-accounts">Accounts</a>
+  <a href="#sec-logs">Logs</a>
+</nav>
 <main>
-  <section>
+  <section id="sec-rooms">
     <h2>Rooms</h2>
     <div class="scroll"><table id="rooms"><thead><tr><th>Code</th><th>Region</th><th>Name</th><th class="num">Players</th><th>State</th><th class="num">Tick</th><th class="num">Hz</th><th class="num">Step µs</th><th class="num">In/Out</th><th>Map</th></tr></thead><tbody></tbody></table></div>
     <div id="norooms" class="muted">No rooms.</div>
   </section>
-  <section>
+  <section id="sec-room">
     <h2 id="roomtitle">Room</h2>
     <div id="roomdetail" class="muted">Select a room.</div>
   </section>
-  <section>
+  <section id="sec-view">
     <h2>Live view</h2>
     <canvas id="view" width="960" height="600"></canvas>
     <div class="muted" id="viewinfo"></div>
   </section>
-  <section>
+  <section id="sec-players">
     <h2>Players</h2>
     <div class="scroll"><table id="players"><thead><tr><th>Id</th><th>Name</th><th>Team</th><th class="num">Ping</th><th class="num">Margin</th><th class="num">In/Out</th><th>Input</th><th>Online</th><th>IP</th><th></th></tr></thead><tbody></tbody></table></div>
   </section>
-  <section>
+  <section id="sec-maps">
     <h2>Map approvals</h2>
     <div class="scroll"><table id="maps"><thead><tr><th>Name</th><th>Author</th><th>Created</th><th class="num">Size</th><th></th></tr></thead><tbody></tbody></table></div>
     <div id="nomaps" class="muted">No maps waiting for approval.</div>
     <div id="mapmsg" class="muted"></div>
     <textarea id="mapcode" readonly hidden style="width:100%;height:120px;font:12px ui-monospace, monospace;margin-top:8px"></textarea>
   </section>
-  <section>
+  <section id="sec-library">
     <h2>Map library</h2>
     <div class="row"><input id="libq" placeholder="Search name or author" style="flex:1"><button id="libprev">Prev</button><button id="libnext">Next</button></div>
     <div class="scroll"><table id="library"><thead><tr><th>Name</th><th>Author</th><th>Status</th><th>Visibility</th><th>Picked</th><th>Created</th><th></th></tr></thead><tbody></tbody></table></div>
@@ -100,14 +133,14 @@ canvas { width:100%; aspect-ratio: 16/10; background:var(--fg); display:block; }
     <div id="libmsg" class="muted"></div>
     <textarea id="libcode" readonly hidden style="width:100%;height:120px;font:12px ui-monospace, monospace;margin-top:8px"></textarea>
   </section>
-  <section>
+  <section id="sec-clips">
     <h2>Clips</h2>
     <div class="scroll"><table id="clips"><thead><tr><th>Recorder</th><th>Map</th><th>Created</th><th class="num">Size</th><th></th></tr></thead><tbody></tbody></table></div>
     <div id="noclips" class="muted" hidden>No clips.</div>
     <div class="row"><button id="clipmore">More</button></div>
     <div id="clipmsg" class="muted"></div>
   </section>
-  <section>
+  <section id="sec-reports">
     <h2>Reports</h2>
     <div class="row"><select id="repstatus"><option value="open">Open</option><option value="resolved">Resolved</option><option value="dismissed">Dismissed</option><option value="">All</option></select></div>
     <div class="scroll"><table id="reports"><thead><tr><th>Kind</th><th>Subject</th><th>Reason</th><th>Reporter</th><th>Room</th><th>Created</th><th></th></tr></thead><tbody></tbody></table></div>
@@ -116,14 +149,14 @@ canvas { width:100%; aspect-ratio: 16/10; background:var(--fg); display:block; }
     <div id="repdetail" class="muted" style="white-space:pre-wrap"></div>
     <div id="repmsg" class="muted"></div>
   </section>
-  <section>
+  <section id="sec-accounts">
     <h2>Accounts</h2>
     <div class="row"><input id="accq" placeholder="Search name" style="flex:1"></div>
     <div class="scroll"><table id="accounts"><thead><tr><th>Name</th><th class="num">XP</th><th>Created</th><th></th></tr></thead><tbody></tbody></table></div>
     <div id="noacc" class="muted" hidden>No accounts.</div>
     <div id="accmsg" class="muted"></div>
   </section>
-  <section class="wide">
+  <section id="sec-logs" class="wide">
     <h2>Logs</h2>
     <div class="row"><input id="logfilter" placeholder="Filter" style="flex:1"><label><input type="checkbox" id="logfollow" checked> follow</label></div>
     <div id="logs"></div>
