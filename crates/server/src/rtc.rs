@@ -29,6 +29,8 @@ use tracing::{debug, info};
 
 /// Peers whose channel has not opened by then are dropped.
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
+/// Grace period for transient ICE disconnects (brief Wi-Fi/NAT blips) before dropping the peer.
+const DISCONNECT_GRACE: Duration = Duration::from_secs(8);
 /// Largest datagram accepted.
 const MAX_DATAGRAM: usize = 2048;
 
@@ -79,6 +81,7 @@ struct Peer {
     stats: Arc<ConnStats>,
     inbound: mpsc::UnboundedSender<Vec<u8>>,
     created: Instant,
+    disconnected_since: Option<Instant>,
 }
 
 impl Peer {
@@ -122,7 +125,17 @@ impl Peer {
                 self.channel = None;
                 self.stats.udp.store(false, Ordering::Relaxed);
             }
-            Event::IceConnectionStateChange(IceConnectionState::Disconnected) => self.rtc.disconnect(),
+            Event::IceConnectionStateChange(IceConnectionState::Disconnected) => {
+                // Transient disconnect: pause UDP sending while ICE tries to recover instead of immediately destroying the peer.
+                self.disconnected_since.get_or_insert_with(Instant::now);
+                self.stats.udp.store(false, Ordering::Relaxed);
+            }
+            Event::IceConnectionStateChange(IceConnectionState::Connected | IceConnectionState::Completed) => {
+                self.disconnected_since = None;
+                if self.channel.is_some() {
+                    self.stats.udp.store(true, Ordering::Relaxed);
+                }
+            }
             _ => {}
         }
     }
@@ -134,7 +147,9 @@ impl Peer {
     }
 
     fn alive(&self) -> bool {
-        self.rtc.is_alive() && (self.channel.is_some() || self.created.elapsed() < CONNECT_TIMEOUT)
+        self.rtc.is_alive()
+            && (self.channel.is_some() || self.created.elapsed() < CONNECT_TIMEOUT)
+            && self.disconnected_since.is_none_or(|t| t.elapsed() < DISCONNECT_GRACE)
     }
 }
 
@@ -182,7 +197,7 @@ async fn run(socket: UdpSocket, public: SocketAddr, mut rx: mpsc::UnboundedRecei
                 Some(Cmd::Offer { conn_id, sdp, stats, inbound, reply }) => {
                     peers.retain(|p| p.conn_id != conn_id);
                     let r = accept(public, &sdp).map(|(rtc, answer)| {
-                        peers.push(Peer { conn_id, rtc, channel: None, stats, inbound, created: Instant::now() });
+                        peers.push(Peer { conn_id, rtc, channel: None, stats, inbound, created: Instant::now(), disconnected_since: None });
                         answer
                     });
                     let _ = reply.send(r);

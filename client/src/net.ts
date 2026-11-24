@@ -53,10 +53,15 @@ export interface NetHandlers {
 interface Rtc {
   pc: RTCPeerConnection;
   dc: RTCDataChannel;
+  disconnectTimer: ReturnType<typeof setTimeout> | null;
 }
 
-/** At most one WebRTC attempt per this many milliseconds. */
-const RTC_RETRY_MS = 30_000;
+/** Delay before retrying WebRTC after a failure while the WebSocket stays open. */
+const RTC_RETRY_MS = 15_000;
+/** Max time to wait for ICE gathering before sending the offer with candidates gathered so far. */
+const GATHER_TIMEOUT_MS = 3_000;
+/** Grace period before tearing down a temporarily disconnected ICE/peer connection. */
+const ICE_DISCONNECT_GRACE_MS = 6_000;
 /** Liveness is checked every LIVE_TICK_MS (the browser never shows us a dead TCP link on its own): worst case the banner shows SILENT_MS + one tick after the last frame. */
 const LIVE_TICK_MS = 250;
 /** Silence before a ping goes out: a quiet link is tested, not assumed alive. */
@@ -74,7 +79,9 @@ const S_PONG = 0x82;
 export class Net {
   private ws: WebSocket | null = null;
   private rtc: Rtc | null = null;
+  private rtcEnabled = false;
   private rtcRetryAt = 0;
+  private rtcRetryTimer: ReturnType<typeof setTimeout> | null = null;
   private watch: number | null = null;
   private lastInbound = 0;
   private lastTick = 0;
@@ -108,6 +115,9 @@ export class Net {
 
   connect(url: string): void {
     this.close();
+    // Fresh connection (including regional redirects and reconnects) gets an immediate WebRTC attempt.
+    this.rtcRetryAt = 0;
+    this.rtcEnabled = false;
     const ws = new WebSocket(url);
     ws.binaryType = "arraybuffer";
     this.ws = ws;
@@ -131,14 +141,17 @@ export class Net {
       if (typeof ev.data === "string") {
         const msg = parseServerMsg(ev.data);
         if (msg === null) return;
-        if (msg.t === "welcome") this.startRtc(msg.rtc);
+        if (msg.t === "welcome") {
+          this.rtcEnabled = msg.rtc;
+          this.startRtc(msg.rtc);
+        }
         if (msg.t === "rtc_answer") {
           this.applyAnswer(msg.sdp);
           return;
         }
         if (msg.t === "error" && msg.code.startsWith("rtc_")) {
-          // WebRTC is optional: stay on the WebSocket without bothering the player
-          this.dropRtc();
+          // WebRTC is optional: stay on the WebSocket and retry later without bothering the player
+          this.dropRtc(true);
           return;
         }
         this.handlers.onMessage(msg);
@@ -193,37 +206,76 @@ export class Net {
   /** Begin the WebRTC offer after `welcome`; silently does nothing when unsupported or rate-limited. */
   private startRtc(enabled: boolean): void {
     if (!enabled || typeof RTCPeerConnection === "undefined") return;
+    if (this.ws === null || this.ws.readyState !== WebSocket.OPEN) return;
     const now = performance.now();
     if (now < this.rtcRetryAt || this.rtc) return;
+    this.clearRtcRetry();
     this.rtcRetryAt = now + RTC_RETRY_MS;
     let rtc: Rtc | null = null;
     try {
       const pc = new RTCPeerConnection({ iceServers: [] });
       const dc = pc.createDataChannel("g", { ordered: false, maxRetransmits: 0 });
       dc.binaryType = "arraybuffer";
-      rtc = { pc, dc };
+      rtc = { pc, dc, disconnectTimer: null };
       const cur = rtc;
       this.rtc = cur;
+      const clearDisconnectGrace = (): void => {
+        if (cur.disconnectTimer !== null) {
+          clearTimeout(cur.disconnectTimer);
+          cur.disconnectTimer = null;
+        }
+      };
+      const scheduleDisconnectGrace = (): void => {
+        if (cur.disconnectTimer !== null) return;
+        cur.disconnectTimer = setTimeout(() => {
+          cur.disconnectTimer = null;
+          if (this.rtc === cur && (pc.connectionState === "disconnected" || pc.iceConnectionState === "disconnected")) {
+            this.dropRtc(true);
+          }
+        }, ICE_DISCONNECT_GRACE_MS);
+      };
+      dc.onopen = () => {
+        if (this.rtc !== cur) return;
+        clearDisconnectGrace();
+      };
       dc.onmessage = (ev: MessageEvent<unknown>) => {
         if (this.rtc === cur && ev.data instanceof ArrayBuffer) this.inBinary(new Uint8Array(ev.data), ev.timeStamp);
       };
-      dc.onclose = () => this.dropRtc();
-      dc.onerror = () => this.dropRtc();
-      pc.onconnectionstatechange = () => {
-        if (pc.connectionState === "failed" || pc.connectionState === "closed") this.dropRtc();
+      dc.onclose = () => {
+        if (this.rtc === cur) this.dropRtc(true);
       };
-      // The offer goes out only once gathering is complete: candidates are not trickled, and Firefox puts none
-      // in the local description until then (Chromium has them at once), so the server could never reach the browser.
+      dc.onerror = () => {
+        if (this.rtc === cur) this.dropRtc(true);
+      };
+      const checkState = (): void => {
+        if (this.rtc !== cur) return;
+        const cState = pc.connectionState;
+        const iState = pc.iceConnectionState;
+        if (cState === "failed" || cState === "closed" || iState === "failed" || iState === "closed") {
+          this.dropRtc(true);
+        } else if (cState === "disconnected" || iState === "disconnected") {
+          scheduleDisconnectGrace();
+        } else if (cState === "connected" || iState === "connected" || iState === "completed") {
+          clearDisconnectGrace();
+        }
+      };
+      pc.onconnectionstatechange = checkState;
+      pc.oniceconnectionstatechange = checkState;
+      // The offer goes out once gathering finishes (or after GATHER_TIMEOUT_MS if a virtual interface stalls):
+      // candidates are not trickled, and Firefox puts none in the local description until gathered.
       pc.createOffer()
         .then((offer) => pc.setLocalDescription(offer))
-        .then(() => whenGathered(pc))
+        .then(() => whenGathered(pc, GATHER_TIMEOUT_MS))
         .then(() => {
           if (this.rtc === cur && pc.localDescription) this.send({ t: "rtc_offer", sdp: pc.localDescription.sdp });
         })
-        .catch(() => this.dropRtc());
+        .catch(() => {
+          if (this.rtc === cur) this.dropRtc(true);
+        });
     } catch {
       if (rtc) rtc.pc.close();
       this.rtc = null;
+      this.scheduleRtcRetry();
     }
   }
 
@@ -231,20 +283,51 @@ export class Net {
     const cur = this.rtc;
     if (!cur) return;
     try {
-      cur.pc.setRemoteDescription({ type: "answer", sdp }).catch(() => this.dropRtc());
+      cur.pc.setRemoteDescription({ type: "answer", sdp }).catch(() => {
+        if (this.rtc === cur) this.dropRtc(true);
+      });
     } catch {
-      this.dropRtc();
+      if (this.rtc === cur) this.dropRtc(true);
     }
   }
 
+  private clearRtcRetry(): void {
+    if (this.rtcRetryTimer !== null) {
+      clearTimeout(this.rtcRetryTimer);
+      this.rtcRetryTimer = null;
+    }
+  }
+
+  private scheduleRtcRetry(): void {
+    if (!this.rtcEnabled || this.ws === null || this.ws.readyState !== WebSocket.OPEN) return;
+    if (this.rtcRetryTimer !== null) return;
+    const delay = Math.max(250, this.rtcRetryAt - performance.now());
+    this.rtcRetryTimer = setTimeout(() => {
+      this.rtcRetryTimer = null;
+      this.startRtc(this.rtcEnabled);
+    }, delay);
+  }
+
   /** Tear down the data channel; gameplay falls back to the WebSocket. */
-  private dropRtc(): void {
+  private dropRtc(retry = false): void {
+    if (!retry) this.clearRtcRetry();
     const cur = this.rtc;
-    if (!cur) return;
-    this.rtc = null;
-    cur.dc.onmessage = null;
-    cur.dc.close();
-    cur.pc.close();
+    if (cur) {
+      this.rtc = null;
+      if (cur.disconnectTimer !== null) {
+        clearTimeout(cur.disconnectTimer);
+        cur.disconnectTimer = null;
+      }
+      cur.dc.onopen = null;
+      cur.dc.onmessage = null;
+      cur.dc.onclose = null;
+      cur.dc.onerror = null;
+      cur.pc.onconnectionstatechange = null;
+      cur.pc.oniceconnectionstatechange = null;
+      cur.dc.close();
+      cur.pc.close();
+    }
+    if (retry) this.scheduleRtcRetry();
   }
 
   /** One liveness tick of `ws`. A tick later than its interval means the page stalled (a busy main thread, throttled
@@ -324,13 +407,20 @@ export class Net {
   }
 }
 
-/** Resolves once the connection has gathered all its candidates (with no ICE servers, that is immediate). */
-function whenGathered(pc: RTCPeerConnection): Promise<void> {
+/** Resolves once the connection has gathered all its candidates, or after `timeoutMs` so a stalled interface cannot hang offer setup. */
+function whenGathered(pc: RTCPeerConnection, timeoutMs: number): Promise<void> {
   if (pc.iceGatheringState === "complete") return Promise.resolve();
   const { promise, resolve } = Promise.withResolvers<void>();
-  pc.addEventListener("icegatheringstatechange", () => {
-    if (pc.iceGatheringState === "complete") resolve();
-  });
+  const done = (): void => {
+    clearTimeout(timer);
+    pc.removeEventListener("icegatheringstatechange", onChange);
+    resolve();
+  };
+  const onChange = (): void => {
+    if (pc.iceGatheringState === "complete") done();
+  };
+  const timer = setTimeout(done, timeoutMs);
+  pc.addEventListener("icegatheringstatechange", onChange);
   return promise;
 }
 
