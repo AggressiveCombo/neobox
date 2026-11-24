@@ -1061,7 +1061,8 @@ impl FrameBuilder {
         w[24] = f(gs.objective_limit);
         w[25] = f(gs.max_stamina);
         w[26] = f(cur.round.round_number);
-        w[27] = st.wrap as u32;
+        let has_objectives = cur.bodies.values().any(|b| b.def.objective != 0.0);
+        w[27] = (st.wrap as u32) | ((has_objectives as u32) << 1);
         w[28] = meta.prediction.to_bits();
         w[29] = meta.rollbacks_per_s.to_bits();
         // static geometry extent (all infinite when the map has no visible static body)

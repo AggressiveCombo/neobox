@@ -838,7 +838,7 @@ export function objectiveLabel(scene: Scene): string {
     case 3:
       return limit > 0 ? `${limit} rounds to win` : "Rounds";
     case 4:
-      return limit > 0 ? `${limit} objectives to win` : "Endless teams";
+      return scene.hasObjectives && limit > 0 ? `${limit} objectives to win` : "Endless teams";
     case 5: {
       const teamLives = local?.team === TEAM_RED ? scene.red : local?.team === TEAM_BLUE ? scene.blue : null;
       return teamLives !== null ? `Spawns remaining: ${Math.round(teamLives)}` : "Lives teams";
@@ -869,8 +869,18 @@ export function objectiveProgress(scene: Scene): number | null {
       else return null;
       break;
     case 2:
-    case 3:
       value = local.wins;
+      break;
+    case 3:
+      if (local.team === TEAM_RED) value = scene.red;
+      else if (local.team === TEAM_BLUE) value = scene.blue;
+      else return null;
+      break;
+    case 4:
+      if (!scene.hasObjectives) return null;
+      if (local.team === TEAM_RED) value = scene.red;
+      else if (local.team === TEAM_BLUE) value = scene.blue;
+      else value = Math.max(scene.red, scene.blue);
       break;
     default:
       return null;

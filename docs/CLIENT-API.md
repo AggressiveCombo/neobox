@@ -94,7 +94,7 @@ Header (words 0..44):
 | 24 | f32 | objective limit |
 | 25 | f32 | max stamina |
 | 26 | f32 | round number |
-| 27 | u32 | flags: bit0 map wraps |
+| 27 | u32 | flags: bit0 map wraps, bit1 map has objective bodies |
 | 28 | f32 | network: confirmed ticks behind head (prediction depth) |
 | 29 | f32 | network: rollbacks per second |
 | 30 | u32 | kill count (kills since the previous frame) |

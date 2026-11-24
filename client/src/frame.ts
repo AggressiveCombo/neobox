@@ -128,6 +128,8 @@ export interface Scene {
   maxStamina: number;
   round: number;
   wraps: boolean;
+  /** True when the map contains objective bodies (e.g. flags), header word 27 bit 1. */
+  hasObjectives: boolean;
   predictionDepth: number;
   rollbacksPerSec: number;
   worldOffset: number;
@@ -278,6 +280,7 @@ export function readScene(fb: FrameView): Scene {
     maxStamina: f32[25] ?? 0,
     round: f32[26] ?? 0,
     wraps: ((u32[27] ?? 0) & 1) !== 0,
+    hasObjectives: ((u32[27] ?? 0) & 2) !== 0,
     predictionDepth: f32[28] ?? 0,
     rollbacksPerSec: f32[29] ?? 0,
     worldOffset: u32[2] ?? 0,
