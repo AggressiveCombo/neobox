@@ -52,7 +52,6 @@ pub fn router() -> Router<Arc<Hub>> {
         .route("/api/library/{id}", get(library_get).patch(library_update).delete(library_delete))
         .route("/api/library/{id}/vote", post(library_vote))
         .route("/api/library/{id}/favourite", post(library_favourite))
-        .route("/api/library/{id}/play", post(library_play))
         .route("/api/library/{id}/records", get(library_records))
         .route("/api/report", post(report))
         .route("/api/players/{name}", get(player))
@@ -655,11 +654,6 @@ async fn library_favourite(
 ) -> Result<StatusCode, Fail> {
     let me = signed_in(&hub, &headers).await?.id;
     db(&hub, move |s| s.favourite(me, id, b.on)).await?;
-    Ok(StatusCode::NO_CONTENT)
-}
-
-async fn library_play(State(hub): State<Arc<Hub>>, Path(id): Path<i64>) -> Result<StatusCode, Fail> {
-    db(&hub, move |s| s.record_play(id)).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 

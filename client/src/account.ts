@@ -189,8 +189,6 @@ export const voteMap = (id: number, v: -1 | 0 | 1): Promise<void> => request<voi
 export const favouriteMap = (id: number, on: boolean): Promise<void> =>
   request<void>("POST", `/api/library/${id}/favourite`, { on });
 
-export const playMap = (id: number): Promise<void> => request<void>("POST", `/api/library/${id}/play`);
-
 /** One row of a library map's Fastest Times: a player's best time, in ticks at 30 per second. */
 export interface MapRecord {
   rank: number;

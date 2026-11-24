@@ -32,6 +32,10 @@ const LOST_LIMIT: Duration = Duration::from_secs(60);
 const START_DELAY: Duration = Duration::from_secs(1);
 /// Quick-play players who change no input and say nothing this long are removed.
 const IDLE_LIMIT: Duration = Duration::from_secs(120);
+/// Minimum elapsed match duration before an unfinished match counts as a map play.
+const PLAY_MIN_ELAPSED: Duration = Duration::from_secs(10);
+/// Minimum time between counted plays of the same library map in one room.
+const PLAY_COOLDOWN: Duration = Duration::from_secs(30);
 /// Typing signals relayed per player at most this often.
 const TYPING_GAP: Duration = Duration::from_millis(800);
 /// The quick-play rotation awards experience when the game-over countdown
@@ -276,6 +280,8 @@ struct Game {
     tallies: award::Tallies,
     /// the server's own record of the match, when NEOBOX_QA_EVENTS is set
     qa: Option<qa_events::EventLog>,
+    /// whether this match has already recorded a library map play
+    play_counted: bool,
 }
 
 /// A match whose steps stay slower than real time this long is stopped.
@@ -318,6 +324,8 @@ pub struct Room {
     map_name: String,
     /// The current map's library entry, when it comes from the library.
     map_meta: Option<MapMeta>,
+    /// Last time a play was counted for each library map ID in this room (anti-spam cooldown).
+    last_play: HashMap<i64, Instant>,
     /// Quick-play mode (`qp_N`): no host, the rotation plays by itself.
     quick: Option<String>,
     /// Maps the quick-play rotation plays, in order.
@@ -439,6 +447,7 @@ pub fn spawn(
         map_code: map.as_ref().map(|m| m.code.clone()).unwrap_or_default(),
         map_name: map.map(|m| m.name).unwrap_or_default(),
         map_meta: None,
+        last_play: HashMap::new(),
         quick,
         rotation,
         starting: None,
@@ -568,6 +577,7 @@ impl Room {
                     self.expire_lost();
                     self.kick_idle();
                     self.quick_start();
+                    self.maybe_count_play(false);
                     self.update_summary();
                     if self.game.is_none() {
                         self.broadcast_room();
@@ -1531,11 +1541,40 @@ impl Room {
             slow_us: 0.0,
             tallies: award::Tallies::default(),
             qa: qa_events::EventLog::open(self.players.iter().filter(|p| p.team != TEAM_SPECTATOR).map(|p| (p.id, p.name.clone())).collect()),
+            play_counted: false,
         });
         self.broadcast_room();
     }
 
+    /// Count a library map play once per real match (after `PLAY_MIN_ELAPSED` or on natural completion),
+    /// subject to a short per-map cooldown so reselecting maps or start/end spam cannot farm plays,
+    /// while playing multiple real matches in the same room (with or without host changes) still counts.
+    fn maybe_count_play(&mut self, natural_finish: bool) {
+        let Some(g) = self.game.as_mut() else { return };
+        if g.play_counted {
+            return;
+        }
+        if !natural_finish && g.started.elapsed() < PLAY_MIN_ELAPSED {
+            return;
+        }
+        let Some(map_id) = self.map_meta.as_ref().map(|m| m.id).filter(|&id| id > 0) else { return };
+        if self.last_play.get(&map_id).is_some_and(|t| t.elapsed() < PLAY_COOLDOWN) {
+            return;
+        }
+        g.play_counted = true;
+        self.last_play.insert(map_id, Instant::now());
+        let hub = self.hub.clone();
+        tokio::spawn(async move {
+            if let Err(e) = hub.backend.record_play(map_id).await {
+                warn!(map = map_id, "could not count the play: {e}");
+            }
+        });
+    }
+
     fn end_match(&mut self, reason: &str) {
+        if reason == "game over" {
+            self.maybe_count_play(true);
+        }
         let Some(mut game) = self.game.take() else { return };
         if let Some(log) = game.qa.as_mut() {
             log.finish(&game.m.state, reason);
@@ -1702,7 +1741,7 @@ impl Room {
     }
 
     /// A library map the host asked for arrived: check the host may still change the map, then use it.
-    fn library_map_loaded(&mut self, id: u32, map: i64, result: Result<RoomMap, String>) {
+    fn library_map_loaded(&mut self, id: u32, _map: i64, result: Result<RoomMap, String>) {
         if !self.is_host(id) {
             return self.error(id, "not_host", "Only the host can change the map");
         }
@@ -1716,12 +1755,6 @@ impl Room {
         if let Err(e) = MapData::from_code(&found.code) {
             return self.error(id, "bad_map", &format!("Could not load the map: {e}"));
         }
-        let hub = self.hub.clone();
-        tokio::spawn(async move {
-            if let Err(e) = hub.backend.record_play(map).await {
-                warn!(map, "could not count the play: {e}");
-            }
-        });
         self.map_meta = Some(map_meta_of(&found));
         self.map_name = map_label(Some(found.name.as_str()));
         self.map_code = found.code;
