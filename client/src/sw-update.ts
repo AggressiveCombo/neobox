@@ -7,6 +7,7 @@
 
 import { pageLeaving } from "./page-leave";
 import type { AppState, Store } from "./state";
+import { buildId } from "./version";
 
 /** What a player on an older build reads: the same words the server's refusal carries. */
 const NEW_VERSION_TEXT = "A new version of neobox is out. Reload to play.";
@@ -56,7 +57,34 @@ export function watchServiceWorker(store: Store<AppState>): void {
   sw.addEventListener("controllerchange", () => {
     const firstInstall = !hadController;
     hadController = true;
-    if (!firstInstall) newVersionOut(store);
+    if (firstInstall) return;
+    const current = buildId ?? "";
+    void controllerBuildId(sw.controller).then((workerBuild) => {
+      // Because page navigations use networkFirst, opening the site right after a deploy already
+      // loads the new page before the new service worker claims it. Skip the reload prompt when
+      // the newly activated worker matches the build this page is already running.
+      if (workerBuild !== null && current !== "" && workerBuild === current) return;
+      newVersionOut(store);
+    });
+  });
+}
+
+/** Ask the controlling service worker for its build id; null if unavailable or timed out. */
+function controllerBuildId(controller: ServiceWorker | null): Promise<string | null> {
+  if (!controller) return Promise.resolve(null);
+  return new Promise((resolve) => {
+    const ch = new MessageChannel();
+    const timer = window.setTimeout(() => resolve(null), 500);
+    ch.port1.onmessage = (e: MessageEvent<unknown>) => {
+      window.clearTimeout(timer);
+      resolve(typeof e.data === "string" ? e.data : null);
+    };
+    try {
+      controller.postMessage("build-id", [ch.port2]);
+    } catch {
+      window.clearTimeout(timer);
+      resolve(null);
+    }
   });
 }
 

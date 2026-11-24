@@ -34,6 +34,12 @@ self.addEventListener("activate", (event) => {
   );
 });
 
+self.addEventListener("message", (event) => {
+  if (event.data === "build-id" && event.ports && event.ports[0]) {
+    event.ports[0].postMessage(BUILD);
+  }
+});
+
 // Firefox logs "A ServiceWorker intercepted the request and encountered an unexpected error" for every intercepted
 // request the page cancels (a reload or navigation while it loads), whatever the worker answers. So the worker answers
 // only pages and bundles. Other files (wasm, sfx, fonts, logo, clips, music) are not intercepted: the page reads the
