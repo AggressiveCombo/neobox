@@ -251,6 +251,7 @@ export function start(): Store<AppState> {
   const setViewShown = (shown: boolean): void => {
     if (shown === viewShown) return;
     viewShown = shown;
+    if (!shown) sfx.stopLoops();
     glHost.style.visibility = shown ? "" : "hidden";
     overlayCanvas.style.visibility = shown ? "" : "hidden";
     syncSurround();
@@ -289,6 +290,17 @@ export function start(): Store<AppState> {
     lastPresent = performance.now();
     setViewShown(true);
     for (const s of scene.sounds) sfx.play(s.kind, s.volume, (s.x - cam.cx) / (cam.w / 2));
+    // Continuous rocket-charge hum while any live player holds rocket aim (sim emits kind 15 only once on frame 4).
+    let charger: { x: number; dist: number; local: boolean } | null = null;
+    for (const p of scene.players) {
+      if (p.rocketCharge < 4 || (p.flags & 2) !== 0) continue;
+      const isLocal = (p.flags & 1) !== 0;
+      const dist = Math.abs(p.x - cam.cx);
+      if (!charger || (isLocal && !charger.local) || (isLocal === charger.local && dist < charger.dist)) {
+        charger = { x: p.x, dist, local: isLocal };
+      }
+    }
+    sfx.syncRocketCharge(charger !== null, 0.2, charger ? (charger.x - cam.cx) / (cam.w / 2) : 0);
     return scene;
   };
 

@@ -68,6 +68,8 @@ const USAGES = [
   game("level up", 20, 0.5, "game", "postgame.ts LEVEL_SOUND, a one-shot cue"),
   game("post-game tally tick", 10, 0.4, "tick", "postgame.ts TICK_SOUND, one per XP step"),
   ui("hover", "hover", UI_LEVEL * HOVER_LEVEL, "tick"),
+  ui("scroll", "scroll", UI_LEVEL * HOVER_LEVEL, "tick"),
+  ui("slider", "slider", UI_LEVEL * HOVER_LEVEL, "tick"),
   ui("click", "click", UI_LEVEL, "interface"),
   ui("tab", "tab", UI_LEVEL, "interface"),
   ui("toggle", "toggle", UI_LEVEL, "interface"),

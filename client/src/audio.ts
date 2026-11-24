@@ -10,7 +10,19 @@ import { HttpError } from "./http-error";
 import { CLIPS, CLIP_GAIN_DB, HOVER_LEVEL, UI_LEVEL, type SoundKey } from "./sfx-levels";
 
 /** Interface sound names; the screens never play sounds themselves, the global hooks do (installUiSounds). */
-export type UiSound = "hover" | "click" | "tab" | "toggle" | "open" | "close" | "error" | "win" | "lose" | "chat";
+export type UiSound =
+  | "hover"
+  | "scroll"
+  | "slider"
+  | "click"
+  | "tab"
+  | "toggle"
+  | "open"
+  | "close"
+  | "error"
+  | "win"
+  | "lose"
+  | "chat";
 
 /** An engine sound kind (docs/CLIENT-API.md) or an interface sound. */
 type Key = SoundKey;
@@ -65,8 +77,12 @@ export class Sfx {
   /** Set when the page starts leaving: pending audio work then rejects by design, not by failure. */
   private leaving = false;
   private lastPlayed = new Map<Key, number>();
-  /** Silences the engine's scene sounds without touching the saved prefs (the menu clip viewer); interface sounds still play. */
+  /** Silences the engine's scene sounds without touching the saved prefs; interface sounds still play. */
   sceneMuted = false;
+  /** Multiplier on engine scene sounds (1 in matches/replays, lower for ambient main-menu replays). */
+  sceneScale = 1;
+  /** Active seamless loop for rocket charging (kind 15) while a player holds the rocket key. */
+  private rocketLoop: { src: AudioBufferSourceNode; gain: GainNode; panner: StereoPannerNode | null } | null = null;
 
   /** Call from a user gesture: creates the audio context and loads the clips. */
   unlock(): void {
@@ -92,16 +108,96 @@ export class Sfx {
       qaSounds.captioned.add(kind);
       showCaption(text);
     }
-    const level = prefs.value.volume * prefs.value.sfxVolume * clamp01(volume);
+    // Kind 15 (rocket charge) runs as a continuous loop via syncRocketCharge() while held.
+    if (kind === 15) return;
+    const level = prefs.value.volume * prefs.value.sfxVolume * this.sceneScale * clamp01(volume);
     this.trigger(kind, level, pan);
   }
 
-  /** An interface sound, when the "Interface sounds" switch is on. */
-  ui(name: UiSound): void {
+  /** Keep the rocket-charging hum looping seamlessly for as long as any player holds rocket aim. */
+  syncRocketCharge(active: boolean, volume: number, pan = 0): void {
+    const ctx = this.ctx;
+    const shouldPlay =
+      active &&
+      !this.sceneMuted &&
+      ctx !== null &&
+      !prefs.value.muted &&
+      ctx.state === "running" &&
+      prefs.value.volume * prefs.value.sfxVolume * this.sceneScale * clamp01(volume) > 0;
+
+    if (!shouldPlay) {
+      if (this.rocketLoop && ctx) {
+        const { src, gain } = this.rocketLoop;
+        this.rocketLoop = null;
+        const now = ctx.currentTime;
+        try {
+          gain.gain.cancelScheduledValues(now);
+          gain.gain.setValueAtTime(gain.gain.value, now);
+          gain.gain.linearRampToValueAtTime(0, now + 0.045);
+          src.stop(now + 0.055);
+        } catch {
+          // Already stopped.
+        }
+      }
+      return;
+    }
+
+    const targetGain =
+      prefs.value.volume *
+      prefs.value.sfxVolume *
+      this.sceneScale *
+      clamp01(volume) *
+      10 ** ((CLIP_GAIN_DB[15] ?? 0) / 20);
+    const clampedPan = Math.max(-1, Math.min(1, pan));
+
+    if (this.rocketLoop) {
+      const now = ctx.currentTime;
+      this.rocketLoop.gain.gain.setTargetAtTime(targetGain, now, 0.025);
+      if (this.rocketLoop.panner) this.rocketLoop.panner.pan.setTargetAtTime(clampedPan, now, 0.025);
+      return;
+    }
+
+    const clip = CLIPS[15];
+    const buffer = clip === undefined ? undefined : this.buffers.get(clip);
+    if (!buffer) return;
+    const src = ctx.createBufferSource();
+    src.buffer = buffer;
+    src.loop = true;
+    // Trim past MP3 padding/ramp at start & end so the steady hum loops seamlessly forever.
+    const pad = Math.min(0.18, buffer.duration * 0.15);
+    if (buffer.duration > pad * 2 + 0.15) {
+      src.loopStart = pad;
+      src.loopEnd = buffer.duration - pad;
+    }
+    const gain = ctx.createGain();
+    const now = ctx.currentTime;
+    gain.gain.setValueAtTime(0, now);
+    gain.gain.linearRampToValueAtTime(targetGain, now + 0.04);
+    src.connect(gain);
+    let panner: StereoPannerNode | null = null;
+    if (ctx.createStereoPanner) {
+      panner = ctx.createStereoPanner();
+      panner.pan.setValueAtTime(clampedPan, now);
+      gain.connect(panner).connect(ctx.destination);
+    } else {
+      gain.connect(ctx.destination);
+    }
+    src.start(now, src.loopStart);
+    this.rocketLoop = { src, gain, panner };
+  }
+
+  /** Stop any continuous looping scene effects (e.g. when a match or replay ends or pauses). */
+  stopLoops(): void {
+    this.syncRocketCharge(false, 0, 0);
+  }
+
+  /** An interface sound, when the "Interface sounds" switch is on. Optional `rate` scales playback pitch. */
+  ui(name: UiSound, rate = 1): void {
     const text = UI_CAPTIONS[name];
     if (text && prefs.value.captions) showCaption(text);
     if (!prefs.value.uiSounds) return;
-    this.trigger(name, prefs.value.volume * UI_LEVEL * (name === "hover" ? HOVER_LEVEL : 1), 0);
+    const isTick = name === "hover" || name === "scroll" || name === "slider";
+    this.trigger(name, prefs.value.volume * UI_LEVEL * (isTick ? HOVER_LEVEL : 1), 0, rate);
   }
 
   /** Short pop for a chat line from another player. */
@@ -140,7 +236,7 @@ export class Sfx {
     if (!this.leaving) console.error(what, err);
   }
 
-  private trigger(key: Key, level: number, pan: number): void {
+  private trigger(key: Key, level: number, pan: number, rate = 1): void {
     const ctx = this.ctx;
     if (!ctx || prefs.value.muted || ctx.state !== "running") return;
     const clip = CLIPS[key];
@@ -152,7 +248,7 @@ export class Sfx {
 
     const src = ctx.createBufferSource();
     src.buffer = buffer;
-    src.playbackRate.value = 1 + (Math.random() * 2 - 1) * RATE_SPREAD;
+    src.playbackRate.value = rate * (1 + (Math.random() * 2 - 1) * RATE_SPREAD);
     const gain = ctx.createGain();
     gain.gain.value = level * 10 ** ((CLIP_GAIN_DB[key] ?? 0) / 20);
     src.connect(gain);
@@ -194,15 +290,22 @@ export const sfx = new Sfx();
 Object.assign(globalThis, { __qaSfx: sfx });
 
 /** What a hover tick marks: the things a click acts on. */
-const HOVERABLE = "button:not(:disabled), a[href], summary, select:not(:disabled), [role='tab'], .seg-option, label:has(> input:not(:disabled))";
+const HOVERABLE =
+  "button:not(:disabled), a[href], summary, select:not(:disabled), [role='tab'], [role='option'], .seg-option, label:has(> input:not(:disabled))";
+
+/** Minimum gap between ticks while dragging a range slider, ms. */
+const SLIDER_TICK_MS = 55;
 
 /**
  * Interface sounds for everything that is not a game effect: hovers, buttons, switches, tabs,
- * dialogs opening and closing, error toasts. Delegated, so screens that mount later are covered.
+ * sliders, selects, disclosures, dialogs opening and closing, error toasts. Delegated, so screens
+ * that mount later are covered.
  */
 export function installUiSounds(): void {
   // A mouse entering a control ticks once; moving inside it, or a touch, does not.
   let hovered: Element | null = null;
+  let lastSliderAt = 0;
+  let lastSliderVal = "";
   document.addEventListener(
     "pointerover",
     (e) => {
@@ -219,7 +322,26 @@ export function installUiSounds(): void {
     (e) => {
       if (!(e.target instanceof Element)) return;
       if (e.target.closest(".seg-option, [role='tab']")) sfx.ui("tab");
-      else if (e.target.closest("button")) sfx.ui("click");
+      else if (e.target.closest("summary")) sfx.ui("toggle");
+      else if (e.target.closest("button, a[href]")) sfx.ui("click");
+    },
+    true,
+  );
+  document.addEventListener(
+    "input",
+    (e) => {
+      const t = e.target;
+      if (!(t instanceof HTMLInputElement) || t.type !== "range") return;
+      const now = performance.now();
+      if (t.value === lastSliderVal || now - lastSliderAt < SLIDER_TICK_MS) return;
+      lastSliderVal = t.value;
+      lastSliderAt = now;
+      const min = Number(t.min || 0);
+      const max = Number(t.max || 100);
+      const span = max - min;
+      const frac = span > 0 ? clamp01((Number(t.value) - min) / span) : 0.5;
+      sfx.unlock();
+      sfx.ui("slider", 0.85 + frac * 0.35);
     },
     true,
   );
@@ -228,6 +350,9 @@ export function installUiSounds(): void {
     (e) => {
       const t = e.target;
       if (t instanceof HTMLInputElement && t.type === "checkbox") sfx.ui("toggle");
+      else if (t instanceof HTMLInputElement && t.type === "radio") sfx.ui("tab");
+      else if (t instanceof HTMLInputElement && t.type === "color") sfx.ui("click");
+      else if (t instanceof HTMLSelectElement) sfx.ui("tab");
     },
     true,
   );
