@@ -612,9 +612,7 @@ pub extern "C" fn nb_frame(now_ms: f64, mask: u32) -> u32 {
         s.drain_confirmed(|tick, prev, cur| a.feed.add_confirmed(tick, prev, cur));
         s.drain_predicted(|tick, prev, cur| a.feed.add_predicted(tick, prev, cur));
         a.feed.forget_before(s.base);
-        let (prev, cur) = s.latest_pair();
-        // between the last finished tick and the one in progress
-        let alpha = (tick_f - (new_head as f64 - 1.0)).clamp(0.0, 1.0);
+        let (prev, cur, alpha) = s.pair_at(tick_f);
         let meta = Meta {
             tick: new_head,
             local: s.local.map_or(-1, |l| l as i32),
@@ -627,6 +625,10 @@ pub extern "C" fn nb_frame(now_ms: f64, mask: u32) -> u32 {
         // immediately when the input changed; the heartbeat names the tick in
         // progress, the one new inputs are stamped with
         let newest = s.last_input_seq();
+        // If the clock stepped backward (correction or gap reset), allow heartbeats to resume immediately.
+        if target + 1 < a.last_sent {
+            a.last_sent = target;
+        }
         if target >= a.last_sent || newest != a.sent_seq {
             a.out = ClientFrame::Input(s.input_frame(target, MAX_RESEND, clock.next_frame())).encode();
             a.last_sent = a.last_sent.max(target + 1);

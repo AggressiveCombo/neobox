@@ -368,6 +368,8 @@ pub struct ClientSession {
     next_seq: u32,
     acked_seq: u32,
     states: VecDeque<State>,
+    /// State immediately before `states[0]` (at tick `base - 1`), kept so interpolation never degenerates when `states.len() == 1`.
+    prev_base: Option<State>,
     /// inputs and "had events" used to compute `states[i + 1]`
     used: VecDeque<(Vec<u8>, bool)>,
     /// earliest tick whose step must be recomputed
@@ -484,6 +486,7 @@ impl ClientSession {
             next_seq: 1,
             acked_seq: 0,
             states,
+            prev_base: None,
             used: VecDeque::with_capacity(64),
             dirty: None,
             hash_log: Vec::new(),
@@ -525,8 +528,34 @@ impl ClientSession {
     pub fn latest_pair(&self) -> (&State, &State) {
         let n = self.states.len();
         let cur = &self.states[n - 1];
-        let prev = if n >= 2 { &self.states[n - 2] } else { cur };
+        let prev = if n >= 2 { &self.states[n - 2] } else { self.prev_base.as_ref().unwrap_or(cur) };
         (prev, cur)
+    }
+
+    /// Bracketing `(prev, cur, alpha)` for fractional tick `tick_f`, interpolating smoothly
+    /// through the held state buffer even when `head` is ahead of `tick_f` or `states.len() == 1`.
+    pub fn pair_at(&self, tick_f: f64) -> (&State, &State, f64) {
+        let head = self.head();
+        let head_f = head as f64;
+        if tick_f >= head_f {
+            let (prev, cur) = self.latest_pair();
+            return (prev, cur, 1.0);
+        }
+        let base_f = self.base as f64;
+        if tick_f >= base_f {
+            let offset = (tick_f - base_f).floor() as usize;
+            if offset + 1 < self.states.len() {
+                let alpha = (tick_f - (base_f + offset as f64)).clamp(0.0, 1.0);
+                return (&self.states[offset], &self.states[offset + 1], alpha);
+            }
+            let (prev, cur) = self.latest_pair();
+            return (prev, cur, (tick_f - (head_f - 1.0)).clamp(0.0, 1.0));
+        }
+        if let Some(prev) = self.prev_base.as_ref() {
+            let alpha = (tick_f - (base_f - 1.0)).clamp(0.0, 1.0);
+            return (prev, &self.states[0], alpha);
+        }
+        (&self.states[0], &self.states[0], 0.0)
     }
 
     /// The (tick, previous, current) of the ticks in `(from, to]` still held, oldest first.
@@ -779,7 +808,7 @@ impl ClientSession {
             self.step_one();
         }
         while self.base < self.known && self.base < self.feed_floor() && self.states.len() > 1 {
-            self.states.pop_front();
+            self.prev_base = self.states.pop_front();
             if let Some((v, _)) = self.used.pop_front() {
                 self.spare.push(v);
             }
@@ -1078,8 +1107,22 @@ impl TickClock {
             self.restart_feedback();
             return self.tick;
         }
+        // If the local clock fell behind the server's confirmed tick, catch up quickly so interpolation
+        // never clamps to a stale tick (which would visually lock rendering to the 30 Hz server rate).
+        let behind = confirmed - self.tick;
+        if behind > 3.0 {
+            self.tick = confirmed + self.target_margin;
+            self.stats.corrections += 1;
+            self.margin = self.target_margin;
+            self.have_margin = false;
+            self.restart_feedback();
+            return self.tick;
+        }
         let err = if self.have_margin { self.target_margin - self.margin } else { 0.0 };
-        let rate = 1.0 + (err * 0.02).clamp(-0.06, 0.06);
+        let mut rate = 1.0 + (err * 0.02).clamp(-0.06, 0.06);
+        if behind > 0.5 {
+            rate = rate.max(1.0 + (behind * 0.1).clamp(0.06, 0.25));
+        }
         self.tick += dt * self.hz * rate;
         self.tick
     }

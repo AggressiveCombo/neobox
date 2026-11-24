@@ -1566,7 +1566,12 @@ impl Room {
                 let Some(g) = self.game.as_mut() else { return };
                 let Some(p) = self.players.iter_mut().find(|p| p.id == id) else { return };
                 p.ack = p.ack.max(f.ack);
+                let to_next = g.next_tick.saturating_duration_since(Instant::now()).as_secs_f64() * self.tick_hz;
                 if !p.in_match {
+                    // Spectators still need clock margin feedback so their TickClock tracks the server and interpolates smoothly.
+                    let precise = (f.now as i64 - g.m.tick as i64) as f64 - (1.0 - to_next.clamp(0.0, 1.0));
+                    p.margin16 = (precise * 16.0).round().clamp(-30000.0, 30000.0) as i32;
+                    p.margin_frame = f.frame;
                     return;
                 }
                 if !f.changes.is_empty() {
@@ -1574,7 +1579,6 @@ impl Room {
                 }
                 let receipt = g.m.submit(id, &f);
                 // fraction of the current tick already elapsed counts against the margin
-                let to_next = g.next_tick.saturating_duration_since(Instant::now()).as_secs_f64() * self.tick_hz;
                 let precise = receipt.margin as f64 - (1.0 - to_next.clamp(0.0, 1.0));
                 p.margin16 = (precise * 16.0).round().clamp(-30000.0, 30000.0) as i32;
                 p.margin_frame = f.frame;

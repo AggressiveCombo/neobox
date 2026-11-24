@@ -55,6 +55,8 @@ function harness() {
     serverFrame: () => false,
     ping: () => new Uint8Array([9]),
     rtt: () => 0,
+    netStats: () => ({ kind: 0, a: 0, b: 0, rollbackP95: 0 }),
+    framebuffer: () => null,
   } as unknown as Engine;
   const net = {
     transport: "ws",
@@ -71,7 +73,9 @@ function harness() {
     present: (() => null) as Present,
     hud: () => null,
     names: () => new Map(),
-    onError: () => {},
+    onError: (msg) => {
+      throw new Error(`unexpected loop error: ${msg}`);
+    },
   };
   return { loop: new MatchLoop(deps), counts };
 }
