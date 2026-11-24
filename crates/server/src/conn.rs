@@ -265,35 +265,46 @@ impl Session {
                 let coords = self.viewer_coords();
                 let viewer = self.hub.geo.lookup(self.ip);
                 let local_distance = coords.zip(self.hub.cfg.location).map(|(a, b)| distance_km(a, b));
-                let mut found: Vec<(crate::room::RoomSummary, String, Option<u32>)> = self
+                let local_country = self.hub.server_country();
+                let mut found: Vec<(crate::room::RoomSummary, String, Option<String>, Option<u32>)> = self
                     .hub
                     .summaries()
                     .into_iter()
-                    .map(|r| (r, self.hub.cfg.region.clone(), local_distance))
+                    .map(|r| (r, self.hub.cfg.region.clone(), local_country.clone(), local_distance))
                     .collect();
                 for node in cluster::live_nodes(&self.hub) {
                     let d = coords.zip(node.location).map(|(a, b)| distance_km(a, b));
                     let region = node.region;
-                    found.extend(node.rooms.into_iter().map(|r| (r, region.clone(), d)));
+                    let country = node.country;
+                    found.extend(node.rooms.into_iter().map(|r| (r, region.clone(), country.clone(), d)));
                 }
                 let rooms = found
                     .into_iter()
-                    .filter(|(r, _, _)| r.public)
-                    .map(|(r, region, distance)| RoomInfo {
-                        friends: r.players.iter().filter_map(|p| p.account.and_then(|a| friends.get(&a).cloned())).collect(),
-                        code: r.code,
-                        name: r.name,
-                        players: r.players.len() as u8,
-                        max_players: r.max_players,
-                        password: r.password,
-                        in_match: r.in_match,
-                        map: r.map_name,
-                        mode: r.game_mode,
-                        quick: r.quick,
-                        jukebox: r.jukebox,
-                        region,
-                        distance,
-                        country: r.host_country,
+                    .filter(|(r, _, _, _)| r.public)
+                    .map(|(r, region, server_country, distance)| {
+                        // Show the server's country beside its city name so flags never contradict the region
+                        // (e.g. a host in Turkey on a Chicago server still shows the US flag next to Chicago).
+                        let country = if region.is_empty() {
+                            r.host_country.or(server_country)
+                        } else {
+                            server_country.or(r.host_country)
+                        };
+                        RoomInfo {
+                            friends: r.players.iter().filter_map(|p| p.account.and_then(|a| friends.get(&a).cloned())).collect(),
+                            code: r.code,
+                            name: r.name,
+                            players: r.players.len() as u8,
+                            max_players: r.max_players,
+                            password: r.password,
+                            in_match: r.in_match,
+                            map: r.map_name,
+                            mode: r.game_mode,
+                            quick: r.quick,
+                            jukebox: r.jukebox,
+                            region,
+                            distance,
+                            country,
+                        }
                     })
                     .collect();
                 self.send(&ServerMsg::Rooms { rooms, country: viewer.and_then(|v| v.country) });

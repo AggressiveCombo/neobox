@@ -108,6 +108,91 @@ pub fn parse_location(s: &str) -> Option<(f64, f64)> {
     ((-90.0..=90.0).contains(&lat) && (-180.0..=180.0).contains(&lon)).then_some((lat, lon))
 }
 
+/// Infer an ISO 3166-1 alpha-2 country code from a server's `NEOBOX_REGION` label
+/// (such as "Chicago", "Frankfurt", "New York", "Tokyo", or "Warsaw, PL"), so the
+/// flag shown beside the server's city matches that server rather than the host's IP.
+pub fn region_country(region: &str) -> Option<String> {
+    let trimmed = region.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    // Explicit trailing ISO code such as "Chicago, US" or "Frankfurt (DE)".
+    if let Some((_, tail)) = trimmed.rsplit_once(',').or_else(|| trimmed.rsplit_once('(')) {
+        let code = tail.trim().trim_end_matches(')').trim();
+        if code.len() == 2 && code.bytes().all(|b| b.is_ascii_alphabetic()) {
+            return Some(code.to_ascii_uppercase());
+        }
+    }
+    let lower = trimmed.to_ascii_lowercase();
+    let code = match lower.as_str() {
+        s if s.contains("chicago")
+            || s.contains("new york")
+            || s.contains("nyc")
+            || s.contains("newark")
+            || s.contains("ashburn")
+            || s.contains("virginia")
+            || s.contains("dallas")
+            || s.contains("miami")
+            || s.contains("los angeles")
+            || s.contains("san jose")
+            || s.contains("san francisco")
+            || s.contains("silicon valley")
+            || s.contains("seattle")
+            || s.contains("atlanta")
+            || s.contains("denver")
+            || s.contains("phoenix")
+            || s.contains("boston")
+            || s.contains("hillsboro")
+            || s.contains("usa")
+            || s.contains("united states")
+            || s.starts_with("us-")
+            || s.starts_with("us ") =>
+        {
+            "US"
+        }
+        s if s.contains("frankfurt")
+            || s.contains("nuremberg")
+            || s.contains("falkenstein")
+            || s.contains("berlin")
+            || s.contains("munich")
+            || s.contains("germany") =>
+        {
+            "DE"
+        }
+        s if s.contains("london") || s.contains("manchester") || s.contains("united kingdom") || s == "uk" => "GB",
+        s if s.contains("paris") || s.contains("gravelines") || s.contains("strasbourg") || s.contains("france") => "FR",
+        s if s.contains("amsterdam") || s.contains("netherlands") => "NL",
+        s if s.contains("warsaw") || s.contains("krakow") || s.contains("poland") => "PL",
+        s if s.contains("helsinki") || s.contains("finland") => "FI",
+        s if s.contains("stockholm") || s.contains("sweden") => "SE",
+        s if s.contains("madrid") || s.contains("barcelona") || s.contains("spain") => "ES",
+        s if s.contains("milan") || s.contains("rome") || s.contains("italy") => "IT",
+        s if s.contains("zurich") || s.contains("switzerland") => "CH",
+        s if s.contains("vienna") || s.contains("austria") => "AT",
+        s if s.contains("istanbul") || s.contains("ankara") || s.contains("turkey") || s.contains("türkiye") => "TR",
+        s if s.contains("tokyo") || s.contains("osaka") || s.contains("japan") => "JP",
+        s if s.contains("seoul") || s.contains("korea") => "KR",
+        s if s.contains("singapore") => "SG",
+        s if s.contains("sydney") || s.contains("melbourne") || s.contains("australia") => "AU",
+        s if s.contains("mumbai") || s.contains("bangalore") || s.contains("chennai") || s.contains("delhi") || s.contains("india") => "IN",
+        s if s.contains("sao paulo") || s.contains("são paulo") || s.contains("brazil") => "BR",
+        s if s.contains("toronto") || s.contains("montreal") || s.contains("vancouver") || s.contains("canada") => "CA",
+        s if s.contains("hong kong") => "HK",
+        s if s.contains("taipei") || s.contains("taiwan") => "TW",
+        s if s.contains("dublin") || s.contains("ireland") => "IE",
+        s if s.contains("prague") || s.contains("czech") => "CZ",
+        s if s.contains("bucharest") || s.contains("romania") => "RO",
+        s if s.contains("sofia") || s.contains("bulgaria") => "BG",
+        s if s.contains("johannesburg") || s.contains("cape town") || s.contains("south africa") => "ZA",
+        s if s.contains("dubai") || s.contains("uae") => "AE",
+        s if s.contains("mexico") => "MX",
+        s if s.contains("santiago") || s.contains("chile") => "CL",
+        s if s.contains("buenos aires") || s.contains("argentina") => "AR",
+        _ => return None,
+    };
+    Some(code.to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

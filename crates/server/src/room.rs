@@ -822,6 +822,7 @@ impl Room {
         info!(room = %self.code, player = id, name = %p.name, "resumed");
         self.catch_up(i);
         self.broadcast_room();
+        self.publish_players();
         (id, token)
     }
 
@@ -1360,6 +1361,7 @@ impl Room {
                     self.host = Some(player);
                     self.system_chat(&format!("{name} is now the host"));
                     self.broadcast_room();
+                    self.publish_players();
                 }
             }
             ClientMsg::Resync => {
@@ -1896,6 +1898,7 @@ impl Room {
                 if self.player(player).is_some() {
                     self.host = Some(player);
                     self.broadcast_room();
+                    self.publish_players();
                 }
             }
             AdminCmd::SetMaxPlayers { max } => {

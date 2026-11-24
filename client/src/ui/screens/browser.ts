@@ -376,7 +376,13 @@ export const browserScreen: ScreenFactory = (ctx) => {
     const shown = sortRooms(rooms).filter((room) => {
       if (hideFull && room.players >= room.max_players) return false;
       if (query === "") return true;
-      return [room.name, room.map, GAME_MODES.find((m) => m.id === room.mode)?.name ?? "Unknown", room.region].some((s) => s.toLowerCase().includes(query));
+      return [
+        room.name,
+        room.map,
+        GAME_MODES.find((m) => m.id === room.mode)?.name ?? "Unknown",
+        room.region,
+        room.country !== null ? countryName(room.country) : "",
+      ].some((s) => s.toLowerCase().includes(query));
     });
     const active = document.activeElement;
     const owner = active instanceof HTMLElement ? active.closest<HTMLElement>(".room-item") : null;

@@ -43,6 +43,8 @@ pub struct Config {
     pub geoip: Option<PathBuf>,
     /// This server's region name shown in the room list (`NEOBOX_REGION`; empty: single server).
     pub region: String,
+    /// This server's ISO 3166-1 alpha-2 country code (`NEOBOX_COUNTRY`; optional override).
+    pub country: Option<String>,
     /// This server's latitude and longitude (`NEOBOX_LOCATION`, `"lat,lon"`).
     pub location: Option<(f64, f64)>,
     /// Base URL browsers reach this server at (`NEOBOX_PUBLIC_URL`, e.g. `https://eu.example.org`).
@@ -132,6 +134,10 @@ impl Config {
             }),
             geoip: std::env::var("NEOBOX_GEOIP").ok().filter(|v| !v.is_empty()).map(PathBuf::from),
             region: var("NEOBOX_REGION", "").trim().to_string(),
+            country: std::env::var("NEOBOX_COUNTRY")
+                .ok()
+                .map(|v| v.trim().to_ascii_uppercase())
+                .filter(|v| v.len() == 2 && v.bytes().all(|b| b.is_ascii_alphabetic())),
             location: std::env::var("NEOBOX_LOCATION").ok().and_then(|v| crate::geo::parse_location(&v)),
             public_url,
             main_url,
@@ -334,6 +340,16 @@ impl Hub {
 
     pub fn store(&self) -> Option<&Arc<Store>> {
         self.backend.store()
+    }
+
+    /// ISO 3166-1 alpha-2 country code of this server's region (explicit `NEOBOX_COUNTRY`, inferred from
+    /// `NEOBOX_REGION`, or looked up from `NEOBOX_RTC_PUBLIC`).
+    pub fn server_country(&self) -> Option<String> {
+        self.cfg
+            .country
+            .clone()
+            .or_else(|| crate::geo::region_country(&self.cfg.region))
+            .or_else(|| self.cfg.rtc_public.and_then(|a| self.geo.country(a.ip())))
     }
 
     pub fn summaries(&self) -> Vec<RoomSummary> {

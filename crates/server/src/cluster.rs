@@ -27,6 +27,7 @@ const BEAT_EVERY: Duration = Duration::from_secs(2);
 #[derive(Clone, Debug)]
 pub struct NodeInfo {
     pub region: String,
+    pub country: Option<String>,
     pub url: String,
     pub location: Option<(f64, f64)>,
     pub conns: usize,
@@ -39,6 +40,8 @@ pub struct NodeInfo {
 #[derive(Serialize, Deserialize)]
 pub struct Beat {
     pub region: String,
+    #[serde(default)]
+    pub country: Option<String>,
     pub url: String,
     pub location: Option<[f64; 2]>,
     pub conns: usize,
@@ -141,8 +144,10 @@ async fn heartbeat(State(hub): State<Arc<Hub>>, headers: HeaderMap, Json(b): Jso
     if !authorized(&hub, &headers) {
         return denied();
     }
+    let country = b.country.or_else(|| crate::geo::region_country(&b.region));
     let info = NodeInfo {
         region: b.region,
+        country,
         location: b.location.map(|[lat, lon]| (lat, lon)),
         conns: b.conns,
         rooms: b.rooms,
@@ -319,6 +324,7 @@ pub fn spawn_heartbeat(hub: Arc<Hub>) {
             }
             let beat = Beat {
                 region: hub.cfg.region.clone(),
+                country: hub.server_country(),
                 url: hub.cfg.public_url.clone(),
                 location: hub.cfg.location.map(|(lat, lon)| [lat, lon]),
                 conns: hub.conns.load(Ordering::Relaxed),
