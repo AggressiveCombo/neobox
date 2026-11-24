@@ -20,6 +20,18 @@ interface NewsEntry {
  */
 const NEWS: NewsEntry[] = [
   {
+    date: "2026-11-23",
+    items: [
+      "Main menu: the replay showcase is larger on widescreen displays and cycles infinitely between replays with a smooth sliding transition.",
+      "Match HUD: lives, scores and objectives now live inside one slim top bar instead of floating over the arena, with each player's remaining lives shown cleanly at the top.",
+      "Advanced stats (F3): added a compact live FPS and ping graph over time.",
+      "Sound effects: refreshed gameplay and interface sounds with distinct effects for each action, including menu wheel scrolling and pitch-tracked sliders.",
+      "Map editor and library: added Cut, Copy and Paste (Ctrl+X / Ctrl+C / Ctrl+V) in the editor, Delete buttons for your own maps in the library and editor, properly framed map previews, and fair play-count tracking.",
+      "Chat and Jukebox: keyboard copy and paste now work directly in chat, space-only chat lines are allowed, and the Jukebox plays audio-only with no popup unless you enable the popup in Sound settings.",
+      "Performance, connections and polish: fixed matches locking to 30 FPS on smooth displays, reduced unnecessary WebRTC fallbacks, matched room flags to server regions, and fixed initial page scrollbars and layout shifts.",
+    ],
+  },
+  {
     date: "2026-11-22",
     items: [
       "Capturing the flag now ends the round, and the match ends when a team reaches the objective limit.",
