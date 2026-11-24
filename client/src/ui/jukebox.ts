@@ -132,8 +132,11 @@ export function mountJukebox(ctx: AppCtx): void {
   /** The player's YouTube state: -1 unstarted, 1 playing, 2 paused, 3 buffering, 5 cued. */
   let playerState = -1;
 
+  // Persistent clipped audio host on document.body so YouTube keeps playing audio even when the popup is hidden.
+  const audioHost = h("div", { class: "jukebox-audio-host", "aria-hidden": "true" });
   // The player frame lives in this mount (ensurePlayer gives YouTube an inner node to replace).
   const playerMount = h("div", { class: "jukebox-screen" });
+  audioHost.append(playerMount);
   const title = h("strong", { class: "jukebox-title" });
   const by = h("p", { class: "jukebox-by", hidden: true });
   const note = h("p", { class: "jukebox-note", hidden: true }, "The video player could not load, so the jukebox is silent.");
@@ -155,8 +158,9 @@ export function mountJukebox(ctx: AppCtx): void {
   );
 
   function applyVolume(): void {
-    if (player === null) return;
     const p = prefs.value;
+    volume.value = String(Math.round(p.jukeboxVolume * 100));
+    if (player === null) return;
     player.setVolume(Math.round(100 * p.jukeboxVolume * p.volume));
     if (p.muted) player.mute();
     else player.unMute();
@@ -287,16 +291,16 @@ export function mountJukebox(ctx: AppCtx): void {
     value: String(Math.round(prefs.value.jukeboxVolume * 100)),
     oninput: () => prefs.set({ jukeboxVolume: Number(volume.value) / 100 }),
   });
+  const topRow = h(
+    "div",
+    { class: "jukebox-top" },
+    h("div", { class: "jukebox-info" }, title, by, h("div", { class: "jukebox-meta" }, stateChip, sizeBtn)),
+    note,
+  );
   const panel = h(
     "section",
     { class: "jukebox", "aria-label": "Jukebox", hidden: true },
-    h(
-      "div",
-      { class: "jukebox-top" },
-      h("div", { class: "jukebox-info" }, title, by, h("div", { class: "jukebox-meta" }, stateChip, sizeBtn)),
-      playerMount,
-      note,
-    ),
+    topRow,
     tapBtn,
     hostRow,
     h("label", { class: "jukebox-volume" }, h("span", { title: "Volume" }, icon("volume-2", 18)), volume),
@@ -304,8 +308,19 @@ export function mountJukebox(ctx: AppCtx): void {
 
   function render(state: AppState): void {
     const jb = state.room?.jukebox ?? null;
-    panel.hidden = jb === null;
-    if (jb === null) return;
+    const showPanel = jb !== null && prefs.value.jukeboxPopup;
+    panel.hidden = !showPanel;
+    // Keep the iframe inside the clipped audioHost whenever the popup is hidden or video is off,
+    // so display:none on the hidden popup never pauses or blocks audio playback.
+    const showVideo = showPanel && large && !unavailable;
+    const targetParent = showVideo ? topRow : audioHost;
+    if (playerMount.parentElement !== targetParent) {
+      if (showVideo) topRow.insertBefore(playerMount, note);
+      else audioHost.append(playerMount);
+    }
+    playerMount.toggleAttribute("inert", !showVideo);
+    playerMount.hidden = unavailable;
+    if (!showPanel || jb === null) return;
     title.textContent = jb.title;
     // The latest chat line that pasted the room's link names its suggester; the server does not send one.
     const suggests = state.chat.filter((line) => line.suggest?.video === jb.video);
@@ -316,17 +331,18 @@ export function mountJukebox(ctx: AppCtx): void {
     stateChip.className = jb.playing && !unavailable ? "chip ink" : "chip";
     panel.classList.toggle("is-large", large);
     panel.dataset.playerState = String(playerState);
-    playerMount.toggleAttribute("inert", !large);
     sizeBtn.textContent = large ? "Hide video" : "Show video";
-    playerMount.hidden = unavailable;
     note.hidden = !unavailable;
     tapBtn.hidden = unavailable || !jb.playing || !NOT_PLAYING.has(playerState);
     toggleBtn.replaceChildren(icon(jb.playing ? "pause" : "play", 18), jb.playing ? "Pause" : "Resume");
     hostRow.hidden = !isHost(state);
   }
 
-  document.body.append(panel);
-  prefs.subscribe(applyVolume);
+  document.body.append(audioHost, panel);
+  prefs.subscribe(() => {
+    applyVolume();
+    render(ctx.store.state);
+  });
   ctx.store.subscribe((next, prev) => {
     const jb = next.room?.jukebox ?? null;
     if (jb !== (prev.room?.jukebox ?? null)) {

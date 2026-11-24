@@ -77,7 +77,7 @@ type SectionId = (typeof SECTIONS)[number]["id"];
 const SECTION_PREFS: Record<SectionId, (keyof Prefs)[]> = {
   controls: ["keys"],
   touch: ["touchScale", "touchLeftHanded", "touchLayout"],
-  sound: ["volume", "muted", "musicVolume", "musicMuted", "matchMusicMuted", "sfxVolume", "uiSounds", "jukeboxVolume"],
+  sound: ["volume", "muted", "musicVolume", "musicMuted", "matchMusicMuted", "sfxVolume", "uiSounds", "jukeboxVolume", "jukeboxPopup"],
   display: ["theme", "renderScale", "antialias", "showStats", "color"],
   access: ["motion", "textScale", "readableFont", "captions", "palette"],
   chat: ["filterProfanity"],

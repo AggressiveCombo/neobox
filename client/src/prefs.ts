@@ -102,6 +102,8 @@ export interface Prefs {
   filterProfanity: boolean;
   /** Jukebox volume (0..1), on top of the master volume. */
   jukeboxVolume: number;
+  /** Show the floating jukebox popup when a room plays a song (audio still plays when false). */
+  jukeboxPopup: boolean;
   /** Colour theme of the menus: follow the system, or always light or dark. */
   theme: Theme;
   /** Motion: follow the system, or always reduce (no decorative motion) or always keep it. */
@@ -133,6 +135,7 @@ export const DEFAULT_PREFS: Prefs = {
   uiSounds: true,
   filterProfanity: true,
   jukeboxVolume: 0.5,
+  jukeboxPopup: false,
   theme: "system",
   motion: "system",
   textScale: 1,
@@ -190,6 +193,7 @@ export function sanitizePrefs(raw: unknown): Prefs {
     uiSounds: typeof o.uiSounds === "boolean" ? o.uiSounds : DEFAULT_PREFS.uiSounds,
     filterProfanity: typeof o.filterProfanity === "boolean" ? o.filterProfanity : DEFAULT_PREFS.filterProfanity,
     jukeboxVolume: clamp(o.jukeboxVolume, 0, 1, DEFAULT_PREFS.jukeboxVolume),
+    jukeboxPopup: typeof o.jukeboxPopup === "boolean" ? o.jukeboxPopup : DEFAULT_PREFS.jukeboxPopup,
     theme: THEMES.includes(o.theme as Theme) ? (o.theme as Theme) : DEFAULT_PREFS.theme,
     motion: MOTIONS.includes(o.motion as Motion) ? (o.motion as Motion) : DEFAULT_PREFS.motion,
     textScale: clamp(o.textScale, 1, 1.5, DEFAULT_PREFS.textScale),

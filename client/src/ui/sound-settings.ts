@@ -60,6 +60,7 @@ export function soundSettingsSection(): HTMLElement {
     flag("Mute menu music", null, (p) => p.musicMuted, (on) => prefs.set({ musicMuted: on })),
     flag("Mute match music", "The in-game playlist.", (p) => p.matchMusicMuted, (on) => prefs.set({ matchMusicMuted: on })),
     flag("Interface sounds", "Hovers, clicks, switches, tabs, dialogs and toasts.", (p) => p.uiSounds, (on) => prefs.set({ uiSounds: on })),
+    flag("Jukebox popup", "Show the floating jukebox controls when a song plays (audio plays either way).", (p) => p.jukeboxPopup, (on) => prefs.set({ jukeboxPopup: on })),
   ];
 
   const root = h(

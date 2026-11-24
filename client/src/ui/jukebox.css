@@ -1,5 +1,16 @@
 /* Jukebox panel: what is playing (title, who suggested it), the player and the transport. Floats over the page, mounted once on document.body. */
 
+/* Persistent clipped container for audio-only playback when the popup is off or video is hidden. */
+.jukebox-audio-host {
+  position: fixed;
+  left: 0;
+  bottom: 0;
+  width: 0;
+  height: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
 .jukebox {
   position: fixed;
   right: 16px;
