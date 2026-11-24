@@ -7,6 +7,7 @@ import { History } from "./history";
 import {
   KIND_ORDER,
   type BodyScope,
+  type ClipboardData,
   type Ref,
   addBody,
   addJoint,
@@ -16,6 +17,8 @@ import {
   bodyIdAt,
   bodyXf,
   circleShape,
+  copyRefs,
+  copyShapes,
   getList,
   hitTest,
   isCircle,
@@ -24,6 +27,8 @@ import {
   moveRefs,
   moveShapes,
   nextBodyId,
+  pasteClipboard,
+  pasteShapes,
   polyShapes,
   refCenter,
   removeRefs,
@@ -242,6 +247,8 @@ export class EditorController {
   private note = "";
   private fitShown = true;
   private colour = bodyColor(0);
+  private clipboard: ClipboardData | null = null;
+  private pasteCount = 0;
   private readonly cleanups: (() => void)[] = [];
 
   constructor(
@@ -400,6 +407,57 @@ export class EditorController {
     this.scheduleDraft();
     this.notify();
     this.paint();
+  }
+
+  get hasSelection(): boolean {
+    return this.selection.length > 0 || (this.scope?.shapes.length ?? 0) > 0;
+  }
+
+  get hasClipboard(): boolean {
+    return this.clipboard !== null;
+  }
+
+  copySelection(): boolean {
+    const scope = this.scope;
+    const data = scope ? copyShapes(this.doc, scope.index, scope.shapes) : copyRefs(this.doc, this.selection);
+    if (!data) return false;
+    this.clipboard = data;
+    this.pasteCount = 0;
+    this.note = "Copied";
+    this.notify();
+    return true;
+  }
+
+  cutSelection(): boolean {
+    if (!this.copySelection()) return false;
+    this.pasteCount = -1;
+    this.removeSelection();
+    this.note = "Cut";
+    this.notify();
+    this.paint();
+    return true;
+  }
+
+  pasteSelection(): boolean {
+    if (!this.clipboard) return false;
+    this.cancelGesture();
+    this.pasteCount += 1;
+    const step = this.snapStep() > 0 ? this.snapStep() : 1;
+    const off = this.pasteCount * step;
+    const scope = this.scope;
+    if (scope && this.clipboard.mode === "shapes") {
+      const made = pasteShapes(this.doc, scope.index, this.clipboard, off, off);
+      if (made.shapes.length === 0) return false;
+      this.note = "";
+      this.commitScoped(made.doc, made.shapes);
+      return true;
+    }
+    if (scope) this.scopeId = null;
+    const made = pasteClipboard(this.doc, this.clipboard, off, off);
+    if (made.refs.length === 0) return false;
+    this.note = "";
+    this.commitWith(made.doc, made.refs);
+    return true;
   }
 
   removeSelection(): void {
@@ -908,6 +966,7 @@ export class EditorController {
     this.shapeSel = shapeSel;
     this.scheduleDraft();
     this.notify();
+    this.paint();
   }
 
   /** Edit inside a body: its shapes become selectable and the other bodies are dimmed. */
@@ -1038,6 +1097,7 @@ export class EditorController {
 
   private onKey(e: KeyboardEvent): void {
     if (this.paused) return;
+    if (document.querySelector("dialog[open]")) return;
     const t = e.target;
     if (t instanceof HTMLInputElement || t instanceof HTMLSelectElement || t instanceof HTMLTextAreaElement) return;
     if (t instanceof HTMLElement && t.isContentEditable) return;
@@ -1052,10 +1112,20 @@ export class EditorController {
       if (key === "z") {
         if (e.shiftKey) this.redo();
         else this.undo();
+      } else if (key === "y") {
+        this.redo();
+      } else if (key === "a") {
+        this.selectAll();
+      } else if (key === "c") {
+        if ((window.getSelection()?.toString() ?? "") !== "") return;
+        if (!this.copySelection()) return;
+      } else if (key === "x") {
+        if (!this.cutSelection()) return;
+      } else if (key === "v") {
+        if (!this.pasteSelection()) return;
+      } else {
+        return;
       }
-      else if (key === "y") this.redo();
-      else if (key === "a") this.selectAll();
-      else return;
       e.preventDefault();
       return;
     }
@@ -1179,6 +1249,7 @@ export class EditorController {
     this.selection = sel;
     this.scheduleDraft();
     this.notify();
+    this.paint();
   }
 
   private afterHistory(): void {

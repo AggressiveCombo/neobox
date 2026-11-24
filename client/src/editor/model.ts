@@ -586,3 +586,184 @@ export function mergeBodies(doc: Obj, bodyIdxs: number[]): { doc: Obj; index: nu
   next = withList(next, "grapple", grapples);
   return { doc: next, index: surv };
 }
+
+/** Deep-cloned editor clipboard payload for top-level entities or in-body shapes. */
+export type ClipboardData =
+  | { mode: "entities"; bodies: Obj[]; joints: Obj[]; spawns: Obj[]; turrets: Obj[]; grapples: Obj[]; caps: Obj[] }
+  | { mode: "shapes"; shapes: Obj[]; origin: Pt };
+
+function cloneObj(o: Obj): Obj {
+  return structuredClone(o);
+}
+
+/** Copy the selected top-level entities, plus any joints linking two copied bodies. */
+export function copyRefs(doc: Obj, refs: readonly Ref[]): ClipboardData | null {
+  if (refs.length === 0) return null;
+  const byKind = new Map<Kind, Set<number>>();
+  for (const r of refs) {
+    const set = byKind.get(r.kind) ?? new Set<number>();
+    set.add(r.i);
+    byKind.set(r.kind, set);
+  }
+  const copiedBodyIds = new Set<number>();
+  const bodies: Obj[] = [];
+  for (const i of [...(byKind.get("body") ?? [])].sort((a, b) => a - b)) {
+    const b = getList(doc, "body")[i];
+    if (!b) continue;
+    copiedBodyIds.add(num(b, "1", -1));
+    bodies.push(cloneObj(b));
+  }
+  const jointIdxs = new Set<number>(byKind.get("joint") ?? []);
+  if (copiedBodyIds.size > 0) {
+    getList(doc, "joint").forEach((j, i) => {
+      const a = num(j, "7", -1);
+      const b = num(j, "8", -1);
+      if (a >= 0 && b >= 0 && copiedBodyIds.has(a) && copiedBodyIds.has(b)) jointIdxs.add(i);
+    });
+  }
+  const pick = (kind: Kind, idxs: Iterable<number>): Obj[] => {
+    const items = getList(doc, kind);
+    const out: Obj[] = [];
+    for (const i of [...idxs].sort((a, b) => a - b)) {
+      const o = items[i];
+      if (o) out.push(cloneObj(o));
+    }
+    return out;
+  };
+  const joints = pick("joint", jointIdxs);
+  const spawns = pick("spawn", byKind.get("spawn") ?? []);
+  const turrets = pick("turret", byKind.get("turret") ?? []);
+  const grapples = pick("grapple", byKind.get("grapple") ?? []);
+  const caps = pick("cap", byKind.get("cap") ?? []);
+  if (bodies.length + joints.length + spawns.length + turrets.length + grapples.length + caps.length === 0) return null;
+  return { mode: "entities", bodies, joints, spawns, turrets, grapples, caps };
+}
+
+/** Copy selected shapes from one body. */
+export function copyShapes(doc: Obj, bodyIdx: number, shapeIdxs: readonly number[]): ClipboardData | null {
+  const body = getList(doc, "body")[bodyIdx];
+  if (!body || shapeIdxs.length === 0) return null;
+  const src = list(body, "s");
+  const shapes: Obj[] = [];
+  for (const i of [...new Set(shapeIdxs)].sort((a, b) => a - b)) {
+    const s = src[i];
+    if (s) shapes.push(cloneObj(asObj(s)));
+  }
+  if (shapes.length === 0) return null;
+  return { mode: "shapes", shapes, origin: { x: num(body, "2", 0), y: num(body, "3", 0) } };
+}
+
+/** Paste copied top-level entities with fresh body IDs, remapped joints/grapples, and a world offset. */
+export function pasteClipboard(doc: Obj, clip: ClipboardData, dx: number, dy: number): { doc: Obj; refs: Ref[] } {
+  if (clip.mode === "shapes") {
+    const cloned = clip.shapes.map(cloneObj);
+    const made = addBody(doc, cloned, { x: round(clip.origin.x + dx), y: round(clip.origin.y + dy) });
+    return { doc: made.doc, refs: [{ kind: "body", i: made.index }] };
+  }
+  let next = doc;
+  const refs: Ref[] = [];
+  const idMap = new Map<number, number>();
+  let allocId = nextBodyId(next);
+
+  if (clip.bodies.length > 0) {
+    const existing = getList(next, "body");
+    const added: Obj[] = [];
+    for (const raw of clip.bodies) {
+      const b = cloneObj(raw);
+      const oldId = num(b, "1", -1);
+      const newId = Math.min(allocId, MAX_OBJECT_ID);
+      allocId = Math.min(allocId + 1, MAX_OBJECT_ID);
+      if (oldId >= 0) idMap.set(oldId, newId);
+      b["1"] = newId;
+      b["2"] = round(num(b, "2", 0) + dx);
+      b["3"] = round(num(b, "3", 0) + dy);
+      refs.push({ kind: "body", i: existing.length + added.length });
+      added.push(b);
+    }
+    next = withList(next, "body", [...existing, ...added]);
+  }
+
+  const appendSimple = (kind: "spawn" | "turret" | "cap", items: Obj[]): void => {
+    if (items.length === 0) return;
+    const existing = getList(next, kind);
+    const added = items.map((raw, k) => {
+      const o = cloneObj(raw);
+      o["1"] = round(num(o, "1", 0) + dx);
+      o["2"] = round(num(o, "2", 0) + dy);
+      refs.push({ kind, i: existing.length + k });
+      return o;
+    });
+    next = withList(next, kind, [...existing, ...added]);
+  };
+  appendSimple("spawn", clip.spawns);
+  appendSimple("turret", clip.turrets);
+  appendSimple("cap", clip.caps);
+
+  if (clip.grapples.length > 0) {
+    const existing = getList(next, "grapple");
+    const added = clip.grapples.map((raw, k) => {
+      const g = cloneObj(raw);
+      g["1"] = round(num(g, "1", 0) + dx);
+      g["2"] = round(num(g, "2", 0) + dy);
+      const attached = num(g, "4", -1);
+      if (attached >= 0) {
+        const mapped = idMap.get(attached);
+        if (mapped !== undefined) g["4"] = mapped;
+        else if (!bodyById(next, attached)) delete g["4"];
+      }
+      refs.push({ kind: "grapple", i: existing.length + k });
+      return g;
+    });
+    next = withList(next, "grapple", [...existing, ...added]);
+  }
+
+  if (clip.joints.length > 0) {
+    const existing = getList(next, "joint");
+    const added = clip.joints.map((raw, k) => {
+      const j = cloneObj(raw);
+      const ends: [string, string, string][] = [
+        ["7", "1", "2"],
+        ["8", "3", "4"],
+      ];
+      for (const [kid, kx, ky] of ends) {
+        const oldId = num(j, kid, -1);
+        const mapped = oldId >= 0 ? idMap.get(oldId) : undefined;
+        if (mapped !== undefined) {
+          j[kid] = mapped;
+        } else if (oldId < 0) {
+          j[kx] = round(num(j, kx, 0) + dx);
+          j[ky] = round(num(j, ky, 0) + dy);
+        } else {
+          const host = bodyById(next, oldId);
+          if (host) {
+            const local = { x: num(j, kx, 0), y: num(j, ky, 0) };
+            const world = toWorld(bodyXf(host), local);
+            const moved = toLocal(bodyXf(host), { x: world.x + dx, y: world.y + dy });
+            j[kx] = round(moved.x);
+            j[ky] = round(moved.y);
+          } else {
+            delete j[kid];
+            j[kx] = round(num(j, kx, 0) + dx);
+            j[ky] = round(num(j, ky, 0) + dy);
+          }
+        }
+      }
+      refs.push({ kind: "joint", i: existing.length + k });
+      return j;
+    });
+    next = withList(next, "joint", [...existing, ...added]);
+  }
+
+  return { doc: next, refs };
+}
+
+/** Paste copied shapes into a scoped body and shift them by a world offset. */
+export function pasteShapes(doc: Obj, bodyIdx: number, clip: ClipboardData, dx: number, dy: number): { doc: Obj; shapes: number[] } {
+  if (clip.mode !== "shapes") return { doc, shapes: [] };
+  const cloned = clip.shapes.map(cloneObj);
+  const made = addShapes(doc, bodyIdx, cloned);
+  if (made.first < 0) return { doc, shapes: [] };
+  const idxs = cloned.map((_, i) => made.first + i);
+  const next = dx !== 0 || dy !== 0 ? moveShapes(made.doc, bodyIdx, idxs, dx, dy) : made.doc;
+  return { doc: next, shapes: idxs };
+}

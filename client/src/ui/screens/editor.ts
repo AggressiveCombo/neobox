@@ -132,6 +132,9 @@ export const editorScreen: ScreenFactory = (ctx) => {
   const undoBtn = iconButton("undo-2", "Undo", () => ctrl.undo());
   const redoBtn = iconButton("redo-2", "Redo", () => ctrl.redo());
   const saveBtn = iconButton("save", "Save", () => openSaveDialog());
+  const copyBtn = iconButton("copy", "Copy (Ctrl+C)", () => ctrl.copySelection());
+  const cutBtn = iconButton("scissors", "Cut (Ctrl+X)", () => ctrl.cutSelection());
+  const pasteBtn = iconButton("clipboard", "Paste (Ctrl+V)", () => ctrl.pasteSelection());
   const mergeBtn = iconButton("combine", "Merge shapes", () => ctrl.mergeSelected());
   const deleteBtn = iconButton("trash-2", "Delete", () => ctrl.removeSelection());
   const zoomOutBtn = iconButton("zoom-out", "Zoom out", () => ctrl.zoomBy(0.8));
@@ -170,7 +173,7 @@ export const editorScreen: ScreenFactory = (ctx) => {
     h(
       "div",
       { class: "editor-float" },
-      h("div", { class: "editor-cluster", role: "group", "aria-label": "Edit" }, colourInput, mergeBtn, deleteBtn),
+      h("div", { class: "editor-cluster", role: "group", "aria-label": "Edit" }, colourInput, copyBtn, cutBtn, pasteBtn, mergeBtn, deleteBtn),
       h("div", { class: "editor-cluster", role: "group", "aria-label": "View" }, zoomOutBtn, zoomInBtn, resetZoomBtn),
     ),
   );
@@ -345,8 +348,11 @@ export const editorScreen: ScreenFactory = (ctx) => {
     if (emptyEl.hidden === showEmpty) emptyEl.hidden = !showEmpty;
     if (scopeBar.hidden !== !scope) scopeBar.hidden = !scope;
     setText(scopeText, scope ? `Editing shapes inside body ${scope.id}. Esc returns.` : "");
+    setDisabled(copyBtn, !ctrl.hasSelection);
+    setDisabled(cutBtn, !ctrl.hasSelection);
+    setDisabled(pasteBtn, !ctrl.hasClipboard);
     setDisabled(mergeBtn, ctrl.sel.filter((r) => r.kind === "body").length < 2);
-    setDisabled(deleteBtn, ctrl.sel.length === 0);
+    setDisabled(deleteBtn, !ctrl.hasSelection);
     const shapes = ctrl.physicsShapes;
     setText(lagEl, `${shapes} physics ${shapes === 1 ? "shape" : "shapes"}: ${lagVerdict(shapes)}`);
     setText(hintEl, ctrl.message || ctrl.hint);

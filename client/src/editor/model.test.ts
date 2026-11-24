@@ -1,0 +1,65 @@
+// Run: bun test client/src/editor/model.test.ts
+import { expect, test } from "bun:test";
+import { addBody, addJoint, addMarker, circleShape, copyRefs, copyShapes, getList, pasteClipboard, pasteShapes } from "./model";
+import { emptyDoc, num } from "./schema";
+
+test("copy and paste bodies remaps body IDs, joints, and grapples with offset", () => {
+  let doc = emptyDoc();
+  const a = addBody(doc, [circleShape(2, 0xff0000)], { x: 0, y: 0 });
+  doc = a.doc;
+  const b = addBody(doc, [circleShape(2, 0x00ff00)], { x: 10, y: 0 });
+  doc = b.doc;
+  const idA = num(getList(doc, "body")[a.index]!, "1", -1);
+  const idB = num(getList(doc, "body")[b.index]!, "1", -1);
+  // Joint linking A and B (not explicitly selected — should copy automatically with both bodies).
+  doc = addJoint(doc, { body: idA, p: { x: 1, y: 0 } }, { body: idB, p: { x: -1, y: 0 } }, 0).doc;
+  // Grapple attached to body A.
+  const gp = addMarker(doc, "grapple", 2, 3);
+  doc = gp.doc;
+  getList(doc, "grapple")[gp.index]!["4"] = idA;
+
+  const clip = copyRefs(doc, [
+    { kind: "body", i: a.index },
+    { kind: "body", i: b.index },
+    { kind: "grapple", i: gp.index },
+  ]);
+  expect(clip).not.toBeNull();
+  const pasted = pasteClipboard(doc, clip!, 5, -3);
+  const bodies = getList(pasted.doc, "body");
+  expect(bodies.length).toBe(4);
+  const newIdA = num(bodies[2]!, "1", -1);
+  const newIdB = num(bodies[3]!, "1", -1);
+  expect(newIdA).not.toBe(idA);
+  expect(newIdB).not.toBe(idB);
+  expect(newIdA).not.toBe(newIdB);
+  expect(num(bodies[2]!, "2", 0)).toBe(5);
+  expect(num(bodies[2]!, "3", 0)).toBe(-3);
+
+  const joints = getList(pasted.doc, "joint");
+  expect(joints.length).toBe(2);
+  expect(num(joints[1]!, "7", -1)).toBe(newIdA);
+  expect(num(joints[1]!, "8", -1)).toBe(newIdB);
+
+  const grapples = getList(pasted.doc, "grapple");
+  expect(grapples.length).toBe(2);
+  expect(num(grapples[1]!, "4", -1)).toBe(newIdA);
+  expect(num(grapples[1]!, "1", 0)).toBe(7);
+  expect(num(grapples[1]!, "2", 0)).toBe(0);
+});
+
+test("copy and paste shapes inside a body and outside as a new body", () => {
+  const made = addBody(emptyDoc(), [circleShape(2, 0xff0000)], { x: 4, y: 6 });
+  const clip = copyShapes(made.doc, made.index, [0]);
+  expect(clip).not.toBeNull();
+
+  const inBody = pasteShapes(made.doc, made.index, clip!, 2, 1);
+  expect(inBody.shapes).toEqual([1]);
+  const shapes = (getList(inBody.doc, "body")[made.index]!.s as Record<string, unknown>[]);
+  expect(shapes.length).toBe(2);
+  expect(shapes[1]!["2"]).toBe(2);
+  expect(shapes[1]!["3"]).toBe(1);
+
+  const asBody = pasteClipboard(made.doc, clip!, 3, 4);
+  expect(getList(asBody.doc, "body").length).toBe(2);
+  expect(asBody.refs).toEqual([{ kind: "body", i: 1 }]);
+});
