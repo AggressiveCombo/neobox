@@ -192,7 +192,8 @@ function showFastestTimes(map: MapMeta): void {
 }
 
 function chatLine(line: ChatLine, myId: number | null, text: string, onPlay: ((video: string) => void) | null): HTMLElement {
-  if (line.from === null) return h("div", { class: "room-chat-line room-chat-system" }, text);
+  const display = text === " " ? "\u00A0" : text;
+  if (line.from === null) return h("div", { class: "room-chat-line room-chat-system" }, display);
   const mine = line.from === myId ? "room-chat-line is-me" : "room-chat-line";
   const suggest = line.suggest;
   return h(

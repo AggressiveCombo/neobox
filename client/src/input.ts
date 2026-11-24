@@ -84,9 +84,23 @@ export const GAMEPAD_LABELS: Record<Action, string> = {
   grab: "LB",
 };
 
+const MODIFIER_CODES: ReadonlySet<string> = new Set([
+  "ControlLeft",
+  "ControlRight",
+  "AltLeft",
+  "AltRight",
+  "MetaLeft",
+  "MetaRight",
+]);
+
 function typingInField(): boolean {
   const el = document.activeElement;
-  return el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || el instanceof HTMLSelectElement;
+  return (
+    el instanceof HTMLInputElement ||
+    el instanceof HTMLTextAreaElement ||
+    el instanceof HTMLSelectElement ||
+    (el instanceof HTMLElement && el.isContentEditable)
+  );
 }
 
 /** Touch input bits held by one source (the stick or the buttons). */
@@ -257,6 +271,8 @@ export class Input {
       return;
     }
     if (typingInField()) return;
+    // Never swallow browser/OS shortcuts (Ctrl+C, Ctrl+V, Ctrl+X, Ctrl+A, Cmd+...) as game inputs.
+    if (down && (e.ctrlKey || e.metaKey || e.altKey) && !MODIFIER_CODES.has(e.code)) return;
     const bound = this.codeBits.has(e.code);
     if (bound) e.preventDefault();
     if (down) this.held.add(e.code);

@@ -1098,10 +1098,12 @@ impl Room {
         let running = self.game.is_some();
         match msg {
             ClientMsg::Chat { text } => {
-                let text: String = clean_text(&text).chars().take(MAX_CHAT_LEN).collect::<String>().trim().to_string();
-                if text.is_empty() {
+                let cleaned: String = clean_text(&text).chars().take(MAX_CHAT_LEN).collect();
+                if cleaned.is_empty() {
                     return;
                 }
+                let trimmed = cleaned.trim();
+                let text = if trimmed.is_empty() { " ".to_string() } else { trimmed.to_string() };
                 // commands and chat lines spend one budget, across all of the player's
                 // sockets: a flood of `/help` is throttled like a flood of chat
                 if !self.take_chat_token(id) {
