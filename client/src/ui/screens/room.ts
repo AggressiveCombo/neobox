@@ -200,7 +200,7 @@ function chatLine(line: ChatLine, myId: number | null, text: string, onPlay: ((v
     { class: mine },
     h("span", { class: "room-chat-name" }, line.name),
     ": ",
-    text,
+    display,
     suggest
       ? h(
           "div",
@@ -674,12 +674,16 @@ export const roomScreen: ScreenFactory = (ctx: AppCtx) => {
         h("button", { type: "button", class: "room-btn", "data-focus-key": "lock", disabled: st.reconnecting, onclick: () => setLock(!room.locked) }, icon(room.locked ? "lock-open" : "lock", 16), room.locked ? "Unlock teams" : "Lock teams"),
         h("p", { class: "room-muted" }, room.locked ? "Players cannot change team." : "Players can change team."),
       ),
-      h(
-        "div",
-        { class: "room-danger" },
-        h("button", { type: "button", class: "room-btn danger", disabled: !room.in_match, onclick: endMatch }, icon("x", 16), "End match"),
-        h("p", { class: "room-muted" }, room.in_match ? "Stops the match for everyone." : "No match is running."),
-      ),
+      ...(room.in_match
+        ? [
+            h(
+              "div",
+              { class: "room-danger" },
+              h("button", { type: "button", class: "room-btn danger", onclick: endMatch }, icon("x", 16), "End match"),
+              h("p", { class: "room-muted" }, "Stops the match for everyone."),
+            ),
+          ]
+        : []),
     ];
   }
 
@@ -838,8 +842,10 @@ export const roomScreen: ScreenFactory = (ctx: AppCtx) => {
   }
 
   const sendChat = (): void => {
-    const text = chatInput.value.trim();
-    if (text === "" || st.reconnecting) return;
+    const raw = chatInput.value;
+    if (raw.length === 0 || st.reconnecting) return;
+    const trimmed = raw.trim();
+    const text = trimmed === "" ? " " : trimmed;
     ctx.send({ t: "chat", text });
     sentHistory.push(text);
     if (sentHistory.length > SENT_LIMIT) sentHistory.shift();
@@ -1026,7 +1032,6 @@ export const roomScreen: ScreenFactory = (ctx: AppCtx) => {
   /** Opens the built-in maps in a dialog; picking one sets the room's map and closes it. */
   function openMapPicker(): void {
     closeMapPicker?.();
-    refreshMapList();
     const modal = openModal({
       title: "Choose a map",
       body: [mapList, mapControls],
@@ -1035,6 +1040,7 @@ export const roomScreen: ScreenFactory = (ctx: AppCtx) => {
       },
     });
     closeMapPicker = () => modal.close();
+    refreshMapList();
   }
 
   /** Opens the game modes in a dialog; picking one sets the room's mode and closes it. */
@@ -1073,14 +1079,21 @@ export const roomScreen: ScreenFactory = (ctx: AppCtx) => {
     );
   }
 
-  /** A map's preview thumbnail, drawn from its code. */
+  /** A map's preview thumbnail, drawn from its code once the engine is ready and the canvas has layout size. */
   function mapThumb(code: string): HTMLCanvasElement {
     const canvas = h("canvas", { class: "room-map-thumb", "aria-hidden": "true" });
-    try {
-      drawMapPreview(canvas, ctx.wasm.mapPreview(code));
-    } catch {
-      // no thumbnail: the name alone still picks the map
-    }
+    afterEngine(() => {
+      const draw = (): void => {
+        if (!alive) return;
+        try {
+          drawMapPreview(canvas, ctx.wasm.mapPreview(code));
+        } catch {
+          // no thumbnail: the name alone still picks the map
+        }
+      };
+      if (canvas.clientWidth > 0) draw();
+      else requestAnimationFrame(draw);
+    });
     return canvas;
   }
 
@@ -1284,7 +1297,7 @@ export const roomScreen: ScreenFactory = (ctx: AppCtx) => {
   const chatSend = h("button", { type: "button", class: "icon", "aria-label": "Send", title: "Send", disabled: true, onclick: sendChat }, icon("send", 18));
   /** Send is off while the draft is empty (nothing to send) or the connection is being restored. */
   const syncChatSend = (reconnecting: boolean): void => {
-    chatSend.disabled = reconnecting || chatInput.value.trim() === "";
+    chatSend.disabled = reconnecting || chatInput.value.length === 0;
   };
   const chatPanel = h(
     "section",

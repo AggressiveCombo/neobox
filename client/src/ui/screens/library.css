@@ -7,13 +7,10 @@
 }
 
 .library-page .status {
-  margin: 0;
+  margin: -16px 0 0;
+  min-height: 1.4em;
   color: var(--muted);
   font-size: var(--step-small);
-}
-
-.library-page .status:empty {
-  display: none;
 }
 
 /* Tabs share the strip so "Favourites" keeps its whole word; at phone widths the glyphs go to make room. */
@@ -80,7 +77,7 @@
   align-items: center;
   justify-content: center;
   gap: 12px;
-  min-height: calc(100dvh - var(--wip-h) - 300px);
+  min-height: 220px;
   padding: 32px 0;
   color: var(--muted);
   text-align: center;
@@ -123,9 +120,31 @@
   min-width: 0;
 }
 
+.map-card-wrap {
+  position: relative;
+}
+
+.map-card-delete {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 2;
+  min-width: 34px;
+  min-height: 34px;
+  padding: 0;
+  opacity: 0.9;
+}
+
+.map-card-delete:hover {
+  opacity: 1;
+}
+
 .map-card {
   display: flex;
   flex-direction: column;
+  align-items: stretch;
+  justify-content: flex-start;
+  gap: 0;
   width: 100%;
   min-height: 0;
   height: 100%;
@@ -156,21 +175,27 @@
   background: var(--surface-2);
 }
 
-.map-thumb canvas,
+.map-thumb canvas {
+  display: block;
+  width: 100%;
+  height: auto;
+  aspect-ratio: 16 / 10;
+}
+
 .detail-thumb canvas,
 .map-preview canvas {
   display: block;
   width: 100%;
   height: auto;
-  aspect-ratio: 16 / 10;
-  object-fit: contain;
+  aspect-ratio: var(--preview-aspect, 1.6);
 }
 
 .thumb-missing {
   display: flex;
   align-items: center;
   justify-content: center;
-  min-height: 6em;
+  width: 100%;
+  aspect-ratio: 16 / 10;
   color: var(--muted);
   font-size: var(--step-small);
 }
@@ -234,6 +259,7 @@ dialog.modal.map-dialog {
 
 .detail-thumb {
   display: block;
+  flex: none;
   width: 100%;
   background: var(--surface-2);
 }
@@ -360,6 +386,15 @@ dialog.modal.map-dialog {
 
 .map-owner > summary:hover {
   color: var(--accent);
+}
+
+.map-owner > summary .icon:last-child {
+  margin-left: auto;
+  transition: transform 160ms var(--ease);
+}
+
+.map-owner[open] > summary .icon:last-child {
+  transform: rotate(180deg);
 }
 
 .map-owner-body {

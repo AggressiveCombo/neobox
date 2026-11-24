@@ -29,8 +29,8 @@
   overflow-y: auto;
   display: flex;
   flex-direction: column;
-  gap: var(--gap);
-  padding: var(--margin) var(--margin) var(--gap);
+  gap: 16px;
+  padding: 16px var(--margin) 16px;
   min-width: 0;
 }
 
@@ -161,30 +161,29 @@
   display: grid;
   grid-template-areas: "roster match chat";
   grid-template-columns: minmax(0, 5fr) minmax(0, 4fr) minmax(0, 3fr);
-  gap: var(--gap);
+  gap: 14px;
   align-items: start;
 }
 
 .room-col {
   display: flex;
   flex-direction: column;
-  gap: var(--gap);
+  gap: 12px;
   min-width: 0;
 }
 
-/* Desktop: the columns fill the window under the header and scroll inside themselves (a fold that grows the roster, a
-   long match list), so the lobby never grows. The chat takes the row's height and its log scrolls inside it. */
+/* Desktop: the columns fill the window under the header and scroll only when content genuinely exceeds the height. */
 @media (min-width: 1100px) {
   .room-main {
     flex: 1 1 auto;
-    min-height: 480px;
+    min-height: 0;
     grid-template-rows: minmax(0, 1fr);
     align-items: stretch;
   }
 
   .room-col {
     overflow-y: auto;
-    scrollbar-gutter: stable;
+    scrollbar-width: thin;
   }
 }
 
@@ -204,7 +203,8 @@
 .room-panel {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 8px;
+  padding: 14px 16px;
   min-width: 0;
 }
 
@@ -348,7 +348,9 @@
 .room-player-stats {
   display: flex;
   align-items: center;
+  justify-content: flex-end;
   gap: 10px;
+  min-width: 108px;
   color: var(--muted);
   font-size: var(--step-small);
   white-space: nowrap;
@@ -358,6 +360,8 @@
 .room-ping {
   display: inline-flex;
   align-items: center;
+  justify-content: flex-end;
+  min-width: 5.5ch;
   gap: 4px;
   font-variant-numeric: tabular-nums;
 }
@@ -571,8 +575,11 @@ button.room-menu-item[aria-checked="true"] {
 }
 
 .room-map-preview {
-  width: 100%;
+  display: block;
+  width: min(100%, calc(clamp(120px, 21vh, 180px) * var(--preview-aspect, 1.6)));
   height: auto;
+  aspect-ratio: var(--preview-aspect, 1.6);
+  margin-inline: auto;
   background: var(--surface-2);
 }
 
@@ -597,6 +604,7 @@ button.room-menu-item[aria-checked="true"] {
   display: flex;
   flex-direction: column;
   align-items: stretch;
+  justify-content: flex-start;
   gap: 6px;
   padding: 6px;
   text-align: left;
@@ -606,6 +614,7 @@ button.room-menu-item[aria-checked="true"] {
   display: block;
   width: 100%;
   height: auto;
+  aspect-ratio: 16 / 10;
   background: var(--surface-2);
 }
 
