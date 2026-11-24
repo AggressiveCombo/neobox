@@ -362,14 +362,17 @@ function stored(f: Field, v: Value): Value {
   return Math.round(x * 1e6) / 1e6;
 }
 
-function fieldRow(f: Field, value: Value, apply: Apply): HTMLElement {
+function fieldRow(f: Field, value: Value, apply: Apply, mixed = false): HTMLElement {
+  const labelText = mixed ? `${f.label} (mixed)` : f.label;
   if (f.kind === "bool") {
-    return h(
-      "label",
-      { class: "check" },
-      h("input", { type: "checkbox", role: "switch", checked: value === true, onchange: (e: Event) => apply((e.target as HTMLInputElement).checked) }),
-      h("span", null, f.label),
-    );
+    const input = h("input", {
+      type: "checkbox",
+      role: "switch",
+      checked: !mixed && value === true,
+      onchange: (e: Event) => apply((e.target as HTMLInputElement).checked),
+    });
+    if (mixed) input.indeterminate = true;
+    return h("label", { class: "check" }, input, h("span", null, labelText));
   }
   if (f.kind === "select") {
     const sel = h(
@@ -381,10 +384,11 @@ function fieldRow(f: Field, value: Value, apply: Apply): HTMLElement {
           if (opt) apply(opt.value);
         },
       },
+      ...(mixed ? [h("option", { value: "__mixed__", disabled: true }, "Mixed…")] : []),
       ...(f.options ?? []).map((o) => h("option", { value: String(o.value) }, o.label)),
     );
-    sel.value = String(value);
-    return h("label", { class: "field" }, h("span", { class: "field-label" }, f.label), sel);
+    sel.value = mixed ? "__mixed__" : String(value);
+    return h("label", { class: "field" }, h("span", { class: "field-label" }, labelText), sel);
   }
   if (f.kind === "colour") {
     const input = h("input", {
@@ -392,26 +396,51 @@ function fieldRow(f: Field, value: Value, apply: Apply): HTMLElement {
       value: colorHex(Number(value)),
       onchange: (e: Event) => apply(hexColor((e.target as HTMLInputElement).value)),
     });
-    return h("label", { class: "field" }, h("span", { class: "field-label" }, f.label), input);
+    return h("label", { class: "field" }, h("span", { class: "field-label" }, labelText), input);
   }
   const input = h("input", {
     type: "number",
     step: f.step ?? "any",
     min: f.min,
     max: f.max,
-    value: String(Math.round(Number(value) * 1e6) / 1e6),
+    value: mixed ? "" : String(Math.round(Number(value) * 1e6) / 1e6),
+    placeholder: mixed ? "Mixed" : undefined,
     inputmode: "decimal",
     onchange: (e: Event) => {
       const el = e.target as HTMLInputElement;
       const n = Number(el.value);
       if (el.value.trim() === "" || !Number.isFinite(n)) {
-        el.value = String(value);
+        el.value = mixed ? "" : String(Math.round(Number(value) * 1e6) / 1e6);
         return;
       }
       apply(n);
     },
   });
-  return h("label", { class: "field" }, h("span", { class: "field-label" }, f.label), input);
+  return h("label", { class: "field" }, h("span", { class: "field-label" }, labelText), input);
+}
+
+/** Shared value across `items` for field `f`, plus whether the items disagree. */
+function readMultiField(items: readonly Obj[], f: Field, defaults: Obj): { value: Value; mixed: boolean } {
+  const first = readField(items[0] ?? {}, f, defaults);
+  for (let i = 1; i < items.length; i++) {
+    if (readField(items[i]!, f, defaults) !== first) return { value: first, mixed: true };
+  }
+  return { value: first, mixed: false };
+}
+
+/** Field rows under their headings for multiple selected entities of the same kind. */
+function multiFieldGroups(gs: readonly Group[], items: readonly Obj[], defaults: Obj, set: (f: Field, v: Value) => void): HTMLElement[] {
+  return gs.map(([title, fs]) =>
+    h(
+      "section",
+      { class: "inspector-group" },
+      h("h3", null, icon(GROUP_ICONS[title] ?? "pencil-ruler", 20), title),
+      ...fs.map((f) => {
+        const { value, mixed } = readMultiField(items, f, defaults);
+        return fieldRow(f, value, (v) => set(f, v), mixed);
+      }),
+    ),
+  );
 }
 
 const KIND_ICONS: Record<string, IconName> = {
@@ -479,19 +508,7 @@ export function renderInspector(o: InspectorOpts): HTMLElement {
   }
   if (sel.length === 0) return mapSettings(doc, o.commit);
   if (sel.length > 1) {
-    const bodies = sel.filter((r) => r.kind === "body").map((r) => r.i);
-    const merge =
-      bodies.length === sel.length && bodies.length > 1
-        ? [h("button", { type: "button", onclick: () => o.commit((d) => mergeBodies(d, bodies).doc) }, icon("combine", 18), "Merge bodies")]
-        : [];
-    return h(
-      "div",
-      { class: "inspector" },
-      h("h2", { class: "inspector-title" }, icon("pencil-ruler", 20), `${sel.length} selected`),
-      h("p", { class: "hint" }, "Drag to move. Arrow keys nudge."),
-      ...merge,
-      h("button", { type: "button", class: "danger", onclick: o.remove }, icon("trash-2", 18), "Delete"),
-    );
+    return multiInspector(doc, sel, o.commit, o.remove);
   }
   const ref = sel[0]!;
   const item = getList(doc, ref.kind)[ref.i];
@@ -544,6 +561,128 @@ function anchorName(id: number): string {
   return id < 0 ? "the ground" : `body ${id}`;
 }
 
+/** Bulk property editor when multiple top-level entities are selected. */
+function multiInspector(doc: Obj, sel: readonly Ref[], commit: Commit, remove: () => void): HTMLElement {
+  const byKind = new Map<Ref["kind"], Ref[]>();
+  for (const r of sel) {
+    const arr = byKind.get(r.kind);
+    if (arr) arr.push(r);
+    else byKind.set(r.kind, [r]);
+  }
+  const singleKind = byKind.size === 1 ? sel[0]!.kind : null;
+  const bodyRefs = byKind.get("body") ?? [];
+  const bodies = bodyRefs.map((r) => r.i);
+
+  const patchAll = (refs: readonly Ref[], patch: Obj): void =>
+    commit((d) => refs.reduce((acc, r) => patchEntity(acc, r, patch), d));
+  const setAllField = (refs: readonly Ref[]) => (f: Field, v: Value): void => patchAll(refs, { [f.key]: stored(f, v) });
+
+  const children: (Node | string | false | null | undefined)[] = [
+    h("h2", { class: "inspector-title" }, icon(singleKind ? (KIND_ICONS[singleKind] ?? "pencil-ruler") : "pencil-ruler", 20), `${sel.length} selected`),
+    h(
+      "p",
+      { class: "hint" },
+      singleKind
+        ? "Edits below apply to all selected items in one step."
+        : [...byKind.entries()].map(([k, rs]) => `${rs.length} ${kindLabel(k).toLowerCase()}${rs.length === 1 ? "" : "s"}`).join(", ") + ".",
+    ),
+  ];
+
+  // Colour picker + merge action whenever multiple bodies are selected (or bodies are part of a mixed selection).
+  if (bodies.length > 0) {
+    const bodyObjs = bodies.map((bi) => getList(doc, "body")[bi]).filter((b): b is Obj => b !== undefined);
+    const allColours: string[] = [];
+    for (const b of bodyObjs) {
+      for (const s of list(b, "s")) allColours.push(shapeColor(asObj(s)));
+    }
+    const firstHex = allColours[0] ?? "#ffffff";
+    const mixedCol = allColours.some((c) => c !== firstHex);
+    const colourInput = h("input", {
+      type: "color",
+      value: firstHex,
+      "aria-label": "Shape colour for all selected bodies",
+      onchange: (e: Event) => {
+        const hex = hexColor((e.target as HTMLInputElement).value);
+        commit((d) => {
+          let next = d;
+          for (const bi of bodies) {
+            const b = getList(next, "body")[bi];
+            if (!b) continue;
+            const nShapes = list(b, "s").length;
+            for (let si = 0; si < nShapes; si++) next = setShapeColor(next, bi, si, hex);
+          }
+          return next;
+        });
+      },
+    });
+    children.push(
+      h("label", { class: "field shape-row" }, h("span", { class: "field-label" }, mixedCol ? "Shape colour (mixed)" : "Shape colour"), colourInput),
+    );
+    if (singleKind === "body" && bodies.length > 1) {
+      children.push(h("button", { type: "button", onclick: () => commit((d) => mergeBodies(d, bodies).doc) }, icon("combine", 18), "Merge bodies"));
+    }
+    if (bodyObjs.length > 0) {
+      if (singleKind !== "body") {
+        children.push(h("p", { class: "hint" }, `Editing properties for ${bodyObjs.length} selected ${bodyObjs.length === 1 ? "body" : "bodies"}:`));
+      }
+      children.push(...multiFieldGroups(BODY_GROUPS, bodyObjs, BODY_DEFAULTS, setAllField(bodyRefs)));
+    }
+  } else if (singleKind === "joint") {
+    const items = sel.map((r) => getList(doc, "joint")[r.i]).filter((x): x is Obj => x !== undefined);
+    children.push(...multiFieldGroups(JOINT_GROUPS, items, JOINT_DEFAULTS, setAllField(sel)));
+  } else if (singleKind === "spawn") {
+    const items = sel.map((r) => getList(doc, "spawn")[r.i]).filter((x): x is Obj => x !== undefined);
+    const teams = items.map((item) => (flag(item, "6", false) ? 1 : flag(item, "7", false) ? 2 : 0));
+    const mixedTeam = teams.some((t) => t !== teams[0]);
+    children.push(
+      ...SPAWN_FIELDS.map((f) => {
+        const { value, mixed } = readMultiField(items, f, SPAWN_DEFAULTS);
+        return fieldRow(f, value, (v) => setAllField(sel)(f, v), mixed);
+      }),
+      fieldRow(
+        { key: "team", label: "Team", kind: "select", options: SPAWN_TEAMS },
+        teams[0] ?? 0,
+        (v) => {
+          const t = Number(v);
+          patchAll(sel, { "5": t === 0, "6": t === 1, "7": t === 2 });
+        },
+        mixedTeam,
+      ),
+    );
+  } else if (singleKind === "turret") {
+    const items = sel.map((r) => getList(doc, "turret")[r.i]).filter((x): x is Obj => x !== undefined);
+    children.push(...multiFieldGroups(TURRET_GROUPS, items, TURRET_DEFAULTS, setAllField(sel)));
+  } else if (singleKind === "grapple") {
+    const items = sel.map((r) => getList(doc, "grapple")[r.i]).filter((x): x is Obj => x !== undefined);
+    const attach: Field = {
+      key: "4",
+      label: "Attached to",
+      kind: "select",
+      options: [
+        { value: -1, label: "Nothing (static)" },
+        ...getList(doc, "body").map((b) => ({ value: num(b, "1", -1), label: `Body ${num(b, "1", -1)}` })),
+      ],
+    };
+    children.push(
+      ...[...GRAPPLE_FIELDS, attach].map((f) => {
+        const { value, mixed } = readMultiField(items, f, GRAPPLE_DEFAULTS);
+        return fieldRow(f, value, (v) => setAllField(sel)(f, v), mixed);
+      }),
+    );
+  } else if (singleKind === "cap") {
+    const items = sel.map((r) => getList(doc, "cap")[r.i]).filter((x): x is Obj => x !== undefined);
+    children.push(
+      ...CAP_FIELDS.map((f) => {
+        const { value, mixed } = readMultiField(items, f, CAP_DEFAULTS);
+        return fieldRow(f, value, (v) => setAllField(sel)(f, v), mixed);
+      }),
+    );
+  }
+
+  children.push(h("button", { type: "button", class: "danger", onclick: remove }, icon("trash-2", 18), "Delete"));
+  return h("div", { class: "inspector" }, ...children);
+}
+
 /** The inspector while editing inside a body: the selected shape's fields, or the body's shape list when none is selected. */
 function scopeInspector(doc: Obj, bi: number, body: Obj, shapes: readonly number[], commit: Commit, remove: () => void): HTMLElement {
   if (shapes.length === 0) {
@@ -557,11 +696,45 @@ function scopeInspector(doc: Obj, bi: number, body: Obj, shapes: readonly number
   }
   const del = h("button", { type: "button", class: "danger", onclick: remove }, icon("trash-2", 18), "Delete");
   if (shapes.length > 1) {
+    const allShapes = list(body, "s");
+    const picked = shapes.map((si) => asObj(allShapes[si] ?? {}));
+    const allCircles = picked.every(isCircle);
+    const allPolys = picked.every((s) => !isCircle(s));
+    const colours = picked.map(shapeColor);
+    const firstHex = colours[0] ?? "#ffffff";
+    const mixedCol = colours.some((c) => c !== firstHex);
+    const colour = h("input", {
+      type: "color",
+      value: firstHex,
+      "aria-label": "Colour for all selected shapes",
+      onchange: (e: Event) => {
+        const hex = hexColor((e.target as HTMLInputElement).value);
+        commit((d) => shapes.reduce((acc, si) => setShapeColor(acc, bi, si, hex), d));
+      },
+    });
+    const fs: Field[] = [
+      { key: "2", label: "Offset X", kind: "num", step: 0.5 },
+      { key: "3", label: "Offset Y", kind: "num", step: 0.5 },
+      ...(allCircles ? [{ key: "9", label: "Radius", kind: "num" as const, step: 0.5, min: 0 }] : []),
+      ...(allPolys ? [{ key: "8", label: "Closed", kind: "bool" as const }] : []),
+      { key: "14", label: "Scenery (no physics)", kind: "bool" },
+      { key: "15", label: "Z index", kind: "num", step: 1 },
+    ];
     return h(
       "div",
       { class: "inspector" },
-      h("h2", { class: "inspector-title" }, icon("pencil-ruler", 20), `${shapes.length} shapes selected`),
-      h("p", { class: "hint" }, "Drag to move. Arrow keys nudge."),
+      h("h2", { class: "inspector-title" }, icon("pentagon", 20), `${shapes.length} shapes selected`),
+      h("p", { class: "hint" }, "Edits below apply to all selected shapes in one step."),
+      h("label", { class: "field shape-row" }, h("span", { class: "field-label" }, mixedCol ? "Colour (mixed)" : "Colour"), colour),
+      ...fs.map((f) => {
+        const { value, mixed } = readMultiField(picked, f, SHAPE_DEFAULTS);
+        return fieldRow(
+          f,
+          value,
+          (v) => commit((d) => shapes.reduce((acc, si) => patchShape(acc, bi, si, { [f.key]: stored(f, v) }), d)),
+          mixed,
+        );
+      }),
       del,
     );
   }
