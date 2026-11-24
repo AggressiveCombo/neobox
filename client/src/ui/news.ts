@@ -20,6 +20,16 @@ interface NewsEntry {
  */
 const NEWS: NewsEntry[] = [
   {
+    date: "2026-11-24",
+    items: [
+      "In-game Jukebox: open Menu → Jukebox or use /play, /pause, /resume and /stop in chat to control music during a match, or click Play right on a chat song suggestion.",
+      "Map editor: selecting multiple objects or shapes now lets you bulk-edit their shared properties and colours at once instead of only merging.",
+      "Endless teams: maps without objectives now show Endless teams cleanly instead of displaying a misleading objective limit.",
+      "Lobby settings: scrolling or tweaking Settings while in a room lobby no longer closes the Settings screen when room updates arrive.",
+      "Updates: opening the site fresh after a new release no longer triggers a false \"new version\" banner when you are already on the latest build.",
+    ],
+  },
+  {
     date: "2026-11-23",
     items: [
       "Main menu: the replay showcase is larger on widescreen displays and cycles infinitely between replays with a smooth sliding transition.",
