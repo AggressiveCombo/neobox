@@ -106,6 +106,18 @@ export interface SegOption<T extends string> {
   disabled?: boolean;
 }
 
+/** Shared resize observer for all segmented controls; detached controls unobserve themselves so rebuilds never leak observers. */
+const segPlace = new WeakMap<Element, () => void>();
+const segSize = new ResizeObserver((entries) => {
+  for (const entry of entries) {
+    if (!entry.target.isConnected) {
+      segSize.unobserve(entry.target);
+      continue;
+    }
+    segPlace.get(entry.target)?.();
+  }
+});
+
 /**
  * One choice of a few, as a row of buttons (role="radiogroup"). Arrow keys move
  * the choice; a square indicator slides under the chosen option. Returns the
@@ -144,7 +156,8 @@ export function seg<T extends string>(
     place();
   };
   set(value);
-  new ResizeObserver(place).observe(el);
+  segPlace.set(el, place);
+  segSize.observe(el);
   buttons.forEach((b, i) => {
     b.addEventListener("click", () => {
       set(options[i].value);

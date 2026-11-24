@@ -44,7 +44,7 @@ import { signInPrompt } from "./account";
 const SEARCH_DELAY_MS = 300;
 const PREVIEW_DELAY_MS = 300;
 const ROOM_WAIT_MS = 15_000;
-const ROOM_MAX_PLAYERS = 8;
+const ROOM_MAX_PLAYERS = 32;
 const TICKS_PER_SECOND = 30;
 const SORTS: readonly (readonly [LibrarySort, string])[] = (["hot", "top", "new", "plays", "picks"] as const).map(
   (s) => [s, SORT_LABELS[s]] as const,

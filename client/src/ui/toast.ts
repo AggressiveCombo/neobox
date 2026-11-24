@@ -68,20 +68,25 @@ function dismiss(host: HTMLElement, el: HTMLElement): void {
   sync(host);
 }
 
-/** Publishes the bottom clearance while toasts show. Measured every frame for the few toast seconds so a bar that changes is followed. */
-function sync(host: HTMLElement): void {
-  cancelAnimationFrame(tracking);
-  tracking = 0;
-  const doc = host.ownerDocument;
-  if (host.childElementCount > 0) track(doc);
-  else doc.documentElement.style.removeProperty("--toast-clear");
+/** Publishes the bottom clearance while toasts show, re-measuring only when toasts change or the window resizes. */
+let resizeBound = false;
+
+function updateClearance(doc: Document): void {
+  const host = doc.querySelector<HTMLElement>(".toasts");
+  if (host && host.childElementCount > 0) {
+    doc.documentElement.style.setProperty("--toast-clear", `${clearance(doc)}px`);
+  } else {
+    doc.documentElement.style.removeProperty("--toast-clear");
+  }
 }
 
-let tracking = 0;
-
-function track(doc: Document): void {
-  doc.documentElement.style.setProperty("--toast-clear", `${clearance(doc)}px`);
-  tracking = requestAnimationFrame(() => track(doc));
+function sync(host: HTMLElement): void {
+  const doc = host.ownerDocument;
+  if (!resizeBound) {
+    resizeBound = true;
+    window.addEventListener("resize", () => updateClearance(doc));
+  }
+  updateClearance(doc);
 }
 
 /** Height from the bottom of the viewport to the top of the highest bottom-anchored bar or control. */

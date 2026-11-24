@@ -17,7 +17,7 @@ import { field, openModal, page, pageHead, toggle, uid } from "../kit";
 import { icon } from "../icons";
 
 const SVG_NS = "http://www.w3.org/2000/svg";
-const DEFAULT_MAX_PLAYERS = 8;
+const DEFAULT_MAX_PLAYERS = 32;
 /** Room codes: 6 characters from the server's alphabet (no I, O, 0 or 1). */
 const ROOM_CODE_RE = /^[A-HJ-NP-Z2-9]{6}$/;
 /** YouTube video ids: 11 characters from the URL-safe alphabet (anything else gets no thumbnail). */

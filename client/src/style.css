@@ -257,14 +257,13 @@ a:hover {
   z-index: 0;
 }
 
-/* The window outside the game view is the map's own background, extended: the arena gradient runs from --stage-top at the view's top edge to --stage-bottom at its bottom edge, and holds those colours beyond. */
+/* Neutral letterbox matte outside the game view (matches VOID_RGB #0a0a0a so maps with
+   opaque interior backgrounds never leak a mismatched sky gradient into the pillarboxes). */
 #stage-surround {
   position: fixed;
   inset: 0;
   z-index: 0; /* positioned, so it paints over the body's ground; #gl-host and the UI come later in the DOM */
-  --stage-top: #0a0a0a;
-  --stage-bottom: #0a0a0a;
-  background: linear-gradient(var(--stage-top) var(--view-y), var(--stage-bottom) calc(var(--view-y) + var(--view-h)));
+  background: #0a0a0a;
 }
 
 #gl-host canvas {
@@ -295,19 +294,9 @@ button,
   z-index: 2;
   display: flex;
   overflow-y: auto;
-  /* A scrollbar appearing on a longer page would shift the centred column; keep its room on every page. */
-  scrollbar-gutter: stable;
-  /* Focus scrolling keeps a control clear of the sticky page head (its measured height, kit.ts headSize; min 72px plus the safe-area inset). */
-  scroll-padding-top: var(--page-head-h, calc(72px + env(safe-area-inset-top)));
+  /* Focus scrolling keeps a control clear of the sticky page head (its measured height, kit.ts headSize; min 56px plus the safe-area inset). */
+  scroll-padding-top: var(--page-head-h, calc(56px + env(safe-area-inset-top)));
   pointer-events: none;
-}
-
-/* Engines without scrollbar-gutter (older Safari) would add the scrollbar's width only when a page scrolls, and the
-   centred column would move sideways. There the scrollbar is always shown, so its room is always reserved. */
-@supports not (scrollbar-gutter: stable) {
-  #ui {
-    overflow-y: scroll;
-  }
 }
 
 #ui > * {
@@ -322,10 +311,10 @@ button,
   /* #ui is a row flex box: a stretched page would take the viewport's height and its head and content would shrink into it. Size to the content; min-height still fills the viewport. */
   align-self: flex-start;
   background: var(--ground);
-  padding: 0 var(--margin) calc(48px + env(safe-area-inset-bottom));
+  padding: 0 var(--margin) calc(24px + env(safe-area-inset-bottom));
   display: flex;
   flex-direction: column;
-  gap: 32px;
+  gap: 20px;
 }
 
 .page-inner {
@@ -334,7 +323,17 @@ button,
   margin-inline: auto;
   display: flex;
   flex-direction: column;
-  gap: 32px;
+  gap: 20px;
+}
+
+/* Vertically centre compact hub/setup screens inside the viewport below their header; collapses to 0 when scrolling. */
+.page.quick > .page-inner,
+.page.practice-page > .page-inner,
+.page.offline-page > .page-inner,
+.page.account-page > .page-inner,
+.page.friends-page > .page-inner,
+.page.about > .page-inner {
+  margin-block: auto;
 }
 
 /* The page's top row: back, title, actions. */
@@ -345,7 +344,7 @@ button,
   display: flex;
   align-items: center;
   gap: 12px;
-  min-height: 72px;
+  min-height: 56px;
   padding-top: env(safe-area-inset-top);
   padding-inline: max(0px, calc((100% - var(--page-column)) / 2));
   background: var(--ground);
