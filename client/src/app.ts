@@ -1005,8 +1005,11 @@ export function start(): Store<AppState> {
         if (msg.room.quick !== null) quickVisited.add(msg.room.code.toUpperCase());
         matching = null;
         saveSeat();
-        // a match, or the host's map editor opened from the room, stays on screen
-        const keep = store.state.inMatch || (store.state.editorForRoom && store.state.screen === "editor");
+        // a match, Settings opened from the lobby, or the host's map editor opened from the room stays on screen
+        const keep =
+          store.state.inMatch ||
+          store.state.screen === "settings" ||
+          (store.state.editorForRoom && store.state.screen === "editor");
         store.set({
           room: msg.room,
           chat,
