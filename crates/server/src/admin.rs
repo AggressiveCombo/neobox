@@ -38,6 +38,8 @@ pub fn router() -> Router<Arc<Hub>> {
         .route("/admin/api/maps", get(all_maps))
         .route("/admin/api/maps/pending", get(pending_maps))
         .route("/admin/api/maps/{id}/code", get(map_code))
+        .route("/admin/api/maps/{id}/preview", get(map_preview))
+        .route("/admin/api/maps/{id}/inspect", get(map_inspect))
         .route("/admin/api/maps/{id}/approve", post(approve_map))
         .route("/admin/api/maps/{id}/reject", post(reject_map))
         .route("/admin/api/maps/{id}/delete", post(remove_map))
@@ -171,12 +173,64 @@ async fn state(State(hub): State<Arc<Hub>>, headers: HeaderMap) -> Response {
     let mut rooms: Vec<(String, crate::room::RoomSummary)> =
         hub.summaries().into_iter().map(|r| (hub.cfg.region.clone(), r)).collect();
     let mut conns = hub.conns.load(std::sync::atomic::Ordering::Relaxed);
-    for node in cluster::live_nodes(&hub) {
+    let live_nodes = cluster::live_nodes(&hub);
+    let nodes_json: Vec<serde_json::Value> = live_nodes
+        .iter()
+        .map(|n| {
+            serde_json::json!({
+                "region": n.region,
+                "url": n.url,
+                "connections": n.conns,
+                "rooms": n.rooms.len(),
+                "players": n.rooms.iter().map(|r| r.players.len()).sum::<usize>(),
+            })
+        })
+        .collect();
+    for node in live_nodes {
         conns += node.conns;
         let region = node.region;
         rooms.extend(node.rooms.into_iter().map(|r| (region.clone(), r)));
     }
     let players: usize = rooms.iter().map(|(_, r)| r.players.len()).sum();
+    let mut udp_players: usize = 0;
+    let mut ws_players: usize = 0;
+    let mut pings: Vec<u32> = Vec::with_capacity(players);
+    let mut in_match_rooms: usize = 0;
+    let mut max_step_us: f64 = 0.0;
+    let mut step_sum: f64 = 0.0;
+    let mut step_rooms: usize = 0;
+    let mut mode_counts: std::collections::BTreeMap<i32, (usize, usize)> = std::collections::BTreeMap::new();
+    for (_, r) in &rooms {
+        if r.in_match {
+            in_match_rooms += 1;
+            if r.step_avg_us > 0.0 {
+                step_sum += r.step_avg_us;
+                step_rooms += 1;
+            }
+            if r.step_max_us > max_step_us {
+                max_step_us = r.step_max_us;
+            }
+        }
+        let entry = mode_counts.entry(r.game_mode).or_insert((0, 0));
+        entry.0 += 1;
+        entry.1 += r.players.len();
+        for p in &r.players {
+            if p.transport == "udp" {
+                udp_players += 1;
+            } else {
+                ws_players += 1;
+            }
+            if p.ping_ms > 0 {
+                pings.push(p.ping_ms);
+            }
+        }
+    }
+    pings.sort_unstable();
+    let avg_ping_ms = if pings.is_empty() { 0.0 } else { pings.iter().map(|&x| x as f64).sum::<f64>() / pings.len() as f64 };
+    let p95_ping_ms = if pings.is_empty() { 0 } else { pings[((pings.len() - 1) * 95) / 100] };
+    let avg_step_us = if step_rooms == 0 { 0.0 } else { step_sum / step_rooms as f64 };
+    let counts = db(&hub, |s| s.admin_counts()).await.unwrap_or_default();
+
     let rooms_json: Vec<serde_json::Value> = rooms
         .iter()
         .map(|(region, r)| {
@@ -198,6 +252,19 @@ async fn state(State(hub): State<Arc<Hub>>, headers: HeaderMap) -> Response {
             "max_players": hub.cfg.max_players,
             "bytes_in_per_s": rooms.iter().map(|(_, r)| r.bytes_in_per_s).sum::<u64>(),
             "bytes_out_per_s": rooms.iter().map(|(_, r)| r.bytes_out_per_s).sum::<u64>(),
+        },
+        "insights": {
+            "udp_players": udp_players,
+            "ws_players": ws_players,
+            "avg_ping_ms": avg_ping_ms,
+            "p95_ping_ms": p95_ping_ms,
+            "in_match_rooms": in_match_rooms,
+            "lobby_rooms": rooms.len().saturating_sub(in_match_rooms),
+            "avg_step_us": avg_step_us,
+            "max_step_us": max_step_us,
+            "modes": mode_counts.into_iter().map(|(mode, (rc, pc))| serde_json::json!({ "mode": mode, "rooms": rc, "players": pc })).collect::<Vec<_>>(),
+            "counts": counts,
+            "nodes": nodes_json,
         },
         "rooms": rooms_json,
         "maps": hub.maps.iter().map(|m| &m.name).collect::<Vec<_>>(),
@@ -276,7 +343,15 @@ async fn room_view(State(hub): State<Arc<Hub>>, headers: HeaderMap, Path(code): 
         return StatusCode::NOT_FOUND.into_response();
     }
     match rx.await {
-        Ok(Some(bytes)) => ([(header::CONTENT_TYPE, "application/octet-stream"), (header::CACHE_CONTROL, "no-store")], Body::from(bytes)).into_response(),
+        Ok(Some((bytes, in_match))) => (
+            [
+                (header::CONTENT_TYPE, "application/octet-stream"),
+                (header::CACHE_CONTROL, "no-store"),
+                (header::HeaderName::from_static("x-neobox-mode"), if in_match { "match" } else { "lobby" }),
+            ],
+            Body::from(bytes),
+        )
+            .into_response(),
         _ => StatusCode::NO_CONTENT.into_response(),
     }
 }
@@ -333,6 +408,106 @@ async fn map_code(State(hub): State<Arc<Hub>>, headers: HeaderMap, Path(id): Pat
     }
     let d = db(&hub, move |s| s.get(id, None, true)).await?;
     Ok(Json(MapDetailJson::of(d, false)).into_response())
+}
+
+/// Rendered binary frame buffer preview of any map (works for pending, unlisted and private maps too).
+async fn map_preview(State(hub): State<Arc<Hub>>, headers: HeaderMap, Path(id): Path<i64>) -> Result<Response, Fail> {
+    if !authorized(&hub, &headers) {
+        return Ok(StatusCode::UNAUTHORIZED.into_response());
+    }
+    let d = db(&hub, move |s| s.get(id, None, true)).await?;
+    let map = neobox_sim::MapData::from_code(&d.code).map_err(|_| Error::Invalid("Could not decode map"))?;
+    let st = neobox_sim::State::from_map(&map);
+    let mut fb = neobox_wasm::frame::FrameBuilder::default();
+    let meta = neobox_wasm::frame::Meta { tick: 0, local: -1, ..Default::default() };
+    fb.build(&st, &st, 1.0, &neobox_sim::GameSettings::default(), meta, &neobox_wasm::frame::Feed::default());
+    let bytes: Vec<u8> = fb.words.iter().flat_map(|w| w.to_le_bytes()).collect();
+    Ok((
+        [
+            (header::CONTENT_TYPE, "application/octet-stream"),
+            (header::CACHE_CONTROL, "private, max-age=60"),
+        ],
+        Body::from(bytes),
+    )
+        .into_response())
+}
+
+/// Full map metadata + geometry/gameplay analysis for the admin Map Inspector (no code copying needed).
+async fn map_inspect(State(hub): State<Arc<Hub>>, headers: HeaderMap, Path(id): Path<i64>) -> Result<Response, Fail> {
+    if !authorized(&hub, &headers) {
+        return Ok(StatusCode::UNAUTHORIZED.into_response());
+    }
+    let d = db(&hub, move |s| s.get(id, None, true)).await?;
+    let code_size = d.code.len();
+    let analysis = match neobox_sim::MapData::from_code(&d.code) {
+        Ok(map) => {
+            let bodies = map.bodies.len();
+            let shapes: usize = map.bodies.iter().map(|(_, b)| b.def.shapes.len()).sum();
+            let death_bodies = map.bodies.iter().filter(|(_, b)| b.def.kill_players).count();
+            let objective_bodies = map.bodies.iter().filter(|(_, b)| b.def.objective != 0.0).count();
+            let checkpoints = map.bodies.iter().filter(|(_, b)| b.def.checkpoint > 0.0).count();
+            let dynamic_bodies = map.bodies.iter().filter(|(_, b)| b.def.motion == 2.0).count();
+            let scenery_bodies = map.bodies.iter().filter(|(_, b)| b.def.no_physics).count();
+            let spawns_ffa = map.spawns.iter().filter(|s| s.teams[1]).count();
+            let spawns_red = map.spawns.iter().filter(|s| s.teams[2]).count();
+            let spawns_blue = map.spawns.iter().filter(|s| s.teams[3]).count();
+            let spawn_points: Vec<serde_json::Value> = map
+                .spawns
+                .iter()
+                .map(|s| serde_json::json!({ "x": s.x, "y": s.y, "ffa": s.teams[1], "red": s.teams[2], "blue": s.teams[3] }))
+                .collect();
+            let mut warnings: Vec<&'static str> = Vec::new();
+            if map.spawns.is_empty() {
+                warnings.push("No spawn points — players spawn at default coordinates");
+            }
+            if spawns_ffa == 0 && (spawns_red > 0 || spawns_blue > 0) {
+                warnings.push("Team spawns only (no FFA spawns)");
+            }
+            if bodies == 0 {
+                warnings.push("Map has zero bodies");
+            }
+            if shapes > 400 {
+                warnings.push("High shape count (>400) — check performance on older devices");
+            }
+            if map.settings.width <= 0.0 || map.settings.height <= 0.0 {
+                warnings.push("Arena width/height is zero (unbounded editor map)");
+            }
+            serde_json::json!({
+                "ok": true,
+                "arena_w": map.settings.width,
+                "arena_h": map.settings.height,
+                "view_aspect": map.settings.view_aspect(),
+                "wide": map.settings.wide,
+                "gravity": map.settings.gravity,
+                "wrap": map.settings.wrap,
+                "bodies": bodies,
+                "shapes": shapes,
+                "joints": map.joints.len(),
+                "spawns": map.spawns.len(),
+                "spawns_ffa": spawns_ffa,
+                "spawns_red": spawns_red,
+                "spawns_blue": spawns_blue,
+                "turrets": map.turrets.len(),
+                "caps": map.caps.len(),
+                "grapples": map.grapples.len(),
+                "death_bodies": death_bodies,
+                "objective_bodies": objective_bodies,
+                "checkpoints": checkpoints,
+                "dynamic_bodies": dynamic_bodies,
+                "scenery_bodies": scenery_bodies,
+                "spawn_points": spawn_points,
+                "warnings": warnings,
+            })
+        }
+        Err(e) => serde_json::json!({ "ok": false, "error": e.to_string(), "warnings": ["Map failed to decode"] }),
+    };
+    let detail = MapDetailJson::of(d, false);
+    Ok(Json(serde_json::json!({
+        "detail": detail,
+        "code_size": code_size,
+        "analysis": analysis,
+    }))
+    .into_response())
 }
 
 async fn approve_map(State(hub): State<Arc<Hub>>, headers: HeaderMap, Path(id): Path<i64>) -> Result<Response, Fail> {

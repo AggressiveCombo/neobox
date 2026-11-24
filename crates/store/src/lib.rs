@@ -224,7 +224,30 @@ ALTER TABLE accounts ADD COLUMN deaths INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE accounts ADD COLUMN play_seconds INTEGER NOT NULL DEFAULT 0;
 "#];
 
+/// High-level database counts for the admin insights dashboard.
+#[derive(Debug, Clone, Default, serde::Serialize)]
+pub struct AdminCounts {
+    pub accounts: i64,
+    pub maps: i64,
+    pub pending_maps: i64,
+    pub clips: i64,
+    pub open_reports: i64,
+}
+
 impl Store {
+    /// Summary counts across accounts, maps, approvals, clips and reports.
+    pub fn admin_counts(&self) -> Result<AdminCounts> {
+        let db = self.db();
+        let count = |sql: &str| -> Result<i64> { Ok(db.query_row(sql, [], |r| r.get(0))?) };
+        Ok(AdminCounts {
+            accounts: count("SELECT COUNT(*) FROM accounts")?,
+            maps: count("SELECT COUNT(*) FROM maps")?,
+            pending_maps: count("SELECT COUNT(*) FROM maps WHERE visibility = 'public' AND status = 'pending'")?,
+            clips: count("SELECT COUNT(*) FROM clips")?,
+            open_reports: count("SELECT COUNT(*) FROM reports WHERE status = 'open'")?,
+        })
+    }
+
     /// Open (creating if needed) the database file and migrate it.
     pub fn open(path: &Path) -> Result<Store> {
         Self::from_connection(Connection::open(path)?)

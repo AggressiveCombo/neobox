@@ -7,10 +7,14 @@
 <link rel="icon" type="image/svg+xml" href="/logo.svg">
 <style>
 @font-face { font-family:"Hanken Grotesk"; src:url("/fonts/hanken-grotesk-latin.woff2") format("woff2"); font-display:swap; }
-:root { color-scheme: light; --bg:#f7f7f7; --panel:#ebebeb; --fg:#0a0a0a; --muted:#5c5c5c; --rule:rgba(10,10,10,.16); --accent:#006fe0; --bad:#b3261e; }
+:root {
+  color-scheme: light;
+  --bg:#f7f7f7; --panel:#ebebeb; --card:#ffffff; --fg:#0a0a0a; --muted:#5c5c5c;
+  --rule:rgba(10,10,10,.16); --accent:#006fe0; --good:#18794e; --warn:#9a6700; --bad:#b3261e;
+}
 * { box-sizing: border-box; border-radius:0; }
 body { margin:0; font:14px/1.4 "Hanken Grotesk", system-ui, sans-serif; background:var(--bg); color:var(--fg); overflow-x:hidden; }
-header { display:flex; flex-wrap:wrap; align-items:center; gap:8px 12px; padding:10px 16px; border-bottom:1px solid var(--fg); background:var(--bg); position:sticky; top:0; z-index:2; }
+header { display:flex; flex-wrap:wrap; align-items:center; gap:8px 12px; padding:10px 16px; border-bottom:1px solid var(--fg); background:var(--bg); position:sticky; top:0; z-index:4; }
 header .brand { display:flex; align-items:center; gap:8px; }
 header h1 { font-size:16px; margin:0; font-weight:700; white-space:nowrap; }
 header .stats { display:flex; gap:6px 14px; flex-wrap:wrap; color:var(--muted); font-variant-numeric:tabular-nums; font-size:13px; }
@@ -19,37 +23,121 @@ header .spacer { flex:1 1 auto; }
 header .broadcast { display:flex; align-items:center; gap:6px; flex:0 1 auto; min-width:0; }
 header .broadcast input { width:220px; min-width:0; flex:1 1 auto; }
 .admin-nav { display:none; gap:6px; overflow-x:auto; -webkit-overflow-scrolling:touch; padding:8px 10px; border-bottom:1px solid var(--rule); background:var(--bg); white-space:nowrap; }
-.admin-nav a { display:inline-flex; align-items:center; padding:6px 10px; background:var(--panel); color:var(--fg); text-decoration:none; font-size:13px; font-weight:500; }
-main { display:grid; grid-template-columns: minmax(320px, 1fr) minmax(360px, 1.3fr); gap:12px; padding:12px; max-width:100%; }
-@media (max-width: 900px) { main { grid-template-columns: minmax(0, 1fr); } }
-section { background:var(--panel); padding:12px; min-width:0; max-width:100%; scroll-margin-top:12px; }
-section h2 { margin:0 0 8px; font-size:16px; font-weight:500; color:var(--fg); }
+.admin-nav a { display:inline-flex; align-items:center; gap:5px; padding:6px 10px; background:var(--panel); color:var(--fg); text-decoration:none; font-size:13px; font-weight:500; }
+.admin-nav a .badge { display:inline-block; padding:0 5px; font-size:11px; font-weight:700; background:var(--fg); color:var(--bg); }
+.admin-nav a .badge.alert { background:var(--bad); color:#fff; }
+main { display:grid; grid-template-columns: minmax(340px, 1fr) minmax(380px, 1.3fr); gap:12px; padding:12px; max-width:100%; }
+@media (max-width: 960px) { main { grid-template-columns: minmax(0, 1fr); } }
+section { background:var(--panel); padding:12px; min-width:0; max-width:100%; scroll-margin-top:56px; }
+section h2 { margin:0 0 8px; font-size:16px; font-weight:600; color:var(--fg); display:flex; align-items:center; justify-content:space-between; gap:8px; flex-wrap:wrap; }
+section h2 .sub { font-size:12px; font-weight:500; color:var(--muted); }
 table { width:100%; border-collapse:collapse; font-variant-numeric:tabular-nums; }
-th, td { text-align:left; padding:6px; border-bottom:1px solid var(--rule); white-space:nowrap; }
+th, td { text-align:left; padding:6px; border-bottom:1px solid var(--rule); white-space:nowrap; vertical-align:middle; }
 th { color:var(--muted); font-weight:600; font-size:12px; border-bottom-color:var(--fg); }
 th.num, td.num { text-align:right; }
-tr.sel td { background:rgba(0,128,255,.18); }
+tr.sel td { background:rgba(0,111,224,.15); }
 tbody tr { cursor:default; }
 #rooms tbody tr { cursor:pointer; }
+#rooms tbody tr:hover td { background:rgba(0,111,224,.08); }
+#rooms tbody tr.sel:hover td { background:rgba(0,111,224,.18); }
 button, input, select, textarea { font:inherit; color:var(--fg); background:var(--bg); border:1px solid var(--rule); padding:6px 9px; max-width:100%; }
-button { background:#e0e0e0; border-color:#e0e0e0; font-weight:500; cursor:pointer; touch-action:manipulation; }
-button:hover { background:#d4d4d4; border-color:#d4d4d4; }
-/* The one main action of a form: log in, send to all rooms. */
-form button, #sayallbtn { background:var(--accent); border-color:var(--accent); color:#fff; }
-form button:hover, #sayallbtn:hover { background:#005fc4; border-color:#005fc4; }
+button { background:#e0e0e0; border-color:#d0d0d0; font-weight:500; cursor:pointer; touch-action:manipulation; }
+button:hover { background:#d4d4d4; border-color:#c4c4c4; }
+button:disabled { opacity:.45; cursor:default; }
+form button, #sayallbtn, button.primary { background:var(--accent); border-color:var(--accent); color:#fff; }
+form button:hover, #sayallbtn:hover, button.primary:hover { background:#005fc4; border-color:#005fc4; }
+button.good { background:var(--good); border-color:var(--good); color:#fff; }
+button.good:hover { background:#13623f; border-color:#13623f; }
 button.bad { background:var(--bad); border-color:var(--bad); color:#fff; }
 button.bad:hover { background:#8f1e17; border-color:#8f1e17; }
+td button + button, td button + select, td select + button { margin-left:4px; }
 .row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin:8px 0; min-width:0; }
 .row input[type="text"], .row input[type="password"], .row input:not([type]), .row select { min-width:0; }
 .muted { color:var(--muted); }
+.good-txt { color:var(--good); font-weight:600; }
+.warn-txt { color:var(--warn); font-weight:600; }
+.bad-txt { color:var(--bad); font-weight:600; }
 .wide { grid-column: 1 / -1; }
-canvas { width:100%; aspect-ratio: 16/10; background:var(--fg); display:block; }
+
+/* Insights KPI strip & sparklines */
+.kpi-grid { display:grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap:8px; }
+.kpi { background:var(--card); border:1px solid var(--rule); padding:10px 12px; display:flex; flex-direction:column; gap:3px; min-width:0; }
+.kpi.clickable { cursor:pointer; transition:border-color .12s; }
+.kpi.clickable:hover { border-color:var(--accent); }
+.kpi.alert { border-color:var(--bad); background:#fff7f6; }
+.kpi.warn { border-color:var(--warn); background:#fffaf0; }
+.kpi .k-lbl { font-size:11px; font-weight:600; text-transform:uppercase; letter-spacing:.04em; color:var(--muted); display:flex; justify-content:space-between; gap:6px; }
+.kpi .k-val { font-size:22px; font-weight:700; line-height:1.15; font-variant-numeric:tabular-nums; }
+.kpi .k-sub { font-size:12px; color:var(--muted); font-variant-numeric:tabular-nums; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.bar-track { height:5px; background:rgba(10,10,10,.1); margin-top:4px; overflow:hidden; }
+.bar-fill { height:100%; background:var(--good); transition:width .25s; }
+.bar-fill.warn { background:var(--warn); }
+.bar-fill.bad { background:var(--bad); }
+
+.charts-grid { display:grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap:8px; margin-top:8px; }
+@media (max-width: 820px) { .charts-grid { grid-template-columns: minmax(0, 1fr); } }
+.chart-card { background:var(--card); border:1px solid var(--rule); padding:8px 10px; min-width:0; }
+.chart-head { display:flex; justify-content:space-between; align-items:baseline; gap:8px; font-size:12px; margin-bottom:4px; }
+.chart-head b { font-size:12px; }
+.chart-head span { color:var(--muted); font-variant-numeric:tabular-nums; }
+canvas.spark { width:100%; height:64px; aspect-ratio:auto; background:transparent; display:block; }
+
+/* Live room/lobby canvas */
+canvas.live-canvas { width:100%; aspect-ratio: 16/10; background:#0b0d12; display:block; border:1px solid var(--rule); }
+.view-bar { display:flex; align-items:center; justify-content:space-between; gap:8px; flex-wrap:wrap; margin-top:6px; font-size:12px; }
+.view-controls { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+.view-controls label { display:inline-flex; align-items:center; gap:4px; font-size:12px; cursor:pointer; }
+.view-controls button { padding:3px 8px; font-size:12px; }
+
+/* Room chat */
+.chat-box { max-height:160px; overflow:auto; background:var(--bg); border:1px solid var(--rule); padding:6px 8px; font-size:12px; line-height:1.45; margin-top:8px; }
+.chat-line { margin:2px 0; overflow-wrap:anywhere; }
+.chat-line .t { color:var(--muted); font-variant-numeric:tabular-nums; margin-right:6px; font-size:11px; }
+.chat-line .n { font-weight:600; margin-right:4px; }
+
+/* Map thumbnails */
+canvas.map-thumb { width:112px; height:70px; aspect-ratio:16/10; background:#0b0d12; display:block; border:1px solid var(--rule); cursor:pointer; }
+canvas.map-thumb:hover { border-color:var(--accent); outline:1px solid var(--accent); }
+.map-name-cell { white-space:normal; min-width:130px; max-width:240px; }
+.map-name-cell .desc { display:block; font-size:12px; color:var(--muted); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:230px; }
+
+/* Pills & status */
+.pill { display:inline-flex; align-items:center; gap:4px; padding:1px 6px; font-size:11px; font-weight:600; background:var(--bg); border:1px solid var(--rule); white-space:nowrap; }
+.pill.live { background:#e6f4ec; border-color:#9dd6b5; color:var(--good); }
+.pill.lobby { background:#e8f1fc; border-color:#a6c8f2; color:var(--accent); }
+.pill.pending { background:#fff4db; border-color:#e5c068; color:var(--warn); }
+.pill.approved { background:#e6f4ec; border-color:#9dd6b5; color:var(--good); }
+.pill.rejected { background:#fce8e6; border-color:#e8a7a2; color:var(--bad); }
+.pill.pick { background:#0a0a0a; border-color:#0a0a0a; color:#fff; }
+.dot { width:6px; height:6px; display:inline-block; background:currentColor; }
+.t0 { color:var(--muted); } .t2 { color:var(--bad); } .t3 { color:#1d4fa3; }
+
+/* Logs */
 #logs { height:280px; overflow:auto; -webkit-overflow-scrolling:touch; font:12px/1.35 ui-monospace, monospace; background:var(--bg); border:1px solid var(--rule); padding:8px; white-space:pre-wrap; overflow-wrap:anywhere; }
 .WARN { color:#8a5a00; } .ERROR { color:var(--bad); } .DEBUG, .TRACE { color:var(--muted); }
 #login { max-width:360px; margin:12vh auto; padding:0 12px; }
 .scroll { overflow-x:auto; max-width:100%; -webkit-overflow-scrolling:touch; }
-.pill { display:inline-block; padding:0 6px; font-size:12px; background:var(--bg); border:1px solid var(--rule); }
-.t0 { color:var(--muted); } .t2 { color:var(--bad); } .t3 { color:#1d4fa3; }
+
+/* Map Inspector Dialog */
+dialog.inspector { width:min(980px, calc(100vw - 24px)); max-height:calc(100vh - 24px); padding:0; border:1px solid var(--fg); background:var(--bg); color:var(--fg); overflow:hidden; }
+dialog.inspector::backdrop { background:rgba(10,10,10,.58); }
+.ins-head { display:flex; align-items:center; justify-content:space-between; gap:10px; padding:10px 14px; border-bottom:1px solid var(--rule); background:var(--panel); }
+.ins-head h3 { margin:0; font-size:17px; display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+.ins-body { display:grid; grid-template-columns: minmax(0, 1.35fr) minmax(260px, 1fr); gap:14px; padding:14px; overflow:auto; max-height:calc(100vh - 84px); }
+@media (max-width: 800px) { .ins-body { grid-template-columns: minmax(0, 1fr); } }
+.ins-canvas-wrap { display:flex; flex-direction:column; gap:6px; min-width:0; }
+.ins-meta { display:flex; flex-direction:column; gap:10px; min-width:0; }
+.ins-warns { display:flex; flex-direction:column; gap:4px; }
+.warn-item { padding:6px 8px; font-size:12px; font-weight:500; background:#fff4db; border-left:3px solid var(--warn); color:#664400; }
+.warn-item.ok { background:#e6f4ec; border-left-color:var(--good); color:#135437; }
+.warn-item.err { background:#fce8e6; border-left-color:var(--bad); color:#7d1914; }
+.stat-grid { display:grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap:6px; }
+.stat-cell { background:var(--card); border:1px solid var(--rule); padding:6px 8px; }
+.stat-cell .l { font-size:11px; color:var(--muted); display:block; }
+.stat-cell .v { font-size:14px; font-weight:700; font-variant-numeric:tabular-nums; }
+.ins-desc { background:var(--card); border:1px solid var(--rule); padding:8px; font-size:13px; white-space:pre-wrap; overflow-wrap:anywhere; max-height:110px; overflow:auto; }
+.ins-actions { display:flex; flex-wrap:wrap; gap:6px; padding-top:4px; border-top:1px solid var(--rule); }
+
 @media (max-width: 720px) {
   header { position:static; padding:10px; gap:8px; }
   header .spacer { display:none; }
@@ -61,17 +149,19 @@ canvas { width:100%; aspect-ratio: 16/10; background:var(--fg); display:block; }
   .admin-nav { display:flex; }
   main { padding:8px; gap:8px; }
   section { padding:10px; }
-  button, input, select, textarea { min-height:40px; font-size:16px; }
-  td button, td select { min-height:34px; font-size:13px; padding:4px 8px; }
+  button, input, select, textarea { min-height:38px; font-size:15px; }
+  td button, td select { min-height:32px; font-size:13px; padding:4px 8px; }
   th, td { padding:6px 5px; font-size:13px; }
   #logs { height:220px; font-size:11px; }
+  canvas.map-thumb { width:84px; height:52px; }
+  .stat-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 </style>
 </head>
 <body>
 <div id="login" hidden>
   <section>
-    <h2 style="text-transform:none;font-size:16px;color:var(--fg);letter-spacing:0"><img src="/logo.svg" width="28" height="28" alt="" style="vertical-align:middle;margin-right:8px">neobox admin</h2>
+    <h2 style="font-size:16px;justify-content:flex-start"><img src="/logo.svg" width="28" height="28" alt="">neobox admin</h2>
     <form id="loginform" class="row">
       <input id="pw" type="password" placeholder="Admin password" autocomplete="current-password" required style="flex:1">
       <button>Log in</button>
@@ -79,6 +169,7 @@ canvas { width:100%; aspect-ratio: 16/10; background:var(--fg); display:block; }
     <div id="loginerr" class="muted"></div>
   </section>
 </div>
+
 <div id="app" hidden>
 <header>
   <div class="brand"><img src="/logo.svg" width="24" height="24" alt=""><h1>neobox admin</h1></div>
@@ -87,59 +178,89 @@ canvas { width:100%; aspect-ratio: 16/10; background:var(--fg); display:block; }
   <div class="broadcast"><input id="sayall" placeholder="Message to all rooms"><button id="sayallbtn">Send</button></div>
   <button id="logout">Log out</button>
 </header>
+
 <nav class="admin-nav" aria-label="Sections">
-  <a href="#sec-rooms">Rooms</a>
-  <a href="#sec-room">Room</a>
+  <a href="#sec-insights">Overview</a>
+  <a href="#sec-rooms">Rooms <span class="badge" id="nav-rooms" hidden>0</span></a>
   <a href="#sec-view">Live</a>
+  <a href="#sec-room">Room</a>
   <a href="#sec-players">Players</a>
-  <a href="#sec-maps">Approvals</a>
+  <a href="#sec-maps">Approvals <span class="badge alert" id="nav-maps" hidden>0</span></a>
   <a href="#sec-library">Library</a>
+  <a href="#sec-reports">Reports <span class="badge alert" id="nav-reports" hidden>0</span></a>
   <a href="#sec-clips">Clips</a>
-  <a href="#sec-reports">Reports</a>
   <a href="#sec-accounts">Accounts</a>
   <a href="#sec-logs">Logs</a>
 </nav>
+
 <main>
-  <section id="sec-rooms">
-    <h2>Rooms</h2>
-    <div class="scroll"><table id="rooms"><thead><tr><th>Code</th><th>Region</th><th>Name</th><th class="num">Players</th><th>State</th><th class="num">Tick</th><th class="num">Hz</th><th class="num">Step µs</th><th class="num">In/Out</th><th>Map</th></tr></thead><tbody></tbody></table></div>
-    <div id="norooms" class="muted">No rooms.</div>
+  <section id="sec-insights" class="wide">
+    <h2>Server insights <span class="sub" id="insights-sub">Live telemetry</span></h2>
+    <div class="kpi-grid" id="kpis"></div>
+    <div class="charts-grid">
+      <div class="chart-card">
+        <div class="chart-head"><b>Players &amp; rooms</b><span id="chart-pop-lbl">—</span></div>
+        <canvas class="spark" id="chart-pop"></canvas>
+      </div>
+      <div class="chart-card">
+        <div class="chart-head"><b>Bandwidth (in / out)</b><span id="chart-bw-lbl">—</span></div>
+        <canvas class="spark" id="chart-bw"></canvas>
+      </div>
+      <div class="chart-card">
+        <div class="chart-head"><b>Sim step time (µs)</b><span id="chart-step-lbl">—</span></div>
+        <canvas class="spark" id="chart-step"></canvas>
+      </div>
+    </div>
   </section>
+
+  <section id="sec-rooms">
+    <h2>Rooms <span class="sub" id="rooms-sub">Click a room to inspect</span></h2>
+    <div class="scroll"><table id="rooms"><thead><tr><th>Code</th><th>Region</th><th>Name</th><th>Mode</th><th class="num">Players</th><th>State</th><th class="num">Tick</th><th class="num">Step µs</th><th class="num">In/Out</th><th>Map</th></tr></thead><tbody></tbody></table></div>
+    <div id="norooms" class="muted">No active rooms.</div>
+  </section>
+
+  <section id="sec-view">
+    <h2>Live view <span class="pill" id="viewbadge">Idle</span></h2>
+    <canvas class="live-canvas" id="view" width="960" height="600"></canvas>
+    <div class="view-bar">
+      <span class="muted" id="viewinfo">Select a room to view its live match or lobby map.</span>
+      <div class="view-controls">
+        <label><input type="checkbox" id="viewnames" checked> Names</label>
+        <button id="viewpause">Pause</button>
+      </div>
+    </div>
+  </section>
+
   <section id="sec-room">
     <h2 id="roomtitle">Room</h2>
     <div id="roomdetail" class="muted">Select a room.</div>
   </section>
-  <section id="sec-view">
-    <h2>Live view</h2>
-    <canvas id="view" width="960" height="600"></canvas>
-    <div class="muted" id="viewinfo"></div>
-  </section>
+
   <section id="sec-players">
-    <h2>Players</h2>
+    <h2>Players <span class="sub" id="players-sub"></span></h2>
     <div class="scroll"><table id="players"><thead><tr><th>Id</th><th>Name</th><th>Team</th><th class="num">Ping</th><th class="num">Margin</th><th class="num">In/Out</th><th>Input</th><th>Online</th><th>IP</th><th></th></tr></thead><tbody></tbody></table></div>
   </section>
-  <section id="sec-maps">
-    <h2>Map approvals</h2>
-    <div class="scroll"><table id="maps"><thead><tr><th>Name</th><th>Author</th><th>Created</th><th class="num">Size</th><th></th></tr></thead><tbody></tbody></table></div>
+
+  <section id="sec-maps" class="wide">
+    <h2>Map approvals <span class="sub" id="maps-sub">Click any preview or Inspect to review without copying code</span></h2>
+    <div class="scroll"><table id="maps"><thead><tr><th>Preview</th><th>Map</th><th>Author</th><th>Created</th><th class="num">Size</th><th>Actions</th></tr></thead><tbody></tbody></table></div>
     <div id="nomaps" class="muted">No maps waiting for approval.</div>
     <div id="mapmsg" class="muted"></div>
     <textarea id="mapcode" readonly hidden style="width:100%;height:120px;font:12px ui-monospace, monospace;margin-top:8px"></textarea>
   </section>
-  <section id="sec-library">
-    <h2>Map library</h2>
-    <div class="row"><input id="libq" placeholder="Search name or author" style="flex:1"><button id="libprev">Prev</button><button id="libnext">Next</button></div>
-    <div class="scroll"><table id="library"><thead><tr><th>Name</th><th>Author</th><th>Status</th><th>Visibility</th><th>Picked</th><th>Created</th><th></th></tr></thead><tbody></tbody></table></div>
-    <div id="libinfo" class="muted"></div>
+
+  <section id="sec-library" class="wide">
+    <h2>Map library <span class="sub" id="libinfo"></span></h2>
+    <div class="row">
+      <input id="libq" placeholder="Search name or author" style="flex:1">
+      <button id="libprev">Prev</button>
+      <button id="libnext">Next</button>
+    </div>
+    <div class="scroll"><table id="library"><thead><tr><th>Preview</th><th>Map</th><th>Author</th><th>Status</th><th>Visibility</th><th>Picked</th><th>Created</th><th>Actions</th></tr></thead><tbody></tbody></table></div>
     <div id="libmsg" class="muted"></div>
     <textarea id="libcode" readonly hidden style="width:100%;height:120px;font:12px ui-monospace, monospace;margin-top:8px"></textarea>
   </section>
-  <section id="sec-clips">
-    <h2>Clips</h2>
-    <div class="scroll"><table id="clips"><thead><tr><th>Recorder</th><th>Map</th><th>Created</th><th class="num">Size</th><th></th></tr></thead><tbody></tbody></table></div>
-    <div id="noclips" class="muted" hidden>No clips.</div>
-    <div class="row"><button id="clipmore">More</button></div>
-    <div id="clipmsg" class="muted"></div>
-  </section>
+
   <section id="sec-reports">
     <h2>Reports</h2>
     <div class="row"><select id="repstatus"><option value="open">Open</option><option value="resolved">Resolved</option><option value="dismissed">Dismissed</option><option value="">All</option></select></div>
@@ -149,6 +270,15 @@ canvas { width:100%; aspect-ratio: 16/10; background:var(--fg); display:block; }
     <div id="repdetail" class="muted" style="white-space:pre-wrap"></div>
     <div id="repmsg" class="muted"></div>
   </section>
+
+  <section id="sec-clips">
+    <h2>Clips</h2>
+    <div class="scroll"><table id="clips"><thead><tr><th>Recorder</th><th>Map</th><th>Created</th><th class="num">Size</th><th></th></tr></thead><tbody></tbody></table></div>
+    <div id="noclips" class="muted" hidden>No clips.</div>
+    <div class="row"><button id="clipmore">More</button></div>
+    <div id="clipmsg" class="muted"></div>
+  </section>
+
   <section id="sec-accounts">
     <h2>Accounts</h2>
     <div class="row"><input id="accq" placeholder="Search name" style="flex:1"></div>
@@ -156,13 +286,51 @@ canvas { width:100%; aspect-ratio: 16/10; background:var(--fg); display:block; }
     <div id="noacc" class="muted" hidden>No accounts.</div>
     <div id="accmsg" class="muted"></div>
   </section>
+
   <section id="sec-logs" class="wide">
     <h2>Logs</h2>
-    <div class="row"><input id="logfilter" placeholder="Filter" style="flex:1"><label><input type="checkbox" id="logfollow" checked> follow</label></div>
+    <div class="row">
+      <select id="loglevel">
+        <option value="0">All levels</option>
+        <option value="1">INFO+</option>
+        <option value="2">WARN+</option>
+        <option value="3">ERROR only</option>
+      </select>
+      <input id="logfilter" placeholder="Filter text or target" style="flex:1">
+      <label><input type="checkbox" id="logfollow" checked> follow</label>
+      <button id="logclear">Clear</button>
+    </div>
     <div id="logs"></div>
   </section>
 </main>
 </div>
+
+<dialog id="mapmodal" class="inspector">
+  <div class="ins-head">
+    <h3 id="modaltitle">Map inspector</h3>
+    <button id="modalclose" aria-label="Close">Close</button>
+  </div>
+  <div class="ins-body">
+    <div class="ins-canvas-wrap">
+      <canvas class="live-canvas" id="modalcanvas" width="960" height="600"></canvas>
+      <div class="view-bar">
+        <span class="muted" id="modaldim">Loading preview…</span>
+        <div class="view-controls">
+          <label><input type="checkbox" id="modalspawns" checked> Show spawns</label>
+        </div>
+      </div>
+    </div>
+    <div class="ins-meta">
+      <div id="modalwarns" class="ins-warns"></div>
+      <div id="modalstats" class="stat-grid"></div>
+      <div id="modaldesc" class="ins-desc" hidden></div>
+      <div id="modalactions" class="ins-actions"></div>
+      <div id="modalmsg" class="muted"></div>
+      <textarea id="modalcode" readonly hidden style="width:100%;height:96px;font:12px ui-monospace, monospace"></textarea>
+    </div>
+  </div>
+</dialog>
+
 <script src="/admin/admin.js"></script>
 </body>
 </html>

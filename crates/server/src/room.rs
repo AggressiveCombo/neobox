@@ -66,7 +66,7 @@ pub enum RoomCmd {
     Msg { player: u32, msg: ClientMsg, out: mpsc::UnboundedSender<Out> },
     Frame { player: u32, frame: ClientFrame, out: mpsc::UnboundedSender<Out> },
     Admin(AdminCmd),
-    View { reply: oneshot::Sender<Option<Vec<u8>>> },
+    View { reply: oneshot::Sender<Option<(Vec<u8>, bool)>> },
     /// What a report keeps of the room; `player` is the one reported.
     Evidence { player: Option<u32>, reply: oneshot::Sender<Evidence> },
     /// The title of a suggested video arrived (fetched off the room task).
@@ -126,6 +126,9 @@ pub struct PlayerSummary {
     pub in_match: bool,
     /// Signed-in account id (`None` for guests).
     pub account: Option<i64>,
+    /// Player appearance colour (0xRRGGBB).
+    #[serde(default)]
+    pub color: u32,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Default)]
@@ -157,6 +160,9 @@ pub struct RoomSummary {
     pub jukebox: Option<JukeboxInfo>,
     /// Country of the host's address (ISO alpha-2), when geolocation knows it.
     pub host_country: Option<String>,
+    /// Recent room chat lines for admin inspection.
+    #[serde(default)]
+    pub recent_chat: Vec<ReportChat>,
 }
 
 /// A banned player: the name listed in the room and the keys that block
@@ -624,12 +630,21 @@ impl Room {
                 let _ = reply.send(self.evidence(player));
             }
             RoomCmd::View { reply } => {
-                let frame = self.game.as_ref().map(|g| {
+                let frame = if let Some(g) = self.game.as_ref() {
                     let mut fb = neobox_wasm::frame::FrameBuilder::default();
                     let meta = neobox_wasm::frame::Meta { tick: g.m.tick, local: -1, ..Default::default() };
                     fb.build(&g.m.state, &g.m.state, 1.0, &g.m.start.settings, meta, &neobox_wasm::frame::Feed::default());
-                    fb.words.iter().flat_map(|w| w.to_le_bytes()).collect()
-                });
+                    Some((fb.words.iter().flat_map(|w| w.to_le_bytes()).collect(), true))
+                } else {
+                    // In the lobby, render the selected map's arena so admins can inspect the room before the match starts.
+                    MapData::from_code(&self.map_code).ok().map(|map| {
+                        let st = neobox_sim::State::from_map(&map);
+                        let mut fb = neobox_wasm::frame::FrameBuilder::default();
+                        let meta = neobox_wasm::frame::Meta { tick: 0, local: -1, ..Default::default() };
+                        fb.build(&st, &st, 1.0, &self.settings, meta, &neobox_wasm::frame::Feed::default());
+                        (fb.words.iter().flat_map(|w| w.to_le_bytes()).collect(), false)
+                    })
+                };
                 let _ = reply.send(frame);
             }
             RoomCmd::XpGranted { player, award, result } => self.xp_granted(player, award, result),
@@ -1991,6 +2006,7 @@ impl Room {
         s.jukebox = self.jukebox.as_ref().map(|j| JukeboxInfo { video: j.video.clone(), title: j.title.clone() });
         s.bytes_in_per_s = self.players.iter().map(|p| p.rate.0).sum();
         s.bytes_out_per_s = self.players.iter().map(|p| p.rate.1).sum();
+        s.recent_chat = self.chat_log.iter().cloned().collect();
         match &mut self.game {
             Some(g) => {
                 s.tick = g.m.tick;
@@ -2046,6 +2062,7 @@ impl Room {
                 connected_s: p.live().map_or(0, |c| c.connected.elapsed().as_secs()),
                 in_match: p.in_match,
                 account: p.account.as_ref().map(|a| a.id),
+                color: p.color,
             })
             .collect();
         let host_country = self.host.and_then(|h| self.players.iter().find(|p| p.id == h)).and_then(|p| self.hub.geo.country(p.ip));
