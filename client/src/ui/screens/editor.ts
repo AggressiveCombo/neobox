@@ -4,7 +4,7 @@
 // Opened from a room (store.editorForRoom), it edits the room's map and can send
 // the result back to the room.
 
-import { errorText, listFavourites, listMine, updateMap, uploadMap, type LibraryMap, type Visibility } from "../../account";
+import { deleteMap, errorText, listFavourites, listMine, updateMap, uploadMap, type LibraryMap, type Visibility } from "../../account";
 import type { ScreenFactory } from "../../ctx";
 import { EditorController, lagVerdict, type Tool } from "../../editor/controller";
 import { downloadMap, mapText, parseMap, readMapFile } from "../../editor/io";
@@ -228,6 +228,19 @@ export const editorScreen: ScreenFactory = (ctx) => {
   const fileInput = h("input", { type: "file", accept: ".json,application/json", "aria-label": "Open map file" });
   fileInput.hidden = true;
   const menuClose = h("button", { type: "button", class: "quiet", onclick: () => toggleMenu(false) }, icon("x", 18), "Close");
+  const deleteMapBtn = h(
+    "button",
+    {
+      type: "button",
+      class: "danger",
+      hidden: true,
+      onclick: () => {
+        if (libraryMap) void deleteLibraryMap(libraryMap);
+      },
+    },
+    icon("trash-2"),
+    "Delete map",
+  );
   const menu = h(
     "div",
     { class: "editor-menu", id: menuId, role: "dialog", "aria-label": "Map menu" },
@@ -247,6 +260,7 @@ export const editorScreen: ScreenFactory = (ctx) => {
           h("button", { type: "button", onclick: () => { downloadMap(ctrl.doc); markSaved(); } }, icon("download"), "Download"),
           h("button", { type: "button", onclick: () => void copyCode() }, icon("copy"), "Copy map code"),
           h("button", { type: "button", onclick: () => void newMap() }, icon("file-plus"), "New map"),
+          deleteMapBtn,
         ),
         fileInput,
       ),
@@ -494,13 +508,57 @@ export const editorScreen: ScreenFactory = (ctx) => {
       .catch((err: unknown) => ctx.toast(errorText(err), "error"));
   }
 
+  async function deleteLibraryMap(m: LibraryMap): Promise<boolean> {
+    const ok = await confirmDialog({
+      title: `Delete "${m.name}"?`,
+      message: "This removes the map from your library and cannot be undone.",
+      action: "Delete map",
+    });
+    if (!ok) return false;
+    try {
+      await deleteMap(m.id);
+      if (libraryMap?.id === m.id) {
+        libraryMap = null;
+        deleteMapBtn.hidden = true;
+      }
+      ctx.toast("Map deleted.");
+      void showMine();
+      return true;
+    } catch (err) {
+      ctx.toast(errorText(err), "error");
+      return false;
+    }
+  }
+
   /** Buttons for a list of library maps, or a notice when the list is empty or failed. */
   function libraryButtons(result: PromiseSettledResult<LibraryMap[]>, empty: string, owned: boolean): Node[] {
     if (result.status === "rejected") return [h("p", { class: "editor-status error" }, errorText(result.reason))];
     if (result.value.length === 0) return [h("p", { class: "editor-status" }, empty)];
-    return result.value.map((m) =>
-      h("button", { type: "button", class: "editor-item list-row", onclick: () => openLibraryMap(m, owned) }, icon("map", 18), `${m.name} · ${VISIBILITY_LABELS[m.visibility]}`),
-    );
+    return result.value.map((m) => {
+      const openBtn = h(
+        "button",
+        { type: "button", class: "editor-item list-row", onclick: () => openLibraryMap(m, owned) },
+        icon("map", 18),
+        `${m.name} · ${VISIBILITY_LABELS[m.visibility]}`,
+      );
+      if (!owned) return openBtn;
+      return h(
+        "div",
+        { class: "editor-map-row" },
+        openBtn,
+        h(
+          "button",
+          {
+            type: "button",
+            class: "danger editor-map-del",
+            "aria-label": `Delete ${m.name}`,
+            title: "Delete map",
+            onclick: () => void deleteLibraryMap(m),
+          },
+          icon("trash-2", 16),
+        ),
+      );
+    });
   }
 
   async function showMine(): Promise<void> {
@@ -571,7 +629,13 @@ export const editorScreen: ScreenFactory = (ctx) => {
     if (current) {
       const asNew = h("button", { type: "button" }, icon("save", 18), "Save as new");
       asNew.addEventListener("click", () => save("new", asNew));
-      actions.push(asNew);
+      const del = h("button", { type: "button", class: "danger" }, icon("trash-2", 18), "Delete map");
+      del.addEventListener("click", () => {
+        void deleteLibraryMap(current).then((removed) => {
+          if (removed) done();
+        });
+      });
+      actions.push(asNew, del);
     }
     modal = openModal({
       title: "Save to library",
@@ -633,6 +697,7 @@ export const editorScreen: ScreenFactory = (ctx) => {
   }
 
   function refreshMenu(): void {
+    deleteMapBtn.hidden = libraryMap === null;
     refreshCode();
     void showBuiltins();
     void showMine();

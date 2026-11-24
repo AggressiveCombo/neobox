@@ -504,6 +504,24 @@
   text-align: left;
 }
 
+.editor-map-row {
+  display: flex;
+  align-items: stretch;
+  gap: 6px;
+}
+
+.editor-map-row .editor-item {
+  flex: 1 1 auto;
+  min-width: 0;
+  width: auto;
+}
+
+.editor-map-del {
+  flex: none;
+  min-width: var(--control);
+  padding: 0 10px;
+}
+
 .editor-status {
   margin: 0;
   color: var(--muted);

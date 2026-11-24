@@ -170,10 +170,17 @@ export function tabBar(current: LibraryTab, onSelect: (tab: LibraryTab) => void)
 }
 
 /**
- * A map as a card: the square preview, then name, author, votes and plays. A staff pick
+ * A map as a card: the preview, then name, author, votes and plays. A staff pick
  * gets a chip; `withState` adds the visibility and approval state (your own maps).
+ * When `onDelete` is given, a corner delete button sits beside the card button.
  */
-export function mapCard(ctx: AppCtx, map: LibraryMap, onOpen: () => void, withState = false): HTMLElement {
+export function mapCard(
+  ctx: AppCtx,
+  map: LibraryMap,
+  onOpen: () => void,
+  withState = false,
+  onDelete?: () => void,
+): HTMLElement {
   const lines: Child[] = [
     h("span", { class: "map-name" }, map.name),
     h("span", { class: "map-meta" }, `by ${map.author}`),
@@ -186,5 +193,24 @@ export function mapCard(ctx: AppCtx, map: LibraryMap, onOpen: () => void, withSt
   ];
   if (map.pick) lines.push(h("span", { class: "chip" }, icon("award", 14), "Staff pick"));
   if (withState) lines.push(h("span", { class: "map-state" }, mapState(map)));
-  return h("li", null, h("button", { type: "button", class: "map-card", onclick: onOpen }, previewThumb(ctx, map.id), h("span", { class: "map-body" }, lines)));
+  const del =
+    onDelete === undefined
+      ? null
+      : h(
+          "button",
+          {
+            type: "button",
+            class: "map-card-delete danger",
+            "aria-label": `Delete ${map.name}`,
+            title: "Delete map",
+            onclick: onDelete,
+          },
+          icon("trash-2", 16),
+        );
+  return h(
+    "li",
+    { class: del !== null ? "map-card-wrap" : undefined },
+    h("button", { type: "button", class: "map-card", onclick: onOpen }, previewThumb(ctx, map.id), h("span", { class: "map-body" }, lines)),
+    del,
+  );
 }

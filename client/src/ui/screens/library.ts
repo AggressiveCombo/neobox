@@ -272,7 +272,8 @@ export const libraryScreen: ScreenFactory = (ctx) => {
       const key = `${tab}|${JSON.stringify(m)}`;
       const cached = cards.get(m.id);
       if (cached?.key === key) return cached.el;
-      const el = mapCard(ctx, m, () => openDetail(m), tab === "mine");
+      const onDel = tab === "mine" ? () => void confirmAndDelete(m) : undefined;
+      const el = mapCard(ctx, m, () => openDetail(m), tab === "mine", onDel);
       cards.set(m.id, { key, el });
       return el;
     });
@@ -456,10 +457,30 @@ export const libraryScreen: ScreenFactory = (ctx) => {
           starred ? "Starred" : "Star",
         ),
         h("button", { type: "button", onclick: () => void copyCode(map) }, icon("copy", 18), "Copy code"),
+        ...(own ? [h("button", { type: "button", class: "danger", onclick: () => void confirmAndDelete(map) }, icon("trash-2", 18), "Delete map")] : []),
       ),
       h("div", { class: "map-play" }, roomAction(map)),
       ...(own ? [] : [h("button", { type: "button", class: "quiet map-report", onclick: () => openReport(map) }, icon("flag", 18), "Report map")]),
     );
+  }
+
+  async function confirmAndDelete(map: LibraryMap): Promise<void> {
+    const ok = await confirmDialog({
+      title: `Delete "${map.name}"?`,
+      message: "This cannot be undone.",
+      action: "Delete map",
+    });
+    if (!ok) return;
+    try {
+      await deleteMap(map.id);
+      maps = maps.filter((m) => m.id !== map.id);
+      cards.delete(map.id);
+      paintList();
+      if (detail?.id === map.id) detail.close();
+      ctx.toast("Map deleted.");
+    } catch (err) {
+      ctx.toast(errorText(err), "error");
+    }
   }
 
   /** Owner's controls, folded away: description, visibility, save and delete. */
@@ -481,10 +502,11 @@ export const libraryScreen: ScreenFactory = (ctx) => {
       {
         type: "button",
         onclick: async () => {
+          const cur = detail?.id === map.id ? detail.map : map;
           const patch: { description?: string; visibility?: Visibility } = {};
           const text = desc.value.trim();
-          if (text !== map.description) patch.description = text;
-          if (visibility !== map.visibility) patch.visibility = visibility;
+          if (text !== cur.description) patch.description = text;
+          if (visibility !== cur.visibility) patch.visibility = visibility;
           if (Object.keys(patch).length === 0) {
             ctx.toast("No changes to save.");
             return;
@@ -500,23 +522,7 @@ export const libraryScreen: ScreenFactory = (ctx) => {
       {
         type: "button",
         class: "danger",
-        onclick: async () => {
-          const ok = await confirmDialog({
-            title: `Delete "${map.name}"?`,
-            message: "This cannot be undone.",
-            action: "Delete map",
-          });
-          if (!ok) return;
-          try {
-            await deleteMap(map.id);
-            maps = maps.filter((m) => m.id !== map.id);
-            paintList();
-            detail?.close();
-            ctx.toast("Map deleted.");
-          } catch (err) {
-            ctx.toast(errorText(err), "error");
-          }
-        },
+        onclick: () => void confirmAndDelete(detail?.id === map.id ? detail.map : map),
       },
       icon("trash-2", 18),
       "Delete map",
@@ -524,7 +530,7 @@ export const libraryScreen: ScreenFactory = (ctx) => {
     return h(
       "details",
       { class: "map-owner" },
-      h("summary", null, icon("pencil", 18), "Edit your map"),
+      h("summary", null, icon("pencil", 18), "Edit your map", icon("chevron-down", 16)),
       h(
         "div",
         { class: "map-owner-body" },
