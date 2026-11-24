@@ -8,12 +8,14 @@ use neobox_sim::step::kind;
 use neobox_sim::GameSettings;
 use std::collections::HashMap;
 
-pub const LAYOUT_VERSION: u32 = 9;
-pub const HEADER_WORDS: usize = 43;
+pub const LAYOUT_VERSION: u32 = 10;
+pub const HEADER_WORDS: usize = 45;
 pub const PLAYER_WORDS: usize = 14;
 pub const SOUND_WORDS: usize = 5;
 pub const SCORE_WORDS: usize = 15;
 pub const BAR_WORDS: usize = 4;
+/// Turret records: x, y, range, health fraction, colour (TURRET_WORDS each).
+pub const TURRET_WORDS: usize = 5;
 /// Client-only sound cues (the sim emits kinds 1-4 and 6-19): push stamina ran out, game over.
 pub const SOUND_PUSH_CLICK: u32 = 5;
 pub const SOUND_FANFARE: u32 = 20;
@@ -21,13 +23,9 @@ pub const SOUND_FANFARE: u32 = 20;
 pub const DAMAGE_DYNAMIC_RGB: u32 = 0xd4cd47;
 pub const DAMAGE_REMOVAL_RGB: u32 = 0xc43543;
 
-/// Team colours (0xRRGGBB) of the parts that carry no player colour: projectiles, flags.
-pub const RED: u32 = 0xd44234;
-pub const BLUE: u32 = 0x347bd4;
-
 /// The colours player-owned parts are drawn in, as the client draws players (`playerColourWords` in
 /// client/src/render/geometry.ts): team colours, the FFA palette by player id, and the room's own colour
-/// per FFA player id.
+/// per FFA player id. Team parts without a player (projectiles, capture points, turrets) use the team colours.
 #[derive(Clone, Debug, PartialEq)]
 pub struct PlayerColours {
     red: u32,
@@ -64,13 +62,21 @@ impl PlayerColours {
         Some(Self { red: *red, blue: *blue, ffa: ffa.to_vec(), room: pairs.chunks_exact(2).map(|p| (p[0], p[1])).collect() })
     }
 
-    /// Colour of a player of `team` with id `id`: the same mapping as `playerRgb` in the client.
-    pub fn of(&self, id: f64, team: f64) -> u32 {
+    /// Team colour of `team` (red 2, blue 3), if it is a team.
+    pub fn team(&self, team: f64) -> Option<u32> {
         if team == 2.0 {
-            return self.red;
+            return Some(self.red);
         }
         if team == 3.0 {
-            return self.blue;
+            return Some(self.blue);
+        }
+        None
+    }
+
+    /// Colour of a player of `team` with id `id`: the same mapping as `playerRgb` in the client.
+    pub fn of(&self, id: f64, team: f64) -> u32 {
+        if let Some(rgb) = self.team(team) {
+            return rgb;
         }
         if team == 1.0 {
             if let Some(&(_, rgb)) = self.room.iter().find(|(rid, _)| f64::from(*rid) == id) {
@@ -88,6 +94,15 @@ fn rgba(rgb: u32, alpha: f32) -> u32 {
     let g = (rgb >> 8) & 0xff;
     let b = rgb & 0xff;
     r | (g << 8) | (b << 16) | (a << 24)
+}
+
+/// `rgb` multiplied channel by channel by `by` (a tint, as the original's Pixi tint): white keeps `rgb`.
+fn tint(rgb: u32, by: u32) -> u32 {
+    let ch = |shift: u32| {
+        let (a, b) = ((rgb >> shift) & 0xff, (by >> shift) & 0xff);
+        ((a * b + 127) / 255) << shift
+    };
+    ch(16) | ch(8) | ch(0)
 }
 
 /// Sound emitted this frame.
@@ -122,6 +137,8 @@ pub struct FrameBuilder {
     tmp: Vec<[f32; 2]>,
     /// Damage bars of the built frame: x, y, fraction, colour (BAR_WORDS each).
     bars: Vec<u32>,
+    /// Turret records of the built frame: x, y, range, health fraction, colour (TURRET_WORDS each).
+    turrets: Vec<u32>,
     /// Player colours the frames are drawn with (set by `nb_set_colours`).
     colours: PlayerColours,
     /// Recent positions of each projectile, oldest first: `(tick, x, y)`. Its trail is drawn from them.
@@ -726,7 +743,7 @@ impl FrameBuilder {
             self.push_tri_list(&nose, x, y, angle, rgba(PROJECTILE_RGB, 1.0));
             return;
         }
-        let color = rgba(if q.team == 2.0 { RED } else if q.team == 3.0 { BLUE } else { 0xf2f2f2 }, 1.0);
+        let color = rgba(match q.team { 2.0 => self.colours.red, 3.0 => self.colours.blue, _ => 0xf2f2f2 }, 1.0);
         let mut tris = Vec::new();
         if q.shape == 0.0 {
             circle_points(0.0, 0.0, u, &mut tris);
@@ -807,6 +824,7 @@ impl FrameBuilder {
         // camera frames. Moving bodies, projectiles, effects and aim lines are left out, so they never move a fixed view.
         let mut fixed = [f32::INFINITY, f32::INFINITY, f32::NEG_INFINITY, f32::NEG_INFINITY];
         self.bars.clear();
+        self.turrets.clear();
         // bodies, back to front by z-index (stable)
         let mut order: Vec<(f64, u32)> = cur.bodies.iter().map(|(k, b)| (b.def.z_index, k)).collect();
         order.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
@@ -833,11 +851,11 @@ impl FrameBuilder {
             let pts = [[-h - 0.5, 0.0], [-h, -0.5], [h, -0.5], [h + 0.5, 0.0]];
             let mut tris = Vec::new();
             triangulate(&pts.map(|p| [p[0] as f32, p[1] as f32]), &mut tris);
-            let owner = if c.owner == 2.0 { RED } else if c.owner == 3.0 { BLUE } else if c.owner >= 0.0 { 0xffd440 } else { 0x9a9a9a };
+            let owner = tint(0xbbbbbb, self.colours.team(c.owner).unwrap_or(0xffffff));
             self.push_tri_list(&tris, c.x, c.y, 0.0, rgba(owner, 0.9));
             if c.progress > 0.0 && c.capture_time > 0.0 {
                 let f = (c.progress / c.capture_time).clamp(0.0, 1.0);
-                let col = if c.capturer == 2.0 { RED } else if c.capturer == 3.0 { BLUE } else { 0xffffff };
+                let col = self.colours.team(c.capturer).unwrap_or(0xffffff);
                 self.quad_line(c.x - h, c.y - 0.9, c.x - h + 2.0 * h * f, c.y - 0.9, 0.18, rgba(col, 0.9));
             }
         }
@@ -851,11 +869,11 @@ impl FrameBuilder {
                 })
                 .collect();
             triangulate(&pts, &mut tris);
-            let col = if tu.team == 2.0 { RED } else if tu.team == 3.0 { BLUE } else { 0x777777 };
+            let col = self.colours.team(tu.team).unwrap_or(0xcccccc);
             self.push_tri_list(&tris, tu.x, tu.y, 0.0, rgba(col, 1.0));
             if tu.max_health > 0.0 {
                 let f = (tu.health / tu.max_health).clamp(0.0, 1.0);
-                self.quad_line(tu.x - 0.6, tu.y - 1.0, tu.x - 0.6 + 1.2 * f, tu.y - 1.0, 0.1, rgba(0x6be675, 0.9));
+                self.turrets.extend([(tu.x as f32).to_bits(), (tu.y as f32).to_bits(), (tu.range as f32).to_bits(), (f as f32).to_bits(), col]);
             }
         }
         // parachutes and ability indicators
@@ -1020,6 +1038,9 @@ impl FrameBuilder {
         w[36] = (feed.log_hits.len() / 4) as u32;
         w[37] = w.len() as u32;
         w.extend_from_slice(&feed.log_hits);
+        w[43] = (self.turrets.len() / TURRET_WORDS) as u32;
+        w[44] = w.len() as u32;
+        w.extend_from_slice(&self.turrets);
         let st = &cur.settings;
         w[9] = f(st.screen_width);
         w[10] = f(st.width);
@@ -1402,6 +1423,25 @@ mod tests {
         f.set_colours(PlayerColours::from_words(&[0x010101, 0x020202, 1, 0x030303, 0]).expect("valid colours"));
         assert_eq!(colour(&mut f, &debris(40.0, 1.0)), 0x030303);
         assert_eq!(colour(&mut f, &debris(40.0, 2.0)), 0x010101);
+    }
+
+    #[test]
+    fn capture_points_and_turrets_take_the_original_colours() {
+        use neobox_sim::map::{MapCap, MapTurret};
+        // neutral point 0xbbbbbb tinted by the owner's team colour (0xbbbbbb x 0xd44234 = 0x9b3026); progress bar in the
+        // capturer's team colour; neutral turret 0xcccccc
+        let mut s = State::default();
+        s.caps.push(MapCap { owner: -1.0, width: 4.0, ..MapCap::default() });
+        s.caps.push(MapCap { owner: 2.0, capturer: 3.0, progress: 60.0, capture_time: 120.0, width: 4.0, ..MapCap::default() });
+        s.turrets.insert(1, MapTurret { team: -1.0, ..MapTurret::default() });
+        let mut f = FrameBuilder::default();
+        f.build(&s, &s, 0.5, &GameSettings::default(), Meta::default(), &Feed::default());
+        let has = |rgb: u32| f.verts.chunks(3).any(|v| v[2] & 0xffffff == rgba(rgb, 1.0) & 0xffffff);
+        assert!(has(0xbbbbbb));
+        assert!(has(0x9b3026));
+        assert!(has(0x347bd4));
+        assert!(has(0xcccccc));
+        assert!(!has(0x777777) && !has(0x9a9a9a) && !has(0xffd440));
     }
 
     #[test]

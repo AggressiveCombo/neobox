@@ -1,6 +1,6 @@
 // Decodes the frame buffer header and records (docs/CLIENT-API.md "Frame buffer").
-// Layout: little-endian words; header words 0..37; world verts (3 words), players
-// (14 words), sounds (5 words), score rows (15 words), kill pairs (2 words), damage bars (4 words),
+// Layout: little-endian words; header words 0..44; world verts (3 words), players
+// (14 words), sounds (5 words), score rows (15 words), kill pairs (2 words), damage bars (4 words), turrets (5 words),
 // bat hits (3 words, predicted: hit visuals), bat hits (3 words, confirmed: event log).
 
 import type { FrameView } from "./engine";
@@ -88,6 +88,15 @@ export interface BarRec {
   colour: number;
 }
 
+/** A turret: centre (world units), range (world units), health fraction (0..1) and team colour (0xRRGGBB). */
+export interface TurretRec {
+  x: number;
+  y: number;
+  range: number;
+  fraction: number;
+  colour: number;
+}
+
 export interface SoundRec {
   kind: number;
   x: number;
@@ -135,6 +144,7 @@ export interface Scene {
   scores: ScoreRow[];
   kills: KillRec[];
   bars: BarRec[];
+  turrets: TurretRec[];
   hits: HitRec[];
   /** Bat hits of confirmed ticks: the event log. `hits` are the predicted hit visuals. */
   logHits: LogHitRec[];
@@ -238,6 +248,14 @@ export function readScene(fb: FrameView): Scene {
     logHits.push({ swinger: u32[o] ?? 0, kind: u32[o + 1] ?? 0, index: u32[o + 2] ?? 0, tick: u32[o + 3] ?? 0 });
   }
 
+  const turretCount = u32[43] ?? 0;
+  const turretOff = u32[44] ?? 0;
+  const turrets: TurretRec[] = [];
+  for (let i = 0; i < turretCount; i++) {
+    const o = turretOff + i * 5;
+    turrets.push({ x: f32[o] ?? 0, y: f32[o + 1] ?? 0, range: f32[o + 2] ?? 0, fraction: f32[o + 3] ?? 0, colour: u32[o + 4] ?? 0 });
+  }
+
   return {
     version: u32[0] ?? 0,
     viewWidth: f32[9] ?? 0,
@@ -274,6 +292,7 @@ export function readScene(fb: FrameView): Scene {
     scores,
     kills,
     bars,
+    turrets,
     hits,
     logHits,
     view: fb,

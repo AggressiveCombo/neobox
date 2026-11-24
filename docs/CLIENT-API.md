@@ -63,11 +63,11 @@ Little-endian. Word = 4 bytes. View it as both `Uint32Array` and
 `Float32Array` over `memory.buffer` at `nb_frame_ptr()` (re-create the views
 if `memory.buffer` changed).
 
-Header (words 0..41):
+Header (words 0..44):
 
 | Word | Type | Field |
 | --- | --- | --- |
-| 0 | u32 | layout version (8) |
+| 0 | u32 | layout version (10) |
 | 1 | u32 | world vertex count |
 | 2 | u32 | world vertex offset (words) |
 | 3 | u32 | player count |
@@ -106,6 +106,8 @@ Header (words 0..41):
 | 36 | u32 | confirmed bat hit count (event log) |
 | 37 | u32 | confirmed bat hit offset (words) |
 | 38-41 | f32 | static geometry extent: min x, min y, max x, max y of the static bodies' drawn triangles (world units; all infinite when there is none). Moving bodies, projectiles, effects and aim lines are not in it. The camera frames the arena (as the original); the backdrop covers the arena united with this extent, so static ground in view past the arena edge never sits on page colour. |
+| 43 | u32 | turret count |
+| 44 | u32 | turret offset (words) |
 
 World vertices: 3 words each `x f32, y f32, colour u32`; the colour's bytes
 in memory are R, G, B, A (i.e. `r | g << 8 | b << 16 | a << 24`, ready for a
@@ -151,6 +153,10 @@ ticks since the previous frame.
 Damage bars: 4 words each, `x f32, y f32, fraction f32, colour u32`
 (0xRRGGBB), one per body with a dynamic (field 21) or removal (field 22)
 damage threshold, at the body's interpolated position.
+
+Turrets: 5 words each, `x f32, y f32, range f32, fraction f32, colour u32`
+(0xRRGGBB), one per turret: centre and range in world units, health fraction
+0..1 and team colour.
 
 ## Camera
 

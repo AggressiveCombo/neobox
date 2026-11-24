@@ -47,6 +47,13 @@ const BAR_BORDER_W = 32;
 const BAR_BORDER_H = 6;
 const BAR_FILL_W = 30;
 const BAR_FILL_H = 4;
+/** Turret: range ring (1 CSS px, white at 10%) and health bar, its top edge TURRET_BAR_TOP CSS px above the centre. */
+const TURRET_RING = "rgba(255,255,255,0.1)";
+const TURRET_BAR_TOP = 30;
+const TURRET_BORDER_W = 42;
+const TURRET_BORDER_H = 7;
+const TURRET_FILL_W = 40;
+const TURRET_FILL_H = 5;
 /** Local kill line: top edge and height, CSS px (under the objective bar). */
 const PERSONAL_TOP = 42;
 const PERSONAL_H = 28;
@@ -212,6 +219,7 @@ export class Overlay {
     const cssH = this.canvas.height / dpr;
     if (chrome) this.recordEvents(scene);
     this.drawDamageBars(scene, cam, cssW, cssH);
+    this.drawTurrets(scene, cam, cssW, cssH);
     if (chrome) this.drawIntro(scene, tickHz, cssW, cssH);
     this.publishDraw(scene.tick, this.drawNames(scene, cam, names, cssW, cssH));
     if (chrome) this.drawHitFlashes(scene, cam, cssW, cssH);
@@ -491,6 +499,27 @@ export class Overlay {
       ctx.fillRect(x - BAR_BORDER_W / 2, y - BAR_BORDER_H / 2, BAR_BORDER_W, BAR_BORDER_H);
       ctx.fillStyle = this.colourCss(b.colour);
       ctx.fillRect(x - BAR_FILL_W / 2, y - BAR_FILL_H / 2, BAR_FILL_W * b.fraction, BAR_FILL_H);
+    }
+  }
+
+  /** Turret range rings and health bars (the original's turret sprite): the ring is `range` world units around the centre. */
+  private drawTurrets(scene: Scene, cam: Camera, cssW: number, cssH: number): void {
+    const ctx = this.ctx;
+    const [sx, sy, ox, oy] = worldXf(cam);
+    for (const t of scene.turrets) {
+      const x = ((t.x * sx + ox) + 1) * cssW / 2;
+      const y = (1 - (t.y * sy + oy)) * cssH / 2;
+      ctx.strokeStyle = TURRET_RING;
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.ellipse(x, y, t.range * sx * cssW / 2, t.range * sy * cssH / 2, 0, 0, 2 * Math.PI);
+      ctx.stroke();
+      const left = x - TURRET_BORDER_W / 2;
+      const top = y - TURRET_BAR_TOP;
+      ctx.fillStyle = "#000000";
+      ctx.fillRect(left, top, TURRET_BORDER_W, TURRET_BORDER_H);
+      ctx.fillStyle = this.colourCss(t.colour);
+      ctx.fillRect(left + 1, top + 1, TURRET_FILL_W * t.fraction, TURRET_FILL_H);
     }
   }
 

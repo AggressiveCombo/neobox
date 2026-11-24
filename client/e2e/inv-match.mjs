@@ -1080,6 +1080,34 @@ async function matchEditorTestPlayPending(s) {
   return "Test play is busy while the engine downloads; a failed download offers Try again, which starts the game";
 }
 
+/** round-card: a round a non-team player wins ends with the winner card naming them (no text banner); the match goes on. */
+async function matchWinnerCard(s) {
+  const hostName = uniqueName("wch");
+  const host = await s.open("wc-host", { name: hostName });
+  const roomName = uniqueName("wc");
+  const code = await createRoom(host, s.base, roomName, { isPublic: false });
+  const guestName = uniqueName("wcg");
+  const guest = await s.open("wcg", { name: guestName });
+  await joinByInvite(guest, s.base, code, roomName);
+  const { page } = host;
+  await page.locator("li.room-player").filter({ hasText: guestName }).waitFor();
+  // no ground: the players fall off the map, so one round ends with a winner while the match (objectiveLimit 3) goes on
+  await button(page, "Change map").click();
+  await page.getByLabel("Map code or JSON", { exact: true }).fill(SPECTATE_MAP);
+  await button(page, "Use code").click();
+  const chat = page.getByLabel("Chat message", { exact: true });
+  await chat.fill("/mode 1");
+  await chat.press("Enter");
+  await chat.fill("/set objectiveLimit 10");
+  await chat.press("Enter");
+  await page.locator("div.room-chat-log").getByText("objectiveLimit: 10").waitFor();
+  await startMatch(host, [guest]);
+  await page.waitForFunction(() => globalThis.__qaCard?.name, null, { timeout: 60_000 });
+  const card = await page.evaluate(() => globalThis.__qaCard);
+  check([hostName, guestName].includes(card.name), `card names "${card.name}", expected one of ${hostName}, ${guestName}`);
+  return `round-end card names "${card.name}" (colour ${card.colour}); the match goes on`;
+}
+
 /** postgame: a private room's signed-in host and guest see Game over with an XP line; Escape closes the host's; the room roster shows the level chip. */
 async function matchPostgame(s) {
   const user = await signedIn(s, "pg");
@@ -1149,4 +1177,5 @@ export const matchInvScenarios = [
   { name: "inv match editor panel and mode", inv: ["editor-inspector-close", "editor-testplay-mode"], run: matchEditorPanelAndMode },
   { name: "inv match editor test play pending", inv: ["editor-testplay-pending"], run: matchEditorTestPlayPending },
   { name: "inv match postgame", inv: ["postgame"], run: matchPostgame },
+  { name: "inv match round card", inv: ["round-winner-card"], run: matchWinnerCard },
 ];
