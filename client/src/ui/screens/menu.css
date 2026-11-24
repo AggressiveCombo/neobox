@@ -11,10 +11,12 @@
   position: relative;
   background: transparent;
   display: grid;
-  grid-template-columns: minmax(0, clamp(480px, 34vw, 720px)) minmax(0, 1fr);
-  grid-template-rows: auto minmax(0, 1fr) auto auto minmax(0, 1fr) auto;
-  column-gap: 40px;
-  row-gap: 28px;
+  grid-template-columns: minmax(0, clamp(340px, 28vw, 480px)) minmax(0, 1fr);
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  column-gap: 32px;
+  row-gap: clamp(10px, 1.6dvh, 18px);
+  padding-bottom: calc(10px + env(safe-area-inset-bottom));
+  height: 100%;
 }
 
 /* Top bar: account, news, music, fullscreen. Above the square, whose corner can reach it. */
@@ -25,7 +27,7 @@
   z-index: 2;
   display: flex;
   justify-content: flex-end;
-  padding-top: calc(16px + env(safe-area-inset-top));
+  padding-top: calc(4px + env(safe-area-inset-top));
 }
 
 .home-tools {
@@ -71,22 +73,23 @@ button.home-account {
   background: var(--accent-bright);
 }
 
-/* Left column: the wordmark and the name. */
+/* Left column: the wordmark and the name, aligned cleanly with the top of the replay showcase. */
 .home-copy {
   grid-column: 1;
-  grid-row: 3;
-  align-self: end;
+  grid-row: 2;
+  align-self: start;
+  padding-top: clamp(4px, 1.4dvh, 18px);
   display: flex;
   flex-direction: column;
-  gap: 28px;
+  gap: clamp(8px, 1.4dvh, 14px);
   min-width: 0;
 }
 
 .home-title {
   display: flex;
   align-items: center;
-  gap: 16px;
-  font-size: clamp(3.25rem, 1.4rem + 6vw, 7.5rem);
+  gap: 14px;
+  font-size: clamp(2.25rem, min(4.2vw, 7.2dvh), 4.75rem);
   font-weight: 500;
   letter-spacing: -0.045em;
   line-height: 0.9;
@@ -206,18 +209,19 @@ button.home-account {
   display: none;
 }
 
-/* Right column: the card, centred in the art square and as large as the height allows. The card takes the arena's shape
-   (menu.ts) and fills the square's longer side, so the panel is the square's size. The height keeps 16px to the viewport
-   bottom: side <= (100vh - var(--wip-h) - 104px) / 1.28 (the budget the old tilted card and its caption needed; the panel keeps it). */
+/* Right column: generous showcase stage for the live cycling replays. container-type: size lets the
+   card size to the exact remaining height/width without ever pushing the page into a scrollbar. */
 .menu-art {
   grid-column: 2;
-  grid-row: 2 / 6;
+  grid-row: 2 / 4;
   position: relative;
-  align-self: center;
-  justify-self: center;
-  width: min(78%, calc((100vh - var(--wip-h) - 104px) / 1.28));
-  aspect-ratio: 1;
+  align-self: stretch;
+  justify-self: stretch;
+  display: grid;
+  place-items: center;
   min-width: 0;
+  min-height: 0;
+  container-type: size;
 }
 
 .menu-art * {
@@ -225,18 +229,65 @@ button.home-account {
 }
 
 .menu-square {
-  position: absolute;
-  left: 50%;
-  top: 50%;
-  width: calc(var(--card-w, 1) * 100%);
-  height: calc(var(--card-h, 1) * 100%);
-  transform: translate(-50%, -50%);
+  position: relative;
+  width: min(96cqw, calc(96cqh * var(--card-aspect, 1.6)));
+  height: auto;
+  aspect-ratio: var(--card-aspect, 1.6);
   display: grid;
   place-items: center;
   overflow: hidden;
-  /* The panel's corners: the GL view is masked to the same radius (menu.ts CARD_CLIP). */
+  /* Outer shadow lives on .menu-clip-frame BEHIND #gl-host so it never bleeds over the replay's edges or corners. */
   border-radius: 18px;
-  box-shadow: 0 18px 48px -18px rgb(0 0 0 / 0.55);
+}
+
+/* Outer frame + drop shadow positioned strictly BEHIND #gl-host so no shadow ever paints over gameplay. */
+.menu-clip-frame {
+  position: fixed;
+  left: var(--view-x);
+  top: var(--view-y);
+  width: var(--view-w);
+  height: var(--view-h);
+  z-index: 0;
+  border-radius: 18px;
+  background: var(--brand-tile);
+  box-shadow: 0 22px 60px -16px rgb(0 0 0 / 0.52);
+  pointer-events: none;
+}
+
+/* Outgoing replay snapshot positioned directly underneath #gl-host during the overlapping slide transition. */
+.menu-clip-under {
+  position: fixed;
+  left: var(--view-x);
+  top: var(--view-y);
+  width: var(--view-w);
+  height: var(--view-h);
+  z-index: 0;
+  border-radius: 18px;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.menu-clip-outgoing {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  will-change: transform, filter;
+}
+
+/* Directional cast shadow swept across the outgoing replay by the incoming replay's leading edge. */
+.menu-clip-shadow {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 84px;
+  margin-left: -84px;
+  z-index: 2;
+  pointer-events: none;
+  background: linear-gradient(to left, rgb(0 0 0 / 0.72), rgb(0 0 0 / 0.34) 36%, rgb(0 0 0 / 0.08) 70%, transparent);
+  border-right: 1px solid rgb(255 255 255 / 0.16);
+  will-change: transform, opacity;
 }
 
 /* No clip can play (menu.ts: is-idle): the brand tile, the mark in the middle. */
@@ -258,12 +309,14 @@ button.home-account {
    the window and the front option are here; menu-drum.ts fades the rows the window edge cuts. */
 .home-index {
   grid-column: 1;
-  grid-row: 4;
-  align-self: start;
+  grid-row: 3;
+  align-self: stretch;
   display: flex;
   flex-direction: column;
+  justify-content: center;
   gap: 8px;
   min-width: 0;
+  min-height: 0;
 }
 
 /* A drum with no box: the page shows through, and a row the window edge cuts fades out there. */
@@ -272,7 +325,9 @@ button.home-account {
   --drum-opt-h: 2.25rem;
   position: relative;
   container-type: inline-size;
-  height: 320px;
+  flex: 1 1 auto;
+  min-height: 190px;
+  max-height: 440px;
   overflow: hidden;
   touch-action: none;
   user-select: none;
@@ -342,7 +397,7 @@ button.home-account {
 
 .drum-hint {
   margin: 0;
-  min-height: 1.4em;
+  min-height: 2.8em;
   color: var(--muted);
   font-size: var(--step-small);
   text-align: center;
@@ -417,10 +472,10 @@ button.home-account {
 /* Footer: one muted line, the makers above it. */
 .home-foot {
   grid-column: 1 / -1;
-  grid-row: 6;
+  grid-row: 4;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 4px;
   color: var(--muted);
   font-size: var(--step-small);
 }
@@ -438,15 +493,30 @@ button.home-privacy {
   color: var(--ink);
   font: inherit;
   text-decoration: underline;
+  text-decoration-thickness: 1px;
   text-underline-offset: 3px;
 }
 
 button.home-privacy {
-  /* Inline like its sibling links: the 48px touch target is padding, and the negative margin keeps it out of the line box so the text sits on the same baseline. */
-  padding: 14px 0;
-  margin-block: -14px;
+  /* Inline like its sibling links: vertical hit padding stays within .page.home's bottom padding so it never creates scrollable overflow. */
+  padding: 4px 0;
+  margin-block: -4px;
   min-width: 48px;
+  min-height: 0;
   background: none;
+}
+
+@media (pointer: coarse) {
+  button.home-privacy {
+    padding: 10px 0;
+    margin-block: -10px;
+  }
+}
+
+button.quiet.home-privacy:hover:not(:disabled),
+button.quiet.home-privacy:active:not(:disabled) {
+  background: transparent;
+  text-decoration-thickness: 2px;
 }
 
 /* Phone portrait: one column in flow. Wordmark, name, the drum, then the card under them in its own shape, fully on
@@ -455,6 +525,7 @@ button.home-privacy {
   .page.home {
     display: flex;
     flex-direction: column;
+    height: auto;
     gap: 24px;
     padding-bottom: calc(32px + env(safe-area-inset-bottom));
   }
@@ -498,19 +569,17 @@ button.home-privacy {
 
   .menu-art {
     order: 3;
-    width: min(88vw, 44vh);
+    width: 100%;
+    padding: 0;
     align-self: center;
-    aspect-ratio: auto;
+    container-type: normal;
   }
 
   /* The art box is the card's height: the card takes its own shape in flow, not a square with the card centred in it. */
   .menu-square {
-    position: relative;
-    left: auto;
-    top: auto;
-    transform: none;
+    width: min(92vw, calc(44dvh * var(--card-aspect, 1.6)));
     height: auto;
-    aspect-ratio: calc(var(--card-w, 1) / var(--card-h, 1));
+    aspect-ratio: var(--card-aspect, 1.6);
   }
 
   .home-foot {

@@ -63,7 +63,13 @@ function pads(): (Gamepad | null)[] {
 }
 
 /** `initial` is the option selected at mount (centred, with options above and below it when the list has them). */
-export function mountDrum(items: DrumItem[], label: string, initial = 0): Drum {
+export function mountDrum(
+  items: DrumItem[],
+  label: string,
+  initial = 0,
+  onStep?: () => void,
+  onOpen?: () => void,
+): Drum {
   const n = items.length;
   // `raw` is the travel the input has put the drum at: a wheel step adds to it, and only a discrete input (a key, a
   // click, a drag) or a settle changes it. `target` is where the drum eases to, `pos` where it is drawn now.
@@ -93,7 +99,9 @@ export function mountDrum(items: DrumItem[], label: string, initial = 0): Drum {
 
   /** Runs the front option, unless it is disabled. */
   function open(): void {
-    if (!blocked.has(front)) items[front].run();
+    if (blocked.has(front)) return;
+    onOpen?.();
+    items[front].run();
   }
 
   const opts: HTMLElement[] = items.map((item, i) =>
@@ -147,6 +155,7 @@ export function mountDrum(items: DrumItem[], label: string, initial = 0): Drum {
     if (f !== front) {
       front = f;
       announce();
+      onStep?.();
     }
     listbox.dataset.settled = "false";
     kick();

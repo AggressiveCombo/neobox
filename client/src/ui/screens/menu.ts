@@ -12,6 +12,7 @@ import { type Account, type AppState, type Screen } from "../../state";
 import { local } from "../../storage";
 import { NAME_STORAGE_KEY, TRAINING_SEEN_KEY } from "../../storage-keys";
 import { h } from "../dom";
+import { reducedMotion } from "../a11y";
 import { type IconName, icon } from "../icons";
 import { mountMenuClips } from "../menu-clips";
 import { hasUnreadNews, openNews } from "../news";
@@ -310,14 +311,28 @@ export const menuScreen: ScreenFactory = (ctx) => {
   }
 
   // The clip card: the GL view behind the UI shows only inside it while a clip plays. Its shape is the arena's inside its
-  // boundary walls (setCardAspect). It is untilted; the view's mask gives it the card's rounded corners (CARD_CLIP).
-  const square = h("div", { class: "menu-square", "aria-hidden": "true" }, h("span", { class: "mark" }));
+  // boundary walls (setCardAspect). When cycling between replays, the outgoing frame is snapshotted behind #gl-host while
+  // the incoming live replay slides over it with a soft cast shadow.
+  const shadowRibbon = h("div", { class: "menu-clip-shadow", hidden: true });
+  const square = h("div", { class: "menu-square", "aria-hidden": "true" }, h("span", { class: "mark" }), shadowRibbon);
   const art = h("div", { class: "menu-art" }, square);
 
-  /** The card takes the arena's shape, fitted in the art square: its longer side fills the square. */
+  const cardFrame = h("div", { class: "menu-clip-frame", "aria-hidden": "true", hidden: true });
+  const outgoingCanvas = h("canvas", { class: "menu-clip-outgoing" });
+  const outgoingHost = h("div", { class: "menu-clip-under", "aria-hidden": "true", hidden: true }, outgoingCanvas);
+  if (glHost?.parentElement) {
+    glHost.parentElement.insertBefore(cardFrame, glHost);
+    glHost.parentElement.insertBefore(outgoingHost, glHost);
+  }
+
+  const SLIDE_MS = 740;
+  let slideRaf = 0;
+  let hasOutgoingSnap = false;
+
+  /** The card takes the arena's shape (width / height); CSS fits it generously inside the right column. */
   function setCardAspect(aspect: number): void {
-    square.style.setProperty("--card-w", String(Math.min(1, aspect)));
-    square.style.setProperty("--card-h", String(Math.min(1, 1 / aspect)));
+    const safe = Number.isFinite(aspect) && aspect > 0.4 && aspect < 3.5 ? aspect : 1.6;
+    square.style.setProperty("--card-aspect", String(safe));
   }
 
   function setMask(clipPath: string): void {
@@ -325,15 +340,111 @@ export const menuScreen: ScreenFactory = (ctx) => {
     if (overlay) overlay.style.clipPath = clipPath;
   }
 
+  function setViewTransform(transform: string): void {
+    if (glHost) glHost.style.transform = transform;
+    if (overlay) overlay.style.transform = transform;
+  }
+
+  function stopSlide(): void {
+    if (slideRaf !== 0) {
+      cancelAnimationFrame(slideRaf);
+      slideRaf = 0;
+    }
+    hasOutgoingSnap = false;
+    outgoingHost.hidden = true;
+    outgoingCanvas.style.transform = "";
+    outgoingCanvas.style.filter = "";
+    shadowRibbon.hidden = true;
+    shadowRibbon.style.transform = "";
+    shadowRibbon.style.opacity = "";
+    setViewTransform("");
+  }
+
+  /** Capture the outgoing clip's final rendered frame right before loading the next clip. */
+  function captureOutgoingFrame(): void {
+    if (reducedMotion() || !glHost) return;
+    const srcGl = glHost.querySelector("canvas");
+    if (!srcGl || srcGl.width === 0 || srcGl.height === 0) return;
+    stopSlide();
+    outgoingCanvas.width = srcGl.width;
+    outgoingCanvas.height = srcGl.height;
+    const outCtx = outgoingCanvas.getContext("2d");
+    if (!outCtx) return;
+    outCtx.clearRect(0, 0, outgoingCanvas.width, outgoingCanvas.height);
+    outCtx.drawImage(srcGl, 0, 0, outgoingCanvas.width, outgoingCanvas.height);
+    if (overlay instanceof HTMLCanvasElement && overlay.width > 0 && overlay.height > 0) {
+      outCtx.drawImage(overlay, 0, 0, outgoingCanvas.width, outgoingCanvas.height);
+    }
+    outgoingCanvas.style.transform = "translate3d(0, 0, 0) scale(1)";
+    outgoingCanvas.style.filter = "brightness(1)";
+    outgoingHost.hidden = false;
+    hasOutgoingSnap = true;
+    // Hide the live surface until the incoming clip draws its first frame, leaving the outgoing snapshot seamless.
+    setMask("inset(0 0 0 100%)");
+  }
+
+  /** Pan the outgoing replay subtly left while sliding the live incoming replay over it with a cast shadow. */
+  function startSlideIn(): void {
+    if (!hasOutgoingSnap || reducedMotion()) {
+      stopSlide();
+      setMask(CARD_CLIP);
+      return;
+    }
+    const startAt = performance.now();
+    shadowRibbon.hidden = false;
+    const step = (now: number): void => {
+      const t = Math.min(1, Math.max(0, (now - startAt) / SLIDE_MS));
+      // Smooth quartic ease-out for a weighty, cinematic card glide.
+      const e = 1 - (1 - t) ** 4;
+      const w = square.clientWidth || 1;
+      const dx = (1 - e) * w;
+      const leftR = Math.max(0, Math.min(18, 18 - dx));
+
+      setViewTransform(`translate3d(${dx.toFixed(2)}px, 0, 0)`);
+      setMask(`inset(0 ${dx.toFixed(2)}px 0 0 round ${leftR.toFixed(1)}px 18px 18px ${leftR.toFixed(1)}px)`);
+
+      const panX = -0.22 * e * w;
+      const scale = 1 - 0.03 * e;
+      const dim = 1 - 0.42 * e;
+      outgoingCanvas.style.transform = `translate3d(${panX.toFixed(2)}px, 0, 0) scale(${scale.toFixed(4)})`;
+      outgoingCanvas.style.filter = `brightness(${dim.toFixed(3)})`;
+
+      shadowRibbon.style.transform = `translate3d(${dx.toFixed(2)}px, 0, 0)`;
+      shadowRibbon.style.opacity = String(Math.min(1, (1 - e) * 3.5));
+
+      if (t < 1) {
+        slideRaf = requestAnimationFrame(step);
+      } else {
+        slideRaf = 0;
+        stopSlide();
+        setMask(CARD_CLIP);
+      }
+    };
+    slideRaf = requestAnimationFrame(step);
+  }
+
   // Whole view masked until a clip draws: a frame left on the canvas (the clip that just ended, the match before) must not
   // flash over the window.
   setMask("inset(50%)");
-  const unmountClips = mountMenuClips(ctx, square, (state) => {
-    square.classList.toggle("is-live", state === "live");
-    square.classList.toggle("is-idle", state === "idle");
-    if (state === "idle") setCardAspect(1);
-    setMask(state === "live" ? CARD_CLIP : "inset(50%)");
-  }, setCardAspect);
+  const unmountClips = mountMenuClips(
+    ctx,
+    square,
+    (state) => {
+      square.classList.toggle("is-live", state === "live");
+      square.classList.toggle("is-idle", state === "idle");
+      cardFrame.hidden = state !== "live";
+      if (state === "idle") {
+        stopSlide();
+        setCardAspect(1.6);
+      }
+      if (!hasOutgoingSnap) setMask(state === "live" ? CARD_CLIP : "inset(50%)");
+    },
+    setCardAspect,
+    {
+      beforeSwitch: captureOutgoingFrame,
+      onReady: startSlideIn,
+    },
+  );
 
 
   const form = h(
@@ -390,7 +501,19 @@ export const menuScreen: ScreenFactory = (ctx) => {
       }),
     ),
   ];
-  const drum = mountDrum(items, "Destinations", items.findIndex((it) => it.id === "quick"));
+  const drum = mountDrum(
+    items,
+    "Destinations",
+    items.findIndex((it) => it.id === "quick"),
+    () => {
+      ctx.sfx.unlock();
+      ctx.sfx.ui("scroll");
+    },
+    () => {
+      ctx.sfx.unlock();
+      ctx.sfx.ui("click");
+    },
+  );
 
   sync();
   syncMute();
@@ -464,6 +587,9 @@ export const menuScreen: ScreenFactory = (ctx) => {
       unsubPrefs();
       document.removeEventListener("fullscreenchange", syncFullscreen);
       unmountClips();
+      stopSlide();
+      cardFrame.remove();
+      outgoingHost.remove();
       setMask("");
       drum.destroy();
       el.remove();
