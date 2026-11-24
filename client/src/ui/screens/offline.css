@@ -188,15 +188,15 @@
   z-index: 2;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 4px;
   margin: 0;
   width: 100%;
-  padding: calc(env(safe-area-inset-top, 0px) + 8px) calc(env(safe-area-inset-right, 0px) + var(--margin))
-    calc(env(safe-area-inset-bottom, 0px) + 8px) calc(env(safe-area-inset-left, 0px) + var(--margin));
+  padding: calc(env(safe-area-inset-top, 0px) + 2px) calc(env(safe-area-inset-right, 0px) + 6px)
+    calc(env(safe-area-inset-bottom, 0px) + 4px) calc(env(safe-area-inset-left, 0px) + 6px);
   pointer-events: none;
   overflow: hidden;
   color: var(--hud-ink);
-  font: 400 var(--step-small) / 1.35 var(--font);
+  font: 400 0.8125rem / 1.3 var(--font);
   -webkit-user-select: none;
   user-select: none;
 }
@@ -210,13 +210,13 @@
   display: contents;
 }
 
-/* The top row: Leave, the title, one action. Solid chips, 44px tall. */
+/* The top row: Leave, the title, one action. Slim compact strip on desktop; touch expands under pointer: coarse. */
 .offline-top {
   position: relative;
   z-index: 1;
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 4px;
   min-width: 0;
 }
 
@@ -224,9 +224,9 @@
 .offline-top select,
 .offline-dock button,
 .offline-dock select {
-  min-height: 44px;
-  padding: 0 14px;
-  background: var(--hud-solid);
+  min-height: 26px;
+  padding: 0 9px;
+  background: rgb(10 10 10 / 0.82);
   color: var(--hud-ink);
   border: 0;
   border-radius: 0;
@@ -243,7 +243,7 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 8px;
+  gap: 6px;
 }
 
 .offline-top button:hover,
@@ -279,11 +279,21 @@
   flex-direction: column;
   justify-content: center;
   overflow-wrap: anywhere;
-  min-height: 44px;
-  padding: 0 12px;
-  background: var(--hud-solid);
+  min-height: 26px;
+  padding: 0 8px;
+  background: rgb(10 10 10 / 0.82);
   /* Wraps rather than clips when text scale or zoom narrows the row. */
   font-weight: 500;
+}
+
+@media (pointer: coarse) {
+  .offline-top button,
+  .offline-top select,
+  .offline-title,
+  .offline-dock button,
+  .offline-dock select {
+    min-height: 44px;
+  }
 }
 
 .offline-top > button,

@@ -408,6 +408,9 @@ export function start(): Store<AppState> {
       };
     },
     reserveChrome: (bar) => overlay.reserve(bar),
+    setObjectiveInTopbar: (on) => {
+      overlay.showObjective = !on;
+    },
   };
 
   // A signed-in player joins under the account's name, so the invite waits for the account lookup.
@@ -477,7 +480,9 @@ export function start(): Store<AppState> {
     if (from !== null) playScreenTransition(uiRoot, leaving, handle.el, scrollTop);
     // The controls of a new screen (and the transition's motion) set the band the game view fits between.
     scheduleResize();
-    handle.el.addEventListener("animationend", scheduleResize);
+    handle.el.addEventListener("animationend", (e) => {
+      if (e.target === handle.el) scheduleResize();
+    });
     window.removeEventListener("keydown", escapeBack);
     window.addEventListener("keydown", escapeBack);
   }

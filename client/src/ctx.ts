@@ -64,6 +64,8 @@ export interface AppCtx {
   reserveTop(bar: HTMLElement): () => void;
   /** Keep the objective bar clear of `bar`, a HUD chip row in the view's top corners, until the returned function is called. */
   reserveChrome(bar: HTMLElement): () => void;
+  /** Hide the separate canvas objective bar while the HUD topbar renders objective info directly. */
+  setObjectiveInTopbar(on: boolean): void;
 }
 
 /** A mounted screen. The app calls `update` after every store change and `destroy` when leaving. */

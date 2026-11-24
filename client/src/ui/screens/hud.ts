@@ -10,8 +10,9 @@ import type { Scene } from "../../frame";
 import { BIT } from "../../input";
 import { filterProfanity } from "../../profanity";
 import { TOUCH_SLOTS, prefs, type TouchAction, type TouchSlot } from "../../prefs";
-import { MAX_CHAT_LEN, TEAM_SPECTATOR, type PlayerInfo, type XpAward } from "../../protocol";
+import { MAX_CHAT_LEN, TEAM_BLUE, TEAM_RED, TEAM_SPECTATOR, isTeamMode, type PlayerInfo, type XpAward } from "../../protocol";
 import { cssHex, mixRgb, playerRgb, setPlayerColors } from "../../render/geometry";
+import { objectiveLabel, objectiveProgress } from "../../render/overlay";
 import { CHAT_LIMIT, type AppState, type ChatLine, type Stats } from "../../state";
 import { chatPlaceholder } from "../chat-hint";
 import { h } from "../dom";
@@ -313,7 +314,7 @@ export const hudScreen: HudFactory = (ctx) => {
     h("button", { type: "button", "aria-label": "Next player", onclick: () => spectateStep(1) }, icon("chevron-right", 22)),
   );
 
-  // Stats overlay.
+  // Stats overlay with a compact FPS & RTT sparkline graph (same width, minimal height).
   const statsRows = {
     transport: statRow("Transport"),
     fps: statRow("FPS"),
@@ -323,11 +324,18 @@ export const hudScreen: HudFactory = (ctx) => {
     rollbackP95: statRow("Rollback p95"),
     desync: statRow("Snapshot"),
   };
-  const statsEl = h("div", { class: "hud-stats" }, ...Object.values(statsRows).map((r) => r.el));
+  statsRows.fps.el.classList.add("is-fps");
+  statsRows.rtt.el.classList.add("is-rtt");
+  const GRAPH_SAMPLES = 48;
+  const fpsHist: number[] = [];
+  const rttHist: number[] = [];
+  const statsGraph = h("canvas", { class: "hud-stats-graph", width: 190, height: 34, "aria-hidden": "true" });
+  const statsGraphCtx = statsGraph.getContext("2d");
+  const statsEl = h("div", { class: "hud-stats" }, ...Object.values(statsRows).map((r) => r.el), statsGraph);
   // Connection chip: transport and ping; only its colour changes when the ping is bad.
   const linkKind = h("span", { class: "hud-link-kind" });
-  const linkPing = h("span");
-  const linkEl = h("span", { class: "hud-link", title: "Connection" }, icon("wifi", 18), linkKind, linkPing);
+  const linkPing = h("span", { class: "hud-link-ping" });
+  const linkEl = h("span", { class: "hud-link", title: "Connection" }, icon("wifi", 16), linkKind, linkPing);
 
   // Scoreboard and kill/hit log (shared with the replay viewer).
   const board = createScoreboard();
@@ -458,11 +466,18 @@ export const hudScreen: HudFactory = (ctx) => {
   const unsubPrefs = prefs.subscribe(() => syncMenu());
   document.addEventListener("fullscreenchange", syncMenu);
 
-  const endBtn = h("button", { type: "button", class: "hud-end", hidden: true, onclick: endMatch }, icon("flag", 18), h("span", { class: "hud-chip-label" }, "End match"));
+  const endBtn = h("button", { type: "button", class: "hud-end", hidden: true, onclick: endMatch }, icon("flag", 16), h("span", { class: "hud-chip-label" }, "End match"));
   const barLeft = h("div", { class: "hud-bar hud-bar-left" }, menuBtn, linkEl, menuPanel);
+  const objectiveBody = h("div", { class: "hud-objective-body" });
+  const objectiveRule = h("div", { class: "hud-objective-rule" });
+  const objectiveEl = h("div", { class: "hud-objective" }, objectiveBody, objectiveRule);
   const barRight = h("div", { class: "hud-bar hud-bar-right" }, chatBtn, endBtn, leaveBtn);
-  // The event and chat column grows down from the chips: reserve it too, so the objective bar keeps clear.
-  const releaseChips = [ctx.reserveChrome(barLeft), ctx.reserveChrome(barRight), ctx.reserveChrome(topLeftEl)];
+  // Thin top bar above the playfield (.playfield-clear via reserveTop) combining Menu, ping,
+  // objective/lives readout, End match and Leave in one unified strip outside the arena.
+  const topBar = h("header", { class: "hud-topbar" }, barLeft, objectiveEl, barRight);
+  const releaseTop = ctx.reserveTop(topBar);
+  ctx.setObjectiveInTopbar(true);
+  let lastObjectiveKey = "";
   const rotate = rotateGate();
   const el = h(
     "main",
@@ -473,22 +488,120 @@ export const hudScreen: HudFactory = (ctx) => {
     topLeftEl,
     xpEl,
     countdownLive,
-    barLeft,
-    barRight,
+    topBar,
     connEl,
     matchingEl,
     spectateLabelEl,
     rotate.el,
   );
 
+  function drawStatsGraph(): void {
+    const g = statsGraphCtx;
+    if (!g) return;
+    const w = statsGraph.width;
+    const hPx = statsGraph.height;
+    g.clearRect(0, 0, w, hPx);
+    g.strokeStyle = "rgba(255,255,255,0.08)";
+    g.lineWidth = 1;
+    g.beginPath();
+    g.moveTo(0, hPx / 2);
+    g.lineTo(w, hPx / 2);
+    g.stroke();
+    const plot = (vals: number[], maxFloor: number, color: string): void => {
+      if (vals.length < 2) return;
+      let peak = maxFloor;
+      for (const v of vals) if (v > peak) peak = v;
+      g.strokeStyle = color;
+      g.lineWidth = 1.5;
+      g.beginPath();
+      const step = w / (GRAPH_SAMPLES - 1);
+      const offset = (GRAPH_SAMPLES - vals.length) * step;
+      for (let i = 0; i < vals.length; i++) {
+        const x = offset + i * step;
+        const y = hPx - 2 - (Math.max(0, vals[i]!) / peak) * (hPx - 4);
+        if (i === 0) g.moveTo(x, y);
+        else g.lineTo(x, y);
+      }
+      g.stroke();
+    };
+    plot(fpsHist, 60, "#4ade80");
+    const lastRtt = rttHist[rttHist.length - 1] ?? 0;
+    plot(rttHist, 100, lastRtt > BAD_PING_MS ? "#f87171" : "#60a5fa");
+  }
+
   function renderStats(s: Stats): void {
+    const fps = Math.max(0, Math.round(s.fps));
+    const rtt = s.rttMs < 0 ? 0 : Math.round(s.rttMs);
+    fpsHist.push(fps);
+    rttHist.push(rtt);
+    if (fpsHist.length > GRAPH_SAMPLES) fpsHist.shift();
+    if (rttHist.length > GRAPH_SAMPLES) rttHist.shift();
     statsRows.transport.value.textContent = s.transport === "udp" ? "WebRTC" : "WebSocket";
-    statsRows.fps.value.textContent = String(Math.round(s.fps));
-    statsRows.rtt.value.textContent = s.rttMs < 0 ? "-" : `${Math.round(s.rttMs)} ms`;
+    statsRows.fps.value.textContent = String(fps);
+    statsRows.rtt.value.textContent = s.rttMs < 0 ? "-" : `${rtt} ms`;
     statsRows.predDepth.value.textContent = `${s.predDepth} ticks`;
     statsRows.rollbacks.value.textContent = `${s.rollbacksPerSec.toFixed(1)}/s`;
     statsRows.rollbackP95.value.textContent = `${s.rollbackDepthP95} ticks`;
     statsRows.desync.value.textContent = s.netDesync;
+    drawStatsGraph();
+  }
+
+  function renderObjective(scene: Scene): void {
+    const round = scene.round > 0 ? Math.round(scene.round) : 0;
+    const progress = objectiveProgress(scene);
+    const pct = progress !== null ? Math.round(progress * 100) : -1;
+    if (scene.mode === 1) {
+      // Lives mode: show every player's colour swatch, name, and remaining lives right in the top bar (no hearts on nameplates).
+      const rows = scene.scores
+        .filter((r) => r.team !== TEAM_SPECTATOR)
+        .map((r) => ({
+          id: r.id,
+          team: r.team,
+          local: r.id === scene.localId,
+          name: roomNames.get(r.id) ?? `#${r.id}`,
+          lives: Math.max(0, Math.round(r.lives)),
+        }))
+        .sort((a, b) => Number(b.local) - Number(a.local) || b.lives - a.lives || a.id - b.id);
+      const key = `1|${round}|${pct}|${rows.map((r) => `${r.id}:${r.name}:${r.lives}:${r.team}`).join(",")}`;
+      if (key === lastObjectiveKey) return;
+      lastObjectiveKey = key;
+      const items: Node[] = rows.map((r) => {
+        const swatch = h("span", { class: "hud-life-swatch" });
+        swatch.style.background = cssHex(playerRgb(r.team, r.id));
+        const cls = r.lives === 0 ? "hud-life-item is-out" : r.local ? "hud-life-item is-local" : "hud-life-item";
+        return h("span", { class: cls }, swatch, h("span", { class: "hud-life-name" }, r.name), h("span", { class: "hud-life-num" }, String(r.lives)));
+      });
+      if (round > 0) items.push(h("span", { class: "hud-obj-round" }, `R${round}`));
+      objectiveBody.replaceChildren(...items);
+    } else if (isTeamMode(scene.mode)) {
+      const label = objectiveLabel(scene);
+      const red = Math.round(scene.red);
+      const blue = Math.round(scene.blue);
+      const key = `t|${scene.mode}|${round}|${pct}|${red}|${blue}|${label}`;
+      if (key === lastObjectiveKey) return;
+      lastObjectiveKey = key;
+      const nodes: Node[] = [
+        h("span", { class: "hud-obj-label" }, label),
+        h(
+          "span",
+          { class: "hud-obj-score" },
+          h("span", { class: "hud-obj-red" }, String(red)),
+          " - ",
+          h("span", { class: "hud-obj-blue" }, String(blue)),
+        ),
+      ];
+      if (round > 0) nodes.push(h("span", { class: "hud-obj-round" }, `R${round}`));
+      objectiveBody.replaceChildren(...nodes);
+    } else {
+      const label = objectiveLabel(scene);
+      const key = `o|${scene.mode}|${round}|${pct}|${label}`;
+      if (key === lastObjectiveKey) return;
+      lastObjectiveKey = key;
+      const nodes: Node[] = [h("span", { class: "hud-obj-label" }, label)];
+      if (round > 0) nodes.push(h("span", { class: "hud-obj-round" }, `R${round}`));
+      objectiveBody.replaceChildren(...nodes);
+    }
+    objectiveRule.style.transform = pct >= 0 ? `scaleX(${pct / 100})` : "scaleX(0)";
   }
 
   function renderLink(s: Stats): void {
@@ -518,8 +631,26 @@ export const hudScreen: HudFactory = (ctx) => {
       if (player !== undefined) name.style.color = cssHex(nameText(playerRgb(player.team, player.id)));
       el.append(name);
     }
-    el.append(text);
+    el.append(text === " " ? "\u00A0" : text);
     return el;
+  }
+
+  const CHAT_FADE_MS = 10_000;
+  let chatFadeTimer: number | undefined;
+  let chatIdle = false;
+
+  function scheduleChatFade(): void {
+    clearTimeout(chatFadeTimer);
+    chatIdle = false;
+    chatLog.classList.remove("is-idle");
+    if (chatOpen) return;
+    chatFadeTimer = window.setTimeout(() => {
+      chatFadeTimer = undefined;
+      if (!chatOpen) {
+        chatIdle = true;
+        chatLog.classList.add("is-idle");
+      }
+    }, CHAT_FADE_MS);
   }
 
   function renderChat(lines: readonly ChatLine[]): void {
@@ -532,6 +663,7 @@ export const hudScreen: HudFactory = (ctx) => {
         return el;
       }),
     );
+    if (recent.length > 0) scheduleChatFade();
   }
 
   /** Who is typing now (not us), from the server's typing signals. */
@@ -593,6 +725,9 @@ export const hudScreen: HudFactory = (ctx) => {
 
   function openChat(): void {
     chatOpen = true;
+    clearTimeout(chatFadeTimer);
+    chatIdle = false;
+    chatLog.classList.remove("is-idle");
     chatForm.hidden = false;
     chatBtn.setAttribute("aria-expanded", "true");
     chatInput.focus();
@@ -605,10 +740,13 @@ export const hudScreen: HudFactory = (ctx) => {
     chatInput.blur();
     chatForm.hidden = true;
     chatBtn.setAttribute("aria-expanded", "false");
+    if (!chatIdle && chatLog.childElementCount > 0) scheduleChatFade();
   }
 
   function sendChat(): void {
-    const text = Array.from(chatInput.value.trim()).slice(0, MAX_CHAT_LEN).join("").trim();
+    const raw = Array.from(chatInput.value).slice(0, MAX_CHAT_LEN).join("");
+    const trimmed = raw.trim();
+    const text = raw.length > 0 && trimmed === "" ? " " : trimmed;
     if (text === "/record") {
       // the clip is cut from this client's own recording; its outcome is a local line
       void recordClip(ctx).then((notice) => {
@@ -674,6 +812,9 @@ export const hudScreen: HudFactory = (ctx) => {
       }
       return;
     }
+    if (e.ctrlKey || e.metaKey || e.altKey || e.key === "Control" || e.key === "Meta" || e.key === "Alt" || e.key === "Shift") {
+      return;
+    }
     e.stopPropagation();
     if (e.key === "Enter") {
       e.preventDefault();
@@ -710,7 +851,7 @@ export const hudScreen: HudFactory = (ctx) => {
     if (!same("showScores")) scoresEl.hidden = !state.showScores;
     if (state.showScores && (!same("showScores") || !same("room"))) renderScores(state);
     if (!same("room") || !same("inMatch")) matchingEl.hidden = !aloneInQuickMatch(state);
-    if (!same("chat") || !same("room")) renderChat(state.chat);
+    if (!same("chat")) renderChat(state.chat);
     if (!same("chat")) {
       const last = state.chat[state.chat.length - 1];
       if (prev !== null && last !== undefined && last !== prev.chat[prev.chat.length - 1] && last.from !== null && last.from !== state.myId) {
@@ -741,6 +882,7 @@ export const hudScreen: HudFactory = (ctx) => {
     onFrame(scene) {
       latestScene = scene;
       board.record(scene, roomNames);
+      renderObjective(scene);
       updateSpectate(scene);
       touch.setLive(scene.intro < 0 && !spectating);
       // The start countdown is announced each second ("Match starting in 3 seconds", then 2, 1) and then "Go"; its digits are also drawn on the canvas.
@@ -762,12 +904,14 @@ export const hudScreen: HudFactory = (ctx) => {
       unsubPrefs();
       clearInterval(typingTimer);
       clearTimeout(xpTimer);
+      clearTimeout(chatFadeTimer);
       touch.destroy();
       rotate.destroy();
       chatInput.blur();
       latestScene = null;
       setPlayerColors(new Map());
-      for (const release of releaseChips) release();
+      ctx.setObjectiveInTopbar(false);
+      releaseTop();
       el.remove();
     },
   };

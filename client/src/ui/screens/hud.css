@@ -22,10 +22,10 @@
   --hud-safe-right: env(safe-area-inset-right, 0px);
   --hud-safe-bottom: env(safe-area-inset-bottom, 0px);
   --hud-safe-left: env(safe-area-inset-left, 0px);
-  --hud-inset: var(--margin);
-  /* Top edge of the chip row; the scoreboard, chat and stats hang below it. */
-  --hud-top: calc(var(--hud-safe-top) + var(--hud-inset));
-  --hud-row: 52px;
+  --hud-inset: 6px;
+  /* Slim top strip outside the playfield so Menu, ping, End match and Leave never obscure arena corners. */
+  --hud-top: var(--hud-safe-top);
+  --hud-row: 28px;
 }
 
 .hud-root {
@@ -100,28 +100,156 @@
   opacity: 0.5;
 }
 
-/* Top-left: Menu, connection. Top-right: Chat (touch), End match, Leave. */
-.hud-bar {
+/* Slim top strip sitting above the game canvas (.playfield-clear), keeping the entire arena unobstructed.
+   Three-column grid keeps the centre objective/lives readout dead-centre regardless of left/right button widths. */
+.hud-topbar {
   position: absolute;
   top: var(--hud-top);
+  left: 0;
+  right: 0;
+  height: var(--hud-row);
+  padding: 0 calc(var(--hud-safe-right) + var(--hud-inset)) 0 calc(var(--hud-safe-left) + var(--hud-inset));
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  background: rgb(10 10 10 / 0.9);
+  border-bottom: 1px solid rgb(255 255 255 / 0.08);
+  pointer-events: auto;
+}
+
+.hud-topbar button {
+  min-height: 22px;
+  padding: 0 8px;
+  gap: 5px;
+  font-size: 0.8125rem;
+  background: transparent;
+}
+
+.hud-topbar button:hover:not(:disabled):not([aria-expanded="true"]):not(.hud-on) {
+  background: rgb(255 255 255 / 0.08);
+}
+
+/* Top-left: Menu, connection. Top-right: Chat (touch), End match, Leave. */
+.hud-bar {
+  position: relative;
   display: flex;
   align-items: center;
-  gap: 6px;
-  max-width: calc(50% - var(--hud-inset));
+  gap: 4px;
+  min-width: 0;
   pointer-events: none;
 }
 
 .hud-bar-left {
-  left: calc(var(--hud-safe-left) + var(--hud-inset));
+  justify-self: start;
 }
 
 .hud-bar-right {
-  right: calc(var(--hud-safe-right) + var(--hud-inset));
+  justify-self: end;
   justify-content: flex-end;
 }
 
+/* Unified objective & lives strip centred inside the top bar (zero overlap with playfield). */
+.hud-objective {
+  position: relative;
+  justify-self: center;
+  min-width: 0;
+  max-width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  font-size: 0.8125rem;
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+}
+
+.hud-objective-body {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.hud-objective-rule {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 2px;
+  background: var(--accent-bright);
+  transform-origin: left center;
+  transform: scaleX(0);
+}
+
+.hud-obj-label {
+  font-weight: 500;
+  color: var(--hud-ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.hud-obj-round {
+  color: var(--hud-muted);
+  font-size: 0.75rem;
+  flex: none;
+}
+
+.hud-obj-score {
+  font-weight: 600;
+  flex: none;
+}
+
+.hud-obj-red {
+  color: var(--hud-red);
+}
+
+.hud-obj-blue {
+  color: var(--hud-blue);
+}
+
+.hud-life-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  padding: 1px 6px;
+  background: rgb(255 255 255 / 0.06);
+}
+
+.hud-life-item.is-local {
+  background: rgb(255 255 255 / 0.14);
+  font-weight: 600;
+}
+
+.hud-life-item.is-out {
+  opacity: 0.4;
+}
+
+.hud-life-swatch {
+  width: 7px;
+  height: 7px;
+  flex: none;
+}
+
+.hud-life-name {
+  max-width: 84px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.hud-life-num {
+  font-weight: 600;
+  color: var(--hud-ink);
+}
+
 .hud-menu-btn {
-  min-width: 96px;
+  min-width: 0;
 }
 
 .hud-root .hud-menu-btn[aria-expanded="true"] {
@@ -129,15 +257,17 @@
   color: var(--accent-ink);
 }
 
-/* Connection chip: transport and ping. Red only when the ping is bad. */
+/* Connection chip: fixed-width transport and ping so digit changes never shift sibling controls. */
 .hud-link {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
-  min-height: 40px;
-  padding: 0 12px;
-  background: var(--hud-solid);
+  gap: 5px;
+  min-width: 96px;
+  min-height: 22px;
+  padding: 0 6px;
+  background: transparent;
   color: var(--hud-ink);
+  font-size: 0.8125rem;
   font-variant-numeric: tabular-nums;
   font-weight: 500;
   white-space: nowrap;
@@ -145,8 +275,14 @@
 }
 
 .hud-link-kind {
+  min-width: 3ch;
   color: var(--hud-muted);
   font-size: 0.8125rem;
+}
+
+.hud-link-ping {
+  min-width: 5.5ch;
+  text-align: right;
 }
 
 .hud-link-bad {
@@ -155,10 +291,10 @@
 
 .hud-leave,
 .hud-end {
-  min-width: 96px;
+  min-width: 0;
 }
 
-.hud-end {
+.hud-topbar .hud-end {
   background: var(--danger);
   color: var(--danger-ink);
 }
@@ -315,16 +451,16 @@
   vertical-align: middle;
 }
 
-/* Stats (F3) and chat: one column under the chip row, top-left. */
+/* Stats (F3) and chat: compact column under the slim top bar, top-left. */
 .hud-topleft {
   position: absolute;
-  top: calc(var(--hud-top) + var(--hud-row));
+  top: calc(var(--hud-top) + var(--hud-row) + 6px);
   left: calc(var(--hud-safe-left) + var(--hud-inset));
   display: flex;
   flex-direction: column;
   align-items: flex-start;
-  gap: 6px;
-  width: min(340px, 40vw);
+  gap: 4px;
+  width: min(260px, 32vw);
   pointer-events: none;
 }
 
@@ -344,9 +480,9 @@
 .hud-stats {
   display: grid;
   gap: 2px;
-  min-width: 190px;
-  padding: 8px 12px;
-  background: var(--hud-solid);
+  width: 210px;
+  padding: 6px 10px;
+  background: rgb(10 10 10 / 0.65);
   font-variant-numeric: tabular-nums;
 }
 
@@ -360,22 +496,61 @@
   color: var(--hud-muted);
 }
 
+.hud-stat-row.is-fps .hud-stat-label::before,
+.hud-stat-row.is-rtt .hud-stat-label::before {
+  content: "";
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-right: 5px;
+  vertical-align: middle;
+}
+
+.hud-stat-row.is-fps .hud-stat-label::before {
+  background: #4ade80;
+}
+
+.hud-stat-row.is-rtt .hud-stat-label::before {
+  background: #60a5fa;
+}
+
+.hud-stats-graph {
+  display: block;
+  width: 100%;
+  height: 34px;
+  margin-top: 4px;
+  background: rgb(0 0 0 / 0.35);
+}
+
 .hud-chat-log {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
-  gap: 3px;
-  max-height: 30vh;
+  gap: 2px;
+  max-height: 24vh;
   overflow: hidden;
   justify-content: flex-end;
   max-width: 100%;
+  transition: opacity 400ms var(--ease);
+}
+
+.hud-chat-log.is-idle {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.hud-chat-log.is-idle .hud-chat-line {
+  pointer-events: none;
 }
 
 .hud-chat-line {
   max-width: 100%;
-  padding: 4px 8px;
-  background: var(--hud-solid);
+  padding: 2px 6px;
+  background: rgb(10 10 10 / 0.48);
   overflow-wrap: anywhere;
+  -webkit-user-select: text;
+  user-select: text;
+  pointer-events: auto;
 }
 
 .hud-chat-name {
@@ -786,9 +961,14 @@
 }
 
 @media (pointer: coarse) {
+  .hud-touch-layer,
+  .hud-root {
+    --hud-row: 48px;
+  }
+
   .hud-root button,
   .hud-link {
-    min-height: 48px;
+    min-height: 44px;
   }
 
   .hud-menu button,
@@ -869,18 +1049,18 @@
   .hud-root .hud-chat-btn,
   .hud-leave,
   .hud-end {
-    min-width: 48px;
-    padding: 0;
+    min-width: 34px;
+    padding: 0 6px;
     justify-content: center;
   }
 
   .hud-link {
     gap: 6px;
-    padding: 0 10px;
+    padding: 0 6px;
   }
 
   .hud-bar {
-    max-width: 200px;
+    max-width: none;
   }
 }
 

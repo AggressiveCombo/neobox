@@ -32,7 +32,7 @@ const CARD_DELAY_S = 0.5;
 const CARD_FADE_S = 0.3;
 const CARD_SLIDE_DELAY_S = 0.2;
 const CARD_SLIDE_S = 0.6;
-const BAR_FONT = "500 13px system-ui, sans-serif";
+const BAR_FONT = "500 11.5px system-ui, sans-serif";
 const PERSONAL_FONT = "700 15px system-ui, sans-serif";
 const FEED_FONT = "600 12px system-ui, sans-serif";
 const OUTLINE = "rgba(0, 0, 0, 0.7)";
@@ -55,28 +55,28 @@ const TURRET_BORDER_H = 7;
 const TURRET_FILL_W = 40;
 const TURRET_FILL_H = 5;
 /** Local kill line: top edge and height, CSS px (under the objective bar). */
-const PERSONAL_TOP = 42;
-const PERSONAL_H = 28;
-/** Kill feed, top right: top edge (below the Leave, Chat and End buttons), row height and gap. */
-const FEED_TOP = 150;
-const FEED_ROW_H = 20;
+const PERSONAL_TOP = 26;
+const PERSONAL_H = 22;
+/** Kill feed, top right: top edge, row height and gap. */
+const FEED_TOP = 30;
+const FEED_ROW_H = 18;
 const FEED_GAP = 2;
 /** Kill feed: lifetime in ms and the number of rows kept. */
 const FEED_MS = 4000;
 const FEED_MAX = 4;
 /** Bat hit flash (ring around the hit player): lifetime in ms. */
 const HIT_FLASH_MS = 160;
-/** Objective bar: height, and its width limits (CSS px). */
-const OBJECTIVE_H = 30;
-const OBJECTIVE_MIN_W = 160;
-const OBJECTIVE_MAX_W = 480;
-/** Objective bar: the HUD chip ink (--hud-solid), the progress rule in the accent blue (lifted for the ink ground) and its height. */
-const CHIP = "#0a0a0a";
+/** Objective bar: compact height, and its width limits (CSS px). */
+const OBJECTIVE_H = 20;
+const OBJECTIVE_MIN_W = 110;
+const OBJECTIVE_MAX_W = 320;
+/** Objective bar: translucent HUD chip ink, the progress rule in the accent blue (lifted for the ink ground) and its height. */
+const CHIP = "rgba(10, 10, 10, 0.52)";
 const PROGRESS = "#3d94ff";
-const RULE_H = 3;
+const RULE_H = 2;
 /** Objective bar: its row sits this far below the view's top edge; it keeps CHIP_GAP from reserved bars. */
-const BAR_ROW_INSET = 8;
-const CHIP_GAP = 8;
+const BAR_ROW_INSET = 2;
+const CHIP_GAP = 6;
 /** Edge indicators (off-screen opponents): inset of the arrow from the view edge, arrow length, chip height, padding and gap. */
 const AWAY_EDGE = 16;
 const AWAY_ARROW = 9;
@@ -155,6 +155,8 @@ export class Overlay {
   private cardFrom: number | null = null;
   /** CSS px at the top taken by a screen's own controls (AppCtx.reserveTop); the top bars go below. */
   topInset = 0;
+  /** False when the live HUD topbar renders the objective info directly instead of a separate canvas bar. */
+  showObjective = true;
   /** The game view's rect in window CSS px (the canvas covers it). */
   private view: ViewRect = { x: 0, y: 0, w: 0, h: 0 };
   /** Reserved DOM bars (see reserve) and their window rects. */
@@ -229,7 +231,7 @@ export class Overlay {
     this.drawBanner(scene, names, cssW, cssH);
     this.drawPersonal(scene, names, cssW);
     this.drawFeed(names, cssW);
-    this.drawObjectiveBar(scene, cssW);
+    if (this.showObjective) this.drawObjectiveBar(scene, cssW);
   }
 
   /**
@@ -423,7 +425,6 @@ export class Overlay {
     ctx.textBaseline = "middle";
     ctx.font = NAME_FONT;
     const chips: AwayChip[] = [];
-    const rect = this.canvas.getBoundingClientRect();
     for (const id of cam.away) {
       const p = scene.players.find((q) => q.id === id);
       if (!p) continue;
@@ -470,7 +471,7 @@ export class Overlay {
       ctx.fillRect(left + AWAY_CHIP_PAD, chipY - AWAY_SWATCH / 2, AWAY_SWATCH, AWAY_SWATCH);
       ctx.fillStyle = TEXT;
       ctx.fillText(name, left + AWAY_CHIP_PAD + AWAY_SWATCH + AWAY_CHIP_GAP + textW / 2, chipY + 0.5);
-      chips.push({ id, x: rect.left + left, y: rect.top + chipY - height / 2, w: width, h: height });
+      chips.push({ id, x: this.view.x + left, y: this.view.y + chipY - height / 2, w: width, h: height });
     }
     return chips;
   }
@@ -691,7 +692,7 @@ export class Overlay {
    * that row left between the reserved DOM bars (HUD chips, a screen's top strip), centred in it. When no
    * run is wide enough it goes under those bars, centred in the view. Always kept inside the view.
    */
-  private objectiveBox(cssW: number): { left: number; width: number; top: number } {
+  private objectiveBox(cssW: number, desiredW: number): { left: number; width: number; top: number } {
     const { x, y, w, h } = this.view;
     const rowTop = y + BAR_ROW_INSET;
     const rowBottom = rowTop + OBJECTIVE_H;
@@ -715,18 +716,28 @@ export class Overlay {
       }
       cursor = Math.max(cursor, r);
     }
+    const targetW = Math.min(OBJECTIVE_MAX_W, Math.max(OBJECTIVE_MIN_W, desiredW));
     if (runW >= OBJECTIVE_MIN_W) {
-      const width = Math.min(OBJECTIVE_MAX_W, runW);
+      const width = Math.min(targetW, runW);
       return { left: runLeft + (runW - width) / 2 - x, width, top: BAR_ROW_INSET };
     }
-    const width = Math.min(OBJECTIVE_MAX_W, cssW - 16);
+    const width = Math.min(targetW, cssW - 16);
     const top = Math.min(below, y + h - OBJECTIVE_H - BAR_ROW_INSET) - y;
     return { left: (cssW - width) / 2, width, top };
   }
 
   private drawObjectiveBar(scene: Scene, cssW: number): void {
     const ctx = this.ctx;
-    const { left, width, top } = this.objectiveBox(cssW);
+    ctx.font = BAR_FONT;
+    const label = objectiveLabel(scene);
+    const roundText = scene.round > 0 ? `R${Math.round(scene.round)}` : "";
+    const team = isTeamMode(scene.mode);
+    const labelW = ctx.measureText(label).width;
+    const roundW = roundText ? ctx.measureText(roundText).width : 0;
+    const desiredW = team
+      ? Math.max(labelW, roundW) * 2 + 84
+      : labelW + (roundW > 0 ? roundW + 16 : 0) + 18;
+    const { left, width, top } = this.objectiveBox(cssW, desiredW);
     const height = OBJECTIVE_H;
     const mid = top + height / 2;
     ctx.fillStyle = CHIP;
@@ -736,29 +747,28 @@ export class Overlay {
       ctx.fillStyle = PROGRESS;
       ctx.fillRect(left, top + height - RULE_H, width * progress, RULE_H);
     }
-    ctx.font = BAR_FONT;
     ctx.textBaseline = "middle";
 
     ctx.textAlign = "left";
     ctx.fillStyle = TEXT;
-    ctx.fillText(objectiveLabel(scene), left + 10, mid);
+    ctx.fillText(label, left + 8, mid);
 
-    if (scene.round > 0) {
+    if (roundText) {
       ctx.textAlign = "right";
-      ctx.fillText(`round ${Math.round(scene.round)}`, left + width - 10, mid);
+      ctx.fillText(roundText, left + width - 8, mid);
     }
 
-    if (isTeamMode(scene.mode)) {
-      const cx = cssW / 2;
+    if (team) {
+      const cx = left + width / 2;
       ctx.textAlign = "right";
       ctx.fillStyle = this.colourCss(playerRgb(TEAM_RED, 0));
-      ctx.fillText(String(Math.round(scene.red)), cx - 12, mid);
+      ctx.fillText(String(Math.round(scene.red)), cx - 10, mid);
       ctx.textAlign = "center";
       ctx.fillStyle = TEXT;
       ctx.fillText("-", cx, mid);
       ctx.textAlign = "left";
       ctx.fillStyle = this.colourCss(playerRgb(TEAM_BLUE, 0));
-      ctx.fillText(String(Math.round(scene.blue)), cx + 12, mid);
+      ctx.fillText(String(Math.round(scene.blue)), cx + 10, mid);
     }
   }
 
@@ -816,7 +826,7 @@ function bannerText(scene: Scene, names: ReadonlyMap<number, string>): Banner | 
 }
 
 /** Left side of the objective bar: what the match is played for, in the mode's terms. */
-function objectiveLabel(scene: Scene): string {
+export function objectiveLabel(scene: Scene): string {
   const limit = Math.round(scene.objectiveLimit);
   const local = scene.scores.find((r) => r.id === scene.localId);
   switch (scene.mode) {
@@ -829,8 +839,10 @@ function objectiveLabel(scene: Scene): string {
       return limit > 0 ? `${limit} rounds to win` : "Rounds";
     case 4:
       return limit > 0 ? `${limit} objectives to win` : "Endless teams";
-    case 5:
-      return local !== undefined ? `Spawns remaining: ${Math.round(local.lives)}` : "Lives teams";
+    case 5: {
+      const teamLives = local?.team === TEAM_RED ? scene.red : local?.team === TEAM_BLUE ? scene.blue : null;
+      return teamLives !== null ? `Spawns remaining: ${Math.round(teamLives)}` : "Lives teams";
+    }
     case 6:
       return "Just fight!";
     default:
@@ -839,7 +851,7 @@ function objectiveLabel(scene: Scene): string {
 }
 
 /** Progress rule of the objective bar, 0..1 of the mode's limit for the local player; null when there is none. */
-function objectiveProgress(scene: Scene): number | null {
+export function objectiveProgress(scene: Scene): number | null {
   if (!(scene.objectiveLimit > 0)) return null;
   const local = scene.scores.find((r) => r.id === scene.localId);
   if (local === undefined) return null;
@@ -849,8 +861,12 @@ function objectiveProgress(scene: Scene): number | null {
       value = local.kills;
       break;
     case 1:
-    case 5:
       value = local.lives;
+      break;
+    case 5:
+      if (local.team === TEAM_RED) value = scene.red;
+      else if (local.team === TEAM_BLUE) value = scene.blue;
+      else return null;
       break;
     case 2:
     case 3:
