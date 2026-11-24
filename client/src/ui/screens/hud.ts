@@ -17,7 +17,8 @@ import { CHAT_LIMIT, type AppState, type ChatLine, type Stats } from "../../stat
 import { chatPlaceholder } from "../chat-hint";
 import { h } from "../dom";
 import { icon, type IconName } from "../icons";
-import { confirmDialog, contrastRatio } from "../kit";
+import { parseYouTubeId } from "../jukebox";
+import { confirmDialog, contrastRatio, openModal } from "../kit";
 import { showPhoneSplash } from "../phone-splash";
 import { createScoreboard } from "../scoreboard";
 import { stickBits, stickOctant } from "../../touch-stick";
@@ -402,11 +403,163 @@ export const hudScreen: HudFactory = (ctx) => {
     step: 1,
     oninput: (e: Event) => prefs.set({ volume: Number((e.target as HTMLInputElement).value) / 100 }),
   });
+  const isRoomHost = (): boolean => {
+    const r = ctx.store.state.room;
+    return r !== null && r.quick === null && r.players.some((p) => p.id === ctx.store.state.myId && p.host);
+  };
+
+  function openJukeboxModal(): void {
+    setMenu(false);
+    const input = h("input", {
+      type: "url",
+      placeholder: "Paste a YouTube link or video ID",
+      autocomplete: "off",
+      spellcheck: "false",
+    });
+    const feedback = h("p", { class: "field-hint", role: "status", "aria-live": "polite" });
+    const nowPlaying = h("div", { class: "hud-jukebox-now" });
+    const suggestionsBox = h("div", { class: "hud-jukebox-suggests" });
+    const volSlider = h("input", {
+      type: "range",
+      min: 0,
+      max: 100,
+      step: 1,
+      value: String(Math.round(prefs.value.jukeboxVolume * 100)),
+      oninput: () => prefs.set({ jukeboxVolume: Number(volSlider.value) / 100 }),
+    });
+
+    const submitUrl = (): void => {
+      const raw = input.value.trim();
+      const video = parseYouTubeId(raw);
+      if (video === null) {
+        feedback.textContent = "Paste a valid YouTube link or 11-character video ID.";
+        return;
+      }
+      if (isRoomHost()) {
+        ctx.send({ t: "jukebox", action: "play", video });
+        feedback.textContent = "Playing on the room jukebox.";
+      } else {
+        ctx.send({ t: "chat", text: `https://youtu.be/${video}` });
+        feedback.textContent = "Suggested in room chat for the host.";
+      }
+      input.value = "";
+    };
+
+    const form = h(
+      "form",
+      {
+        class: "hud-jukebox-form",
+        onsubmit: (e: Event) => {
+          e.preventDefault();
+          submitUrl();
+        },
+      },
+      input,
+      h("button", { type: "submit", class: "primary" }, icon("play", 16), isRoomHost() ? "Play" : "Suggest"),
+    );
+
+    const refreshModal = (): void => {
+      const st = ctx.store.state;
+      const host = isRoomHost();
+      const jb = st.room?.jukebox ?? null;
+      if (jb) {
+        const controls: Node[] = [];
+        if (host) {
+          controls.push(
+            h(
+              "button",
+              {
+                type: "button",
+                class: "quiet",
+                onclick: () => ctx.send({ t: "jukebox", action: jb.playing ? "pause" : "resume" }),
+              },
+              icon(jb.playing ? "pause" : "play", 16),
+              jb.playing ? "Pause" : "Resume",
+            ),
+            h(
+              "button",
+              { type: "button", class: "quiet", onclick: () => ctx.send({ t: "jukebox", action: "stop" }) },
+              icon("square", 16),
+              "Stop",
+            ),
+          );
+        }
+        nowPlaying.replaceChildren(
+          h("div", { class: "hud-jukebox-track" }, icon("music", 16), h("strong", null, jb.title), h("span", { class: "chip" }, jb.playing ? "Playing" : "Paused")),
+          ...(controls.length > 0 ? [h("div", { class: "hud-jukebox-controls" }, ...controls)] : []),
+        );
+      } else {
+        nowPlaying.replaceChildren(h("p", { class: "muted" }, "Nothing playing on the jukebox."));
+      }
+
+      const seen = new Set<string>();
+      const recent = st.chat
+        .filter((l) => l.suggest !== undefined)
+        .reverse()
+        .filter((l) => {
+          const id = l.suggest!.video;
+          if (seen.has(id)) return false;
+          seen.add(id);
+          return true;
+        })
+        .slice(0, 6);
+      if (recent.length > 0) {
+        suggestionsBox.replaceChildren(
+          h("p", { class: "field-label" }, "Recent suggestions"),
+          ...recent.map((l) =>
+            h(
+              "div",
+              { class: "hud-jukebox-sug-row" },
+              h("span", { class: "hud-jukebox-sug-title" }, `${l.suggest!.title} · ${l.name}`),
+              host
+                ? h(
+                    "button",
+                    {
+                      type: "button",
+                      class: "quiet",
+                      onclick: () => ctx.send({ t: "jukebox", action: "play", video: l.suggest!.video }),
+                    },
+                    icon("play", 14),
+                    "Play",
+                  )
+                : null,
+            ),
+          ),
+        );
+      } else {
+        suggestionsBox.replaceChildren();
+      }
+    };
+
+    refreshModal();
+    const unsub = ctx.store.subscribe(refreshModal);
+    const modal = openModal({
+      title: "Jukebox",
+      body: [
+        nowPlaying,
+        form,
+        feedback,
+        h("label", { class: "hud-jukebox-vol" }, icon("volume-2", 16), h("span", null, "Jukebox volume"), volSlider),
+        suggestionsBox,
+      ],
+      actions: [h("button", { type: "button", onclick: () => modal.close() }, icon("x", 18), "Close")],
+      onclose: () => unsub(),
+    });
+    input.focus();
+  }
+
+  const jukeboxItem = h(
+    "button",
+    { type: "button", onclick: openJukeboxModal },
+    icon("music", 18),
+    h("span", null, "Jukebox"),
+  );
   const signOutItem = h("button", { type: "button", onclick: () => void signOut() }, icon("log-out", 18), h("span", null, "Sign out"));
   const menuPanel = h(
     "div",
     { class: "hud-menu", id: "hud-menu", hidden: true },
     h("button", { type: "button", onclick: () => ctx.store.set({ screen: "room" }) }, icon("users", 18), h("span", null, "Show lobby")),
+    jukeboxItem,
     fullscreenItem,
     h("label", { class: "hud-menu-volume" }, icon("volume-2", 18), h("span", null, "Volume"), volumeInput),
     muteItem,
@@ -442,6 +595,7 @@ export const hudScreen: HudFactory = (ctx) => {
     muteLabel.textContent = prefs.value.musicMuted ? "Unmute music" : "Mute music";
     muteItem.replaceChildren(icon(prefs.value.musicMuted ? "volume-x" : "volume-2", 18), muteLabel);
     volumeInput.value = String(Math.round(prefs.value.volume * 100));
+    jukeboxItem.hidden = ctx.store.state.room === null || ctx.store.state.room.quick !== null;
     signOutItem.hidden = ctx.store.state.account === null;
   }
 
@@ -620,7 +774,24 @@ export const hudScreen: HudFactory = (ctx) => {
   /** One chat line. Others' text is masked when the profanity filter pref is on; our own is not. */
   function chatElement(line: ChatLine): HTMLElement {
     if (line.suggest !== undefined) {
-      return h("div", { class: "hud-chat-line hud-chat-suggest" }, `🎧 ${line.name} suggests ${line.suggest.title}`);
+      const sug = line.suggest;
+      return h(
+        "div",
+        { class: "hud-chat-line hud-chat-suggest" },
+        h("span", null, `🎧 ${line.name} suggests ${sug.title}`),
+        isRoomHost()
+          ? h(
+              "button",
+              {
+                type: "button",
+                class: "hud-chat-play",
+                onclick: () => ctx.send({ t: "jukebox", action: "play", video: sug.video }),
+              },
+              icon("play", 12),
+              "Play",
+            )
+          : null,
+      );
     }
     const mine = line.from !== null && line.from === ctx.store.state.myId;
     const text = prefs.value.filterProfanity && line.from !== null && !mine ? filterProfanity(line.text) : line.text;
@@ -796,7 +967,7 @@ export const hudScreen: HudFactory = (ctx) => {
 
   // Capture phase: while chat is open, keys go to chat and never reach the movement input.
   function onWindowKey(e: KeyboardEvent): void {
-    if (endConfirming) return;
+    if (endConfirming || document.querySelector("dialog.modal[open]") !== null) return;
     const t = e.target;
     if (t instanceof HTMLInputElement || t instanceof HTMLTextAreaElement || t instanceof HTMLSelectElement || e.isComposing) return;
     if (!chatOpen) {

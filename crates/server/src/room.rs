@@ -48,7 +48,8 @@ const RECORD_TICKS_PER_SECOND: f64 = 30.0;
 const DEFAULT_COLORS: [u32; 6] = [0xf9fc91, 0x33658a, 0xe34a6f, 0x3acf60, 0xbc56d5, 0xeea210];
 const HELP: &str = "Commands: /set <key> <value>, /settings, /reset, /mode <n>, /start, /end, /lock, /unlock, \
     /kick <name>, /ban <name>, /unban <name>, /mute <name>, /unmute <name>, /host <name>, \
-    /team <name> <ffa|red|blue|spec>, /join <ffa|red|blue|spec>, /upvote, /downvote, /fav, /unfav, /record";
+    /team <name> <ffa|red|blue|spec>, /join <ffa|red|blue|spec>, /play <youtube>, /pause, /resume, /stop, \
+    /upvote, /downvote, /fav, /unfav, /record";
 
 /// (player id, resume token) on success, or (code, message).
 type JoinReply = Result<(u32, String), (String, String)>;
@@ -1045,6 +1046,15 @@ impl Room {
                 Some((player, _)) => ClientMsg::Mute { player, muted: word == "mute" },
                 None => return self.notice(id, "No player with that name"),
             },
+            "play" | "jukebox" => {
+                let Some(video) = youtube::video_id(rest) else {
+                    return self.notice(id, "Usage: /play <YouTube link or video id>");
+                };
+                ClientMsg::Jukebox { action: "play".into(), video: Some(video) }
+            }
+            "pause" => ClientMsg::Jukebox { action: "pause".into(), video: None },
+            "resume" => ClientMsg::Jukebox { action: "resume".into(), video: None },
+            "stop" => ClientMsg::Jukebox { action: "stop".into(), video: None },
             "upvote" | "downvote" | "fav" | "fave" | "unfav" | "unfave" => return self.map_command(id, &word),
             // clips are cut on the client from its own recording of the match
             "record" => return self.notice(id, "Type /record in a running match to send its last 15 seconds to the main menu"),

@@ -562,7 +562,83 @@
 }
 
 .hud-chat-suggest {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
   color: var(--hud-mint);
+}
+
+.hud-root button.hud-chat-play {
+  min-height: 20px;
+  padding: 0 7px;
+  gap: 4px;
+  font-size: 0.75rem;
+  background: var(--accent);
+  color: var(--accent-ink);
+}
+
+.hud-jukebox-now {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.hud-jukebox-track {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.hud-jukebox-controls {
+  display: flex;
+  gap: 8px;
+}
+
+.hud-jukebox-form {
+  display: flex;
+  gap: 8px;
+}
+
+.hud-jukebox-form input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.hud-jukebox-vol {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: var(--step-small);
+  color: var(--muted);
+}
+
+.hud-jukebox-vol input[type="range"] {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.hud-jukebox-suggests {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.hud-jukebox-sug-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 4px 8px;
+  background: var(--surface-2);
+  font-size: var(--step-small);
+}
+
+.hud-jukebox-sug-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .hud-chat-form {
