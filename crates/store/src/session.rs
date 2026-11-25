@@ -13,13 +13,27 @@ use sha2::{Digest, Sha256};
 /// How long a session lasts without use. Each use in the last half of this
 /// window extends it, so an active player stays signed in.
 pub const SESSION_TTL: i64 = 30 * 24 * 60 * 60;
+/// How long an admin session lasts without use (30 days, sliding on use).
+pub const ADMIN_SESSION_TTL: i64 = 30 * 24 * 60 * 60;
 /// Live sessions per account. Beyond this, the least recently extended are dropped.
 pub const MAX_SESSIONS_PER_ACCOUNT: i64 = 20;
+/// Live admin sessions kept at once.
+const MAX_ADMIN_SESSIONS: i64 = 20;
 /// Longest token accepted. Real tokens are 43 characters.
 const MAX_TOKEN_LEN: usize = 128;
 
 fn digest(token: &str) -> Vec<u8> {
     Sha256::digest(token.as_bytes()).to_vec()
+}
+
+/// Admin token digest bound to the configured admin password, so rotating
+/// `NEOBOX_ADMIN_PASSWORD` invalidates all older admin cookies automatically.
+fn admin_digest(token: &str, password: &str) -> Vec<u8> {
+    let mut h = Sha256::new();
+    h.update(password.as_bytes());
+    h.update([0u8]);
+    h.update(token.as_bytes());
+    h.finalize().to_vec()
 }
 
 impl Store {
@@ -85,7 +99,57 @@ impl Store {
 
     /// Drop expired sessions. The server calls this periodically. Returns how many were dropped.
     pub fn prune_expired_sessions(&self) -> Result<usize> {
-        Ok(self.db().execute("DELETE FROM sessions WHERE expires <= ?1", [now()])?)
+        let t = now();
+        let db = self.db();
+        let n = db.execute("DELETE FROM sessions WHERE expires <= ?1", [t])?;
+        let m = db.execute("DELETE FROM admin_sessions WHERE expires <= ?1", [t])?;
+        Ok(n + m)
+    }
+
+    /// Create a persistent admin session bound to `password` and return its opaque cookie token.
+    pub fn create_admin_session(&self, password: &str) -> Result<String> {
+        let mut raw = [0u8; 32];
+        rand::rng().fill_bytes(&mut raw);
+        let token = URL_SAFE_NO_PAD.encode(raw);
+        let mut db = self.db();
+        let tx = db.transaction()?;
+        tx.execute(
+            "INSERT INTO admin_sessions (token_digest, expires) VALUES (?1, ?2)",
+            params![admin_digest(&token, password), now() + ADMIN_SESSION_TTL],
+        )?;
+        tx.execute(
+            "DELETE FROM admin_sessions WHERE rowid NOT IN \
+             (SELECT rowid FROM admin_sessions ORDER BY expires DESC, rowid DESC LIMIT ?1)",
+            params![MAX_ADMIN_SESSIONS],
+        )?;
+        tx.commit()?;
+        Ok(token)
+    }
+
+    /// Whether `token` is a live admin session for `password`. Slides its expiry when past halfway.
+    pub fn check_admin_session(&self, token: &str, password: &str) -> Result<bool> {
+        if token.is_empty() || token.len() > MAX_TOKEN_LEN || password.is_empty() {
+            return Ok(false);
+        }
+        let t = now();
+        let d = admin_digest(token, password);
+        let db = self.db();
+        let expires: Option<i64> = db
+            .query_row("SELECT expires FROM admin_sessions WHERE token_digest = ?1 AND expires > ?2", params![&d, t], |r| r.get(0))
+            .optional()?;
+        let Some(expires) = expires else {
+            return Ok(false);
+        };
+        if expires - t < ADMIN_SESSION_TTL / 2 {
+            db.execute("UPDATE admin_sessions SET expires = ?1 WHERE token_digest = ?2", params![t + ADMIN_SESSION_TTL, &d])?;
+        }
+        Ok(true)
+    }
+
+    /// Sign out one admin session.
+    pub fn delete_admin_session(&self, token: &str, password: &str) -> Result<()> {
+        self.db().execute("DELETE FROM admin_sessions WHERE token_digest = ?1", params![admin_digest(token, password)])?;
+        Ok(())
     }
 }
 
@@ -155,6 +219,20 @@ mod tests {
         s.db().execute("UPDATE sessions SET expires = ?1", [now() + SESSION_TTL / 4]).unwrap();
         s.session_account(&token).unwrap();
         assert!(expiry(&s, &token) >= now() + SESSION_TTL - 5);
+    }
+
+    #[test]
+    fn admin_sessions_persist_slide_and_bind_to_password() {
+        let s = store();
+        let token = s.create_admin_session("secret1").unwrap();
+        assert!(s.check_admin_session(&token, "secret1").unwrap());
+        assert!(!s.check_admin_session(&token, "secret2").unwrap());
+        s.db().execute("UPDATE admin_sessions SET expires = ?1", [now() + ADMIN_SESSION_TTL / 4]).unwrap();
+        assert!(s.check_admin_session(&token, "secret1").unwrap());
+        let exp: i64 = s.db().query_row("SELECT expires FROM admin_sessions", [], |r| r.get(0)).unwrap();
+        assert!(exp >= now() + ADMIN_SESSION_TTL - 5);
+        s.delete_admin_session(&token, "secret1").unwrap();
+        assert!(!s.check_admin_session(&token, "secret1").unwrap());
     }
 
     #[test]

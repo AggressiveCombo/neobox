@@ -25,7 +25,7 @@ pub use library::{
     Listing, MapDetail, MapSummary, RoomMap, Sort, Status, Verdict, Visibility, MAX_CODE_BYTES, MAX_FAVOURITES,
     MAX_MAPS_PER_ACCOUNT, MAX_MAP_NAME_CHARS,
 };
-pub use session::{MAX_SESSIONS_PER_ACCOUNT, SESSION_TTL};
+pub use session::{ADMIN_SESSION_TTL, MAX_SESSIONS_PER_ACCOUNT, SESSION_TTL};
 pub use xp::{XP_PER_DAY, XP_PER_HOUR, XpGrant, XpLimit};
 pub use records::{Record, MAX_RECORDS};
 pub use reports::{NewReport, Report, ReportChat, ReportKind, ReportStatus, ReportedMap, ReportedPlayer, Reporter, MAX_REASON_CHARS, MAX_REPORT_CHAT};
@@ -241,6 +241,13 @@ CREATE TABLE feedback (
 );
 CREATE INDEX feedback_status_id ON feedback (status, id DESC);
 CREATE INDEX feedback_kind_id ON feedback (kind, id DESC);
+"#, r#"
+-- Persistent admin sessions (SHA-256 of password + token) so admin logins survive server restarts.
+CREATE TABLE admin_sessions (
+    token_digest BLOB PRIMARY KEY,
+    expires INTEGER NOT NULL
+);
+CREATE INDEX admin_sessions_expires ON admin_sessions (expires);
 "#];
 
 /// High-level database counts for the admin insights dashboard.

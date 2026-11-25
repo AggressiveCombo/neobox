@@ -11,7 +11,7 @@ use axum::http::{header, HeaderMap, StatusCode};
 use axum::response::{Html, IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
-use neobox_store::{Error, FeedbackKind, FeedbackStatus, ReportStatus, Verdict};
+use neobox_store::{Error, FeedbackKind, FeedbackStatus, ReportStatus, Verdict, ADMIN_SESSION_TTL};
 use serde::{Deserialize, Serialize};
 use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
@@ -20,7 +20,7 @@ use tokio::sync::oneshot;
 use tracing::{info, warn};
 
 const COOKIE: &str = "neobox_admin";
-const SESSION_TTL: Duration = Duration::from_secs(12 * 3600);
+const SESSION_TTL: Duration = Duration::from_secs(ADMIN_SESSION_TTL as u64);
 
 pub fn router() -> Router<Arc<Hub>> {
     Router::new()
@@ -82,9 +82,29 @@ fn authorized(hub: &Hub, headers: &HeaderMap) -> bool {
         return false;
     }
     let Some(token) = cookie_token(headers) else { return false };
-    let mut sessions = hub.admin_sessions.lock().unwrap();
-    sessions.retain(|_, t| t.elapsed() < SESSION_TTL);
-    sessions.keys().any(|k| constant_time_eq(k.as_bytes(), token.as_bytes()))
+    {
+        let mut sessions = hub.admin_sessions.lock().unwrap();
+        sessions.retain(|_, t| t.elapsed() < SESSION_TTL);
+        if sessions.keys().any(|k| constant_time_eq(k.as_bytes(), token.as_bytes())) {
+            return true;
+        }
+    }
+    // Check SQLite for persistent sessions (e.g. after a server restart or deploy) and warm the RAM cache.
+    if let Some(store) = hub.store() {
+        if store.check_admin_session(&token, &hub.cfg.admin_password).unwrap_or(false) {
+            hub.admin_sessions.lock().unwrap().insert(token, Instant::now());
+            return true;
+        }
+    }
+    false
+}
+
+fn admin_cookie(hub: &Hub, peer: SocketAddr, headers: &HeaderMap, value: &str, max_age: i64) -> String {
+    let secure = via_trusted_proxy(hub, peer) && headers.get("x-forwarded-proto").and_then(|v| v.to_str().ok()) == Some("https");
+    format!(
+        "{COOKIE}={value}; Path=/admin; HttpOnly; SameSite=Lax; Max-Age={max_age}{}",
+        if secure { "; Secure" } else { "" }
+    )
 }
 
 /// A JSON body, parsed only once the request is authorized.
@@ -145,28 +165,45 @@ async fn login(State(hub): State<Arc<Hub>>, ConnectInfo(peer): ConnectInfo<Socke
         warn!(%ip, "admin login failed");
         return (StatusCode::UNAUTHORIZED, "wrong password").into_response();
     }
-    let token: String = (0..32).map(|_| format!("{:02x}", rand::random::<u8>())).collect();
+    let token = if let Some(store) = hub.store() {
+        match store.create_admin_session(&hub.cfg.admin_password) {
+            Ok(t) => t,
+            Err(_) => return (StatusCode::INTERNAL_SERVER_ERROR, "could not create session").into_response(),
+        }
+    } else {
+        (0..32).map(|_| format!("{:02x}", rand::random::<u8>())).collect()
+    };
     hub.admin_sessions.lock().unwrap().insert(token.clone(), Instant::now());
     info!(%ip, "admin login");
-    let secure = via_trusted_proxy(&hub, peer) && headers.get("x-forwarded-proto").and_then(|v| v.to_str().ok()) == Some("https");
-    let cookie = format!(
-        "{COOKIE}={token}; Path=/admin; HttpOnly; SameSite=Strict; Max-Age={}{}",
-        SESSION_TTL.as_secs(),
-        if secure { "; Secure" } else { "" }
-    );
+    let cookie = admin_cookie(&hub, peer, &headers, &token, ADMIN_SESSION_TTL);
     ([(header::SET_COOKIE, cookie)], "ok").into_response()
 }
 
-async fn logout(State(hub): State<Arc<Hub>>, headers: HeaderMap) -> Response {
+async fn logout(State(hub): State<Arc<Hub>>, ConnectInfo(peer): ConnectInfo<SocketAddr>, headers: HeaderMap) -> Response {
     if let Some(t) = cookie_token(&headers) {
         hub.admin_sessions.lock().unwrap().remove(&t);
+        if let Some(store) = hub.store() {
+            let _ = store.delete_admin_session(&t, &hub.cfg.admin_password);
+        }
     }
-    ([(header::SET_COOKIE, format!("{COOKIE}=; Path=/admin; Max-Age=0"))], "ok").into_response()
+    let cookie = admin_cookie(&hub, peer, &headers, "", 0);
+    ([(header::SET_COOKIE, cookie)], "ok").into_response()
 }
 
 /// Whether this browser holds an admin session; the page asks once on load.
-async fn session(State(hub): State<Arc<Hub>>, headers: HeaderMap) -> Json<serde_json::Value> {
-    Json(serde_json::json!({ "admin": authorized(&hub, &headers) }))
+/// Refreshes the cookie's 30-day Max-Age when valid so active admins stay logged in.
+async fn session(State(hub): State<Arc<Hub>>, ConnectInfo(peer): ConnectInfo<SocketAddr>, headers: HeaderMap) -> Response {
+    let ok = authorized(&hub, &headers);
+    if ok {
+        if let Some(token) = cookie_token(&headers) {
+            if let Some(store) = hub.store() {
+                let _ = store.check_admin_session(&token, &hub.cfg.admin_password);
+            }
+            let cookie = admin_cookie(&hub, peer, &headers, &token, ADMIN_SESSION_TTL);
+            return ([(header::SET_COOKIE, cookie)], Json(serde_json::json!({ "admin": true }))).into_response();
+        }
+    }
+    Json(serde_json::json!({ "admin": false })).into_response()
 }
 
 async fn state(State(hub): State<Arc<Hub>>, headers: HeaderMap) -> Response {
