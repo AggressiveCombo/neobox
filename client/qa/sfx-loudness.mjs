@@ -30,12 +30,14 @@ const TRACKS = [
   { name: "music: match 2", file: "match-2.mp3", level: MUSIC_LEVEL.match },
 ];
 
-/** Loudness classes: target in-game level (dB) and the tolerance around it. */
+/** Perceptual loudness classes: target in-game level (dB) and tolerance, ordered by human-ear priority. */
 export const CLASSES = {
-  game: { target: -34, tol: 3, what: "gameplay effects" },
+  impact: { target: -31, tol: 3, what: "heavy dramatic events (explosions, rocket fire, death)" },
+  game: { target: -34, tol: 3, what: "core gameplay actions (hits, swings, spawns, countdown)" },
+  subtle: { target: -38, tol: 3, what: "frequent movement & ambient cues (jumps, ghost, parachute, soft bumps)" },
   jingle: { target: -30, tol: 3, what: "fanfares and match-end jingles" },
-  interface: { target: -38, tol: 3, what: "clicks, tabs, switches, dialogs" },
-  tick: { target: -43, tol: 3, what: "high-rate ticks (hover, post-game tally)" },
+  interface: { target: -39, tol: 3, what: "clicks, tabs, switches, dialogs, chat" },
+  tick: { target: -45, tol: 3, what: "high-rate micro-ticks (hover, scroll, slider, tally)" },
   music: { target: -35, tol: 1, what: "background music tracks" },
 };
 
@@ -45,25 +47,25 @@ export const CLASSES = {
 const game = (name, key, volume, cls, src) => ({ name, key, bus: "game", volume, cls, src });
 const ui = (name, key, volume, cls) => ({ name, key, bus: "ui", volume, cls, src: "audio.ts ui()" });
 const USAGES = [
-  game("jump", 1, 1.0, "game", "player.rs JUMP"),
-  game("air jump", 2, 1.0, "game", "player.rs AIR_JUMP"),
+  game("jump", 1, 1.0, "subtle", "player.rs JUMP"),
+  game("air jump", 2, 1.0, "subtle", "player.rs AIR_JUMP"),
   game("push hit", 3, 0.8, "game", "player.rs PUSH_HIT"),
-  game("push miss", 4, 0.8, "game", "player.rs PUSH_MISS"),
+  game("push miss", 4, 0.8, "subtle", "player.rs PUSH_MISS"),
   game("impact", 6, 0.5, "game", "player.rs IMPACT, typical 0.025 x mass"),
   game("impact (no jump)", 7, 0.5, "game", "player.rs IMPACT_NOJUMP, typical"),
   game("freeze", 8, 0.6, "game", "player.rs FREEZE"),
   game("spawn", 9, 1.0, "game", "round.rs SPAWN"),
   game("countdown", 10, 1.0, "game", "step.rs COUNTDOWN"),
-  game("death", 11, 0.23, "game", "player.rs DEATH"),
-  game("body impact", 12, 0.2, "game", "objects.rs BODY_IMPACT, typical 0.008 x mass"),
-  game("bat swing", 13, 1.0, "game", "player.rs BAT_SWING"),
+  game("death", 11, 0.23, "impact", "player.rs DEATH"),
+  game("body impact", 12, 0.2, "subtle", "objects.rs BODY_IMPACT, typical 0.008 x mass"),
+  game("bat swing", 13, 1.0, "subtle", "player.rs BAT_SWING"),
   game("bat hit", 14, 1.0, "game", "player.rs BAT_HIT"),
-  game("rocket charge", 15, 0.2, "game", "player.rs ROCKET_CHARGE"),
-  game("rocket fire", 16, 0.4, "game", "player.rs ROCKET_FIRE"),
-  game("rocket fire (other player)", 16, 0.3, "game", "player.rs ROCKET_FIRE sim sound"),
-  game("explosion", 17, 0.3, "game", "objects.rs EXPLOSION"),
-  game("parachute", 18, 0.5, "game", "player.rs PARACHUTE, typical"),
-  game("ghost trail", 19, 1.0, "game", "player.rs GHOST_TRAIL"),
+  game("rocket charge", 15, 0.2, "subtle", "player.rs ROCKET_CHARGE"),
+  game("rocket fire", 16, 0.4, "impact", "player.rs ROCKET_FIRE"),
+  game("rocket fire (other player)", 16, 0.3, "impact", "player.rs ROCKET_FIRE sim sound"),
+  game("explosion", 17, 0.3, "impact", "objects.rs EXPLOSION"),
+  game("parachute", 18, 0.5, "subtle", "player.rs PARACHUTE, typical"),
+  game("ghost trail", 19, 1.0, "subtle", "player.rs GHOST_TRAIL"),
   game("fanfare (game over)", 20, 1.0, "jingle", "frame.rs SOUND_FANFARE"),
   game("level up", 20, 0.5, "game", "postgame.ts LEVEL_SOUND, a one-shot cue"),
   game("post-game tally tick", 10, 0.4, "tick", "postgame.ts TICK_SOUND, one per XP step"),

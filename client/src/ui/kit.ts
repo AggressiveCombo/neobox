@@ -160,6 +160,7 @@ export function seg<T extends string>(
   segSize.observe(el);
   buttons.forEach((b, i) => {
     b.addEventListener("click", () => {
+      if (b.getAttribute("aria-checked") === "true") return;
       set(options[i].value);
       onchange(options[i].value);
     });

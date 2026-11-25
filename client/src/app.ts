@@ -299,7 +299,11 @@ export function start(): Store<AppState> {
     overlay.draw(scene, cam, names, tickHz, chrome);
     lastPresent = performance.now();
     setViewShown(true);
-    for (const s of scene.sounds) sfx.play(s.kind, s.volume, (s.x - cam.cx) / (cam.w / 2));
+    for (const s of scene.sounds) {
+      // Global cues (countdown tick, fanfare) and origin-anchored (0, 0) sounds always play centered.
+      const pan = s.kind === 10 || s.kind === 20 || (s.x === 0 && s.y === 0) ? 0 : (s.x - cam.cx) / (cam.w / 2);
+      sfx.play(s.kind, s.volume, pan);
+    }
     // Continuous rocket-charge hum while any live player holds rocket aim (sim emits kind 15 only once on frame 4).
     let charger: { x: number; dist: number; local: boolean } | null = null;
     for (const p of scene.players) {

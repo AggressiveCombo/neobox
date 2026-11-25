@@ -520,6 +520,24 @@ button:disabled {
   cursor: not-allowed;
 }
 
+/* Already-selected exclusive controls (active tab, radio segment, current option): show clearly
+   that re-clicking is a no-op with a default cursor and no press bounce. */
+button[role="radio"][aria-checked="true"],
+button[role="tab"][aria-selected="true"],
+button.is-current[aria-pressed="true"],
+button[aria-current="page"],
+button[aria-current="true"] {
+  cursor: default;
+}
+
+button[role="radio"][aria-checked="true"]:active,
+button[role="tab"][aria-selected="true"]:active,
+button.is-current[aria-pressed="true"]:active,
+button[aria-current="page"]:active,
+button[aria-current="true"]:active {
+  transform: none;
+}
+
 /* A label that swaps in place (Invite / Link copied): both states share one grid cell, so the control keeps the wider width. */
 .label-swap {
   display: inline-grid;

@@ -64,8 +64,6 @@ const FILES = [...new Set(Object.values(CLIPS).filter((clip): clip is string => 
 const MIN_GAP_MS = 35;
 /** On-screen captions for game sounds: how long a caption line stays up. */
 const CAPTION_MS = 1600;
-/** Random playback-rate spread around 1, so repeats never sound identical. */
-const RATE_SPREAD = 0.03;
 /** Sound files fetched at once: one request per file would exhaust the browser's connections under host load. */
 const LOAD_CONCURRENCY = 6;
 /** A file that fails to fetch or decode is tried this many times before it is given up. */
@@ -248,7 +246,7 @@ export class Sfx {
 
     const src = ctx.createBufferSource();
     src.buffer = buffer;
-    src.playbackRate.value = rate * (1 + (Math.random() * 2 - 1) * RATE_SPREAD);
+    src.playbackRate.value = rate;
     const gain = ctx.createGain();
     gain.gain.value = level * 10 ** ((CLIP_GAIN_DB[key] ?? 0) / 20);
     src.connect(gain);
@@ -289,9 +287,17 @@ function clamp01(v: number): number {
 export const sfx = new Sfx();
 Object.assign(globalThis, { __qaSfx: sfx });
 
-/** What a hover tick marks: the things a click acts on. */
+/** What a hover tick marks: interactive controls that are not already the active selection. */
 const HOVERABLE =
   "button:not(:disabled), a[href], summary, select:not(:disabled), [role='tab'], [role='option'], .seg-option, label:has(> input:not(:disabled))";
+
+/** True when clicking this exclusive control is a no-op because it is already selected. */
+function isAlreadySelected(el: Element): boolean {
+  return (
+    el.matches("[role='radio'][aria-checked='true'], [role='tab'][aria-selected='true'], .is-current[aria-pressed='true'], [aria-current='page'], [aria-current='true']") ||
+    (el.matches("[aria-current='location']") && el.classList.contains("settings-nav-item"))
+  );
+}
 
 /** Minimum gap between ticks while dragging a range slider, ms. */
 const SLIDER_TICK_MS = 55;
@@ -313,7 +319,7 @@ export function installUiSounds(): void {
       const el = e.target.closest(HOVERABLE);
       if (el === hovered) return;
       hovered = el;
-      if (el !== null) sfx.ui("hover");
+      if (el !== null && !isAlreadySelected(el)) sfx.ui("hover");
     },
     true,
   );
@@ -321,9 +327,11 @@ export function installUiSounds(): void {
     "click",
     (e) => {
       if (!(e.target instanceof Element)) return;
-      if (e.target.closest(".seg-option, [role='tab']")) sfx.ui("tab");
-      else if (e.target.closest("summary")) sfx.ui("toggle");
-      else if (e.target.closest("button, a[href]")) sfx.ui("click");
+      const hit = e.target.closest(".seg-option, [role='tab'], summary, button, a[href]");
+      if (hit === null || isAlreadySelected(hit)) return;
+      if (hit.matches(".seg-option, [role='tab']")) sfx.ui("tab");
+      else if (hit.matches("summary")) sfx.ui("toggle");
+      else sfx.ui("click");
     },
     true,
   );

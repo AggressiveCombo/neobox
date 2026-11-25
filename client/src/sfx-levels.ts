@@ -54,32 +54,35 @@ export const CLIPS: Partial<Record<SoundKey, string>> = {
  * (targets and tolerance in client/qa/sfx-loudness.mjs). Keys absent here play at 0 dB.
  */
 export const CLIP_GAIN_DB: Partial<Record<SoundKey, number>> = {
-  1: -12.9, // jump (game)
-  2: -6.6, // air jump (game)
-  6: 1, // impact (game)
-  7: 4, // impact on a no-jump body (game)
-  8: -3, // freeze (game)
+  1: -10.6, // jump (subtle)
+  2: -12.2, // air jump (subtle)
+  3: 0.2, // push hit (game)
+  4: -4.0, // push miss (subtle)
+  6: 1.0, // impact (game)
+  7: 4.1, // impact on a no-jump body (game)
+  8: -3.2, // freeze (game)
   9: -16.4, // spawn (game)
-  11: -5.6, // death (game)
-  12: 15.5, // body impact (game); typical sim volume is very low
-  13: -10.5, // bat swing (game)
-  14: -2.5, // bat hit (game)
-  15: 9.5, // rocket charge (game)
-  16: 7.5, // rocket fire, and the other player's copy (game)
-  17: 7, // explosion (game)
-  18: -1.9, // parachute (game)
-  19: -2.7, // ghost trail (game)
-  20: -1.1, // fanfare (jingle) and level up (game): one clip, two classes
-  hover: -0.7, // tick class
-  scroll: -4.5, // tick class (menu drum wheel)
-  slider: -1.3, // tick class (range slider drag)
-  click: -4.0, // interface
-  tab: -15.1, // interface
-  toggle: -4.7, // interface
-  open: -5, // interface
-  close: -9.1, // interface
-  error: -7.7, // interface
-  chat: -5.6, // interface
-  win: 2, // jingle
-  lose: 2, // jingle
+  10: -6.4, // countdown tick (game) & post-game tally (tick)
+  11: -2.6, // death (impact)
+  12: 11.5, // body impact (subtle); typical sim volume is very low
+  13: -14.5, // bat swing (subtle)
+  14: -2.4, // bat hit (game)
+  15: 5.6, // rocket charge loop (subtle)
+  16: 10.4, // rocket fire (impact)
+  17: 9.9, // explosion (impact)
+  18: -5.9, // parachute (subtle)
+  19: -6.7, // ghost trail (subtle)
+  20: -1.1, // fanfare (jingle) and level up (game)
+  hover: -2.7, // tick class
+  scroll: -6.5, // tick class (menu drum wheel)
+  slider: -3.3, // tick class (range slider drag)
+  click: -5.0, // interface
+  tab: -16.1, // interface
+  toggle: -5.7, // interface
+  open: -6.0, // interface
+  close: -10.1, // interface
+  error: -8.7, // interface
+  chat: -6.6, // interface
+  win: 2.1, // jingle
+  lose: 1.9, // jingle
 };
