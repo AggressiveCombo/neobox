@@ -269,7 +269,7 @@
 .room-player-line .chip {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: 6px;
 }
 
 .room-player-name {
@@ -361,8 +361,8 @@
   display: inline-flex;
   align-items: center;
   justify-content: flex-end;
-  min-width: 5.5ch;
-  gap: 4px;
+  min-width: 6ch;
+  gap: 6px;
   font-variant-numeric: tabular-nums;
 }
 

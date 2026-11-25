@@ -121,7 +121,7 @@
 .hud-topbar button {
   min-height: 22px;
   padding: 0 8px;
-  gap: 5px;
+  gap: 6px;
   font-size: 0.8125rem;
   background: transparent;
 }

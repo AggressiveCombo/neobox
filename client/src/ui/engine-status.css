@@ -11,6 +11,13 @@
   display: none;
 }
 
+.engine-status-text {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-variant-numeric: tabular-nums;
+}
+
 .engine-status-bar {
   flex: 1 1 160px;
   min-width: 120px;

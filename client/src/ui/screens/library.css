@@ -244,8 +244,8 @@
 .map-card .map-stats > span {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  margin-right: 10px;
+  gap: 6px;
+  margin-right: 12px;
 }
 
 .map-body .chip {
@@ -282,7 +282,7 @@ dialog.modal.map-dialog {
 .map-byline .chip {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: 6px;
 }
 
 .map-state,
@@ -298,6 +298,20 @@ dialog.modal.map-dialog {
 .map-stats {
   margin: 0;
   overflow: visible;
+}
+
+.map-info .map-stats {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 14px;
+}
+
+.map-info .map-stats > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
   font-size: var(--step-body);
 }
 
@@ -482,6 +496,9 @@ dialog.modal.map-picker {
 }
 
 .maker-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   flex: 1;
   min-width: 0;
   overflow: hidden;

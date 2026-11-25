@@ -644,10 +644,18 @@ svg.icon {
   vertical-align: -0.125em;
 }
 
-/* A heading's leading icon sits on the text; an empty state's large icon (40px) is centred above it. */
-h2 > svg.icon,
-h3 > svg.icon {
-  margin-right: 0.4em;
+/* Unified icon-text rhythm: headings and links with a leading/trailing icon always use flex gap
+   (never mixing margin-right + gap, and never leaving 0px between an icon and text). */
+:is(h1, h2, h3, h4, .panel-title, .panel-sub):has(> svg.icon) {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+a:has(> svg.icon) {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
 }
 
 .empty:has(> svg.icon) {
@@ -1283,6 +1291,9 @@ table.data .r {
 }
 
 .toast {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
   max-width: 100%;
   padding: 12px 16px;
   background: var(--ink);
@@ -1639,7 +1650,7 @@ dialog.modal:focus {
 .wip-btn {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: 5px;
   height: calc(var(--wip-h) - 4px);
   min-height: 0;
   padding: 0 7px;

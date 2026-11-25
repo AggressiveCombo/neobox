@@ -228,6 +228,9 @@ button.room-row {
 }
 
 .room-players {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   font-size: var(--step-body);
   font-weight: 500;
 }
