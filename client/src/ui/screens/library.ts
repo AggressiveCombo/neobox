@@ -422,7 +422,12 @@ export const libraryScreen: ScreenFactory = (ctx) => {
       h("p", { class: "map-byline" }, `by ${map.author}`, map.pick ? h("span", { class: "chip" }, icon("award", 14), "Staff pick") : null),
       ...(own ? [h("p", { class: "map-state" }, mapState(map))] : []),
       h("p", { class: "map-desc" }, map.description !== "" ? map.description : "No description."),
-      h("p", { class: "map-stats num" }, icon("thumbs-up", 14), plural(map.votes, "vote"), " · ", icon("play", 14), plural(map.plays, "play")),
+      h(
+        "p",
+        { class: "map-stats num" },
+        h("span", null, icon("thumbs-up", 14), plural(map.votes, "vote")),
+        h("span", null, icon("play", 14), plural(map.plays, "play")),
+      ),
       h(
         "div",
         { class: "map-actions" },
@@ -517,16 +522,6 @@ export const libraryScreen: ScreenFactory = (ctx) => {
       icon("save", 18),
       "Save changes",
     );
-    const remove = h(
-      "button",
-      {
-        type: "button",
-        class: "danger",
-        onclick: () => void confirmAndDelete(detail?.id === map.id ? detail.map : map),
-      },
-      icon("trash-2", 18),
-      "Delete map",
-    );
     return h(
       "details",
       { class: "map-owner" },
@@ -537,7 +532,7 @@ export const libraryScreen: ScreenFactory = (ctx) => {
         field("Description", desc),
         h("div", { class: "field" }, h("span", { class: "field-label" }, "Visibility"), visSeg.el),
         h("p", { class: "field-hint" }, "Public maps show in Browse once an admin approves them."),
-        h("div", { class: "actions" }, save, remove),
+        h("div", { class: "actions" }, save),
       ),
     );
   }

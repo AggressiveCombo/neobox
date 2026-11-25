@@ -10,7 +10,7 @@ import { type Account, type AppState } from "../../state";
 import { h, type Child } from "../dom";
 import { icon } from "../icons";
 import { field, page, pageHead, setFieldError, toggle } from "../kit";
-import { joinedDate, plural, profileSummary } from "../profile";
+import { profileSummary } from "../profile";
 import { privacyLink } from "./privacy";
 
 const NAME_ERROR = "Names are 1 to 15 letters, numbers, spaces or _.";
@@ -261,8 +261,6 @@ export const accountScreen: ScreenFactory = (ctx) => {
       ),
     );
 
-    const friendCount = h("p", { class: "account-count num" });
-    const joined = h("p", { class: "field-hint" });
     const signOutBtn = h("button", { type: "button", class: "quiet", onclick: signOut }, icon("log-out", 18), "Sign out");
 
     return h(
@@ -272,30 +270,19 @@ export const accountScreen: ScreenFactory = (ctx) => {
         "section",
         { class: "panel account-profile" },
         h("h2", { class: "sr-only" }, "Profile"),
-        profileSummary(account.name, (p) => {
-          friendCount.textContent = plural(p.friends, "friend", "friends");
-          joined.textContent = `Joined ${joinedDate(p.joined)}`;
-        }),
+        profileSummary(account.name),
       ),
-      h("h2", { class: "sr-only" }, "Security"),
       security,
-      h(
-        "section",
-        { class: "panel account-friends" },
-        h("h2", { class: "panel-title" }, icon("users", 20), "Friends"),
-        friendCount,
-        h(
-          "div",
-          { class: "actions" },
-          h("button", { type: "button", class: "quiet", onclick: () => store.set({ screen: "friends" }) }, icon("users", 18), "Open friends"),
-        ),
-      ),
       h(
         "section",
         { class: "panel account-session" },
         h("h2", { class: "panel-title" }, icon("user", 20), "Account"),
-        joined,
-        h("div", { class: "actions" }, signOutBtn),
+        h(
+          "div",
+          { class: "actions" },
+          h("button", { type: "button", class: "quiet", onclick: () => store.set({ screen: "friends" }) }, icon("users", 18), "Friends"),
+          signOutBtn,
+        ),
       ),
       status,
     );

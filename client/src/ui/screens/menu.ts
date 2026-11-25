@@ -132,10 +132,8 @@ export const menuScreen: ScreenFactory = (ctx) => {
   const nameError = h("p", { class: "field-error", role: "alert", hidden: true });
   // Server lines with no data say so and offer Try again; the chip in the top bar says the connection is down.
   const onlineText = h("span");
-  const statsRetry = h("button", { type: "button", class: "quiet menu-retry", hidden: true, "aria-label": "Try again: players online", onclick: () => retryConnection() }, icon("refresh-cw", 18), "Try again");
+  const statsRetry = h("button", { type: "button", class: "quiet menu-retry", hidden: true, "aria-label": "Try again", onclick: () => retryConnection() }, icon("refresh-cw", 18), "Try again");
   const onlineLine = h("p", { class: "menu-online" }, onlineText, statsRetry);
-  const accountRetry = h("button", { type: "button", class: "quiet menu-retry", "aria-label": "Try again: account", onclick: () => retryConnection() }, icon("refresh-cw", 18), "Try again");
-  const accountLine = h("p", { class: "menu-account-line", hidden: true }, h("span", null, "Account unavailable offline"), accountRetry);
   const offlineChip = h("p", { class: "home-offline", role: "status", hidden: true }, "Offline: online play, accounts and the library need a connection");
   const makersLine = h("p", { class: "menu-makers", hidden: true });
 
@@ -288,8 +286,7 @@ export const menuScreen: ScreenFactory = (ctx) => {
     offlineChip.hidden = !down;
     onlineLine.classList.toggle("is-down", down);
     statsRetry.hidden = !down;
-    if (down) onlineText.textContent = "Players online unavailable";
-    accountLine.hidden = navigator.onLine || Boolean(shownAccount);
+    if (down) onlineText.textContent = "Server unavailable";
     // Offline the account is unknown, not absent: the button says Account and its page says why.
     if (!shownAccount) setAccount(null);
     syncName();
@@ -544,7 +541,6 @@ export const menuScreen: ScreenFactory = (ctx) => {
       form,
       nameError,
       onlineLine,
-      accountLine,
       status,
     ),
     h("nav", { class: "home-index", "aria-label": "more" }, drum.listbox, drum.hint),

@@ -137,16 +137,16 @@ const TICKS_PER_SECOND = 30;
 function recordsTable(rows: MapRecord[]): HTMLElement {
   return h(
     "table",
-    { class: "records-table" },
+    { class: "data records-table" },
     h(
       "thead",
       null,
       h(
         "tr",
         null,
-        h("th", { scope: "col" }, "Rank"),
+        h("th", { scope: "col", class: "num" }, "Rank"),
         h("th", { scope: "col" }, "Name"),
-        h("th", { scope: "col" }, "Time"),
+        h("th", { scope: "col", class: "num" }, "Time"),
         h("th", { scope: "col" }, "Date"),
       ),
     ),
@@ -157,9 +157,9 @@ function recordsTable(rows: MapRecord[]): HTMLElement {
         h(
           "tr",
           null,
-          h("td", null, String(r.rank)),
+          h("td", { class: "num" }, String(r.rank)),
           h("td", null, r.name),
-          h("td", null, (r.ticks / TICKS_PER_SECOND).toFixed(2)),
+          h("td", { class: "num" }, (r.ticks / TICKS_PER_SECOND).toFixed(2)),
           h("td", null, ageText(r.date)),
         ),
       ),
@@ -1419,6 +1419,8 @@ export const roomScreen: ScreenFactory = (ctx: AppCtx) => {
     }
     const nodes: Node[] = [];
     for (const [group, defs] of groups) {
+      // Non-hosts already see the read-only Match limits above; don't repeat them inside More settings.
+      if (!host && group === "Match") continue;
       nodes.push(
         h(
           "fieldset",
@@ -1476,15 +1478,14 @@ export const roomScreen: ScreenFactory = (ctx: AppCtx) => {
     ];
   }
 
-  /** The dock's line: the match state, what Start needs for the host, and the wait for guests. */
+  /** The dock's status line: only shows actionable info (guests waiting, or missing players to start). */
   function dockText(room: RoomState, host: boolean): string {
-    if (room.starting) return "Match starting";
-    if (room.in_match) return "Match in progress";
+    if (room.starting || room.in_match) return "";
     if (!host) return "Waiting for host to start";
     const active = room.players.filter((p) => p.team !== TEAM_SPECTATOR).length;
     const missing = ROOM_MIN_PLAYERS - active;
     if (missing > 0) return `Waiting for ${missing} more ${missing === 1 ? "player" : "players"}`;
-    return `${active} ${active === 1 ? "player" : "players"} ready`;
+    return "";
   }
 
   function renderRoom(): void {
