@@ -92,10 +92,11 @@ impl Session {
         }
     }
 
-    /// The socket dropped: the room holds this player's slot for a reconnect.
-    fn drop_room(&mut self) {
+    /// The socket closed or dropped: a clean browser close leaves the lobby immediately,
+    /// while an unexpected drop holds the slot for reconnect.
+    fn drop_room(&mut self, clean: bool) {
         if let Some((r, id)) = self.room.take() {
-            let _ = r.tx.send(RoomCmd::Lost { player: id, out: self.out.clone() });
+            let _ = r.tx.send(RoomCmd::Lost { player: id, out: self.out.clone(), clean });
         }
     }
 
@@ -457,6 +458,7 @@ async fn run(hub: &Arc<Hub>, socket: WebSocket, ip: IpAddr, conn_id: u64, accoun
     // why the server closes this socket, if it does: sent as the close frame. subscribe() marks the current value as
     // seen, so a shutdown that began before this socket subscribed is read here, not awaited by changed().
     let mut closing: Option<Close> = if *stop.borrow_and_update() { Some(close::SHUTDOWN) } else { None };
+    let mut clean_close = false;
     while closing.is_none() {
         let msg = tokio::select! {
             m = stream.next() => match m {
@@ -522,7 +524,10 @@ async fn run(hub: &Arc<Hub>, socket: WebSocket, ip: IpAddr, conn_id: u64, accoun
                 }
             }
             Message::Ping(_) => {}
-            Message::Close(_) => break,
+            Message::Close(frame) => {
+                clean_close = frame.as_ref().is_none_or(|f| f.code == 1000 || f.code == 1001);
+                break;
+            }
         }
     }
     if let Some(rtc) = &hub.rtc {
@@ -532,7 +537,7 @@ async fn run(hub: &Arc<Hub>, socket: WebSocket, ip: IpAddr, conn_id: u64, accoun
         // queued behind everything sent so far; the writer sends it and exits
         let _ = s.out.send(Out::Close(c));
     }
-    s.drop_room();
+    s.drop_room(clean_close);
     drop(s);
     if closing.is_some() {
         // keep reading until the writer has sent the close frame and the client has answered it: dropping the socket

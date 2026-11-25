@@ -26,8 +26,11 @@ pub const MAX_PASSWORD_LEN: usize = 64;
 const HISTORY: usize = 256;
 /// Clients further behind than this get a snapshot instead of batches.
 const MAX_CATCHUP: u32 = 90;
-/// A player whose connection dropped keeps their slot this long.
+/// A player whose connection dropped unexpectedly keeps their slot this long.
 const LOST_LIMIT: Duration = Duration::from_secs(60);
+/// A clean tab close / page unload during a match keeps the slot briefly so F5 reloads resume,
+/// without leaving a closed tab stuck on "Reconnecting" for a minute.
+const CLEAN_LOST_LIMIT: Duration = Duration::from_secs(5);
 /// Countdown between the host's start and the match (two or more players).
 const START_DELAY: Duration = Duration::from_secs(1);
 /// Quick-play players who change no input and say nothing this long are removed.
@@ -60,8 +63,8 @@ pub enum RoomCmd {
     /// The connection left on purpose. `out` identifies the connection, so a
     /// stale command from a replaced connection changes nothing.
     Leave { player: u32, out: mpsc::UnboundedSender<Out> },
-    /// The connection dropped: its slot is held for a reconnect.
-    Lost { player: u32, out: mpsc::UnboundedSender<Out> },
+    /// The connection dropped: its slot is held for a reconnect (`clean` = browser closed/unloaded cleanly).
+    Lost { player: u32, out: mpsc::UnboundedSender<Out>, clean: bool },
     /// Chat or a game command. `out` identifies the connection; a stale one changes nothing (see `Leave`).
     Msg { player: u32, msg: ClientMsg, out: mpsc::UnboundedSender<Out> },
     Frame { player: u32, frame: ClientFrame, out: mpsc::UnboundedSender<Out> },
@@ -175,8 +178,8 @@ struct Ban {
 
 enum Link {
     Live(ConnInfo),
-    /// Connection dropped at this instant; the slot waits for a resume.
-    Lost(Instant),
+    /// Connection dropped at `at`; the slot waits up to `limit` for a resume.
+    Lost { at: Instant, limit: Duration },
 }
 
 /// What a chat line is throttled by: the player, its address and its account.
@@ -257,7 +260,7 @@ impl RPlayer {
     fn live(&self) -> Option<&ConnInfo> {
         match &self.link {
             Link::Live(c) => Some(c),
-            Link::Lost(_) => None,
+            Link::Lost { .. } => None,
         }
     }
 
@@ -614,7 +617,7 @@ impl Room {
                     self.remove(player, "left");
                 }
             }
-            RoomCmd::Lost { player, out } => self.lost(player, &out),
+            RoomCmd::Lost { player, out, clean } => self.lost(player, &out, clean),
             RoomCmd::Msg { player, msg, out } => {
                 if self.is_live_as(player, &out) {
                     self.message(player, msg);
@@ -872,16 +875,22 @@ impl Room {
         }
     }
 
-    /// The connection dropped: keep the slot (and its place in a running
-    /// match, standing still) until it resumes or the grace period ends.
-    fn lost(&mut self, id: u32, out: &mpsc::UnboundedSender<Out>) {
+    /// The connection closed or dropped. A clean tab close in the lobby leaves immediately
+    /// (no stuck "Reconnecting"); a clean close in-match holds briefly for F5 reloads;
+    /// an unexpected network drop holds for the full grace period.
+    fn lost(&mut self, id: u32, out: &mpsc::UnboundedSender<Out>, clean: bool) {
         if !self.is_live_as(id, out) {
             return;
         }
+        if clean && self.game.is_none() {
+            self.remove(id, "left");
+            return;
+        }
         let Some(p) = self.player_mut(id) else { return };
-        p.link = Link::Lost(Instant::now());
+        let limit = if clean { CLEAN_LOST_LIMIT } else { LOST_LIMIT };
+        p.link = Link::Lost { at: Instant::now(), limit };
         let in_match = p.in_match;
-        info!(room = %self.code, player = id, "connection lost");
+        info!(room = %self.code, player = id, clean, "connection lost");
         if in_match {
             if let Some(g) = self.game.as_mut() {
                 g.m.neutralize(id);
@@ -896,7 +905,7 @@ impl Room {
         let gone: Vec<u32> = self
             .players
             .iter()
-            .filter(|p| matches!(&p.link, Link::Lost(t) if now.duration_since(*t) > LOST_LIMIT))
+            .filter(|p| matches!(&p.link, Link::Lost { at, limit } if now.duration_since(*at) > *limit))
             .map(|p| p.id)
             .collect();
         for id in gone {
