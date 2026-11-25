@@ -12,8 +12,8 @@ use axum::routing::{get, post};
 use axum::{Json, Router};
 use neobox_net::level_of;
 use neobox_store::{
-    Account, Error, FriendState, MapDetail, MapSummary, MatchStats, NewReport, Profile, ProfileMap, Record, ReportKind, ReportedMap, Reporter,
-    Sort, Status, Store, Visibility, MAX_CODE_BYTES, SESSION_TTL,
+    Account, Error, FeedbackKind, FriendState, MapDetail, MapSummary, MatchStats, NewFeedback, NewReport, Profile, ProfileMap, Record,
+    ReportKind, ReportedMap, Reporter, Sort, Status, Store, Visibility, MAX_CODE_BYTES, SESSION_TTL,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
@@ -54,6 +54,7 @@ pub fn router() -> Router<Arc<Hub>> {
         .route("/api/library/{id}/favourite", post(library_favourite))
         .route("/api/library/{id}/records", get(library_records))
         .route("/api/report", post(report))
+        .route("/api/feedback", post(submit_feedback))
         .route("/api/players/{name}", get(player))
         .layer(DefaultBodyLimit::max(MAX_CODE_BYTES + 64 * 1024))
 }
@@ -794,4 +795,48 @@ async fn library_map_report(hub: &Hub, id: i64, reason: String, reporter: Report
         map: Some(ReportedMap { id: Some(map.id), name: map.name, author: map.author }),
         chat: Vec::new(),
     })
+}
+
+// Player feedback (bug reports & feature suggestions)
+
+#[derive(Deserialize)]
+struct FeedbackBody {
+    kind: FeedbackKind,
+    message: String,
+    #[serde(default)]
+    screen: String,
+    #[serde(default)]
+    context: String,
+    #[serde(default)]
+    name: String,
+}
+
+async fn submit_feedback(
+    State(hub): State<Arc<Hub>>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    Json(b): Json<FeedbackBody>,
+) -> Result<StatusCode, Fail> {
+    let ip = client_ip(&hub, &headers, peer);
+    if !hub.feedback.allow(ip) {
+        return Err(Fail::new(StatusCode::TOO_MANY_REQUESTS, "Too many submissions, please try again shortly"));
+    }
+    let (author_account, author_name) = match signed_in(&hub, &headers).await {
+        Ok(acc) => (Some(acc.id), acc.name),
+        Err(_) => {
+            let clean = b.name.trim();
+            (None, if clean.is_empty() { "Guest".to_string() } else { clean.chars().take(32).collect() })
+        }
+    };
+    let entry = NewFeedback {
+        kind: b.kind,
+        message: b.message,
+        screen: b.screen,
+        context: b.context,
+        author_account,
+        author_name,
+        author_ip: ip.to_string(),
+    };
+    db(&hub, move |s| s.create_feedback(&entry)).await?;
+    Ok(StatusCode::NO_CONTENT)
 }

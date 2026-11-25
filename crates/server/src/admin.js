@@ -46,7 +46,7 @@ async function api(path, body) {
   return r;
 }
 function showLogin() { $("#app").hidden = true; $("#login").hidden = false; $("#pw").focus(); }
-function showApp() { $("#login").hidden = true; $("#app").hidden = false; loadClips(true); loadReports(true); loadAccounts(); }
+function showApp() { $("#login").hidden = true; $("#app").hidden = false; loadFeedback(true); loadClips(true); loadReports(true); loadAccounts(); }
 
 $("#loginform").onsubmit = async (e) => {
   e.preventDefault();
@@ -402,6 +402,9 @@ function renderInsights(st) {
   const pingClass = p95Ping >= 160 ? "bad-txt" : p95Ping >= 80 ? "warn-txt" : "good-txt";
   const pending = counts.pending_maps || 0;
   const reports = counts.open_reports || 0;
+  const openBugs = counts.open_bugs || 0;
+  const openSug = counts.open_suggestions || 0;
+  const openFb = openBugs + openSug;
   const modes = (ins.modes || []).map((m) => `${modeNames[m.mode] || "Mode " + m.mode}: ${m.players}`).join(" · ") || "No active rooms";
   const nodes = ins.nodes || [];
 
@@ -414,6 +417,7 @@ function renderInsights(st) {
 
   setBadge("#nav-rooms", s.rooms);
   setBadge("#nav-maps", pending);
+  setBadge("#nav-feedback", openFb);
   setBadge("#nav-reports", reports);
 
   $("#insights-sub").textContent = nodes.length
@@ -445,6 +449,11 @@ function renderInsights(st) {
       <div class="k-lbl"><span>Map approvals</span><span>queue</span></div>
       <div class="k-val ${pending > 0 ? "warn-txt" : ""}">${pending}</div>
       <div class="k-sub">${pending > 0 ? "Click to review pending maps" : "Queue clear"}</div>
+    </div>
+    <div class="kpi clickable ${openBugs > 0 ? "alert" : openSug > 0 ? "warn" : ""}" data-jump="#sec-feedback">
+      <div class="k-lbl"><span>Bugs &amp; ideas</span><span>feedback</span></div>
+      <div class="k-val ${openBugs > 0 ? "bad-txt" : openSug > 0 ? "warn-txt" : ""}">${openBugs} / ${openSug}</div>
+      <div class="k-sub">${openFb > 0 ? `${openBugs} open bug${openBugs === 1 ? "" : "s"} · ${openSug} suggestion${openSug === 1 ? "" : "s"}` : "No open feedback"}</div>
     </div>
     <div class="kpi clickable ${reports > 0 ? "alert" : ""}" data-jump="#sec-reports">
       <div class="k-lbl"><span>Open reports</span><span>moderation</span></div>
@@ -925,6 +934,74 @@ async function deleteClip(id) {
   loadClips(true);
 }
 $("#clipmore").onclick = () => loadClips(false);
+
+// --- Bugs & Suggestions (Player Feedback) ---
+const FB_PAGE = 25;
+let fbCursor = null;
+async function loadFeedback(reset) {
+  if (reset) { fbCursor = null; $("#feedback tbody").innerHTML = ""; $("#fbdetail").hidden = true; $("#fbdetail").textContent = ""; }
+  const q = new URLSearchParams();
+  if ($("#fbkind").value) q.set("kind", $("#fbkind").value);
+  if ($("#fbstatus").value) q.set("status", $("#fbstatus").value);
+  if (fbCursor !== null) q.set("before", fbCursor);
+  try {
+    const r = await api("/admin/api/feedback?" + q);
+    if (!r.ok) { $("#fbmsg").textContent = "Could not load feedback: " + (await errorText(r)) + "."; return; }
+    const items = await r.json();
+    const tb = $("#feedback tbody");
+    for (const item of items) {
+      const tr = document.createElement("tr");
+      const kindPill = item.kind === "bug"
+        ? `<span class="pill rejected">bug</span>`
+        : `<span class="pill lobby">suggestion</span>`;
+      const statusPill = `<span class="pill ${item.status === "open" ? "pending" : item.status === "resolved" ? "approved" : ""}">${esc(item.status)}</span>`;
+      const preview = item.message.length > 90 ? item.message.slice(0, 90) + "…" : item.message;
+      const authorTag = `${esc(item.author_name)}${item.author_account === null ? " <span class=muted>(guest)</span>" : ""}`;
+      tr.innerHTML = `<td>${kindPill}</td><td class="map-name-cell">${esc(preview)}</td><td><span class="pill">${esc(item.screen || "-")}</span></td><td>${authorTag}</td><td>${esc(fmtShortDate(item.created))}</td><td>${statusPill}</td><td></td>`;
+      const actions = tr.lastChild;
+      const mk = (label, fn, cls) => { const b = document.createElement("button"); b.textContent = label; if (cls) b.className = cls; b.onclick = fn; actions.appendChild(b); };
+      mk("Details", () => showFeedback(item), "primary");
+      if (item.status === "open") {
+        mk("Resolve", () => setFeedbackStatus(item, "resolved"), "good");
+        mk("Dismiss", () => setFeedbackStatus(item, "dismissed"));
+      } else {
+        mk("Reopen", () => setFeedbackStatus(item, "open"));
+      }
+      mk("Delete", () => { if (confirm("Delete feedback #" + item.id + " for good?")) deleteFeedback(item); }, "bad");
+      tb.appendChild(tr);
+      fbCursor = item.id;
+    }
+    $("#nofb").hidden = tb.children.length > 0;
+    $("#fbmore").disabled = items.length < FB_PAGE;
+  } catch (_) {}
+}
+function showFeedback(item) {
+  const lines = [
+    `#${item.id} [${item.kind.toUpperCase()}] (${item.status})`,
+    `Author: ${item.author_name} (${item.author_account === null ? "guest" : "account " + item.author_account}, ${item.author_ip})`,
+    `Screen: ${item.screen || "-"}`,
+    `Context: ${item.context || "-"}`,
+    `Created: ${fmtShortDate(item.created)}`,
+    "",
+    item.message,
+  ];
+  $("#fbdetail").textContent = lines.join("\n");
+  $("#fbdetail").hidden = false;
+}
+async function setFeedbackStatus(item, status) {
+  const r = await api("/admin/api/feedback/" + item.id + "/status", { status });
+  $("#fbmsg").textContent = r.ok ? `Feedback #${item.id} marked ${status}.` : `Could not update #${item.id}: ${await errorText(r)}.`;
+  loadFeedback(true);
+}
+async function deleteFeedback(item) {
+  const r = await api("/admin/api/feedback/" + item.id + "/delete", {});
+  $("#fbmsg").textContent = r.ok ? `Deleted feedback #${item.id}.` : `Could not delete #${item.id}: ${await errorText(r)}.`;
+  loadFeedback(true);
+}
+$("#fbkind").onchange = () => loadFeedback(true);
+$("#fbstatus").onchange = () => loadFeedback(true);
+$("#fbrefresh").onclick = () => loadFeedback(true);
+$("#fbmore").onclick = () => loadFeedback(false);
 
 // --- Reports ---
 const REPORT_PAGE = 25;

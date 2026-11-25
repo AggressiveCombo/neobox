@@ -66,6 +66,8 @@ export interface AppCtx {
   reserveChrome(bar: HTMLElement): () => void;
   /** Hide the separate canvas objective bar while the HUD topbar renders objective info directly. */
   setObjectiveInTopbar(on: boolean): void;
+  /** Open the global bug report or suggestion dialog from any screen. */
+  openFeedback(kind: "bug" | "suggestion"): void;
 }
 
 /** A mounted screen. The app calls `update` after every store change and `destroy` when leaving. */

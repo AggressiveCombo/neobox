@@ -278,6 +278,8 @@ pub struct Hub {
     pub uploads: Limiter<i64>,
     /// Report submissions per address.
     pub reports: Limiter<IpAddr>,
+    /// Bug reports and suggestions per address.
+    pub feedback: Limiter<IpAddr>,
     /// Signed-in accounts with an open WebSocket, with the number of sockets.
     pub online: Mutex<HashMap<i64, usize>>,
     /// Regional game nodes that beat at this (main) server, by public URL.
@@ -322,6 +324,7 @@ impl Hub {
             account_login: Limiter::new(5, Duration::from_secs(60)),
             uploads: Limiter::new(10, Duration::from_secs(3600)),
             reports: Limiter::new(10, Duration::from_secs(3600)),
+            feedback: Limiter::new(12, Duration::from_secs(600)),
             online: Mutex::new(HashMap::new()),
             nodes: Mutex::new(HashMap::new()),
             beat: tokio::sync::Notify::new(),

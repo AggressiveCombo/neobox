@@ -114,3 +114,18 @@ export type ReportInput =
 export async function sendReport(input: ReportInput): Promise<void> {
   await request<void>("POST", "/api/report", input);
 }
+
+export type FeedbackKind = "bug" | "suggestion";
+
+export interface FeedbackInput {
+  kind: FeedbackKind;
+  message: string;
+  screen: string;
+  context: string;
+  name: string;
+}
+
+/** POST /api/feedback. Stores a player bug report or feature suggestion for admins. */
+export async function sendFeedback(input: FeedbackInput): Promise<void> {
+  await request<void>("POST", "/api/feedback", input);
+}

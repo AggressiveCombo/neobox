@@ -187,6 +187,7 @@ dialog.inspector::backdrop { background:rgba(10,10,10,.58); }
   <a href="#sec-players">Players</a>
   <a href="#sec-maps">Approvals <span class="badge alert" id="nav-maps" hidden>0</span></a>
   <a href="#sec-library">Library</a>
+  <a href="#sec-feedback">Feedback <span class="badge alert" id="nav-feedback" hidden>0</span></a>
   <a href="#sec-reports">Reports <span class="badge alert" id="nav-reports" hidden>0</span></a>
   <a href="#sec-clips">Clips</a>
   <a href="#sec-accounts">Accounts</a>
@@ -259,6 +260,29 @@ dialog.inspector::backdrop { background:rgba(10,10,10,.58); }
     <div class="scroll"><table id="library"><thead><tr><th>Preview</th><th>Map</th><th>Author</th><th>Status</th><th>Visibility</th><th>Picked</th><th>Created</th><th>Actions</th></tr></thead><tbody></tbody></table></div>
     <div id="libmsg" class="muted"></div>
     <textarea id="libcode" readonly hidden style="width:100%;height:120px;font:12px ui-monospace, monospace;margin-top:8px"></textarea>
+  </section>
+
+  <section id="sec-feedback" class="wide">
+    <h2>Bugs &amp; suggestions <span class="sub" id="fb-sub">Player-submitted issues and ideas</span></h2>
+    <div class="row">
+      <select id="fbkind">
+        <option value="">All types</option>
+        <option value="bug">Bugs</option>
+        <option value="suggestion">Suggestions</option>
+      </select>
+      <select id="fbstatus">
+        <option value="open">Open</option>
+        <option value="resolved">Resolved</option>
+        <option value="dismissed">Dismissed</option>
+        <option value="">All statuses</option>
+      </select>
+      <button id="fbrefresh">Refresh</button>
+    </div>
+    <div class="scroll"><table id="feedback"><thead><tr><th>Type</th><th>Message</th><th>Screen</th><th>Author</th><th>Created</th><th>Status</th><th>Actions</th></tr></thead><tbody></tbody></table></div>
+    <div id="nofb" class="muted" hidden>No feedback matching this filter.</div>
+    <div class="row"><button id="fbmore">More</button></div>
+    <div id="fbdetail" class="chat-box" hidden style="white-space:pre-wrap;max-height:220px"></div>
+    <div id="fbmsg" class="muted"></div>
   </section>
 
   <section id="sec-reports">

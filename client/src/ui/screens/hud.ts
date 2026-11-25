@@ -564,6 +564,8 @@ export const hudScreen: HudFactory = (ctx) => {
     h("label", { class: "hud-menu-volume" }, icon("volume-2", 18), h("span", null, "Volume"), volumeInput),
     muteItem,
     h("button", { type: "button", onclick: () => ctx.store.set({ screen: "settings" }) }, icon("keyboard", 18), h("span", null, "Change controls")),
+    h("button", { type: "button", onclick: () => { setMenu(false); ctx.openFeedback("bug"); } }, icon("bug", 18), h("span", null, "Report bug")),
+    h("button", { type: "button", onclick: () => { setMenu(false); ctx.openFeedback("suggestion"); } }, icon("lightbulb", 18), h("span", null, "Suggest")),
     signOutItem,
   );
   const menuBtn = h(

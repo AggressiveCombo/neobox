@@ -11,7 +11,7 @@ use axum::http::{header, HeaderMap, StatusCode};
 use axum::response::{Html, IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
-use neobox_store::{Error, ReportStatus, Verdict};
+use neobox_store::{Error, FeedbackKind, FeedbackStatus, ReportStatus, Verdict};
 use serde::{Deserialize, Serialize};
 use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
@@ -49,6 +49,9 @@ pub fn router() -> Router<Arc<Hub>> {
         .route("/admin/api/reports", get(reports))
         .route("/admin/api/reports/{id}/status", post(report_status))
         .route("/admin/api/reports/{id}/delete", post(report_delete))
+        .route("/admin/api/feedback", get(feedback_list))
+        .route("/admin/api/feedback/{id}/status", post(feedback_status))
+        .route("/admin/api/feedback/{id}/delete", post(feedback_delete))
         .route("/admin/api/accounts", get(accounts))
         .route("/admin/api/accounts/{id}/password", post(account_password))
 }
@@ -623,6 +626,44 @@ async fn report_delete(State(hub): State<Arc<Hub>>, headers: HeaderMap, Path(id)
         return Ok(StatusCode::UNAUTHORIZED.into_response());
     }
     db(&hub, move |s| s.delete_report(id)).await?;
+    Ok(StatusCode::NO_CONTENT.into_response())
+}
+
+#[derive(Deserialize)]
+struct FeedbackQuery {
+    kind: Option<FeedbackKind>,
+    status: Option<FeedbackStatus>,
+    before: Option<i64>,
+}
+
+/// Player bug reports and suggestions, newest first, filtered by kind/status and paged by `before`.
+async fn feedback_list(State(hub): State<Arc<Hub>>, headers: HeaderMap, Query(q): Query<FeedbackQuery>) -> Result<Response, Fail> {
+    if !authorized(&hub, &headers) {
+        return Ok(StatusCode::UNAUTHORIZED.into_response());
+    }
+    let list = db(&hub, move |s| s.list_feedback(q.kind, q.status, q.before, ADMIN_PAGE_SIZE)).await?;
+    Ok(Json(list).into_response())
+}
+
+#[derive(Deserialize)]
+struct FeedbackStatusBody {
+    status: FeedbackStatus,
+}
+
+async fn feedback_status(State(hub): State<Arc<Hub>>, headers: HeaderMap, Path(id): Path<i64>, body: Bytes) -> Result<Response, Fail> {
+    if !authorized(&hub, &headers) {
+        return Ok(StatusCode::UNAUTHORIZED.into_response());
+    }
+    let b: FeedbackStatusBody = parse_body(&body)?;
+    db(&hub, move |s| s.set_feedback_status(id, b.status)).await?;
+    Ok(StatusCode::NO_CONTENT.into_response())
+}
+
+async fn feedback_delete(State(hub): State<Arc<Hub>>, headers: HeaderMap, Path(id): Path<i64>) -> Result<Response, Fail> {
+    if !authorized(&hub, &headers) {
+        return Ok(StatusCode::UNAUTHORIZED.into_response());
+    }
+    db(&hub, move |s| s.delete_feedback(id)).await?;
     Ok(StatusCode::NO_CONTENT.into_response())
 }
 

@@ -8,6 +8,7 @@
 
 mod account;
 mod clips;
+mod feedback;
 mod friends;
 mod library;
 mod records;
@@ -18,6 +19,7 @@ mod xp;
 
 pub use account::{Account, AccountSummary, MAX_PREFS_BYTES};
 pub use clips::{ClipSummary, MAX_CLIPS, MAX_CLIP_BYTES};
+pub use feedback::{Feedback, FeedbackKind, FeedbackStatus, NewFeedback, MAX_CONTEXT_CHARS, MAX_FEEDBACK_CHARS};
 pub use friends::{Friend, FriendState, MAX_FRIENDS, MAX_INCOMING_REQUESTS, MAX_OUTGOING_REQUESTS};
 pub use library::{
     Listing, MapDetail, MapSummary, RoomMap, Sort, Status, Verdict, Visibility, MAX_CODE_BYTES, MAX_FAVOURITES,
@@ -222,6 +224,23 @@ ALTER TABLE accounts ADD COLUMN rounds_won INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE accounts ADD COLUMN kills INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE accounts ADD COLUMN deaths INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE accounts ADD COLUMN play_seconds INTEGER NOT NULL DEFAULT 0;
+"#, r#"
+-- Player-submitted bug reports and feature suggestions.
+CREATE TABLE feedback (
+    id INTEGER PRIMARY KEY,
+    kind TEXT NOT NULL CHECK (kind IN ('bug', 'suggestion')),
+    status TEXT NOT NULL CHECK (status IN ('open', 'resolved', 'dismissed')),
+    message TEXT NOT NULL,
+    screen TEXT NOT NULL DEFAULT '',
+    context TEXT NOT NULL DEFAULT '',
+    author_account INTEGER REFERENCES accounts (id) ON DELETE SET NULL,
+    author_name TEXT NOT NULL,
+    author_ip TEXT NOT NULL,
+    created INTEGER NOT NULL,
+    resolved INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX feedback_status_id ON feedback (status, id DESC);
+CREATE INDEX feedback_kind_id ON feedback (kind, id DESC);
 "#];
 
 /// High-level database counts for the admin insights dashboard.
@@ -232,10 +251,12 @@ pub struct AdminCounts {
     pub pending_maps: i64,
     pub clips: i64,
     pub open_reports: i64,
+    pub open_bugs: i64,
+    pub open_suggestions: i64,
 }
 
 impl Store {
-    /// Summary counts across accounts, maps, approvals, clips and reports.
+    /// Summary counts across accounts, maps, approvals, clips, reports and feedback.
     pub fn admin_counts(&self) -> Result<AdminCounts> {
         let db = self.db();
         let count = |sql: &str| -> Result<i64> { Ok(db.query_row(sql, [], |r| r.get(0))?) };
@@ -245,6 +266,8 @@ impl Store {
             pending_maps: count("SELECT COUNT(*) FROM maps WHERE visibility = 'public' AND status = 'pending'")?,
             clips: count("SELECT COUNT(*) FROM clips")?,
             open_reports: count("SELECT COUNT(*) FROM reports WHERE status = 'open'")?,
+            open_bugs: count("SELECT COUNT(*) FROM feedback WHERE kind = 'bug' AND status = 'open'")?,
+            open_suggestions: count("SELECT COUNT(*) FROM feedback WHERE kind = 'suggestion' AND status = 'open'")?,
         })
     }
 

@@ -36,6 +36,7 @@ import { quickScreen } from "./ui/screens/quick";
 import { trainingScreen } from "./ui/screens/training";
 import { privacyScreen } from "./ui/screens/privacy";
 import { mountJukebox } from "./ui/jukebox";
+import { mountFeedbackBar, openFeedbackModal } from "./ui/feedback";
 import { showPostGame } from "./ui/postgame";
 import { prefs } from "./prefs";
 import { music } from "./music";
@@ -423,6 +424,7 @@ export function start(): Store<AppState> {
     setObjectiveInTopbar: (on) => {
       overlay.showObjective = !on;
     },
+    openFeedback: (kind) => openFeedbackModal(ctx, kind),
   };
 
   // A signed-in player joins under the account's name, so the invite waits for the account lookup.
@@ -431,6 +433,7 @@ export function start(): Store<AppState> {
     if (invite !== null && "code" in invite) joinRoom(invite.code);
   });
   mountJukebox(ctx);
+  mountFeedbackBar(ctx);
 
   // The appearance colour follows the preference into the room.
   prefs.subscribe((next, prev) => {
