@@ -50,7 +50,8 @@
   pointer-events: none;
 }
 
-.library-page .library-search > input {
+.library-page .library-search > input,
+.map-picker .library-search > input {
   width: 100%;
   padding-left: 44px;
 }
@@ -451,12 +452,28 @@ dialog.modal.map-picker {
   width: min(calc(100vw - 32px), 880px);
 }
 
+.map-picker [hidden] {
+  display: none !important;
+}
+
 .map-picker .map-grid {
   grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
 }
 
+/* .modal-body is a column flexbox: flex-basis on .library-search would otherwise stretch it to 240px tall. */
 .map-picker .library-search {
+  flex: none;
   max-width: none;
+}
+
+.map-picker .status {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--step-small);
+}
+
+.map-picker .status:empty {
+  display: none;
 }
 
 /* Top makers this week: a short ranked list in a surface block. */
