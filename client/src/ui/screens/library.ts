@@ -457,7 +457,7 @@ export const libraryScreen: ScreenFactory = (ctx) => {
         ),
         h(
           "button",
-          { type: "button", "aria-pressed": starred ? "true" : "false", onclick: () => void toggleFavourite(map) },
+          { type: "button", class: "map-star-btn", "aria-pressed": starred ? "true" : "false", onclick: () => void toggleFavourite(map) },
           icon("star", 18),
           starred ? "Starred" : "Star",
         ),

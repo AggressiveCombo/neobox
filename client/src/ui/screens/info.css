@@ -74,16 +74,13 @@
   font-weight: 500;
 }
 
-/* The privacy notice is one reading column: its header and text share its left edge, centred in the view. */
-.privacy {
-  --page-column: 44rem;
-}
-
-/* Long-form text (privacy notice). */
+/* Long-form text (privacy notice): centred reading column inside the standard page column so the header matches every other screen. */
 .doc {
   display: grid;
   gap: 36px;
+  width: 100%;
   max-width: 44rem;
+  margin-inline: auto;
   font-size: var(--step-body);
   line-height: 1.6;
 }

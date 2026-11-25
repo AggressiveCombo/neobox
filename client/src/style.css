@@ -294,6 +294,7 @@ button,
   z-index: 2;
   display: flex;
   overflow-y: auto;
+  scrollbar-gutter: stable;
   /* Focus scrolling keeps a control clear of the sticky page head (its measured height, kit.ts headSize; min 56px plus the safe-area inset). */
   scroll-padding-top: var(--page-head-h, calc(56px + env(safe-area-inset-top)));
   pointer-events: none;
@@ -326,8 +327,8 @@ button,
   gap: 20px;
 }
 
-/* Vertically centre compact hub/setup screens inside the viewport below their header; collapses to 0 when scrolling. */
-.page.quick > .page-inner,
+/* Vertically centre compact hub/setup screens inside the viewport below their header; collapses to 0 when scrolling.
+   Quick Play stays top-aligned so the matching bar appearing below its cards never shifts them upward. */
 .page.practice-page > .page-inner,
 .page.offline-page > .page-inner,
 .page.account-page > .page-inner,
@@ -361,25 +362,6 @@ button,
   font-size: inherit;
   letter-spacing: normal;
   line-height: inherit;
-}
-
-/* Privacy (wide screens): Back sits on its own line and the title starts on the content column's edge, the same edge as
-   the body. Phones keep Back and the title in one row (below). Settings and Friends keep Back and the title in one row on
-   every width, as Browse rooms does: the shared chrome must not move between pages (qa/motion.mjs chrome.pages). */
-@media (min-width: 601px) {
-  .privacy .page-head {
-    flex-wrap: wrap;
-  }
-
-  .privacy .page-head h1 {
-    flex: 1 1 100%;
-  }
-
-  .privacy .page-back {
-    /* Back's 18px padding would put its box inside the 16px edge gutter at 200% zoom; the icon sits on the edge instead. */
-    margin-inline-start: 0;
-    padding-inline-start: 0;
-  }
 }
 
 .page-actions {
@@ -1389,6 +1371,7 @@ dialog.modal:focus {
   flex: 1 1 auto;
   min-height: 0;
   overflow-y: auto;
+  scrollbar-gutter: stable;
   display: flex;
   flex-direction: column;
   gap: 16px;
@@ -1428,6 +1411,10 @@ dialog.modal:focus {
   min-height: var(--control);
   background: var(--accent);
   color: var(--accent-ink);
+}
+
+.reconnect-banner button:first-of-type {
+  min-width: 128px;
 }
 
 #boot {
@@ -1715,6 +1702,9 @@ dialog.modal:focus {
 .feedback-err {
   color: var(--danger);
   margin: 0;
+}
+.feedback-submit {
+  min-width: 175px;
 }
 /* The strip's full status for screen readers: the visible text is aria-hidden. */
 .wip-mark-sr {

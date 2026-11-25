@@ -18,7 +18,7 @@
 
 .room-screen > * {
   width: 100%;
-  max-width: 1280px;
+  max-width: var(--page-column);
   margin-inline: auto;
   box-sizing: border-box;
 }
@@ -27,6 +27,7 @@
   flex: 1 1 auto;
   min-height: 0;
   overflow-y: auto;
+  scrollbar-gutter: stable;
   display: flex;
   flex-direction: column;
   gap: 16px;
@@ -48,9 +49,8 @@
   outline-offset: -4px;
 }
 
-/* The sticky tabs cover the scroller's top edge. room.ts measures them into --room-tabs-h, so focus scrolling stops short of them. */
 .room-screen :is(button, input, select, textarea, summary, a[href], [tabindex]) {
-  scroll-margin-top: var(--room-tabs-h, 0px);
+  scroll-margin-top: 8px;
 }
 
 /* ---- header ---- */
@@ -102,6 +102,7 @@
   margin: 0;
   color: var(--ink);
   overflow-wrap: anywhere;
+  font-variant-numeric: tabular-nums;
 }
 
 .room-notice,
@@ -184,6 +185,7 @@
   .room-col {
     overflow-y: auto;
     scrollbar-width: thin;
+    scrollbar-gutter: stable;
   }
 }
 
@@ -237,6 +239,10 @@
   gap: 6px;
 }
 
+.room-roster-group .panel-sub {
+  font-variant-numeric: tabular-nums;
+}
+
 .room-roster-list {
   margin: 0;
   padding: 0;
@@ -260,27 +266,32 @@
 
 .room-player-line {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: center;
   gap: 6px;
   min-width: 0;
+  overflow: hidden;
 }
 
 .room-player-line .chip {
   display: inline-flex;
   align-items: center;
   gap: 6px;
+  flex: none;
 }
 
 .room-player-name {
   color: var(--ink);
   font-weight: 500;
-  /* a name wraps rather than clipping: at large text sizes the row gives the name little width */
-  overflow-wrap: anywhere;
+  flex: 0 1 auto;
   min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .room-profile-link {
+  flex: 0 1 auto;
   min-width: 0;
   min-height: 24px;
   padding: 0;
@@ -292,7 +303,9 @@
   text-decoration: underline;
   text-decoration-color: var(--muted);
   text-underline-offset: 3px;
-  overflow-wrap: anywhere;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   cursor: pointer;
 }
 
@@ -399,6 +412,10 @@
 .room-typing,
 .room-editing,
 .room-offline {
+  flex: none;
+  white-space: nowrap;
+  color: var(--muted);
+  font-size: var(--step-small);
   font-style: italic;
 }
 
@@ -566,6 +583,10 @@ button.room-menu-item[aria-checked="true"] {
   margin: 0;
   color: var(--muted);
   font-size: var(--step-small);
+}
+
+.room-map-votes {
+  font-variant-numeric: tabular-nums;
 }
 
 .room-map-actions {
@@ -739,6 +760,7 @@ button.room-menu-item[aria-checked="true"] {
 .room-setting-value {
   color: var(--ink);
   overflow-wrap: anywhere;
+  font-variant-numeric: tabular-nums;
 }
 
 /* Touch: settings rows and their checkboxes take 48px targets. */
@@ -768,6 +790,7 @@ button.room-menu-item[aria-checked="true"] {
   flex: 1 1 0;
   min-height: 240px;
   overflow-y: auto;
+  scrollbar-gutter: stable;
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -812,7 +835,7 @@ button.room-menu-item[aria-checked="true"] {
 
 /* ---- dock: the host's start controls, fixed under the scrolling content ---- */
 
-/* The dock's bar spans the window; its content lines up with the 1280 px column above it. */
+/* The dock's bar spans the window; its content lines up with the shared page column above it. */
 .room-dock {
   flex: none;
   display: flex;
@@ -822,7 +845,7 @@ button.room-menu-item[aria-checked="true"] {
   gap: 12px;
   max-width: none;
   margin: 0;
-  padding: 12px max(var(--margin), calc((100% - 1280px) / 2 + var(--margin))) calc(16px + env(safe-area-inset-bottom));
+  padding: 12px max(var(--margin), calc((100% - var(--page-column)) / 2 + var(--margin))) calc(16px + env(safe-area-inset-bottom));
   background: var(--surface);
   box-sizing: border-box;
 }
@@ -879,12 +902,15 @@ button.room-menu-item[aria-checked="true"] {
     display: flex;
     flex-wrap: wrap;
     flex: none;
-    position: sticky;
-    top: 0;
-    z-index: 5;
-    margin: 0 calc(-1 * var(--margin));
-    padding: 8px calc(var(--margin) + 4px);
+    max-width: none;
+    margin: 0;
+    padding: 8px var(--margin);
     background: var(--surface);
+    border-bottom: 1px solid var(--line);
+  }
+
+  .room-content .room-panel {
+    margin-inline: 0;
   }
 
   .room-screen .room-tabs .tab {

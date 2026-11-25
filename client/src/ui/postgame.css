@@ -19,6 +19,7 @@
   line-height: 1;
   letter-spacing: -0.04em;
   color: var(--ink);
+  font-variant-numeric: tabular-nums;
 }
 
 .postgame-of {
@@ -32,6 +33,7 @@
   font-size: var(--step-lead);
   font-weight: 500;
   color: var(--ink);
+  font-variant-numeric: tabular-nums;
 }
 
 .postgame-level {
@@ -45,6 +47,7 @@
   justify-content: space-between;
   align-items: baseline;
   gap: 8px;
+  font-variant-numeric: tabular-nums;
 }
 
 .postgame-level-range {

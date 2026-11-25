@@ -1320,15 +1320,9 @@ export const roomScreen: ScreenFactory = (ctx: AppCtx) => {
     h("div", { class: "room-col room-col-match" }, modePanel, mapPanel, managePanel),
     h("div", { class: "room-col room-col-chat" }, chatPanel),
   );
-  // The tabs, header, notice and sections scroll together; the tabs come first so the phone's sticky switch is always in view (320x256 zoomed: the header above it hid them under the dock) and DOM order matches the layout. The dock sits outside the scroller so it never covers content.
-  const content = h("main", { class: "room-content" }, tabBar, header, notice, startNotice, joining, main);
-  const root = h("div", { class: "room-screen", "data-tab": "players" }, content, dock);
-
-  // The sticky tabs cover the scroller's top edge. Their height feeds scroll-margin in room.css, so focus scrolling keeps the focused control clear of them.
-  const overlays = new ResizeObserver(() => {
-    root.style.setProperty("--room-tabs-h", `${tabBar.offsetHeight}px`);
-  });
-  overlays.observe(tabBar);
+  // On phones the tab bar sits above the scroller (directly under the top bar), so the lobby header and panels scroll cleanly underneath it without ever peeking above the tabs. The dock stays fixed below the scroller.
+  const content = h("main", { class: "room-content" }, header, notice, startNotice, joining, main);
+  const root = h("div", { class: "room-screen", "data-tab": "players" }, tabBar, content, dock);
 
   // The reconnect banner floats over the top edge of the app. While it shows, the room's top padding starts below it (room.css), so no content scrolls under it.
   const banner = document.querySelector<HTMLElement>(".reconnect-banner");
@@ -1622,7 +1616,6 @@ export const roomScreen: ScreenFactory = (ctx: AppCtx) => {
     destroy() {
       alive = false;
       clearInterval(typingTimer);
-      overlays.disconnect();
       bannerSize.disconnect();
       unsubPrefs();
       closeVoteMenu();

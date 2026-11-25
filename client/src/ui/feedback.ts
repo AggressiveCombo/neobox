@@ -63,7 +63,7 @@ export function openFeedbackModal(ctx: AppCtx, initialKind: FeedbackKind): void 
   const metaLine = h("div", { class: "feedback-meta" }, h("span", null, `Context: ${snap.summary}`), counter);
   const statusEl = h("p", { class: "field-hint feedback-err", role: "alert", hidden: true });
 
-  const submitBtn = h("button", { type: "button", class: "primary", disabled: true }, icon("send", 18), h("span"));
+  const submitBtn = h("button", { type: "button", class: "primary feedback-submit", disabled: true }, icon("send", 18), h("span"));
   const submitLabel = submitBtn.lastElementChild as HTMLElement;
 
   let modal: { close(): void } | null = null;

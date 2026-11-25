@@ -285,6 +285,10 @@ dialog.modal.map-dialog {
   gap: 6px;
 }
 
+.map-star-btn {
+  min-width: 108px;
+}
+
 .map-state,
 .map-desc {
   margin: 0;
@@ -298,6 +302,7 @@ dialog.modal.map-dialog {
 .map-stats {
   margin: 0;
   overflow: visible;
+  font-size: var(--step-body);
 }
 
 .map-info .map-stats {
@@ -311,8 +316,6 @@ dialog.modal.map-dialog {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-}
-  font-size: var(--step-body);
 }
 
 /* Vote, star and copy: icon + word. A pressed toggle fills its icon. */

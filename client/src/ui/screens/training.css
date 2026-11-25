@@ -143,11 +143,11 @@
   }
 }
 
-/* The top bar runs edge to edge: the playfield showed through the margin beside it (grey blocks at the corners).
+/* The top bar runs edge to edge inside #ui > .offline.playing (6px horizontal inset).
    Its controls keep 48px touch targets at every size. */
 .training-bar {
-  margin-inline: calc(-1 * var(--margin));
-  padding-inline: var(--margin);
+  margin-inline: -6px;
+  padding-inline: 6px;
 }
 
 .training-bar button {

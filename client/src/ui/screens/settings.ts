@@ -312,9 +312,9 @@ export const settingsScreen: ScreenFactory = (ctx) => {
 
   function syncColor(): void {
     const color = prefs.value.color;
-    colorSwatch.hidden = color === null;
+    colorSwatch.classList.toggle("is-auto", color === null);
     autoColor.setAttribute("aria-pressed", String(color === null));
-    if (color !== null) colorSwatch.style.background = cssHex(color);
+    colorSwatch.style.background = color !== null ? cssHex(color) : "";
     colorNote.textContent = color === null ? "The server picks a colour until you choose one." : "Your colour in rooms.";
   }
 

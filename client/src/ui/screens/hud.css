@@ -595,6 +595,10 @@
   gap: 8px;
 }
 
+.hud-jukebox-controls button {
+  min-width: 100px;
+}
+
 .hud-jukebox-form {
   display: flex;
   gap: 8px;
@@ -665,10 +669,18 @@
 }
 
 .hud-typing {
+  min-height: 1.45em;
   padding: 2px 8px;
   background: var(--hud-solid);
   color: var(--hud-muted);
   font-size: 0.8125rem;
+  pointer-events: none;
+}
+
+.hud-typing[hidden] {
+  display: block;
+  visibility: hidden;
+  background: transparent;
 }
 
 .hud-root .hud-chat-btn[aria-expanded="true"] {
@@ -776,6 +788,7 @@
 
 .hud-spectate-name {
   min-width: 140px;
+  max-width: 240px;
   padding: 0 8px;
   text-align: center;
   font-weight: 500;

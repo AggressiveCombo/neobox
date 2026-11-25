@@ -90,6 +90,7 @@
 }
 
 .jukebox-size {
+  min-width: 108px;
   min-height: var(--control);
   padding: 0 12px;
   font-size: var(--step-small);

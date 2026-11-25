@@ -44,7 +44,7 @@
   align-items: center;
   gap: 8px;
   flex-wrap: wrap;
-  padding: 10px 16px;
+  padding: 10px var(--margin);
 }
 
 .editor-top-tools {
@@ -232,6 +232,9 @@
   margin: 0;
   color: var(--muted);
   font-size: var(--step-small);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .editor-float {
@@ -338,6 +341,7 @@
   flex: 1 1 auto;
   min-height: 0;
   overflow-y: auto;
+  scrollbar-gutter: stable;
   padding: 8px 20px 24px;
 }
 
@@ -347,11 +351,9 @@
   gap: 20px;
 }
 
+/* .editor-side-head already renders the current panel title ("Selection" / "Map settings"). */
 .editor-side .inspector-title {
-  margin: 0;
-  font-size: var(--step-small);
-  font-weight: 500;
-  color: var(--muted);
+  display: none;
 }
 
 .editor-side h3 {
