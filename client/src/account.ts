@@ -397,8 +397,10 @@ export function applyAccount(ctx: AppCtx, account: Account | null): void {
     ctx.toast("this takes effect the next time you connect", "info");
     return;
   }
+  const prevScreen = ctx.store.state.screen;
   const saved = name || readStoredName();
   ctx.disconnect();
+  if (prevScreen === "account") ctx.store.set({ screen: "account" });
   if (NAME_RE.test(saved)) ctx.play(saved);
   else ctx.toast("press Play to reconnect", "info");
 }

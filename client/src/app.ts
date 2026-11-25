@@ -140,9 +140,18 @@ interface NavState {
   modal?: string;
 }
 
-/** The room's screens: the room, its match, Settings opened from the lobby or the match, and the map editor the host opened from the room. */
+/** Screens reachable while staying in a room (returning via Back keeps the room seat instead of leaving). */
 function inRoomScreen(screen: Screen, editorForRoom: boolean): boolean {
-  return screen === "room" || screen === "match" || screen === "settings" || (screen === "editor" && editorForRoom);
+  return (
+    screen === "room" ||
+    screen === "match" ||
+    screen === "settings" ||
+    screen === "account" ||
+    screen === "friends" ||
+    screen === "privacy" ||
+    screen === "about" ||
+    (screen === "editor" && editorForRoom)
+  );
 }
 
 export function start(): Store<AppState> {
@@ -917,9 +926,15 @@ export function start(): Store<AppState> {
           return;
         }
         const queue = store.state.intent;
-        // A join in progress keeps its screen: the room screen shows its pending state until the room answers.
+        // A join in progress keeps its screen; Account / Settings / Friends / Library keep their screen too.
         const joining = store.state.pending?.kind === "room";
-        store.set({ serverName: msg.server, screen: queue !== null ? "quick" : joining ? store.state.screen : "browse", intent: null });
+        const stayOn =
+          joining ||
+          store.state.screen === "account" ||
+          store.state.screen === "settings" ||
+          store.state.screen === "friends" ||
+          store.state.screen === "library";
+        store.set({ serverName: msg.server, screen: queue !== null ? "quick" : stayOn ? store.state.screen : "browse", intent: null });
         // The offline page for Browse waits on this welcome: mount the list now that the socket is open.
         if (offlineShown) mount(store.state.screen);
         net.send({ t: "list_rooms" });
@@ -1003,14 +1018,18 @@ export function start(): Store<AppState> {
         connectServer(msg.url, msg.then);
         return;
       case "room": {
-        const chat = store.state.room?.code === msg.room.code ? store.state.chat : [];
+        const sameRoom = store.state.room?.code === msg.room.code;
+        const chat = sameRoom ? store.state.chat : [];
         roomCode = msg.room.code;
         if (msg.room.quick !== null) quickVisited.add(msg.room.code.toUpperCase());
         matching = null;
         saveSeat();
-        // a match, Settings opened from the lobby, or the host's map editor opened from the room stays on screen
+        // Only switch to the room screen when entering a room; routine updates for the room we are
+        // already in must never yank the player back from Settings, Account, Friends, Editor, etc.
+        const entering = !sameRoom || store.state.pending?.kind === "room";
         const keep =
           store.state.inMatch ||
+          !entering ||
           store.state.screen === "settings" ||
           (store.state.editorForRoom && store.state.screen === "editor");
         store.set({
