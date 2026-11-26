@@ -636,3 +636,12 @@ button.quiet.home-privacy:active:not(:disabled) {
     height: 200px;
   }
 }
+
+/* Touch: every drum row a finger-sized target (48px at the front, 40px or more on every row the window shows), so
+   a tap lands on the row it aims at. After the phone layouts above, so it wins over their sizes. */
+@media (pointer: coarse) {
+  .drum {
+    --drum-pitch: 3rem;
+    --drum-opt-h: 3rem;
+  }
+}
