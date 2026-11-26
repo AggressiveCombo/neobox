@@ -507,10 +507,12 @@ button.home-privacy {
   background: none;
 }
 
+/* Touch: 44px tall hit areas from vertical padding that the negative margin takes back out of the layout. */
 @media (pointer: coarse) {
+  .home-links a,
   button.home-privacy {
-    padding: 10px 0;
-    margin-block: -10px;
+    padding: 13px 0;
+    margin-block: -13px;
   }
 }
 
