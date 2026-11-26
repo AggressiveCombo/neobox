@@ -73,6 +73,8 @@ struct Session {
     presence: Option<Presence>,
     /// data received on the WebRTC channel
     rtc_in: mpsc::UnboundedSender<Vec<u8>>,
+    /// When this connection last sent a WebRTC offer (offers are rate-limited).
+    rtc_offered: Option<Instant>,
 }
 
 impl Session {
@@ -342,6 +344,11 @@ impl Session {
                 if sdp.len() > 16 * 1024 {
                     return self.error("bad_message", "Offer too large");
                 }
+                // each offer builds a peer on the RTC task: one every few seconds per connection
+                if self.rtc_offered.is_some_and(|t| t.elapsed() < RTC_OFFER_GAP) {
+                    return self.error("rtc_failed", "Too many WebRTC offers, wait a few seconds");
+                }
+                self.rtc_offered = Some(Instant::now());
                 match rtc.offer(self.conn_id, sdp, self.stats.clone(), self.rtc_in.clone()).await {
                     Ok(sdp) => self.send(&ServerMsg::RtcAnswer { sdp }),
                     Err(e) => {
@@ -401,6 +408,9 @@ impl Session {
 /// A client that sends nothing for this long, not even a pong to our ping, is dropped: its network is gone or it is frozen.
 const SILENT_AFTER: Duration = Duration::from_secs(10);
 
+/// Minimum gap between WebRTC offers from one connection; a legitimate client retries after 15 s.
+const RTC_OFFER_GAP: Duration = Duration::from_secs(3);
+
 async fn run(hub: &Arc<Hub>, socket: WebSocket, ip: IpAddr, conn_id: u64, account: Option<AccountRef>) {
     let (mut sink, mut stream) = socket.split();
     let (out_tx, mut out_rx) = mpsc::unbounded_channel::<Out>();
@@ -408,7 +418,7 @@ async fn run(hub: &Arc<Hub>, socket: WebSocket, ip: IpAddr, conn_id: u64, accoun
     let stats = Arc::new(ConnStats::default());
     // friends see the account online while any of its sockets is open
     let presence = account.as_ref().map(|a| hub.presence(a.id));
-    let mut s = Session { hub: hub.clone(), info: None, room: None, out: out_tx, stats: stats.clone(), ip, conn_id, account, presence, rtc_in: rtc_tx };
+    let mut s = Session { hub: hub.clone(), info: None, room: None, out: out_tx, stats: stats.clone(), ip, conn_id, account, presence, rtc_in: rtc_tx, rtc_offered: None };
     let started = Instant::now();
     let writer_stats = stats.clone();
     let writer_hub = hub.clone();
@@ -628,6 +638,7 @@ pub(crate) mod tests {
             account: None,
             presence: None,
             rtc_in: rtc_tx,
+            rtc_offered: None,
         };
         s.binary(&ClientFrame::Ping { client_time: 1.5 }.encode());
         match out_rx.try_recv() {
@@ -657,6 +668,7 @@ pub(crate) mod tests {
             account: None,
             presence: None,
             rtc_in: rtc_tx,
+            rtc_offered: None,
         };
         s.binary(&ClientFrame::Ping { client_time: 2.5 }.encode());
         match out_rx.try_recv() {
