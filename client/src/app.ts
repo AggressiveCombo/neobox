@@ -321,6 +321,8 @@ export function start(): Store<AppState> {
   /** Marks the game view as in use without drawing it; the held frame then stays on screen. */
   const holdView = (): void => {
     lastPresent = performance.now();
+    // A held frame is not drawn again, so the hum of its last draw must not keep looping over it.
+    sfx.stopLoops();
   };
 
   /** The menu card's rect in CSS px, un-turned (the turn is CSS on the view too); the window when no card shows. */
