@@ -675,16 +675,12 @@ export const roomScreen: ScreenFactory = (ctx: AppCtx) => {
         h("button", { type: "button", class: "room-btn", "data-focus-key": "lock", disabled: st.reconnecting, onclick: () => setLock(!room.locked) }, icon(room.locked ? "lock-open" : "lock", 16), room.locked ? "Unlock teams" : "Lock teams"),
         h("p", { class: "room-muted" }, room.locked ? "Players cannot change team." : "Players can change team."),
       ),
-      ...(room.in_match
-        ? [
-            h(
-              "div",
-              { class: "room-danger" },
-              h("button", { type: "button", class: "room-btn danger", onclick: endMatch }, icon("x", 16), "End match"),
-              h("p", { class: "room-muted" }, "Stops the match for everyone."),
-            ),
-          ]
-        : []),
+      h(
+        "div",
+        { class: "room-danger" },
+        h("button", { type: "button", class: "room-btn danger", disabled: !room.in_match, onclick: endMatch }, icon("x", 16), "End match"),
+        h("p", { class: "room-muted" }, room.in_match ? "Stops the match for everyone." : "No match is running."),
+      ),
     ];
   }
 
