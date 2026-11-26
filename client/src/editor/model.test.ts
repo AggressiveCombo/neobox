@@ -22,9 +22,9 @@ test("copy and paste bodies remaps body IDs, joints, and grapples with offset", 
     { kind: "body", i: a.index },
     { kind: "body", i: b.index },
     { kind: "grapple", i: gp.index },
-  ]);
+  ], 0);
   expect(clip).not.toBeNull();
-  const pasted = pasteClipboard(doc, clip!, 5, -3);
+  const pasted = pasteClipboard(doc, clip!, 5, -3, true);
   const bodies = getList(pasted.doc, "body");
   expect(bodies.length).toBe(4);
   const newIdA = num(bodies[2]!, "1", -1);
@@ -59,7 +59,7 @@ test("copy and paste shapes inside a body and outside as a new body", () => {
   expect(shapes[1]!["2"]).toBe(2);
   expect(shapes[1]!["3"]).toBe(1);
 
-  const asBody = pasteClipboard(made.doc, clip!, 3, 4);
+  const asBody = pasteClipboard(made.doc, clip!, 3, 4, true);
   expect(getList(asBody.doc, "body").length).toBe(2);
   expect(asBody.refs).toEqual([{ kind: "body", i: 1 }]);
 });

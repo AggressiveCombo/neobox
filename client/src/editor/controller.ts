@@ -249,6 +249,8 @@ export class EditorController {
   private colour = bodyColor(0);
   private clipboard: ClipboardData | null = null;
   private pasteCount = 0;
+  /** Bumped on each load: entity clips copied under an older epoch came from another map. */
+  private mapEpoch = 0;
   private readonly cleanups: (() => void)[] = [];
 
   constructor(
@@ -387,6 +389,8 @@ export class EditorController {
     this.history.reset(doc);
     this.selection = [];
     this.scopeId = null;
+    // Entity clips record the map they were copied from; pasting them into another map drops what they reference outside the clip.
+    this.mapEpoch += 1;
     this.shapeSel = [];
     this.lastTap = null;
     this.poly = [];
@@ -419,7 +423,7 @@ export class EditorController {
 
   copySelection(): boolean {
     const scope = this.scope;
-    const data = scope ? copyShapes(this.doc, scope.index, scope.shapes) : copyRefs(this.doc, this.selection);
+    const data = scope ? copyShapes(this.doc, scope.index, scope.shapes) : copyRefs(this.doc, this.selection, this.mapEpoch);
     if (!data) return false;
     this.clipboard = data;
     this.pasteCount = 0;
@@ -453,7 +457,9 @@ export class EditorController {
       return true;
     }
     if (scope) this.scopeId = null;
-    const made = pasteClipboard(this.doc, this.clipboard, off, off);
+    const clip = this.clipboard;
+    const sameMap = clip.mode === "entities" && clip.source === this.mapEpoch;
+    const made = pasteClipboard(this.doc, clip, off, off, sameMap);
     if (made.refs.length === 0) return false;
     this.note = "";
     this.commitWith(made.doc, made.refs);

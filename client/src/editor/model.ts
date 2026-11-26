@@ -446,10 +446,11 @@ export function setShapeOutline(doc: Obj, bodyIdx: number, shapeIdx: number, out
   return setBodyShapes(doc, bodyIdx, [...shapes.slice(0, shapeIdx), ...made, ...shapes.slice(shapeIdx + 1)]);
 }
 
-/** Append a body with the given shapes (already relative to `centre`). Returns the new doc and its index. */
-export function addBody(doc: Obj, shapes: Obj[], centre: Pt): { doc: Obj; index: number } {
+/** Append a body with the given shapes (already relative to `centre`) and rotation `angle`. Returns the new doc and its index. */
+export function addBody(doc: Obj, shapes: Obj[], centre: Pt, angle = 0): { doc: Obj; index: number } {
   const items = getList(doc, "body");
   const body: Obj = { "1": nextBodyId(doc), "2": round(centre.x), "3": round(centre.y), s: shapes };
+  if (angle !== 0) body["4"] = round(angle);
   return { doc: withList(doc, "body", [...items, body]), index: items.length };
 }
 
@@ -587,17 +588,73 @@ export function mergeBodies(doc: Obj, bodyIdxs: number[]): { doc: Obj; index: nu
   return { doc: next, index: surv };
 }
 
-/** Deep-cloned editor clipboard payload for top-level entities or in-body shapes. */
+/** Deep-cloned editor clipboard payload: top-level entities (with the map they came from) or in-body shapes. */
 export type ClipboardData =
-  | { mode: "entities"; bodies: Obj[]; joints: Obj[]; spawns: Obj[]; turrets: Obj[]; grapples: Obj[]; caps: Obj[] }
-  | { mode: "shapes"; shapes: Obj[]; origin: Pt };
+  | { mode: "entities"; source: number; bodies: Obj[]; joints: Obj[]; spawns: Obj[]; turrets: Obj[]; grapples: Obj[]; caps: Obj[] }
+  | { mode: "shapes"; shapes: Obj[]; origin: Pt; angle: number };
 
 function cloneObj(o: Obj): Obj {
   return structuredClone(o);
 }
 
+/** Rotate a shape's offset and polygon points by `angle` about the body origin. */
+function turnShape(shape: Obj, angle: number): Obj {
+  const c = Math.cos(angle);
+  const s = Math.sin(angle);
+  const x = num(shape, "2", 0);
+  const y = num(shape, "3", 0);
+  const next = withField(withField(shape, "2", round(c * x - s * y), SHAPE_DEFAULTS), "3", round(s * x + c * y), SHAPE_DEFAULTS);
+  const flat = flatPoints(shape);
+  if (flat.length === 0) return next;
+  const rot: number[] = [];
+  for (let k = 0; k + 1 < flat.length; k += 2) {
+    const px = flat[k]!;
+    const py = flat[k + 1]!;
+    rot.push(round(c * px - s * py), round(s * px + c * py));
+  }
+  return { ...next, p: rot };
+}
+
+/**
+ * Re-point a copied joint's ends at the pasted bodies, or at the world (-1) with an offset. An end on a body
+ * the clip did not copy keeps its body only within the same map; from another map it would hit an unrelated
+ * body, so the joint is dropped (returns false).
+ */
+function relinkJoint(j: Obj, idMap: Map<number, number>, doc: Obj, sameMap: boolean, dx: number, dy: number): boolean {
+  const ends: [string, string, string][] = [
+    ["7", "1", "2"],
+    ["8", "3", "4"],
+  ];
+  for (const [kid, kx, ky] of ends) {
+    const oldId = num(j, kid, -1);
+    const mapped = oldId >= 0 ? idMap.get(oldId) : undefined;
+    if (mapped !== undefined) {
+      j[kid] = mapped;
+    } else if (oldId < 0) {
+      j[kx] = round(num(j, kx, 0) + dx);
+      j[ky] = round(num(j, ky, 0) + dy);
+    } else if (!sameMap) {
+      return false;
+    } else {
+      const host = bodyById(doc, oldId);
+      if (host) {
+        const local = { x: num(j, kx, 0), y: num(j, ky, 0) };
+        const world = toWorld(bodyXf(host), local);
+        const moved = toLocal(bodyXf(host), { x: world.x + dx, y: world.y + dy });
+        j[kx] = round(moved.x);
+        j[ky] = round(moved.y);
+      } else {
+        delete j[kid];
+        j[kx] = round(num(j, kx, 0) + dx);
+        j[ky] = round(num(j, ky, 0) + dy);
+      }
+    }
+  }
+  return true;
+}
+
 /** Copy the selected top-level entities, plus any joints linking two copied bodies. */
-export function copyRefs(doc: Obj, refs: readonly Ref[]): ClipboardData | null {
+export function copyRefs(doc: Obj, refs: readonly Ref[], source: number): ClipboardData | null {
   if (refs.length === 0) return null;
   const byKind = new Map<Kind, Set<number>>();
   for (const r of refs) {
@@ -636,7 +693,7 @@ export function copyRefs(doc: Obj, refs: readonly Ref[]): ClipboardData | null {
   const grapples = pick("grapple", byKind.get("grapple") ?? []);
   const caps = pick("cap", byKind.get("cap") ?? []);
   if (bodies.length + joints.length + spawns.length + turrets.length + grapples.length + caps.length === 0) return null;
-  return { mode: "entities", bodies, joints, spawns, turrets, grapples, caps };
+  return { mode: "entities", source, bodies, joints, spawns, turrets, grapples, caps };
 }
 
 /** Copy selected shapes from one body. */
@@ -650,14 +707,14 @@ export function copyShapes(doc: Obj, bodyIdx: number, shapeIdxs: readonly number
     if (s) shapes.push(cloneObj(asObj(s)));
   }
   if (shapes.length === 0) return null;
-  return { mode: "shapes", shapes, origin: { x: num(body, "2", 0), y: num(body, "3", 0) } };
+  return { mode: "shapes", shapes, origin: { x: num(body, "2", 0), y: num(body, "3", 0) }, angle: num(body, "4", 0) };
 }
 
-/** Paste copied top-level entities with fresh body IDs, remapped joints/grapples, and a world offset. */
-export function pasteClipboard(doc: Obj, clip: ClipboardData, dx: number, dy: number): { doc: Obj; refs: Ref[] } {
+/** Paste copied top-level entities with fresh body IDs, remapped joints/grapples, and a world offset. `sameMap` is false when the clip came from another map: references to bodies it did not copy are dropped. */
+export function pasteClipboard(doc: Obj, clip: ClipboardData, dx: number, dy: number, sameMap: boolean): { doc: Obj; refs: Ref[] } {
   if (clip.mode === "shapes") {
     const cloned = clip.shapes.map(cloneObj);
-    const made = addBody(doc, cloned, { x: round(clip.origin.x + dx), y: round(clip.origin.y + dy) });
+    const made = addBody(doc, cloned, { x: round(clip.origin.x + dx), y: round(clip.origin.y + dy) }, clip.angle);
     return { doc: made.doc, refs: [{ kind: "body", i: made.index }] };
   }
   let next = doc;
@@ -709,7 +766,7 @@ export function pasteClipboard(doc: Obj, clip: ClipboardData, dx: number, dy: nu
       if (attached >= 0) {
         const mapped = idMap.get(attached);
         if (mapped !== undefined) g["4"] = mapped;
-        else if (!bodyById(next, attached)) delete g["4"];
+        else if (!sameMap || !bodyById(next, attached)) delete g["4"];
       }
       refs.push({ kind: "grapple", i: existing.length + k });
       return g;
@@ -719,51 +776,28 @@ export function pasteClipboard(doc: Obj, clip: ClipboardData, dx: number, dy: nu
 
   if (clip.joints.length > 0) {
     const existing = getList(next, "joint");
-    const added = clip.joints.map((raw, k) => {
+    const added: Obj[] = [];
+    for (const raw of clip.joints) {
       const j = cloneObj(raw);
-      const ends: [string, string, string][] = [
-        ["7", "1", "2"],
-        ["8", "3", "4"],
-      ];
-      for (const [kid, kx, ky] of ends) {
-        const oldId = num(j, kid, -1);
-        const mapped = oldId >= 0 ? idMap.get(oldId) : undefined;
-        if (mapped !== undefined) {
-          j[kid] = mapped;
-        } else if (oldId < 0) {
-          j[kx] = round(num(j, kx, 0) + dx);
-          j[ky] = round(num(j, ky, 0) + dy);
-        } else {
-          const host = bodyById(next, oldId);
-          if (host) {
-            const local = { x: num(j, kx, 0), y: num(j, ky, 0) };
-            const world = toWorld(bodyXf(host), local);
-            const moved = toLocal(bodyXf(host), { x: world.x + dx, y: world.y + dy });
-            j[kx] = round(moved.x);
-            j[ky] = round(moved.y);
-          } else {
-            delete j[kid];
-            j[kx] = round(num(j, kx, 0) + dx);
-            j[ky] = round(num(j, ky, 0) + dy);
-          }
-        }
-      }
-      refs.push({ kind: "joint", i: existing.length + k });
-      return j;
-    });
+      if (!relinkJoint(j, idMap, next, sameMap, dx, dy)) continue;
+      refs.push({ kind: "joint", i: existing.length + added.length });
+      added.push(j);
+    }
     next = withList(next, "joint", [...existing, ...added]);
   }
 
   return { doc: next, refs };
 }
 
-/** Paste copied shapes into a scoped body and shift them by a world offset. */
+/** Paste copied shapes into a scoped body and shift them by a world offset. Their geometry turns by the body angle difference, so they keep their world orientation. */
 export function pasteShapes(doc: Obj, bodyIdx: number, clip: ClipboardData, dx: number, dy: number): { doc: Obj; shapes: number[] } {
   if (clip.mode !== "shapes") return { doc, shapes: [] };
-  const cloned = clip.shapes.map(cloneObj);
-  const made = addShapes(doc, bodyIdx, cloned);
-  if (made.first < 0) return { doc, shapes: [] };
-  const idxs = cloned.map((_, i) => made.first + i);
+  const target = getList(doc, "body")[bodyIdx];
+  if (!target) return { doc, shapes: [] };
+  const turn = clip.angle - num(target, "4", 0);
+  const pasted = turn === 0 ? clip.shapes.map(cloneObj) : clip.shapes.map((s) => turnShape(s, turn));
+  const made = addShapes(doc, bodyIdx, pasted);
+  const idxs = pasted.map((_, i) => made.first + i);
   const next = dx !== 0 || dy !== 0 ? moveShapes(made.doc, bodyIdx, idxs, dx, dy) : made.doc;
   return { doc: next, shapes: idxs };
 }
