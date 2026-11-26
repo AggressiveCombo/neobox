@@ -34,11 +34,20 @@ pub fn placement(round: &Round, game_mode: i32, me: u32) -> i32 {
 
 /// Award at the end of a custom-room match: `(placement, xp)`, or `None` for
 /// a player without a record (a spectator). Team modes report placement 1
-/// for a win and 2 otherwise.
+/// for a win and 2 otherwise. A match the sim decided names its winning team
+/// (a capture, the other team out of lives, the round or score limit); only a
+/// match ended early (by the host) falls back to the team ahead on `red`/`blue`.
+/// That fallback is not the verdict of a decided Lives teams match: there
+/// `red`/`blue` are lives left, often equal when a capture ends it.
 pub fn match_award(round: &Round, gs: &GameSettings, me: u32) -> Option<(i32, u32)> {
     let mine = round.players.get(me)?;
     if gs.is_team_mode() {
-        let won = (mine.team == TEAM_RED && round.red > round.blue) || (mine.team == TEAM_BLUE && round.blue > round.red);
+        let decided = round.game_over > -1.0 && (round.objective_team == TEAM_RED || round.objective_team == TEAM_BLUE);
+        let won = if decided {
+            mine.team == round.objective_team
+        } else {
+            (mine.team == TEAM_RED && round.red > round.blue) || (mine.team == TEAM_BLUE && round.blue > round.red)
+        };
         let mut xp: u32 = if won { 75 } else { 25 };
         if gs.game_mode == mode::LIVES_TEAMS {
             xp = xp.saturating_mul(1 + (gs.objective_limit / 25.0).floor().max(0.0) as u32);
@@ -229,6 +238,27 @@ mod tests {
         let lives = GameSettings { game_mode: mode::LIVES_TEAMS, objective_limit: 50.0, ..GameSettings::default() };
         r.blue = 0.0;
         assert_eq!(match_award(&r, &lives, 0), Some((1, 225)));
+    }
+
+    #[test]
+    fn decided_team_match_goes_to_the_named_team() {
+        // A lone red player captures the flag in Lives teams: the match ends with
+        // red named the winner while both teams still hold their 3 lives.
+        let mut r = round(&[(0, TEAM_RED, 0.0, 0.0, 0.0, 0.0)]);
+        r.red = 3.0;
+        r.blue = 3.0;
+        r.objective_team = TEAM_RED;
+        r.game_over = 0.0;
+        let lives = settings(mode::LIVES_TEAMS);
+        assert_eq!(match_award(&r, &lives, 0).map(|a| a.0), Some(1));
+        // the same verdict for the other team's player
+        let mut b = round(&[(0, TEAM_RED, 0.0, 0.0, 0.0, 0.0), (1, TEAM_BLUE, 0.0, 0.0, 0.0, 0.0)]);
+        b.red = 3.0;
+        b.blue = 3.0;
+        b.objective_team = TEAM_BLUE;
+        b.game_over = 0.0;
+        assert_eq!(match_award(&b, &lives, 0).map(|a| a.0), Some(2));
+        assert_eq!(match_award(&b, &lives, 1).map(|a| a.0), Some(1));
     }
 
     #[test]
