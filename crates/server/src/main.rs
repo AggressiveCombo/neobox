@@ -236,6 +236,7 @@ fn spawn_housekeeping(hub: Arc<Hub>) {
             hub.account_login.prune();
             hub.uploads.prune();
             hub.reports.prune();
+            hub.feedback.prune();
             // a monthly database update replaces the file; pick it up within a minute
             hub.geo.refresh();
             let Some(store) = hub.store().cloned() else { continue };
