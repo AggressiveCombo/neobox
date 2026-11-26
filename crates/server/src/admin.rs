@@ -82,21 +82,14 @@ fn authorized(hub: &Hub, headers: &HeaderMap) -> bool {
         return false;
     }
     let Some(token) = cookie_token(headers) else { return false };
-    {
-        let mut sessions = hub.admin_sessions.lock().unwrap();
-        sessions.retain(|_, t| t.elapsed() < SESSION_TTL);
-        if sessions.keys().any(|k| constant_time_eq(k.as_bytes(), token.as_bytes())) {
-            return true;
-        }
-    }
-    // Check SQLite for persistent sessions (e.g. after a server restart or deploy) and warm the RAM cache.
+    // With a store, SQLite is the only session record: it enforces expiry, the
+    // session cap and sliding renewal. A RAM copy would outlive all three.
     if let Some(store) = hub.store() {
-        if store.check_admin_session(&token, &hub.cfg.admin_password).unwrap_or(false) {
-            hub.admin_sessions.lock().unwrap().insert(token, Instant::now());
-            return true;
-        }
+        return store.check_admin_session(&token, &hub.cfg.admin_password).unwrap_or(false);
     }
-    false
+    let mut sessions = hub.admin_sessions.lock().unwrap();
+    sessions.retain(|_, t| t.elapsed() < SESSION_TTL);
+    sessions.keys().any(|k| constant_time_eq(k.as_bytes(), token.as_bytes()))
 }
 
 fn admin_cookie(hub: &Hub, peer: SocketAddr, headers: &HeaderMap, value: &str, max_age: i64) -> String {
@@ -171,9 +164,10 @@ async fn login(State(hub): State<Arc<Hub>>, ConnectInfo(peer): ConnectInfo<Socke
             Err(_) => return (StatusCode::INTERNAL_SERVER_ERROR, "could not create session").into_response(),
         }
     } else {
-        (0..32).map(|_| format!("{:02x}", rand::random::<u8>())).collect()
+        let t: String = (0..32).map(|_| format!("{:02x}", rand::random::<u8>())).collect();
+        hub.admin_sessions.lock().unwrap().insert(t.clone(), Instant::now());
+        t
     };
-    hub.admin_sessions.lock().unwrap().insert(token.clone(), Instant::now());
     info!(%ip, "admin login");
     let cookie = admin_cookie(&hub, peer, &headers, &token, ADMIN_SESSION_TTL);
     ([(header::SET_COOKIE, cookie)], "ok").into_response()
@@ -196,9 +190,6 @@ async fn session(State(hub): State<Arc<Hub>>, ConnectInfo(peer): ConnectInfo<Soc
     let ok = authorized(&hub, &headers);
     if ok {
         if let Some(token) = cookie_token(&headers) {
-            if let Some(store) = hub.store() {
-                let _ = store.check_admin_session(&token, &hub.cfg.admin_password);
-            }
             let cookie = admin_cookie(&hub, peer, &headers, &token, ADMIN_SESSION_TTL);
             return ([(header::SET_COOKIE, cookie)], Json(serde_json::json!({ "admin": true }))).into_response();
         }
