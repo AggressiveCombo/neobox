@@ -1669,17 +1669,17 @@ dialog.modal:focus {
     font-size: 10px;
   }
 }
-/* Touch: a taller strip so Bug and Suggest are finger-sized (34px tall, 56px or more wide) and spaced apart. */
+/* Touch: the strip is one finger tall so Bug and Suggest meet the 44px touch-target floor, spaced apart. */
 @media (pointer: coarse) {
   :root {
-    --wip-h: 36px;
+    --wip-h: 44px;
   }
   .wip-actions {
-    right: 4px;
-    gap: 8px;
+    right: 0;
+    gap: 6px;
   }
   .wip-btn {
-    height: calc(var(--wip-h) - 2px);
+    height: var(--wip-h);
     min-width: 56px;
     justify-content: center;
     padding: 0 12px;
