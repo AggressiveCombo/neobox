@@ -45,29 +45,29 @@ impl Mode {
 /// Runtime wrapper of the round state for one tick.
 pub(crate) struct RoundObj {
     pub mode: Mode,
-    pub eo: Round,
-    /// rounds modes: something changed (death/leave) this tick (`A_`)
+    pub row: Round,
+    /// rounds modes: something changed (death/leave) this tick
     changed: bool,
-    /// rounds modes: someone joined this tick (`O_`)
+    /// rounds modes: someone joined this tick
     joined: bool,
     /// rounds modes, and any mode with `recordMode`: the round state at the
-    /// start of the tick (`R_`)
+    /// start of the tick
     initial: Option<Round>,
-    /// endless teams: the map has objective bodies (`J_`)
+    /// endless teams: the map has objective bodies
     has_objectives: bool,
     /// `recordMode`: deaths take players out of play, and a racer's finish
-    /// can decide the round (`Gn`/`Yn`/`Vn` of the heav.io builds)
+    /// can decide the round (as in the heav.io builds)
     record_mode: bool,
-    /// other modes: a racer finished with `recordMode` this tick (`Pn`)
+    /// other modes: a racer finished with `recordMode` this tick
     race_changed: bool,
 }
 
 impl RoundObj {
-    pub fn new(eo: Round, gs: &GameSettings) -> RoundObj {
+    pub fn new(row: Round, gs: &GameSettings) -> RoundObj {
         let mode = Mode::of(gs.game_mode);
         let record_mode = gs.record_mode;
-        let initial = if mode.rounds_like() || record_mode { Some(eo.clone()) } else { None };
-        RoundObj { mode, eo, changed: false, joined: false, initial, has_objectives: false, record_mode, race_changed: false }
+        let initial = if mode.rounds_like() || record_mode { Some(row.clone()) } else { None };
+        RoundObj { mode, row, changed: false, joined: false, initial, has_objectives: false, record_mode, race_changed: false }
     }
 
     pub fn with_bodies(mut self, bodies: &Sparse<Body>) -> RoundObj {
@@ -78,15 +78,15 @@ impl RoundObj {
     }
 
     fn round_over(&self) -> bool {
-        self.eo.round_over > -1.0
+        self.row.round_over > -1.0
     }
     fn game_over(&self) -> bool {
-        self.eo.game_over > -1.0
+        self.row.game_over > -1.0
     }
 
-    /// `Ko`: a player left.
+    /// A player left.
     fn leave(&mut self, id: u32) {
-        self.eo.players.remove(id);
+        self.row.players.remove(id);
         match self.mode {
             Mode::Lives => self.lives_check(0),
             Mode::Rounds | Mode::TeamRounds => self.changed = true,
@@ -94,44 +94,44 @@ impl RoundObj {
         }
     }
 
-    /// `Zo`: a player joined with `team`.
+    /// A player joined with `team`.
     fn join(&mut self, id: u32, team: f64, gs: &GameSettings) {
         let rec = |respawn: f64| PlayerRecord { id: id as f64, team, respawn, ..PlayerRecord::default() };
         match self.mode {
             Mode::Kills => {
                 if team > 0.0 {
-                    self.eo.players.insert(id, rec(30.0));
+                    self.row.players.insert(id, rec(30.0));
                 }
             }
             Mode::Lives => {
                 if team > 0.0 {
                     let mut r = rec(-1.0);
-                    if self.eo.intro > -1.0 {
+                    if self.row.intro > -1.0 {
                         r.respawn = 30.0;
                         r.lives = gs.objective_limit;
-                    } else if self.eo.min_lives >= 2.0 {
+                    } else if self.row.min_lives >= 2.0 {
                         r.respawn = 30.0;
-                        r.lives = self.eo.min_lives - 1.0;
+                        r.lives = self.row.min_lives - 1.0;
                     }
-                    self.eo.players.insert(id, r);
+                    self.row.players.insert(id, r);
                 }
             }
             Mode::Rounds | Mode::TeamRounds => {
                 if team > 0.0 {
-                    self.eo.players.insert(id, rec(-1.0));
+                    self.row.players.insert(id, rec(-1.0));
                     self.joined = true;
                 }
             }
             Mode::EndlessTeams => {
                 if team >= 2.0 {
-                    self.eo.players.insert(id, rec(30.0));
+                    self.row.players.insert(id, rec(30.0));
                 }
             }
             Mode::LivesTeams => {
                 if team >= 2.0 {
-                    self.eo.players.insert(id, rec(-1.0));
+                    self.row.players.insert(id, rec(-1.0));
                     if self.take_team_life(team) {
-                        if let Some(r) = self.eo.players.get_mut(id) {
+                        if let Some(r) = self.row.players.get_mut(id) {
                             r.respawn = 30.0;
                         }
                     }
@@ -139,40 +139,40 @@ impl RoundObj {
             }
             Mode::Endless => {
                 if team == 1.0 {
-                    self.eo.players.insert(id, rec(30.0));
+                    self.row.players.insert(id, rec(30.0));
                 }
             }
             Mode::Base => {}
         }
     }
 
-    /// `H_`: take a life from the team pool (lives teams).
+    /// Take a life from the team pool (lives teams).
     fn take_team_life(&mut self, team: f64) -> bool {
-        if team == 2.0 && self.eo.red > 0.0 {
-            self.eo.red -= 1.0;
+        if team == 2.0 && self.row.red > 0.0 {
+            self.row.red -= 1.0;
             return true;
         }
-        if team == 3.0 && self.eo.blue > 0.0 {
-            self.eo.blue -= 1.0;
+        if team == 3.0 && self.row.blue > 0.0 {
+            self.row.blue -= 1.0;
             return true;
         }
         false
     }
 
-    /// `nr`: schedule a respawn.
+    /// Schedule a respawn.
     fn respawn_in(&mut self, id: u32, ticks: f64) {
         let over = self.round_over() || self.game_over();
         match self.mode {
             Mode::Kills => {
                 if !over {
-                    if let Some(r) = self.eo.players.get_mut(id) {
+                    if let Some(r) = self.row.players.get_mut(id) {
                         r.respawn = ticks;
                     }
                 }
             }
             Mode::Lives => {
                 if !over {
-                    if let Some(r) = self.eo.players.get_mut(id) {
+                    if let Some(r) = self.row.players.get_mut(id) {
                         if r.lives > 0.0 {
                             r.respawn = ticks;
                         }
@@ -184,47 +184,47 @@ impl RoundObj {
                 if over {
                     return;
                 }
-                let Some(team) = self.eo.players.get(id).map(|r| r.team) else { return };
+                let Some(team) = self.row.players.get(id).map(|r| r.team) else { return };
                 if self.take_team_life(team) {
-                    if let Some(r) = self.eo.players.get_mut(id) {
+                    if let Some(r) = self.row.players.get_mut(id) {
                         r.respawn = ticks;
                     }
                 }
             }
             _ => {
-                if let Some(r) = self.eo.players.get_mut(id) {
+                if let Some(r) = self.row.players.get_mut(id) {
                     r.respawn = ticks;
                 }
             }
         }
     }
 
-    /// `rr`: `killer` killed `victim`.
+    /// `killer` killed `victim`.
     fn kill(&mut self, killer: f64, victim: f64, gs: &GameSettings) {
         // base
         let (Some(k), v) = (index_of(killer), index_of(victim)) else { return };
-        if self.eo.players.contains(k) && !self.game_over() {
-            let r = self.eo.players.get_mut(k).expect("record");
+        if self.row.players.contains(k) && !self.game_over() {
+            let r = self.row.players.get_mut(k).expect("record");
             r.kills += 1.0;
             r.last_victim = victim;
             r.kill_timer = BANNER_TICKS;
-            if let Some(vr) = v.and_then(|v| self.eo.players.get_mut(v)) {
+            if let Some(vr) = v.and_then(|v| self.row.players.get_mut(v)) {
                 vr.killed_by = killer;
                 vr.death_timer = BANNER_TICKS;
             }
         }
         match self.mode {
             Mode::Kills => {
-                if let Some(r) = self.eo.players.get(k) {
+                if let Some(r) = self.row.players.get(k) {
                     if r.kills >= gs.objective_limit {
-                        self.eo.game_over = GAME_OVER_TICKS;
-                        self.eo.winner = killer;
+                        self.row.game_over = GAME_OVER_TICKS;
+                        self.row.winner = killer;
                     }
                 }
             }
             Mode::Lives => {
                 if let Some(v) = v {
-                    if let Some(vr) = self.eo.players.get_mut(v) {
+                    if let Some(vr) = self.row.players.get_mut(v) {
                         vr.lives -= 1.0;
                     }
                     self.eliminated(v);
@@ -233,39 +233,39 @@ impl RoundObj {
             }
             Mode::Rounds | Mode::TeamRounds => {
                 self.changed = true;
-                if let Some(vr) = v.and_then(|v| self.eo.players.get_mut(v)) {
+                if let Some(vr) = v.and_then(|v| self.row.players.get_mut(v)) {
                     vr.alive = false;
                 }
             }
             Mode::EndlessTeams => {
                 if !self.round_over() && !self.game_over() {
-                    let team = v.and_then(|v| self.eo.players.get(v)).map(|r| r.team);
+                    let team = v.and_then(|v| self.row.players.get(v)).map(|r| r.team);
                     if team == Some(2.0) && !self.has_objectives {
-                        self.eo.blue += 1.0;
+                        self.row.blue += 1.0;
                     }
                     if team == Some(3.0) && !self.has_objectives {
-                        self.eo.red += 1.0;
+                        self.row.red += 1.0;
                     }
                 }
             }
             _ => {}
         }
         if self.record_mode && !self.mode.rounds_like() {
-            if let Some(vr) = v.and_then(|v| self.eo.players.get_mut(v)) {
+            if let Some(vr) = v.and_then(|v| self.row.players.get_mut(v)) {
                 vr.alive = false;
             }
         }
     }
 
-    /// `lr`: suicide / environmental death.
+    /// Suicide / environmental death.
     fn suicide(&mut self, id: f64) {
         let Some(i) = index_of(id) else { return };
-        if self.eo.players.contains(i) && !self.game_over() {
-            self.eo.players.get_mut(i).expect("record").suicide_timer = BANNER_TICKS;
+        if self.row.players.contains(i) && !self.game_over() {
+            self.row.players.get_mut(i).expect("record").suicide_timer = BANNER_TICKS;
         }
         match self.mode {
             Mode::Lives => {
-                if let Some(r) = self.eo.players.get_mut(i) {
+                if let Some(r) = self.row.players.get_mut(i) {
                     r.lives -= 1.0;
                 }
                 self.eliminated(i);
@@ -273,36 +273,36 @@ impl RoundObj {
             }
             Mode::Rounds | Mode::TeamRounds => {
                 self.changed = true;
-                if let Some(r) = self.eo.players.get_mut(i) {
+                if let Some(r) = self.row.players.get_mut(i) {
                     r.alive = false;
                 }
             }
             _ => {}
         }
         if self.record_mode && !self.mode.rounds_like() {
-            if let Some(r) = self.eo.players.get_mut(i) {
+            if let Some(r) = self.row.players.get_mut(i) {
                 r.alive = false;
             }
         }
     }
 
-    /// `W_`: record elimination order.
+    /// Record elimination order.
     fn eliminated(&mut self, id: u32) {
-        if let Some(r) = self.eo.players.get(id) {
+        if let Some(r) = self.row.players.get(id) {
             if r.lives == 0.0 {
-                self.eo.eliminations += 1.0;
-                let n = self.eo.eliminations;
-                self.eo.players.get_mut(id).expect("record").eliminated = n;
+                self.row.eliminations += 1.0;
+                let n = self.row.eliminations;
+                self.row.players.get_mut(id).expect("record").eliminated = n;
             }
         }
     }
 
-    /// `U_`: last player with lives wins.
+    /// Last player with lives wins.
     fn lives_check(&mut self, min_players: usize) {
         let mut total = 0;
         let mut with_lives = 0;
         let mut last = -1.0;
-        for (_, r) in self.eo.players.iter() {
+        for (_, r) in self.row.players.iter() {
             total += 1;
             if r.lives > 0.0 {
                 with_lives += 1;
@@ -310,12 +310,12 @@ impl RoundObj {
             }
         }
         if with_lives == 1 && total > min_players {
-            self.eo.game_over = GAME_OVER_TICKS;
-            self.eo.winner = last;
+            self.row.game_over = GAME_OVER_TICKS;
+            self.row.winner = last;
         }
     }
 
-    /// `dr`: objective delivered for `team`.
+    /// Objective delivered for `team`.
     fn objective(&mut self, team: f64, gs: &GameSettings) {
         match self.mode {
             Mode::EndlessTeams => {
@@ -324,43 +324,43 @@ impl RoundObj {
                 }
                 let mut win = false;
                 if team == 2.0 {
-                    self.eo.red += 1.0;
-                    if self.eo.red >= gs.objective_limit {
+                    self.row.red += 1.0;
+                    if self.row.red >= gs.objective_limit {
                         win = true;
                     }
                 }
                 if team == 3.0 {
-                    self.eo.blue += 1.0;
-                    if self.eo.blue >= gs.objective_limit {
+                    self.row.blue += 1.0;
+                    if self.row.blue >= gs.objective_limit {
                         win = true;
                     }
                 }
-                self.eo.objective_team = team;
+                self.row.objective_team = team;
                 if win {
-                    self.eo.game_over = GAME_OVER_TICKS;
+                    self.row.game_over = GAME_OVER_TICKS;
                 } else {
-                    self.eo.round_over = ROUND_OVER_TICKS;
+                    self.row.round_over = ROUND_OVER_TICKS;
                 }
             }
             Mode::LivesTeams => {
                 if !(self.round_over() || self.game_over()) {
-                    self.eo.objective_team = team;
-                    self.eo.game_over = GAME_OVER_TICKS;
+                    self.row.objective_team = team;
+                    self.row.game_over = GAME_OVER_TICKS;
                 }
             }
             _ => {}
         }
     }
 
-    /// `pr`: all capture points owned by `owner`.
+    /// All capture points owned by `owner`.
     fn capture_win(&mut self, owner: f64) {
-        self.eo.game_over = GAME_OVER_TICKS;
-        self.eo.winner = owner;
+        self.row.game_over = GAME_OVER_TICKS;
+        self.row.winner = owner;
     }
 
-    /// `ro` (mode part).
+    /// Mode-specific part of the post-step.
     fn post_step(&mut self, prev_players: &[(f64, f64, f64)]) {
-        for (_, r) in self.eo.players.iter_mut() {
+        for (_, r) in self.row.players.iter_mut() {
             if r.kill_timer > -1.0 {
                 r.kill_timer -= 1.0;
             }
@@ -373,16 +373,16 @@ impl RoundObj {
         }
         match self.mode {
             Mode::Lives => {
-                // `j_`: track the lowest lives left (for late joiners)
+                // Track the lowest lives left (for late joiners)
                 let mut low = f64::INFINITY;
-                let ids: Vec<u32> = self.eo.players.ids().collect();
+                let ids: Vec<u32> = self.row.players.ids().collect();
                 for id in ids {
-                    let lives = self.eo.players.get(id).expect("record").lives;
+                    let lives = self.row.players.get(id).expect("record").lives;
                     if lives < low {
                         low = lives;
                     }
-                    if low < self.eo.min_lives || self.eo.min_lives == -1.0 {
-                        self.eo.min_lives = low;
+                    if low < self.row.min_lives || self.row.min_lives == -1.0 {
+                        self.row.min_lives = low;
                     }
                 }
             }
@@ -391,22 +391,22 @@ impl RoundObj {
                     return;
                 }
                 let alive = |team: f64, me: &Self| {
-                    prev_players.iter().any(|p| p.2 == team) || me.eo.players.values().any(|r| r.team == team && r.respawn > -1.0)
+                    prev_players.iter().any(|p| p.2 == team) || me.row.players.values().any(|r| r.team == team && r.respawn > -1.0)
                 };
-                if self.eo.red <= 0.0 && !alive(2.0, self) {
-                    self.eo.objective_team = 3.0;
-                    self.eo.game_over = GAME_OVER_TICKS;
+                if self.row.red <= 0.0 && !alive(2.0, self) {
+                    self.row.objective_team = 3.0;
+                    self.row.game_over = GAME_OVER_TICKS;
                 }
-                if self.eo.blue <= 0.0 && !alive(3.0, self) {
-                    self.eo.objective_team = 2.0;
-                    self.eo.game_over = GAME_OVER_TICKS;
+                if self.row.blue <= 0.0 && !alive(3.0, self) {
+                    self.row.objective_team = 2.0;
+                    self.row.game_over = GAME_OVER_TICKS;
                 }
             }
             _ => {}
         }
     }
 
-    /// Rounds modes: decide the round (`D_`).
+    /// Rounds modes: decide the round.
     fn rounds_decide(&mut self, gs: &GameSettings) {
         if self.round_over() || self.game_over() {
             return;
@@ -414,7 +414,7 @@ impl RoundObj {
         let initial = self.initial.as_ref().expect("rounds initial state");
         if self.mode == Mode::TeamRounds {
             let mut now = [0u32; 4];
-            for r in self.eo.players.values() {
+            for r in self.row.players.values() {
                 if r.alive {
                     if let Some(t) = index_of(r.team).filter(|t| *t < 4) {
                         now[t as usize] += 1;
@@ -431,28 +431,28 @@ impl RoundObj {
             }
             let mut decided = false;
             if now[2] > 0 && now[3] == 0 && before[3] > 0 {
-                self.eo.red += 1.0;
+                self.row.red += 1.0;
                 decided = true;
-                self.eo.objective_team = 2.0;
+                self.row.objective_team = 2.0;
             }
             if now[3] > 0 && now[2] == 0 && before[2] > 0 {
-                self.eo.blue += 1.0;
+                self.row.blue += 1.0;
                 decided = true;
-                self.eo.objective_team = 3.0;
+                self.row.objective_team = 3.0;
             }
             if now[2] == 0 && now[3] == 0 && before[2] > 0 && before[3] > 0 {
-                self.eo.objective_team = -2.0;
+                self.row.objective_team = -2.0;
                 decided = true;
             }
             if now[2] == 0 && now[3] == 0 && ((before[2] > 0 && before[3] == 0) || (before[3] > 0 && before[2] == 0)) {
-                self.eo.objective_team = -1.0;
+                self.row.objective_team = -1.0;
                 decided = true;
             }
             if decided {
-                if self.eo.red >= gs.objective_limit || self.eo.blue >= gs.objective_limit {
-                    self.eo.game_over = GAME_OVER_TICKS;
+                if self.row.red >= gs.objective_limit || self.row.blue >= gs.objective_limit {
+                    self.row.game_over = GAME_OVER_TICKS;
                 } else {
-                    self.eo.round_over = ROUND_OVER_TICKS;
+                    self.row.round_over = ROUND_OVER_TICKS;
                 }
             }
             return;
@@ -460,7 +460,7 @@ impl RoundObj {
         self.last_standing(gs);
     }
 
-    /// `Vn`: with at most one player still in play, that one wins the round
+    /// With at most one player still in play, that one wins the round
     /// (or nobody: a draw), and the match when it has enough round wins.
     fn last_standing(&mut self, gs: &GameSettings) {
         if self.round_over() || self.game_over() {
@@ -468,7 +468,7 @@ impl RoundObj {
         }
         let mut alive = 0;
         let mut last = -1.0;
-        for r in self.eo.players.values() {
+        for r in self.row.players.values() {
             if r.alive {
                 alive += 1;
                 last = r.id;
@@ -477,28 +477,28 @@ impl RoundObj {
         let alive_before = self.initial.as_ref().map_or(0, |i| i.players.values().filter(|r| r.alive).count());
         if alive <= 1 {
             if alive == 1 {
-                if let Some(r) = index_of(last).and_then(|l| self.eo.players.get_mut(l)) {
+                if let Some(r) = index_of(last).and_then(|l| self.row.players.get_mut(l)) {
                     r.wins += 1.0;
                 }
-                self.eo.winner = last;
+                self.row.winner = last;
             } else if alive_before == 1 {
-                self.eo.winner = -1.0;
+                self.row.winner = -1.0;
             } else if alive_before > 1 {
-                self.eo.winner = -2.0;
+                self.row.winner = -2.0;
             }
-            let wins = index_of(last).and_then(|l| self.eo.players.get(l)).map(|r| r.wins);
+            let wins = index_of(last).and_then(|l| self.row.players.get(l)).map(|r| r.wins);
             if last >= 0.0 && wins.is_some_and(|w| w >= gs.objective_limit) {
-                self.eo.game_over = GAME_OVER_TICKS;
+                self.row.game_over = GAME_OVER_TICKS;
             } else {
-                self.eo.round_over = ROUND_OVER_TICKS;
+                self.row.round_over = ROUND_OVER_TICKS;
             }
         }
     }
 
-    /// `Yn`: a racer finished with `recordMode` and stays out of play until
+    /// A racer finished with `recordMode` and stays out of play until
     /// the round ends.
     fn race_out(&mut self, id: u32) {
-        if let Some(r) = self.eo.players.get_mut(id) {
+        if let Some(r) = self.row.players.get_mut(id) {
             r.alive = false;
         }
         if self.mode.rounds_like() {
@@ -508,19 +508,19 @@ impl RoundObj {
         }
     }
 
-    /// Rounds modes: someone joined; end the round if at most one is alive (`L_`).
+    /// Rounds modes: someone joined; end the round if at most one is alive.
     fn rounds_joined(&mut self) {
         if self.round_over() || self.game_over() {
             return;
         }
-        let alive = self.eo.players.values().filter(|r| r.alive).count();
+        let alive = self.row.players.values().filter(|r| r.alive).count();
         if alive <= 1 {
-            self.eo.round_over = ROUND_OVER_TICKS;
-            self.eo.winner = -1.0;
+            self.row.round_over = ROUND_OVER_TICKS;
+            self.row.winner = -1.0;
         }
     }
 
-    /// `lo`: countdowns, respawn timers, spawn claims and spawning.
+    /// Countdowns, respawn timers, spawn claims and spawning.
     fn serialize(&mut self, next: &mut State, prev_players: &[(f64, f64, f64)], prev_caps: &[MapCap], gs: &GameSettings) {
         if self.mode.rounds_like() {
             if self.changed {
@@ -532,14 +532,14 @@ impl RoundObj {
         } else if self.race_changed {
             self.last_standing(gs);
         }
-        if self.eo.round_over > 0.0 {
-            self.eo.round_over -= 1.0;
+        if self.row.round_over > 0.0 {
+            self.row.round_over -= 1.0;
         }
-        if self.eo.game_over > 0.0 {
-            self.eo.game_over -= 1.0;
+        if self.row.game_over > 0.0 {
+            self.row.game_over -= 1.0;
         }
         let mut claims: Vec<(f64, f64)> = Vec::new();
-        for (_, r) in self.eo.players.iter_mut() {
+        for (_, r) in self.row.players.iter_mut() {
             if r.respawn == 30.0 {
                 claims.push((r.id, r.team));
             }
@@ -547,7 +547,7 @@ impl RoundObj {
                 r.respawn -= 1.0;
             }
         }
-        next.round = self.eo.clone();
+        next.round = self.row.clone();
         if !claims.is_empty() {
             if gs.fixed_spawns {
                 for (id, _) in &claims {
@@ -573,7 +573,7 @@ struct Cand {
     claim_time: f64,
 }
 
-/// `hr`: pick a spawn for every claim (farthest from players, team-aware,
+/// Pick a spawn for every claim (farthest from players, team-aware,
 /// following capture-point progress in team modes).
 fn claim_spawns(claims: &[(f64, f64)], next: &mut State, prev_players: &[(f64, f64, f64)], prev_caps: &[MapCap]) {
     let spawns: Vec<(u32, MapSpawn)> = next.spawns.iter().map(|(k, s)| (k, s.clone())).collect();
@@ -660,7 +660,7 @@ fn claim_spawns(claims: &[(f64, f64)], next: &mut State, prev_players: &[(f64, f
     }
 }
 
-/// `er`: players whose respawn countdown hit 0 appear at their claimed spawn.
+/// Players whose respawn countdown hit 0 appear at their claimed spawn.
 fn spawn_players(next: &mut State, gs: &GameSettings) {
     let ids: Vec<u32> = next.round.players.ids().collect();
     for id in ids {
@@ -689,7 +689,7 @@ fn spawn_players(next: &mut State, gs: &GameSettings) {
         }
         let r = next.round.players.get_mut(id).expect("record");
         r.alive = true;
-        r.mo.clear();
+        r.checkpoint_times.clear();
         r.spawn = -1.0;
         next.sounds.push(Sound { x: s.x, y: s.y, ttl: 15.0, kind: sound::SPAWN, player: pid, ..Sound::default() });
     }
@@ -701,7 +701,7 @@ fn prev_player_list(players: &Sparse<Player>) -> Vec<(f64, f64, f64)> {
     players.values().map(|p| (p.x, p.y, p.team)).collect()
 }
 
-/// Intro countdown tick (`qo` + `lo` only).
+/// Intro countdown tick (leave/join events and serialize only).
 pub(crate) fn intro_tick(next: &mut State, events: Option<&Events>, gs: &GameSettings) {
     let mut obj = RoundObj::new(next.round.clone(), gs).with_bodies(&next.bodies);
     if let Some(ev) = events {
@@ -729,9 +729,9 @@ pub(crate) fn events(ctx: &mut Ctx<'_>, events: Option<&Events>) {
     }
 }
 
-/// `ao`: tick counter.
+/// Tick counter.
 pub(crate) fn pre_step(ctx: &mut Ctx<'_>) {
-    ctx.round.eo.ticks += 1.0;
+    ctx.round.row.ticks += 1.0;
 }
 
 pub(crate) fn post_step(ctx: &mut Ctx<'_>) {
@@ -789,7 +789,7 @@ pub(crate) fn game_over(ctx: &Ctx<'_>) -> bool {
 mod tests {
     use super::*;
 
-    /// Endless teams: a flag delivery scores; the match ends once the score reaches the objective limit, otherwise the round ends (the original's `dr`: `xo` game over, else `_o` round over).
+    /// Endless teams: a flag delivery scores; the match ends once the score reaches the objective limit, otherwise the round ends (the original's objective handler: game over if the limit is reached, else round over).
     #[test]
     fn endless_teams_flag_delivery_scores_to_limit() {
         let gs = GameSettings { game_mode: mode::ENDLESS_TEAMS, objective_limit: 5.0, ..GameSettings::default() };
@@ -797,7 +797,7 @@ mod tests {
         r.objective(2.0, &gs);
         assert!(!r.game_over(), "one of five: the match goes on");
         assert!(r.round_over(), "one of five: the round ends");
-        assert_eq!(r.eo.red, 1.0);
+        assert_eq!(r.row.red, 1.0);
         let gs = GameSettings { objective_limit: 1.0, ..gs };
         let mut r = RoundObj::new(Round::default(), &gs);
         r.objective(2.0, &gs);

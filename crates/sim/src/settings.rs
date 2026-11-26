@@ -20,146 +20,148 @@ pub struct GameSettings {
     /// `gsFightersCollide`: players' contact rays see other players.
     pub fighters_collide: bool,
     pub record_mode: bool,
-    /// `W`
-    pub w: bool,
-    /// `J` timeScale: physics step is `1 / time_scale` seconds per tick.
+    /// Original key `W`: no known meaning; the sim never reads it. Kept so
+    /// the serialised shape does not change.
+    #[serde(rename = "w")]
+    pub flag_w: bool,
+    /// timeScale: physics step is `1 / time_scale` seconds per tick.
     pub time_scale: f64,
-    /// `G` gravityOffset added to the map gravity.
+    /// gravityOffset added to the map gravity.
     pub gravity_offset: f64,
-    /// `H` gameMode.
+    /// gameMode.
     pub game_mode: i32,
-    /// `Y` pushPlayers.
+    /// pushPlayers.
     pub push_players: bool,
-    /// `q` pushRange.
+    /// pushRange.
     pub push_range: f64,
-    /// `V` pushDelay.
+    /// pushDelay.
     pub push_delay: f64,
-    /// `K` maxStamina.
+    /// maxStamina.
     pub max_stamina: f64,
-    /// `X` pushMinAmmoToStartPush.
+    /// pushMinAmmoToStartPush.
     pub push_min_ammo: f64,
-    /// `Z` pushAmmoSpendIfPushing.
+    /// pushAmmoSpendIfPushing.
     pub push_spend: f64,
-    /// `$` pushAmmoSpendAtFirstPushFrame.
+    /// pushAmmoSpendAtFirstPushFrame.
     pub push_first_spend: f64,
-    /// `tt` pushAmmoReplenish.
+    /// pushAmmoReplenish.
     pub ammo_regen: f64,
-    /// `it` bbPower.
+    /// bbPower.
     pub bat_power: f64,
-    /// `st` bbRange.
+    /// bbRange.
     pub bat_range: f64,
-    /// `ht` bbAngleVariance (degrees).
+    /// bbAngleVariance (degrees).
     pub bat_angle: f64,
-    /// `et` bbHoldUntil.
+    /// bbHoldUntil.
     pub bat_hold_until: f64,
-    /// `nt` bbFireOn.
+    /// bbFireOn.
     pub bat_fire_on: f64,
-    /// `ot` bbInitAmmoCost.
+    /// bbInitAmmoCost.
     pub bat_init_cost: f64,
-    /// `rt` bbHoldAmmoCost.
+    /// bbHoldAmmoCost.
     pub bat_hold_cost: f64,
-    /// `at` bbFireFramesLength.
+    /// bbFireFramesLength.
     pub bat_fire_frames: f64,
-    /// `lt` bbHideAfterFireFrames.
+    /// bbHideAfterFireFrames.
     pub bat_hide_after: f64,
-    /// `ut` bbResetOn.
+    /// bbResetOn.
     pub bat_reset_on: f64,
-    /// `ct` bbEnabled.
+    /// bbEnabled.
     pub bat_enabled: bool,
-    /// `dt` dashInitDelay.
+    /// dashInitDelay.
     pub dash_init_delay: f64,
-    /// `wt` dashActiveLength.
+    /// dashActiveLength.
     pub dash_active: f64,
-    /// `ft` dashCoolDownAfterLength.
+    /// dashCoolDownAfterLength.
     pub dash_cooldown: f64,
-    /// `gt` dashBoostSpeed.
+    /// dashBoostSpeed.
     pub dash_boost: f64,
-    /// `yt` dashAmmoCost.
+    /// dashAmmoCost.
     pub dash_cost: f64,
-    /// `bt` dashEnabled.
+    /// dashEnabled.
     pub dash_enabled: bool,
-    /// `vt` parachuteEnabled.
+    /// parachuteEnabled.
     pub parachute_enabled: bool,
-    /// `kt` rkAmmoNeeded.
+    /// rkAmmoNeeded.
     pub rocket_cost: f64,
-    /// `St` rkVelocity.
+    /// rkVelocity.
     pub rocket_speed: f64,
-    /// `Nt` rkAimRate.
+    /// rkAimRate.
     pub rocket_aim_rate: f64,
-    /// `Mt` rkBulletRound.
+    /// rkBulletRound.
     pub rocket_round: bool,
-    /// `Ct` rkBulletRadius.
+    /// rkBulletRadius.
     pub rocket_radius: f64,
-    /// `Tt` rkBulletAge.
+    /// rkBulletAge.
     pub rocket_age: f64,
-    /// `xt` rkBulletTurnRate.
+    /// rkBulletTurnRate.
     pub rocket_turn_rate: f64,
-    /// `_t` rkBulletGravityScale.
+    /// rkBulletGravityScale.
     pub rocket_gravity_scale: f64,
-    /// `Pt` rkBulletBounces.
+    /// rkBulletBounces.
     pub rocket_bounces: bool,
-    /// `Et` rkBulletRestitution.
+    /// rkBulletRestitution.
     pub rocket_restitution: f64,
-    /// `Bt` rkBulletBounceCountLimit.
+    /// rkBulletBounceCountLimit.
     pub rocket_bounce_limit: f64,
-    /// `It` rkSelfBatScale.
+    /// rkSelfBatScale.
     pub rocket_self_bat_scale: f64,
-    /// `Ft` rkExplodeRadius.
+    /// rkExplodeRadius.
     pub rocket_explode_radius: f64,
-    /// `At` rkExplodePush.
+    /// rkExplodePush.
     pub rocket_explode_push: f64,
-    /// `Ot` egEnabled.
+    /// egEnabled.
     pub egg_enabled: bool,
-    /// `Rt` egSize.
+    /// egSize.
     pub egg_size: f64,
-    /// `Dt` egAge.
+    /// egAge.
     pub egg_age: f64,
-    /// `Lt` egGravityScale (unused by the original's throw code).
+    /// egGravityScale (unused by the original's throw code).
     pub egg_gravity_scale: f64,
-    /// `Ut` egRestitution.
+    /// egRestitution.
     pub egg_restitution: f64,
-    /// `jt` egExplodeRadius.
+    /// egExplodeRadius.
     pub egg_explode_radius: f64,
-    /// `Wt` egStartSpin.
+    /// egStartSpin.
     pub egg_spin: f64,
-    /// `Jt` egMaxThrowPower.
+    /// egMaxThrowPower.
     pub egg_power: f64,
-    /// `Gt` egAmmoNeeded.
+    /// egAmmoNeeded.
     pub egg_cost: f64,
-    /// `Ht` egDelay1.
+    /// egDelay1.
     pub egg_delay1: f64,
-    /// `zt` egDelay2.
+    /// egDelay2.
     pub egg_delay2: f64,
-    /// `Yt` egDelayBeforeAmmoUse.
+    /// egDelayBeforeAmmoUse.
     pub egg_delay_ammo: f64,
-    /// `qt` egAimRate.
+    /// egAimRate.
     pub egg_aim_rate: f64,
-    /// `Vt` egShape.
+    /// egShape.
     pub egg_shape: f64,
-    /// `Kt`/`Xt` playerSize (width/height).
+    /// playerSize (width/height).
     pub player_width: f64,
     pub player_height: f64,
-    /// `Zt` objectiveLimit (lives, kills, rounds, score...).
+    /// objectiveLimit (lives, kills, rounds, score...).
     pub objective_limit: f64,
-    /// `Qt` credited kills before becoming a ghost (0 = never).
+    /// Credited kills before becoming a ghost (0 = never).
     pub ghost_after: f64,
-    /// `$t` ghost linear damping.
+    /// Ghost linear damping.
     pub ghost_damping: f64,
-    /// `ti` ghost move force.
+    /// Ghost move force.
     pub ghost_force: f64,
-    /// `ii` ghost stamina regen.
+    /// Ghost stamina regen.
     pub ghost_regen: f64,
-    /// `si` ghost rocket speed.
+    /// Ghost rocket speed.
     pub ghost_rocket_speed: f64,
-    /// `hi` ghost rocket radius.
+    /// Ghost rocket radius.
     pub ghost_rocket_radius: f64,
-    /// `ei` ghost rocket age.
+    /// Ghost rocket age.
     pub ghost_rocket_age: f64,
-    /// `ni` ghost rocket turn rate.
+    /// Ghost rocket turn rate.
     pub ghost_rocket_turn: f64,
-    /// `oi` ghost rocket explode radius.
+    /// Ghost rocket explode radius.
     pub ghost_rocket_explode: f64,
-    /// `ri` fixed spawn assignment (spawn index = player id).
+    /// Fixed spawn assignment (spawn index = player id).
     pub fixed_spawns: bool,
 }
 
@@ -168,7 +170,7 @@ impl Default for GameSettings {
         GameSettings {
             fighters_collide: false,
             record_mode: false,
-            w: false,
+            flag_w: false,
             time_scale: 30.0,
             gravity_offset: 0.0,
             game_mode: mode::LIVES,
@@ -349,7 +351,7 @@ impl GameSettings {
         Ok(())
     }
 
-    /// Apply a `/set <name> <value>` command like the original (`wi`).
+    /// Apply a `/set <name> <value>` command like the original.
     /// Returns the confirmation text, or an error message.
     pub fn set(&mut self, name: &str, value: &str) -> Result<String, String> {
         let n = name.to_ascii_lowercase();

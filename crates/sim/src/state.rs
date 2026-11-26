@@ -94,20 +94,20 @@ pub fn index_of(v: f64) -> Option<u32> {
     if v >= 0.0 && v.fract() == 0.0 && v <= 4294967294.0 { Some(v as u32) } else { None }
 }
 
-/// Short-lived sound event (`Cr` bucket). `ttl` counts down every tick.
+/// Short-lived sound event. `ttl` counts down every tick.
 #[derive(serde::Serialize, serde::Deserialize, Clone, Debug, PartialEq)]
 pub struct Sound {
     pub x: f64,
     pub y: f64,
     pub kind: f64,
-    /// `Dn`
+    /// Countdown ticks left.
     pub ttl: f64,
     pub volume: f64,
-    /// `jn` emitting player (-1 none)
+    /// Emitting player (-1 none).
     pub player: f64,
     /// The original creates the parachute sound with its effect class, so the
     /// row serializes in the effect layout (ttl 20 at index 5) and is read
-    /// back next tick as a sound whose ttl is the effect's `On` (-1): it
+    /// back next tick as a sound whose ttl is the effect's lifetime value (-1): it
     /// lives for exactly one tick. Such sounds are stored with `ttl` -1.
     #[serde(default)]
     pub effect_row: bool,
@@ -119,48 +119,48 @@ impl Default for Sound {
     }
 }
 
-/// Short-lived visual effect (`zl` bucket).
+/// Short-lived visual effect.
 #[derive(serde::Serialize, serde::Deserialize, Clone, Debug, PartialEq)]
 pub struct Effect {
     pub x: f64,
     pub y: f64,
     pub kind: f64,
-    /// `On`/`Rn` secondary point (e.g. push target)
+    /// Secondary point (e.g. push target).
     pub x2: f64,
     pub y2: f64,
-    /// `Dn`
+    /// Countdown ticks left.
     pub ttl: f64,
-    /// `Ln`
-    pub ln: f64,
+    /// Extra value; serialized, not read by the sim.
+    pub extra_value: f64,
     pub volume: f64,
     pub z_index: f64,
-    /// `Un` team colour
+    /// Team colour.
     pub team: f64,
-    /// `jn` player
+    /// Player.
     pub player: f64,
 }
 
 impl Default for Effect {
     fn default() -> Self {
-        Effect { x: 0.0, y: 0.0, kind: 0.0, x2: -1.0, y2: -1.0, ttl: 0.0, ln: 0.0, volume: 1.0, z_index: 0.0, team: 0.0, player: -1.0 }
+        Effect { x: 0.0, y: 0.0, kind: 0.0, x2: -1.0, y2: -1.0, ttl: 0.0, extra_value: 0.0, volume: 1.0, z_index: 0.0, team: 0.0, player: -1.0 }
     }
 }
 
-/// Id allocators (`Dl` bucket).
+/// Id allocators.
 #[derive(serde::Serialize, serde::Deserialize, Clone, Debug, Default, PartialEq)]
 pub struct Counters {
-    /// `Rl` next projectile slot (grows forever).
+    /// Next projectile slot (grows forever).
     pub projectile: f64,
-    /// `Ju` cycling visual-effect slot (0..=250).
+    /// Cycling visual-effect slot (0..=250).
     pub effect: f64,
-    /// `cu` next turret slot.
+    /// Next turret slot.
     pub turret: f64,
-    /// `wu` next `pu` slot.
-    pub pu: f64,
+    /// Next pickup slot.
+    pub pickups: f64,
 }
 
 impl Counters {
-    /// `Yl()`: returns the current effect slot and advances it (wraps after 250).
+    /// Returns the current effect slot and advances it (wraps after 250).
     pub fn next_effect(&mut self) -> f64 {
         let v = self.effect;
         self.effect += 1.0;
@@ -171,51 +171,51 @@ impl Counters {
     }
 }
 
-/// Per-player round record (`ir.Pi` rows).
+/// Per-player round record.
 #[derive(serde::Serialize, serde::Deserialize, Clone, Debug, PartialEq)]
 pub struct PlayerRecord {
     pub id: f64,
-    /// `N` team (0 spectator, 1 FFA, 2 red, 3 blue)
+    /// Team (0 spectator, 1 FFA, 2 red, 3 blue).
     pub team: f64,
-    /// `Ei` kills / score
+    /// Kills / score.
     pub kills: f64,
-    /// `Fi` round wins
+    /// Round wins.
     pub wins: f64,
     // Race times (heav.io builds; the current original keeps these slots
     // unused). Times are run ticks (the player's age when it happened).
-    /// `co` best finish time this match (0 = none).
-    pub co: f64,
-    /// `do_` age at the last tick, while the map has checkpoints.
-    pub do_: f64,
-    /// `po` last finish time.
-    pub po: f64,
-    /// `wo` checkpoint times of the best run (by checkpoint number; NaN = none).
-    pub wo: Vec<f64>,
-    /// `mo` checkpoint times of the current run (by checkpoint number; NaN = none).
-    pub mo: Vec<f64>,
-    /// `yo` time behind (+) or ahead of (-) the best run at the last checkpoint (NaN = none).
-    pub yo: f64,
-    /// `fo` time of the last checkpoint.
-    pub fo: f64,
-    /// `bo` alive this round
+    /// Best finish time this match (0 = none).
+    pub best_finish_time: f64,
+    /// Age at the last tick, while the map has checkpoints.
+    pub checkpoint_age: f64,
+    /// Last finish time.
+    pub last_finish_time: f64,
+    /// Checkpoint times of the best run (by checkpoint number; NaN = none).
+    pub best_checkpoint_times: Vec<f64>,
+    /// Checkpoint times of the current run (by checkpoint number; NaN = none).
+    pub checkpoint_times: Vec<f64>,
+    /// Time behind (+) or ahead of (-) the best run at the last checkpoint (NaN = none).
+    pub checkpoint_delta: f64,
+    /// Time of the last checkpoint.
+    pub last_checkpoint_time: f64,
+    /// Alive this round.
     pub alive: bool,
-    /// `vo` respawn countdown (-1 none)
+    /// Respawn countdown (-1 none).
     pub respawn: f64,
-    /// `ko` claimed spawn index (-1 none)
+    /// Claimed spawn index (-1 none).
     pub spawn: f64,
-    /// `Bi` lives left
+    /// Lives left.
     pub lives: f64,
-    /// `Ii` elimination order
+    /// Elimination order.
     pub eliminated: f64,
-    /// `So` last victim
+    /// Last victim.
     pub last_victim: f64,
-    /// `No` kill-banner timer
+    /// Kill-banner timer.
     pub kill_timer: f64,
-    /// `Mo` killed by
+    /// Killed by.
     pub killed_by: f64,
-    /// `Co` death-banner timer
+    /// Death-banner timer.
     pub death_timer: f64,
-    /// `To` suicide-banner timer
+    /// Suicide-banner timer.
     pub suicide_timer: f64,
 }
 
@@ -226,13 +226,13 @@ impl Default for PlayerRecord {
             team: 0.0,
             kills: 0.0,
             wins: 0.0,
-            co: 0.0,
-            do_: 0.0,
-            po: 0.0,
-            wo: Vec::new(),
-            mo: Vec::new(),
-            yo: f64::NAN,
-            fo: 0.0,
+            best_finish_time: 0.0,
+            checkpoint_age: 0.0,
+            last_finish_time: 0.0,
+            best_checkpoint_times: Vec::new(),
+            checkpoint_times: Vec::new(),
+            checkpoint_delta: f64::NAN,
+            last_checkpoint_time: 0.0,
             alive: false,
             respawn: -1.0,
             spawn: -1.0,
@@ -247,35 +247,38 @@ impl Default for PlayerRecord {
     }
 }
 
-/// Match/round state (`ir` bucket).
+/// Match/round state.
 #[derive(serde::Serialize, serde::Deserialize, Clone, Debug, PartialEq)]
 pub struct Round {
-    /// `xo` game-over countdown (-1 = running); slows physics to 40%.
+    /// Game-over countdown (-1 = running); slows physics to 40%.
     pub game_over: f64,
-    /// `_o` round-over countdown (-1 = running).
+    /// Round-over countdown (-1 = running).
     pub round_over: f64,
-    /// `$e` intro countdown (-1 = finished).
+    /// Intro countdown (-1 = finished).
     pub intro: f64,
-    pub po: f64,
-    /// spawn PRNG state
+    /// Kept for state layout; no rule reads it (2 by default).
+    pub reserved_2: f64,
+    /// Spawn PRNG state.
     pub seed: f64,
-    /// `Eo` round number
+    /// Round number.
     pub round_number: f64,
-    pub bo: f64,
-    pub io: f64,
-    /// `Fo` tick counter
+    /// Kept for state layout; no rule reads it.
+    pub reserved_0: f64,
+    /// Index of the current map in the rotation playlist.
+    pub map_index: f64,
+    /// Tick counter.
     pub ticks: f64,
-    /// `Ao` winner (player id / -1 draw / -2 ...)
+    /// Winner (player id / -1 draw / -2 ...).
     pub winner: f64,
-    /// `Oo` winning team of the last objective
+    /// Winning team of the last objective.
     pub objective_team: f64,
-    /// `Ro` elimination counter
+    /// Elimination counter.
     pub eliminations: f64,
-    /// `Do` lowest lives left (late-join lives)
+    /// Lowest lives left (late-join lives).
     pub min_lives: f64,
-    /// `Lo`
-    pub lo: bool,
-    /// `Uo`/`jo` red/blue score or lives
+    /// Map rotation: the next map is played after a game over (set by `match_start`).
+    pub rotation: bool,
+    /// Red and blue score or lives.
     pub red: f64,
     pub blue: f64,
     pub players: Sparse<PlayerRecord>,
@@ -287,17 +290,17 @@ impl Default for Round {
             game_over: -1.0,
             round_over: -1.0,
             intro: -1.0,
-            po: 2.0,
+            reserved_2: 2.0,
             seed: 0.0,
             round_number: 0.0,
-            bo: 0.0,
-            io: 0.0,
+            reserved_0: 0.0,
+            map_index: 0.0,
             ticks: 0.0,
             winner: 0.0,
             objective_team: -1.0,
             eliminations: 0.0,
             min_lives: -1.0,
-            lo: false,
+            rotation: false,
             red: 0.0,
             blue: 0.0,
             players: Sparse::new(),
@@ -306,7 +309,7 @@ impl Default for Round {
 }
 
 impl Round {
-    /// `Wo()`: 16-bit xorshift; returns a value in (0, 1].
+    /// Advances the seeded 16-bit xorshift; returns a value in (0, 1].
     pub fn random(&mut self) -> f64 {
         let mut s = crate::js::to_int32(self.seed);
         if s == 0 {
@@ -320,18 +323,18 @@ impl Round {
     }
 }
 
-/// Grab/rope attachment state (`f6`).
+/// Grab/rope attachment state.
 #[derive(serde::Serialize, serde::Deserialize, Clone, Copy, Debug, PartialEq)]
 pub struct Attach {
-    /// `Oe`: 0 idle, 2 attached, 3 lost, 4
+    /// 0 idle, 2 attached, 3 lost (see the `ATTACH_*` constants).
     pub state: f64,
-    /// `De`
-    pub de: f64,
-    /// `Le` kind of the attached object
+    /// Kept for state layout; no rule reads it (-1 by default).
+    pub reserved: f64,
+    /// Kind of the attached object.
     pub kind: f64,
-    /// `Ue` id of the attached object
+    /// Id of the attached object.
     pub target: f64,
-    /// `je`/`We` local anchor on the target
+    /// Local anchor on the target.
     pub ax: f64,
     pub ay: f64,
 }
@@ -342,11 +345,11 @@ pub const ATTACH_LOST: f64 = 3.0;
 
 impl Default for Attach {
     fn default() -> Self {
-        Attach { state: ATTACH_IDLE, de: -1.0, kind: 0.0, target: 0.0, ax: 0.0, ay: 0.0 }
+        Attach { state: ATTACH_IDLE, reserved: -1.0, kind: 0.0, target: 0.0, ax: 0.0, ay: 0.0 }
     }
 }
 
-/// Parachute canopy body state (`Pn`).
+/// Parachute canopy body state.
 #[derive(serde::Serialize, serde::Deserialize, Clone, Copy, Debug, Default, PartialEq)]
 pub struct Parachute {
     pub x: f64,
@@ -355,11 +358,11 @@ pub struct Parachute {
     pub angular_velocity: f64,
     pub vx: f64,
     pub vy: f64,
-    /// `Ae` deploy countdown
+    /// Deploy countdown.
     pub deploy: f64,
 }
 
-/// A player (`Ho` bucket row).
+/// A player row.
 #[derive(serde::Serialize, serde::Deserialize, Clone, Debug, PartialEq)]
 pub struct Player {
     pub id: f64,
@@ -369,77 +372,82 @@ pub struct Player {
     pub angular_velocity: f64,
     pub vx: f64,
     pub vy: f64,
-    /// `ze` ticks the jump key has been held.
+    /// Ticks the jump key has been held.
     pub up_held: f64,
-    /// `Ye` teleported this tick (do not interpolate).
+    /// Teleported this tick (do not interpolate).
     pub teleported: bool,
-    /// `qe` health.
+    /// Health.
     pub health: f64,
-    /// `N` team.
+    /// Team.
     pub team: f64,
-    /// `Ve` air jump available.
+    /// Air jump available.
     pub air_jump: bool,
-    /// `Ke`/`Xe` spawn point.
+    /// Spawn point.
     pub spawn_x: f64,
     pub spawn_y: f64,
-    /// Race checkpoints passed this run (`bh` in the heav.io builds; the
-    /// current original keeps the slot but never changes it).
+    /// Race checkpoints passed this run. The heav.io builds used this slot
+    /// for something else; the current original keeps it but never changes it.
     pub checkpoint: f64,
-    /// `Qe` ticks alive.
+    /// Ticks alive.
     pub age: f64,
-    /// `$e` frozen ticks (input ignored).
+    /// Frozen ticks (input ignored).
     pub frozen: f64,
-    pub tn: bool,
-    /// `sn` movement disabled.
+    /// Kept for state layout; no rule reads it.
+    pub reserved_flag: bool,
+    /// Movement disabled.
     pub stunned: bool,
-    /// `hn` coyote-time counter.
+    /// Coyote-time counter.
     pub coyote: f64,
-    pub en: f64,
-    /// `nn` force-push frame counter.
+    /// Compared against the race reset limit when the bat key is pressed.
+    pub reset_count: f64,
+    /// Force-push frame counter.
     pub push_frames: f64,
-    /// `rn` stamina.
+    /// Stamina.
     pub stamina: f64,
-    /// `an` last attacker (-1 none).
+    /// Last attacker (-1 none).
     pub attacker: f64,
-    /// `ln` attacker credit timer.
+    /// Attacker credit timer.
     pub attacker_timer: f64,
-    /// `un` bat frame (-1 idle).
+    /// Bat frame (-1 idle).
     pub bat_frame: f64,
-    /// `cn` bat aim angle.
+    /// Bat aim angle.
     pub bat_aim: f64,
-    /// `dn` bat hit history: [kind, id, kind, id, ...].
+    /// Bat hit history: [kind, id, kind, id, ...].
     pub bat_hits: Vec<f64>,
-    /// `fn` may trigger the freeze sound.
+    /// May trigger the freeze sound.
     pub freeze_ready: bool,
-    /// `wn` dash frame (-1 idle).
+    /// Dash frame (-1 idle).
     pub dash_frame: f64,
-    /// `mn` speed before the dash.
+    /// Speed before the dash.
     pub dash_speed: f64,
-    /// `pn` rocket frame (-1 idle).
+    /// Rocket frame (-1 idle).
     pub rocket_frame: f64,
-    /// `gn` rocket aim angle.
+    /// Rocket aim angle.
     pub rocket_aim: f64,
-    /// `yn` egg charge frame.
+    /// Egg charge frame.
     pub egg_frame: f64,
-    /// `bn` egg aim angle.
+    /// Egg aim angle.
     pub egg_aim: f64,
-    /// `vn` impact-sound limiter.
+    /// Impact-sound limiter.
     pub sound_limiter: f64,
-    pub kn: f64,
-    pub sn2: f64,
-    pub nn2: bool,
-    /// `Mn` ghost (flies, no gravity, fires ghost rockets).
+    /// Kept for state layout; no rule reads it.
+    pub reserved_count: f64,
+    /// Kept for state layout; no rule reads it.
+    pub reserved_count_2: f64,
+    /// Kept for state layout; no rule reads it.
+    pub reserved_flag_2: bool,
+    /// Ghost (flies, no gravity, fires ghost rockets).
     pub ghost: bool,
-    /// `Cn` kills credited; the player becomes a ghost when it reaches the
+    /// Kills credited; the player becomes a ghost when it reaches the
     /// `ghost_after` setting (0 = never, the original default).
     pub kills: f64,
-    /// `Tn` grapple-point rope (inert in the original).
+    /// Grapple-point rope (inert in the original).
     pub rope: Attach,
-    /// `xn` player link (inert in the original).
+    /// Player link (inert in the original).
     pub link: Attach,
-    /// `_n` grab anchors (8 directions).
+    /// Grab anchors (8 directions).
     pub grabs: [Attach; 8],
-    /// `Pn` parachute.
+    /// Parachute.
     pub parachute: Option<Parachute>,
 }
 
@@ -463,10 +471,10 @@ impl Default for Player {
             checkpoint: 0.0,
             age: 0.0,
             frozen: 0.0,
-            tn: false,
+            reserved_flag: false,
             stunned: false,
             coyote: 0.0,
-            en: 0.0,
+            reset_count: 0.0,
             push_frames: 0.0,
             stamina: 0.0,
             attacker: -1.0,
@@ -482,9 +490,9 @@ impl Default for Player {
             egg_frame: 0.0,
             egg_aim: 0.0,
             sound_limiter: 1.0,
-            kn: 0.0,
-            sn2: 0.0,
-            nn2: false,
+            reserved_count: 0.0,
+            reserved_count_2: 0.0,
+            reserved_flag_2: false,
             ghost: false,
             kills: 0.0,
             rope: Attach::default(),
@@ -495,7 +503,7 @@ impl Default for Player {
     }
 }
 
-/// A map body (`pl` bucket row).
+/// A map body row.
 #[derive(serde::Serialize, serde::Deserialize, Clone, Debug, PartialEq)]
 pub struct Body {
     pub x: f64,
@@ -504,30 +512,30 @@ pub struct Body {
     pub angular_velocity: f64,
     pub vx: f64,
     pub vy: f64,
-    /// `Ye` teleported this tick.
+    /// Teleported this tick.
     pub teleported: bool,
-    /// `ya` accumulated damage.
+    /// Accumulated damage.
     pub damage: f64,
-    /// `ba` lifetime countdown (-1 none).
+    /// Lifetime countdown (-1 none).
     pub lifetime: f64,
-    /// `va` impact-sound limiter.
+    /// Impact-sound limiter.
     pub sound_limiter: f64,
-    /// `ka` push attribution: player id -> weight.
+    /// Push attribution: player id -> weight.
     pub push_from: Sparse<f64>,
     pub def: Arc<BodyDef>,
 }
 
-/// A projectile (`Ol` bucket row).
+/// A projectile row.
 pub type Projectile = ProjectileDef;
 
-/// Unused bucket (`pu`): kept for state-layout parity.
+/// Pickup bucket row. Nothing in the sim reads it; kept for state layout.
 #[derive(serde::Serialize, serde::Deserialize, Clone, Debug, PartialEq)]
-pub struct PuRow {
+pub struct PickupRow {
     pub x: f64,
     pub y: f64,
     pub angle: f64,
     pub health: f64,
-    pub yu: f64,
+    pub reserved: f64,
     pub team: f64,
 }
 
@@ -545,6 +553,6 @@ pub struct State {
     pub projectiles: Sparse<Projectile>,
     pub turrets: Sparse<MapTurret>,
     pub grapples: Sparse<MapGrapple>,
-    pub pu: Sparse<PuRow>,
+    pub pickups: Sparse<PickupRow>,
     pub caps: Vec<MapCap>,
 }

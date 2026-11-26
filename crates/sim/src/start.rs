@@ -38,10 +38,10 @@ impl State {
                     angular_velocity: b.angular_velocity,
                     vx: b.vx,
                     vy: b.vy,
-                    teleported: b.ye,
+                    teleported: b.teleported,
                     damage: b.damage,
                     lifetime: b.lifetime,
-                    sound_limiter: b.va,
+                    sound_limiter: b.sound_limiter,
                     push_from: {
                         let mut p = Sparse::new();
                         for (k, w) in &b.push_from {
@@ -69,14 +69,14 @@ impl State {
         s
     }
 
-    /// `hP`: register players in the round record.
+    /// Register players in the round record.
     fn add_records(&mut self, players: &[(u32, f64)], gs: &GameSettings) {
         for &(id, team) in players {
             self.round.players.insert(id, PlayerRecord { id: id as f64, team, lives: gs.objective_limit, ..PlayerRecord::default() });
         }
     }
 
-    /// `Tr`: place players on spawns (priority + PRNG jitter, random pick
+    /// Place players on spawns (priority + PRNG jitter, random pick
     /// among the players that may use each spawn).
     fn place_players(&mut self, players: &[(u32, f64)], gs: &GameSettings) {
         let mut spawns: Vec<crate::map::MapSpawn> = self.spawns.values().cloned().collect();
@@ -135,7 +135,7 @@ impl State {
                 );
                 if let Some(r) = self.round.players.get_mut(id) {
                     r.alive = true;
-                    r.mo.clear();
+                    r.checkpoint_times.clear();
                 }
                 left.remove(pick);
                 if left.is_empty() {
@@ -145,7 +145,7 @@ impl State {
         }
     }
 
-    /// `wr`: mode-specific match initialisation.
+    /// Mode-specific match initialisation.
     fn init_mode(&mut self, gs: &GameSettings) {
         if gs.game_mode == crate::settings::mode::LIVES_TEAMS {
             self.round.red = gs.objective_limit;
@@ -154,14 +154,14 @@ impl State {
     }
 }
 
-/// Start a match on `lobby` (`Q_`).
+/// Start a match on `lobby`.
 ///
-/// `players` are `(id, team)`; `rotation` is the original's `iP`/`Lo` flag
+/// `players` are `(id, team)`; `rotation` is the original's rotation flag
 /// (map rotation: the next map is played after a game over).
 pub fn match_start(lobby: &State, seed: u32, players: &[(u32, f64)], gs: &GameSettings, intro: bool, rotation: bool) -> State {
     let mut s = lobby.clone();
     s.round.seed = seed as f64;
-    s.round.lo = rotation;
+    s.round.rotation = rotation;
     if intro {
         s.round.intro = INTRO_TICKS;
     }
@@ -179,7 +179,7 @@ pub fn match_start(lobby: &State, seed: u32, players: &[(u32, f64)], gs: &GameSe
     s
 }
 
-/// Start the next round (`nP`): fresh map, round record carried over.
+/// Start the next round: fresh map, round record carried over.
 pub fn next_round(lobby: &State, current: &State, gs: &GameSettings) -> State {
     let mut s = lobby.clone();
     s.round = current.round.clone();
@@ -213,18 +213,18 @@ pub enum Outcome {
 }
 
 /// Deterministic per-tick driver: step, then apply the original's round
-/// transitions (`GL`). `maps` is the rotation playlist (at least one map).
+/// transitions. `maps` is the rotation playlist (at least one map).
 pub fn advance(sim: &mut Sim, state: &State, inputs: &[u8], events: Option<&Events>, gs: &GameSettings, maps: &[State]) -> (State, Outcome) {
     let mut next = sim.step(state, inputs, events, gs);
-    let rotation = next.round.lo;
+    let rotation = next.round.rotation;
     let round_done = next.round.round_over == 0.0;
     let game_done = next.round.game_over == 0.0;
     if round_done || (rotation && game_done) {
         let index = if rotation && game_done {
-            next.round.io += 1.0;
-            next.round.io % maps.len() as f64
+            next.round.map_index += 1.0;
+            next.round.map_index % maps.len() as f64
         } else if round_done && rotation {
-            next.round.io % maps.len() as f64
+            next.round.map_index % maps.len() as f64
         } else {
             0.0
         };

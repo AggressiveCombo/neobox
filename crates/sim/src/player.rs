@@ -25,7 +25,7 @@ pub const SPAWN_GRACE: f64 = 27.0;
 /// Collision category of players.
 pub const CATEGORY: u16 = 2;
 
-/// Impact-sound limiter (`A3`).
+/// Impact-sound limiter.
 #[derive(Clone, Copy, Debug)]
 pub struct Limiter {
     value: f64,
@@ -57,56 +57,56 @@ impl Limiter {
 /// Runtime wrapper of a player for one tick.
 pub(crate) struct PlayerObj {
     pub index: u32,
-    pub eo: Player,
-    /// half size used for distance sorting (`hs`)
-    pub hs: f64,
-    pub hu: f64,
-    pub eu: f64,
+    pub row: Player,
+    /// half size used for distance sorting
+    pub sort_half_width: f64,
+    pub half_width: f64,
+    pub half_height: f64,
     pub body: Option<BodyId>,
-    /// parachute canopy body (`lu`)
+    /// parachute canopy body
     pub chute: Option<BodyId>,
-    /// `_l` died this tick
-    pub dead: bool,
-    /// `Xl` died by damage/fall (debris flies up)
-    pub xl: bool,
-    /// `Zl` leaves the state this tick
-    pub gone: bool,
-    /// `$l` jumped this tick
+    /// died this tick
+    pub died: bool,
+    /// died by damage or fall (debris flies up)
+    pub debris_up: bool,
+    /// leaves the state this tick
+    pub leaving: bool,
+    /// jumped this tick
     pub jumped: bool,
-    /// `iu` touched a freeze body
+    /// touched a freeze body
     pub froze: bool,
-    /// `su` holds the special key (blocks movement input)
-    pub su: bool,
+    /// holds the special key (blocks movement input)
+    pub special_held: bool,
     pub new_effects: Vec<Effect>,
     pub new_sounds: Vec<Sound>,
     pub new_projectiles: Vec<Projectile>,
-    /// bodies held by grab joints this tick (`tu`)
+    /// bodies held by grab joints this tick
     pub grabbed: Vec<BodyId>,
     pub limiter: Limiter,
-    /// `rl` touched the next race checkpoint this tick
+    /// touched the next race checkpoint this tick
     pub passed: bool,
-    /// `el`/`nl`/`ol` back to the last race checkpoint at the end of the tick
+    /// goes back to the last race checkpoint at the end of the tick
     pub to_checkpoint: Option<(f64, f64)>,
 }
 
 impl PlayerObj {
-    pub fn new(index: u32, mut eo: Player, gs: &GameSettings) -> PlayerObj {
-        eo.teleported = false;
-        let limiter = Limiter::new(eo.sound_limiter, 1.0, 0.2, 0.8);
+    pub fn new(index: u32, mut row: Player, gs: &GameSettings) -> PlayerObj {
+        row.teleported = false;
+        let limiter = Limiter::new(row.sound_limiter, 1.0, 0.2, 0.8);
         PlayerObj {
             index,
-            eo,
-            hs: gs.player_width / 2.0,
-            hu: gs.player_width / 2.0,
-            eu: gs.player_height / 2.0,
+            row,
+            sort_half_width: gs.player_width / 2.0,
+            half_width: gs.player_width / 2.0,
+            half_height: gs.player_height / 2.0,
             body: None,
             chute: None,
-            dead: false,
-            xl: false,
-            gone: false,
+            died: false,
+            debris_up: false,
+            leaving: false,
             jumped: false,
             froze: false,
-            su: false,
+            special_held: false,
             new_effects: Vec::new(),
             new_sounds: Vec::new(),
             new_projectiles: Vec::new(),
@@ -122,21 +122,21 @@ impl PlayerObj {
         self.index as f64
     }
 
-    /// `Gl`: same team (teams > 1 only).
+    /// Same team (teams > 1 only).
     pub fn same_team(&self, team: f64) -> bool {
-        self.eo.team == team && self.eo.team > 1.0
+        self.row.team == team && self.row.team > 1.0
     }
 
-    /// `Fu`: dash in its active window.
+    /// Dash in its active window.
     pub fn dashing(&self, gs: &GameSettings) -> bool {
-        self.eo.dash_frame >= 3.0 && self.eo.dash_frame < gs.dash_init_delay + gs.dash_active
+        self.row.dash_frame >= 3.0 && self.row.dash_frame < gs.dash_init_delay + gs.dash_active
     }
 
-    /// `Ll`: take damage.
+    /// Take damage.
     pub fn damage(&mut self, amount: f64) {
-        self.eo.health -= amount;
-        self.eo.health = js::min(100.0, self.eo.health);
-        self.eo.health = js::max(0.0, self.eo.health);
+        self.row.health -= amount;
+        self.row.health = js::min(100.0, self.row.health);
+        self.row.health = js::max(0.0, self.row.health);
     }
 
     fn sound_at(&mut self, store: &Store, kind: f64, ttl: f64, volume: f64) {
@@ -150,18 +150,18 @@ fn player_body(ctx: &Ctx<'_>, i: usize) -> BodyId {
     ctx.players[i].body.expect("player body")
 }
 
-/// `oo`: create the player's physics body.
+/// Create the player's physics body.
 pub(crate) fn create(ctx: &mut Ctx<'_>, world: &mut World, i: usize) {
     let gs = ctx.gs;
     let p = &ctx.players[i];
     let mut def = B2BodyDef::default();
     def.body_type = BodyType::Dynamic;
-    def.position = v2(p.eo.x, p.eo.y);
-    def.angle = p.eo.angle;
-    def.angular_velocity = p.eo.angular_velocity;
+    def.position = v2(p.row.x, p.row.y);
+    def.angle = p.row.angle;
+    def.angular_velocity = p.row.angular_velocity;
     def.fixed_rotation = false;
     def.linear_damping = 0.3;
-    if p.eo.ghost {
+    if p.row.ghost {
         def.linear_damping = gs.ghost_damping;
     }
     def.angular_damping = 0.5;
@@ -169,25 +169,25 @@ pub(crate) fn create(ctx: &mut Ctx<'_>, world: &mut World, i: usize) {
     def.user_data = tag(kind::PLAYER, i);
     let body = world.create_body(&def);
     let mut shape = PolygonShape::new();
-    shape.set_as_box(p.hu, p.eu);
+    shape.set_as_box(p.half_width, p.half_height);
     let mut fd = FixtureDef::new(Shape::Polygon(shape));
-    fd.density = 2.0 / (2.0 * p.hu * p.eu * 2.0);
+    fd.density = 2.0 / (2.0 * p.half_width * p.half_height * 2.0);
     fd.friction = FRICTION;
     fd.restitution = RESTITUTION;
     fd.filter.category_bits = CATEGORY;
     world.create_fixture(body, &fd);
-    world.store_mut().body_mut(body).set_linear_velocity(v2(p.eo.vx, p.eo.vy));
+    world.store_mut().body_mut(body).set_linear_velocity(v2(p.row.vx, p.row.vy));
     ctx.players[i].body = Some(body);
 }
 
-/// `mu`: apply one tick of input.
+/// Apply one tick of input.
 pub(crate) fn update(ctx: &mut Ctx<'_>, world: &mut World, i: usize, mut input: Input) {
     let gs = ctx.gs;
     crate::race::reset_key(ctx, i, input.bat);
-    if ctx.players[i].eo.frozen > 0.0 {
+    if ctx.players[i].row.frozen > 0.0 {
         input = Input::default();
     }
-    if !ctx.players[i].eo.ghost {
+    if !ctx.players[i].row.ghost {
         force_push(ctx, world, i, &input);
         if gs.bat_enabled {
             bat(ctx, world, i, &input);
@@ -212,42 +212,42 @@ pub(crate) fn update(ctx: &mut Ctx<'_>, world: &mut World, i: usize, mut input: 
     }
     let p = &mut ctx.players[i];
     if input.up {
-        p.eo.up_held += 1.0;
+        p.row.up_held += 1.0;
     } else {
-        p.eo.up_held = 0.0;
+        p.row.up_held = 0.0;
     }
 }
 
-/// `ao`
+/// Per-tick countdowns of freeze and attacker credit.
 pub(crate) fn pre_step(p: &mut PlayerObj) {
-    if p.eo.frozen > 0.0 {
-        p.eo.frozen -= 1.0;
+    if p.row.frozen > 0.0 {
+        p.row.frozen -= 1.0;
     }
-    if p.eo.attacker_timer > 0.0 {
-        p.eo.attacker_timer -= 1.0;
+    if p.row.attacker_timer > 0.0 {
+        p.row.attacker_timer -= 1.0;
     }
 }
 
-/// `Nu`: horizontal movement forces and air control.
+/// Horizontal movement forces and air control.
 fn movement(ctx: &mut Ctx<'_>, world: &mut World, i: usize, input: &Input) {
     let p = &ctx.players[i];
     let mut input = *input;
-    if p.eo.stunned || p.su {
+    if p.row.stunned || p.special_held {
         input = Input::default();
     }
     let body = player_body(ctx, i);
     let mut brake = 120.0;
     let mut idle = 10.0;
-    let speed = (p.eo.vx * p.eo.vx + p.eo.vy * p.eo.vy).sqrt();
+    let speed = (p.row.vx * p.row.vx + p.row.vy * p.row.vy).sqrt();
     let mut force = 80.0 - 60.0 * js::min(speed / 15.0, 1.0);
-    let moving_right = p.eo.vx > 0.4;
-    let moving_left = p.eo.vx < -0.4;
+    let moving_right = p.row.vx > 0.4;
+    let moving_left = p.row.vx < -0.4;
     // grounded: ray from the centre straight down
     let grounded = {
         let mut hit = false;
-        let from = v2(p.eo.x, p.eo.y);
-        let to = v2(p.eo.x, p.eo.y + js::max(p.eu, p.hu) + 0.2);
-        let team = p.eo.team;
+        let from = v2(p.row.x, p.row.y);
+        let to = v2(p.row.x, p.row.y + js::max(p.half_height, p.half_width) + 0.2);
+        let team = p.row.team;
         world.ray_cast(
             |store, f, _pt, _n, _frac| {
                 if store.fixture(f).is_sensor() {
@@ -255,7 +255,7 @@ fn movement(ctx: &mut Ctx<'_>, world: &mut World, i: usize, input: &Input) {
                 }
                 let (_, k, bi) = fixture_owner(store, f);
                 if k == kind::BODY {
-                    let pass = ctx.bodies[bi].eo.def.player_pass;
+                    let pass = ctx.bodies[bi].row.def.player_pass;
                     if pass == 1.0 || pass == team {
                         return 1.0;
                     }
@@ -312,7 +312,7 @@ fn movement(ctx: &mut Ctx<'_>, world: &mut World, i: usize, input: &Input) {
     }
 }
 
-/// `_u`: count ray hits around the player: [down, up, right, left].
+/// Count ray hits around the player: [down, up, right, left].
 fn contact_rays(ctx: &Ctx<'_>, world: &World, i: usize, axis_aligned: bool) -> [u32; 4] {
     let p = &ctx.players[i];
     let gs = ctx.gs;
@@ -323,20 +323,20 @@ fn contact_rays(ctx: &Ctx<'_>, world: &World, i: usize, axis_aligned: bool) -> [
     let pos = b.get_position();
     let (l, r, d, u) = if !axis_aligned {
         (
-            b.get_world_point(v2(-(p.hu + probe), 0.0)),
-            b.get_world_point(v2(p.hu + probe, 0.0)),
-            b.get_world_point(v2(0.0, p.eu + probe)),
-            b.get_world_point(v2(0.0, -(p.eu + probe))),
+            b.get_world_point(v2(-(p.half_width + probe), 0.0)),
+            b.get_world_point(v2(p.half_width + probe, 0.0)),
+            b.get_world_point(v2(0.0, p.half_height + probe)),
+            b.get_world_point(v2(0.0, -(p.half_height + probe))),
         )
     } else {
         (
-            v2(pos.x - (p.hu + probe), pos.y),
-            v2(pos.x + (p.hu + probe), pos.y),
-            v2(pos.x, pos.y + (p.eu + probe)),
-            v2(pos.x, pos.y - (p.eu + probe)),
+            v2(pos.x - (p.half_width + probe), pos.y),
+            v2(pos.x + (p.half_width + probe), pos.y),
+            v2(pos.x, pos.y + (p.half_height + probe)),
+            v2(pos.x, pos.y - (p.half_height + probe)),
         )
     };
-    let origin = v2(p.eo.x, p.eo.y);
+    let origin = v2(p.row.x, p.row.y);
     let mut counts = [0u32; 4];
     let mut cb = |store: &Store, f, point: Vec2, _n: Vec2, frac: f64| -> f64 {
         if store.fixture(f).is_sensor() {
@@ -349,7 +349,7 @@ fn contact_rays(ctx: &Ctx<'_>, world: &World, i: usize, axis_aligned: bool) -> [
         if k == kind::PLAYER && !gs.fighters_collide {
             return 1.0;
         }
-        if k == kind::BODY && ctx.bodies[bi].eo.def.no_jump {
+        if k == kind::BODY && ctx.bodies[bi].row.def.no_jump {
             return frac;
         }
         let mut d = point;
@@ -376,33 +376,33 @@ fn contact_rays(ctx: &Ctx<'_>, world: &World, i: usize, axis_aligned: bool) -> [
     counts
 }
 
-/// `Mu`: jumping (ground, coyote, walls, ceiling, air jump).
+/// Jumping (ground, coyote, walls, ceiling, air jump).
 fn jump(ctx: &mut Ctx<'_>, world: &mut World, i: usize, input: &Input) {
     let mut input = *input;
-    if ctx.players[i].eo.stunned {
+    if ctx.players[i].row.stunned {
         input = Input::default();
     }
     let [down, up, right, left] = contact_rays(ctx, world, i, false);
     let body = player_body(ctx, i);
     let p = &mut ctx.players[i];
     if down > 0 || right > 0 || left > 0 {
-        p.eo.air_jump = true;
+        p.row.air_jump = true;
     }
-    if p.eo.coyote > 0.0 {
-        p.eo.coyote -= 1.0;
+    if p.row.coyote > 0.0 {
+        p.row.coyote -= 1.0;
     }
     if down > 0 {
-        p.eo.coyote = 4.0;
+        p.row.coyote = 4.0;
     }
     let store = world.store_mut();
-    if input.up && p.eo.up_held == 0.0 && p.eo.rope.state != ATTACH_ON {
+    if input.up && p.row.up_held == 0.0 && p.row.rope.state != ATTACH_ON {
         let b = store.body_mut(body);
-        if (down > 0 || p.eo.coyote > 0.0) && up == 0 {
+        if (down > 0 || p.row.coyote > 0.0) && up == 0 {
             let c = b.get_world_center();
             b.apply_impulse(v2(0.0, -20.0), c);
             p.jumped = true;
             p.sound_at(store, sound::JUMP, 15.0, 1.0);
-            p.eo.coyote = 0.0;
+            p.row.coyote = 0.0;
         } else if right > 0 {
             let v = b.get_linear_velocity();
             if v.y > 0.0 {
@@ -429,12 +429,12 @@ fn jump(ctx: &mut Ctx<'_>, world: &mut World, i: usize, input: &Input) {
         }
         let b = store.body_mut(body);
         if down == 0
-            && p.eo.coyote == 0.0
+            && p.row.coyote == 0.0
             && up == 0
             && right == 0
             && left == 0
             && !p.jumped
-            && p.eo.air_jump
+            && p.row.air_jump
             && b.get_linear_velocity().y > -2.0
         {
             let v = b.get_linear_velocity();
@@ -444,12 +444,12 @@ fn jump(ctx: &mut Ctx<'_>, world: &mut World, i: usize, input: &Input) {
             let c = b.get_world_center();
             b.apply_impulse(v2(0.0, -15.0), c);
             p.jumped = true;
-            p.eo.air_jump = false;
-            // air-jump puff effect (`Eu`) and sound (`Bu`)
+            p.row.air_jump = false;
+            // air-jump puff effect and sound
             let pos = store.body(body).get_position();
             p.new_effects.push(Effect {
                 x: pos.x,
-                y: pos.y + 0.8 * js::min(p.eu, p.hu),
+                y: pos.y + 0.8 * js::min(p.half_height, p.half_width),
                 ttl: 15.0,
                 kind: effect::AIR_JUMP,
                 player: p.id(),
@@ -463,46 +463,46 @@ fn jump(ctx: &mut Ctx<'_>, world: &mut World, i: usize, input: &Input) {
 /// Candidate filter shared by abilities: dynamic, solid, non-debris, not immune map bodies.
 fn targetable_body(ctx: &Ctx<'_>, bi: usize) -> bool {
     let b = &ctx.bodies[bi];
-    !b.eo.def.no_physics && b.eo.def.motion == BODY_DYNAMIC && b.eo.def.source_player == -1.0 && !b.eo.def.ability_immune
+    !b.row.def.no_physics && b.row.def.motion == BODY_DYNAMIC && b.row.def.source_player == -1.0 && !b.row.def.ability_immune
 }
 
-/// `fu`: force push (hold the push key, drains stamina).
+/// Force push (hold the push key, drains stamina).
 fn force_push(ctx: &mut Ctx<'_>, world: &mut World, i: usize, input: &Input) {
     let gs = ctx.gs;
     {
         let p = &mut ctx.players[i];
         if !input.push {
-            p.eo.push_frames = 0.0;
+            p.row.push_frames = 0.0;
         }
-        if !input.push && !input.bat && p.eo.stamina < gs.max_stamina {
-            p.eo.stamina += gs.ammo_regen;
-            if p.eo.stamina > gs.max_stamina {
-                p.eo.stamina = gs.max_stamina;
+        if !input.push && !input.bat && p.row.stamina < gs.max_stamina {
+            p.row.stamina += gs.ammo_regen;
+            if p.row.stamina > gs.max_stamina {
+                p.row.stamina = gs.max_stamina;
             }
         }
         if !input.push || input.bat {
             return;
         }
-        if p.eo.stamina < gs.push_min_ammo && p.eo.push_frames == 0.0 {
+        if p.row.stamina < gs.push_min_ammo && p.row.push_frames == 0.0 {
             return;
         }
-        if p.eo.stamina <= 0.0 {
+        if p.row.stamina <= 0.0 {
             return;
         }
-        if p.eo.push_frames == 0.0 {
-            p.eo.stamina -= gs.push_first_spend;
+        if p.row.push_frames == 0.0 {
+            p.row.stamina -= gs.push_first_spend;
         } else {
-            p.eo.stamina -= gs.push_spend;
+            p.row.stamina -= gs.push_spend;
         }
-        if p.eo.stamina <= 0.0 {
-            p.eo.stamina = 0.0;
+        if p.row.stamina <= 0.0 {
+            p.row.stamina = 0.0;
         }
-        p.eo.push_frames += 1.0;
+        p.row.push_frames += 1.0;
     }
     let me = player_body(ctx, i);
-    let my_id = ctx.players[i].eo.id;
-    let my_team = ctx.players[i].eo.team;
-    let frames = ctx.players[i].eo.push_frames;
+    let my_id = ctx.players[i].row.id;
+    let my_team = ctx.players[i].row.team;
+    let frames = ctx.players[i].row.push_frames;
     let mut hit_any = false;
     let list: Vec<BodyId> = world.bodies().collect();
     for b in list {
@@ -514,10 +514,10 @@ fn force_push(ctx: &mut Ctx<'_>, world: &mut World, i: usize, input: &Input) {
         if k == kind::PROJECTILE {
             continue;
         }
-        if k == kind::BODY && ctx.bodies[oi].eo.def.source_player != -1.0 {
+        if k == kind::BODY && ctx.bodies[oi].row.def.source_player != -1.0 {
             continue;
         }
-        if k == kind::BODY && ctx.bodies[oi].eo.def.ability_immune {
+        if k == kind::BODY && ctx.bodies[oi].row.def.ability_immune {
             continue;
         }
         if !gs.push_players && k == kind::PLAYER {
@@ -525,7 +525,7 @@ fn force_push(ctx: &mut Ctx<'_>, world: &mut World, i: usize, input: &Input) {
         }
         if k == kind::PLAYER {
             let t = &ctx.players[oi];
-            if t.eo.age <= SPAWN_GRACE || t.dashing(gs) || t.same_team(my_team) {
+            if t.row.age <= SPAWN_GRACE || t.dashing(gs) || t.same_team(my_team) {
                 continue;
             }
         }
@@ -548,8 +548,8 @@ fn force_push(ctx: &mut Ctx<'_>, world: &mut World, i: usize, input: &Input) {
             store.body_mut(b).apply_impulse(d, pos);
             if k == kind::PLAYER {
                 let t = &mut ctx.players[oi];
-                t.eo.attacker = my_id;
-                t.eo.attacker_timer = CREDIT_TICKS;
+                t.row.attacker = my_id;
+                t.row.attacker_timer = CREDIT_TICKS;
             }
         }
         let p = &mut ctx.players[i];
@@ -583,8 +583,8 @@ fn force_push(ctx: &mut Ctx<'_>, world: &mut World, i: usize, input: &Input) {
         }
         if k == kind::BODY {
             let pid = p.index;
-            let w = ctx.bodies[oi].eo.push_from.get(pid).copied();
-            ctx.bodies[oi].eo.push_from.insert(pid, w.map_or(1.0, |w| w + 1.0));
+            let w = ctx.bodies[oi].row.push_from.get(pid).copied();
+            ctx.bodies[oi].row.push_from.insert(pid, w.map_or(1.0, |w| w + 1.0));
         }
     }
     let store = world.store();
@@ -618,42 +618,42 @@ fn bat_hit_before(hits: &[f64], k: f64, id: f64) -> bool {
     false
 }
 
-/// `gu`: bat swing (aim during wind-up, hit during the fire window).
+/// Bat swing: aim during wind-up, hit during the fire window.
 fn bat(ctx: &mut Ctx<'_>, world: &mut World, i: usize, input: &Input) {
     let gs = ctx.gs;
     let cone = gs.bat_angle * (std::f64::consts::PI / 180.0);
     let mut hit = false;
     {
         let p = &mut ctx.players[i];
-        if p.eo.bat_frame == -1.0 {
-            if input.bat && p.eo.stamina > gs.bat_init_cost {
-                p.eo.bat_frame += 1.0;
+        if p.row.bat_frame == -1.0 {
+            if input.bat && p.row.stamina > gs.bat_init_cost {
+                p.row.bat_frame += 1.0;
             }
-        } else if p.eo.bat_frame < gs.bat_hold_until {
+        } else if p.row.bat_frame < gs.bat_hold_until {
             if input.bat {
-                p.eo.bat_frame += 1.0;
+                p.row.bat_frame += 1.0;
             }
             if !input.bat {
-                p.eo.bat_frame = -1.0;
+                p.row.bat_frame = -1.0;
             }
         }
-        if p.eo.bat_frame == gs.bat_hold_until {
+        if p.row.bat_frame == gs.bat_hold_until {
             if input.bat {
-                p.eo.stamina = js::max(0.0, p.eo.stamina - gs.bat_hold_cost);
-                if p.eo.stamina == 0.0 {
-                    p.eo.bat_frame += 1.0;
+                p.row.stamina = js::max(0.0, p.row.stamina - gs.bat_hold_cost);
+                if p.row.stamina == 0.0 {
+                    p.row.bat_frame += 1.0;
                 }
             } else {
-                p.eo.bat_frame += 1.0;
+                p.row.bat_frame += 1.0;
             }
         }
-        if p.eo.bat_frame > gs.bat_hold_until {
-            p.eo.bat_frame += 1.0;
+        if p.row.bat_frame > gs.bat_hold_until {
+            p.row.bat_frame += 1.0;
         }
     }
-    let frame = ctx.players[i].eo.bat_frame;
+    let frame = ctx.players[i].row.bat_frame;
     let me_tag = (kind::PLAYER, i);
-    let my_team = ctx.players[i].eo.team;
+    let my_team = ctx.players[i].row.team;
     let origin = world.store().body(player_body(ctx, i)).get_position();
     if frame > -1.0 && frame < gs.bat_fire_on {
         // aim at the nearest target
@@ -673,26 +673,26 @@ fn bat(ctx: &mut Ctx<'_>, world: &mut World, i: usize, input: &Input) {
         }
         let near = sort_near(world.store(), ctx, origin, &cands, me_tag);
         if let Some(n) = near.first() {
-            ctx.players[i].eo.bat_aim = js::qatan2(n.dy, n.dx);
+            ctx.players[i].row.bat_aim = js::qatan2(n.dy, n.dx);
         }
     }
     if frame >= gs.bat_fire_on && frame < gs.bat_fire_on + gs.bat_fire_frames {
-        let hits = ctx.players[i].eo.bat_hits.clone();
+        let hits = ctx.players[i].row.bat_hits.clone();
         let mut cands = Vec::new();
         for bi in 0..ctx.bodies.len() {
             let b = &ctx.bodies[bi];
-            if !b.eo.def.no_physics
-                && b.eo.def.motion == BODY_DYNAMIC
-                && b.eo.def.source_player == -1.0
+            if !b.row.def.no_physics
+                && b.row.def.motion == BODY_DYNAMIC
+                && b.row.def.source_player == -1.0
                 && !bat_hit_before(&hits, kind::BODY as f64, b.index as f64)
-                && !b.eo.def.ability_immune
+                && !b.row.def.ability_immune
             {
                 cands.push((kind::BODY, bi));
             }
         }
         for pi in 0..ctx.players.len() {
             let t = &ctx.players[pi];
-            if t.eo.age > SPAWN_GRACE
+            if t.row.age > SPAWN_GRACE
                 && !bat_hit_before(&hits, kind::PLAYER as f64, t.id())
                 && !t.dashing(gs)
                 && !t.same_team(my_team)
@@ -706,7 +706,7 @@ fn bat(ctx: &mut Ctx<'_>, world: &mut World, i: usize, input: &Input) {
             }
         }
         let near = sort_near(world.store(), ctx, origin, &cands, me_tag);
-        let aim = ctx.players[i].eo.bat_aim;
+        let aim = ctx.players[i].row.bat_aim;
         let my_id = ctx.players[i].id();
         for n in near {
             if n.dist > gs.bat_range {
@@ -726,33 +726,33 @@ fn bat(ctx: &mut Ctx<'_>, world: &mut World, i: usize, input: &Input) {
                     let b = &mut ctx.bodies[n.index];
                     let bb = b.body.expect("body");
                     imp.multiply(0.45 * world.store().body(bb).get_mass());
-                    ctx.players[i].eo.bat_hits.extend([kind::BODY as f64, b.index as f64]);
-                    let w = b.eo.push_from.get(ctx.players[i].index).copied();
-                    b.eo.push_from.insert(ctx.players[i].index, w.map_or(1.0, |w| w + 10.0));
+                    ctx.players[i].row.bat_hits.extend([kind::BODY as f64, b.index as f64]);
+                    let w = b.row.push_from.get(ctx.players[i].index).copied();
+                    b.row.push_from.insert(ctx.players[i].index, w.map_or(1.0, |w| w + 10.0));
                     target_body = bb;
                 }
                 kind::PROJECTILE => {
                     let q = &mut ctx.projectiles[n.index];
-                    if q.eo.owner == my_id {
+                    if q.row.owner == my_id {
                         let s = js::max(js::min(gs.rocket_self_bat_scale, 1.0), 0.0);
                         if s == 0.0 {
                             continue;
                         }
                         imp.multiply(s);
                     }
-                    q.eo.owner = my_id;
-                    q.eo.team = my_team;
-                    ctx.players[i].eo.bat_hits.extend([kind::PROJECTILE as f64, q.index as f64]);
+                    q.row.owner = my_id;
+                    q.row.team = my_team;
+                    ctx.players[i].row.bat_hits.extend([kind::PROJECTILE as f64, q.index as f64]);
                     imp.multiply(0.25);
                     target_body = q.body.expect("projectile body");
                 }
                 _ => {
                     let t = &mut ctx.players[n.index];
-                    t.eo.attacker = my_id;
-                    t.eo.attacker_timer = CREDIT_TICKS;
+                    t.row.attacker = my_id;
+                    t.row.attacker_timer = CREDIT_TICKS;
                     let tid = t.id();
                     target_body = t.body.expect("player body");
-                    ctx.players[i].eo.bat_hits.extend([kind::PLAYER as f64, tid]);
+                    ctx.players[i].row.bat_hits.extend([kind::PLAYER as f64, tid]);
                 }
             }
             let store = world.store_mut();
@@ -763,33 +763,33 @@ fn bat(ctx: &mut Ctx<'_>, world: &mut World, i: usize, input: &Input) {
     }
     let store = world.store();
     let p = &mut ctx.players[i];
-    if p.eo.bat_frame == gs.bat_fire_on {
+    if p.row.bat_frame == gs.bat_fire_on {
         p.sound_at(store, sound::BAT_SWING, 15.0, 1.0);
     }
-    if p.eo.bat_frame == gs.bat_reset_on {
-        p.eo.bat_frame = -1.0;
-        p.eo.bat_hits.clear();
+    if p.row.bat_frame == gs.bat_reset_on {
+        p.row.bat_frame = -1.0;
+        p.row.bat_hits.clear();
     }
     if hit {
         p.sound_at(store, sound::BAT_HIT, 15.0, 1.0);
     }
 }
 
-/// `yu`: dash (settings-enabled alternative to grab).
+/// Dash (settings-enabled alternative to grab).
 fn dash(ctx: &mut Ctx<'_>, world: &mut World, i: usize, input: &Input) {
     let gs = ctx.gs;
     let body = player_body(ctx, i);
     let p = &mut ctx.players[i];
-    if p.eo.dash_frame == -1.0 && input.rocket && p.eo.stamina >= gs.dash_cost {
-        p.eo.dash_frame += 1.0;
-        p.eo.stamina -= gs.dash_cost;
-    } else if p.eo.dash_frame > -1.0 {
-        p.eo.dash_frame += 1.0;
+    if p.row.dash_frame == -1.0 && input.rocket && p.row.stamina >= gs.dash_cost {
+        p.row.dash_frame += 1.0;
+        p.row.stamina -= gs.dash_cost;
+    } else if p.row.dash_frame > -1.0 {
+        p.row.dash_frame += 1.0;
     }
     let b = world.store_mut().body_mut(body);
-    if p.eo.dash_frame == gs.dash_init_delay {
+    if p.row.dash_frame == gs.dash_init_delay {
         let v = b.get_linear_velocity();
-        p.eo.dash_speed = v.length();
+        p.row.dash_speed = v.length();
         let a = js::qatan2(v.y, v.x);
         let dx = js::qcos(a) * gs.dash_boost;
         let dy = js::qsin(a) * gs.dash_boost;
@@ -798,44 +798,44 @@ fn dash(ctx: &mut Ctx<'_>, world: &mut World, i: usize, input: &Input) {
         v.y += dy;
         b.set_linear_velocity(v);
     }
-    if p.eo.dash_frame == gs.dash_init_delay + gs.dash_active {
+    if p.row.dash_frame == gs.dash_init_delay + gs.dash_active {
         let v = b.get_linear_velocity();
-        let r = v.length() / p.eo.dash_speed;
+        let r = v.length() / p.row.dash_speed;
         if r > 1.0 {
             b.set_linear_velocity(v2(v.x / r, v.y / r));
         }
     }
-    if p.eo.dash_frame == gs.dash_init_delay + gs.dash_active + gs.dash_cooldown {
-        p.eo.dash_frame = -1.0;
+    if p.row.dash_frame == gs.dash_init_delay + gs.dash_active + gs.dash_cooldown {
+        p.row.dash_frame = -1.0;
     }
 }
 
-/// `bu`: parachute (settings-enabled alternative to grab).
+/// Parachute (settings-enabled alternative to grab).
 fn parachute(ctx: &mut Ctx<'_>, world: &mut World, i: usize, input: &Input) {
     let held = input.grab;
     {
         let p = &mut ctx.players[i];
-        if held && p.eo.parachute.is_none() {
-            p.eo.parachute = Some(Parachute {
-                x: p.eo.x,
-                y: p.eo.y - 0.5,
-                vx: p.eo.vx,
-                vy: p.eo.vy - 3.0,
+        if held && p.row.parachute.is_none() {
+            p.row.parachute = Some(Parachute {
+                x: p.row.x,
+                y: p.row.y - 0.5,
+                vx: p.row.vx,
+                vy: p.row.vy - 3.0,
                 angle: 0.0,
                 angular_velocity: 0.0,
                 deploy: 4.0,
             });
         }
     }
-    let Some(chute) = ctx.players[i].eo.parachute else {
+    let Some(chute) = ctx.players[i].row.parachute else {
         return;
     };
     if !held {
-        ctx.players[i].eo.parachute = None;
+        ctx.players[i].row.parachute = None;
         return;
     }
     let body = player_body(ctx, i);
-    let (hu, eu) = (ctx.players[i].hu, ctx.players[i].eu);
+    let (half_width, half_height) = (ctx.players[i].half_width, ctx.players[i].half_height);
     if chute.deploy == 2.0 {
         let store = world.store();
         let p = &mut ctx.players[i];
@@ -861,7 +861,7 @@ fn parachute(ctx: &mut Ctx<'_>, world: &mut World, i: usize, input: &Input) {
     def.user_data = tag(kind::PARACHUTE, i);
     let canopy = world.create_body(&def);
     let mut shape = PolygonShape::new();
-    shape.set_as_box(2.0 * hu, 0.5 * eu);
+    shape.set_as_box(2.0 * half_width, 0.5 * half_height);
     let mut fd = FixtureDef::new(Shape::Polygon(shape));
     fd.density = 1.3;
     fd.friction = 0.3;
@@ -876,7 +876,7 @@ fn parachute(ctx: &mut Ctx<'_>, world: &mut World, i: usize, input: &Input) {
     for side in [-1.0, 1.0] {
         let store = world.store();
         let a = store.body(body).get_world_point(v2(0.0, 0.0));
-        let mut b = store.body(canopy).get_world_point(v2(2.0 * side * hu, 0.0));
+        let mut b = store.body(canopy).get_world_point(v2(2.0 * side * half_width, 0.0));
         b.subtract(a);
         let len = b.length();
         if len >= 2.0 {
@@ -884,7 +884,7 @@ fn parachute(ctx: &mut Ctx<'_>, world: &mut World, i: usize, input: &Input) {
                 body_a: body,
                 body_b: canopy,
                 local_anchor_a: v2(0.0, 0.0),
-                local_anchor_b: v2(2.0 * side * hu, 0.0),
+                local_anchor_b: v2(2.0 * side * half_width, 0.0),
                 length: 2.0,
                 frequency_hz: 2.0,
                 damping_ratio: 0.4,
@@ -895,7 +895,7 @@ fn parachute(ctx: &mut Ctx<'_>, world: &mut World, i: usize, input: &Input) {
             attached = true;
         }
     }
-    let rocket_idle = ctx.players[i].eo.rocket_frame == -1.0;
+    let rocket_idle = ctx.players[i].row.rocket_frame == -1.0;
     let store = world.store_mut();
     if attached {
         if rocket_idle {
@@ -923,38 +923,38 @@ fn parachute(ctx: &mut Ctx<'_>, world: &mut World, i: usize, input: &Input) {
     }
 }
 
-/// `Ru`: local anchor of grab direction `dir` (0..8) on the player box.
-fn grab_anchor(dir: usize, outer: bool, hu: f64, eu: f64) -> Vec2 {
+/// Local anchor of grab direction `dir` (0..8) on the player box.
+fn grab_anchor(dir: usize, outer: bool, half_width: f64, half_height: f64) -> Vec2 {
     let e = if outer { 1.0 } else { 0.0 };
     let (x, y) = match dir {
-        0 => (hu + e, -(eu + e)),
-        1 => (hu + e, eu + e),
-        2 => (-(hu + e), eu + e),
-        3 => (-(hu + e), -(eu + e)),
-        4 => (hu + e, 0.0),
-        5 => (-(hu + e), 0.0),
-        6 => (0.0, eu + e),
-        7 => (0.0, -(eu + e)),
+        0 => (half_width + e, -(half_height + e)),
+        1 => (half_width + e, half_height + e),
+        2 => (-(half_width + e), half_height + e),
+        3 => (-(half_width + e), -(half_height + e)),
+        4 => (half_width + e, 0.0),
+        5 => (-(half_width + e), 0.0),
+        6 => (0.0, half_height + e),
+        7 => (0.0, -(half_height + e)),
         _ => (0.0, 0.0),
     };
     v2(x, y)
 }
 
-/// `vu`: grab (8 directional rays attach distance joints to dynamic bodies).
+/// Grab (8 directional rays attach distance joints to dynamic bodies).
 fn grab(ctx: &mut Ctx<'_>, world: &mut World, i: usize, input: &Input) {
     let held = input.grab;
     let body = player_body(ctx, i);
     for dir in 0..8 {
-        let mut a = ctx.players[i].eo.grabs[dir];
+        let mut a = ctx.players[i].row.grabs[dir];
         if !held && a.state != ATTACH_IDLE {
             a.state = ATTACH_IDLE;
-            ctx.players[i].eo.grabs[dir] = a;
+            ctx.players[i].row.grabs[dir] = a;
         }
         if a.state == ATTACH_ON && a.kind == kind::PLAYER as f64 {
             if let Some(ti) = ctx.player_index(a.target) {
-                if ctx.players[ti].eo.age == 0.0 {
+                if ctx.players[ti].row.age == 0.0 {
                     a = Attach { state: ATTACH_LOST, ..Attach::default() };
-                    ctx.players[i].eo.grabs[dir] = a;
+                    ctx.players[i].row.grabs[dir] = a;
                 }
             }
         }
@@ -968,7 +968,7 @@ fn grab(ctx: &mut Ctx<'_>, world: &mut World, i: usize, input: &Input) {
                 a.kind = k as f64;
                 a.ax = local.x;
                 a.ay = local.y;
-                ctx.players[i].eo.grabs[dir] = a;
+                ctx.players[i].row.grabs[dir] = a;
             }
         }
         if a.state == ATTACH_ON {
@@ -986,11 +986,11 @@ fn grab(ctx: &mut Ctx<'_>, world: &mut World, i: usize, input: &Input) {
             }
             match found {
                 Some((tb, k, oi)) if !owner_teleported(ctx, k, oi) => {
-                    let (hu, eu) = (ctx.players[i].hu, ctx.players[i].eu);
+                    let (half_width, half_height) = (ctx.players[i].half_width, ctx.players[i].half_height);
                     let def = DistanceJointDef {
                         body_a: body,
                         body_b: tb,
-                        local_anchor_a: grab_anchor(dir, false, hu, eu),
+                        local_anchor_a: grab_anchor(dir, false, half_width, half_height),
                         local_anchor_b: v2(a.ax, a.ay),
                         length: 0.0,
                         frequency_hz: 2.0,
@@ -1003,7 +1003,7 @@ fn grab(ctx: &mut Ctx<'_>, world: &mut World, i: usize, input: &Input) {
                 }
                 _ => {
                     a.state = ATTACH_LOST;
-                    ctx.players[i].eo.grabs[dir] = a;
+                    ctx.players[i].row.grabs[dir] = a;
                 }
             }
         }
@@ -1016,28 +1016,28 @@ fn owner_id(ctx: &Ctx<'_>, k: u32, oi: usize) -> f64 {
         kind::BODY => ctx.bodies[oi].index as f64,
         kind::PROJECTILE => ctx.projectiles[oi].index as f64,
         kind::TURRET => ctx.turrets[oi].index as f64,
-        kind::PU => ctx.pu[oi].index as f64,
+        kind::PICKUP => ctx.pickups[oi].index as f64,
         _ => f64::NAN,
     }
 }
 
-/// `no.Ye` of the owner (objects without it count as not teleported).
+/// Teleported flag of the owner (objects without it count as not teleported).
 fn owner_teleported(ctx: &Ctx<'_>, k: u32, oi: usize) -> bool {
     match k {
-        kind::PLAYER => ctx.players[oi].eo.teleported,
-        kind::BODY => ctx.bodies[oi].eo.teleported,
+        kind::PLAYER => ctx.players[oi].row.teleported,
+        kind::BODY => ctx.bodies[oi].row.teleported,
         _ => false,
     }
 }
 
-/// `Wu`: ray from the centre through grab direction `dir`; nearest
+/// Ray from the centre through grab direction `dir`; nearest
 /// non-static, non-sensor map body (that the player collides with).
 fn grab_ray(ctx: &Ctx<'_>, world: &World, i: usize, dir: usize) -> Option<(BodyId, Vec2)> {
     let p = &ctx.players[i];
     let body = p.body?;
-    let origin = v2(p.eo.x, p.eo.y);
-    let end = world.store().body(body).get_world_point(grab_anchor(dir, true, p.hu, p.eu));
-    let team = p.eo.team;
+    let origin = v2(p.row.x, p.row.y);
+    let end = world.store().body(body).get_world_point(grab_anchor(dir, true, p.half_width, p.half_height));
+    let team = p.row.team;
     let mut best = f64::INFINITY;
     let mut hit: Option<(BodyId, Vec2)> = None;
     world.ray_cast(
@@ -1049,7 +1049,7 @@ fn grab_ray(ctx: &Ctx<'_>, world: &World, i: usize, dir: usize) -> Option<(BodyI
             if k != kind::BODY {
                 return 1.0;
             }
-            let pass = ctx.bodies[bi].eo.def.player_pass;
+            let pass = ctx.bodies[bi].row.def.player_pass;
             if pass == 1.0 || pass == team {
                 return 1.0;
             }
@@ -1068,7 +1068,7 @@ fn grab_ray(ctx: &Ctx<'_>, world: &World, i: usize, dir: usize) -> Option<(BodyI
 /// Nearest valid target for rocket/egg aiming: players not on my team and
 /// (for rockets) turrets not on my team.
 fn aim_target(ctx: &Ctx<'_>, world: &World, i: usize, include_turrets: bool) -> Option<f64> {
-    let team = ctx.players[i].eo.team;
+    let team = ctx.players[i].row.team;
     let mut cands = Vec::new();
     for pi in 0..ctx.players.len() {
         if !ctx.players[pi].same_team(team) {
@@ -1077,7 +1077,7 @@ fn aim_target(ctx: &Ctx<'_>, world: &World, i: usize, include_turrets: bool) -> 
     }
     if include_turrets {
         for ti in 0..ctx.turrets.len() {
-            let t = &ctx.turrets[ti].eo;
+            let t = &ctx.turrets[ti].row;
             if !(team == t.team && team > 1.0) {
                 cands.push((kind::TURRET, ti));
             }
@@ -1088,28 +1088,28 @@ fn aim_target(ctx: &Ctx<'_>, world: &World, i: usize, include_turrets: bool) -> 
     near.first().map(|n| js::qatan2(n.dy, n.dx))
 }
 
-/// `Su`: rocket (charge, steer, fire).
+/// Rocket (charge, steer, fire).
 fn rocket(ctx: &mut Ctx<'_>, world: &mut World, i: usize, input: &Input) {
     let gs = ctx.gs;
-    let frame = ctx.players[i].eo.rocket_frame;
+    let frame = ctx.players[i].row.rocket_frame;
     let held = input.rocket;
     if held {
-        ctx.players[i].su = true;
+        ctx.players[i].special_held = true;
     }
-    if frame == -1.0 && held && ctx.players[i].eo.stamina >= gs.rocket_cost {
-        ctx.players[i].eo.rocket_frame = 0.0;
+    if frame == -1.0 && held && ctx.players[i].row.stamina >= gs.rocket_cost {
+        ctx.players[i].row.rocket_frame = 0.0;
         if let Some(a) = aim_target(ctx, world, i, true) {
-            ctx.players[i].eo.gn_set(a);
+            ctx.players[i].row.set_rocket_aim(a);
         }
     }
     if frame > -1.0 && frame < 5.0 {
         if held {
-            ctx.players[i].eo.rocket_frame += 1.0;
+            ctx.players[i].row.rocket_frame += 1.0;
             if let Some(a) = aim_target(ctx, world, i, true) {
-                ctx.players[i].eo.gn_set(a);
+                ctx.players[i].row.set_rocket_aim(a);
             }
         } else {
-            ctx.players[i].eo.rocket_frame = -1.0;
+            ctx.players[i].row.rocket_frame = -1.0;
         }
         if frame == 4.0 {
             let store = world.store();
@@ -1118,31 +1118,31 @@ fn rocket(ctx: &mut Ctx<'_>, world: &mut World, i: usize, input: &Input) {
     }
     if frame == 5.0 {
         if let Some(a) = aim_target(ctx, world, i, true) {
-            ctx.players[i].eo.gn_set(a);
+            ctx.players[i].row.set_rocket_aim(a);
         }
-        ctx.players[i].eo.rocket_frame += 1.0;
-        ctx.players[i].eo.stamina -= gs.rocket_cost;
+        ctx.players[i].row.rocket_frame += 1.0;
+        ctx.players[i].row.stamina -= gs.rocket_cost;
     }
     let p = &mut ctx.players[i];
     if frame == 6.0 {
         if input.left {
-            p.eo.rocket_aim -= gs.rocket_aim_rate;
+            p.row.rocket_aim -= gs.rocket_aim_rate;
         }
         if input.right {
-            p.eo.rocket_aim += gs.rocket_aim_rate;
+            p.row.rocket_aim += gs.rocket_aim_rate;
         }
-        p.eo.stamina -= gs.ammo_regen;
+        p.row.stamina -= gs.ammo_regen;
         if !held {
-            p.eo.rocket_frame += 1.0;
+            p.row.rocket_frame += 1.0;
         }
     }
     if frame > 6.0 && frame < 8.0 {
-        p.eo.rocket_frame += 1.0;
+        p.row.rocket_frame += 1.0;
     }
     if frame == 8.0 {
         let pos = world.store().body(p.body.expect("player body")).get_position();
-        let c = js::qcos(p.eo.rocket_aim);
-        let s = js::qsin(p.eo.rocket_aim);
+        let c = js::qcos(p.row.rocket_aim);
+        let s = js::qsin(p.row.rocket_aim);
         p.new_projectiles.push(Projectile {
             owner: p.id(),
             x: pos.x + 0.2 * c,
@@ -1158,13 +1158,13 @@ fn rocket(ctx: &mut Ctx<'_>, world: &mut World, i: usize, input: &Input) {
             restitution: gs.rocket_restitution,
             bounce_limit: gs.rocket_bounce_limit,
             explode_radius: gs.rocket_explode_radius,
-            team: p.eo.team,
+            team: p.row.team,
             damage: 999.0,
             object_damage: 40.0,
             align: true,
             ..Projectile::default()
         });
-        p.eo.rocket_frame = -1.0;
+        p.row.rocket_frame = -1.0;
         let store = world.store();
         p.sound_at(store, sound::ROCKET_FIRE, 15.0, 0.4);
     }
@@ -1172,24 +1172,24 @@ fn rocket(ctx: &mut Ctx<'_>, world: &mut World, i: usize, input: &Input) {
 
 impl Player {
     #[inline]
-    fn gn_set(&mut self, a: f64) {
+    fn set_rocket_aim(&mut self, a: f64) {
         self.rocket_aim = a;
     }
 }
 
-/// `ku`: egg throw (settings-enabled alternative to the rocket).
+/// Egg throw (settings-enabled alternative to the rocket).
 fn egg(ctx: &mut Ctx<'_>, world: &mut World, i: usize, input: &Input) {
     let gs = ctx.gs;
-    let mut frame = ctx.players[i].eo.egg_frame;
+    let mut frame = ctx.players[i].row.egg_frame;
     let held = input.rocket;
     let aim = |ctx: &mut Ctx<'_>, world: &World| {
         if let Some(a) = aim_target(ctx, world, i, false) {
-            ctx.players[i].eo.egg_aim = a;
+            ctx.players[i].row.egg_aim = a;
         }
     };
     let throw = |ctx: &mut Ctx<'_>, world: &World, power: f64| {
         let p = &mut ctx.players[i];
-        let a = p.eo.egg_aim;
+        let a = p.row.egg_aim;
         let c = js::qcos(a);
         let s = js::qsin(a);
         let pos = world.store().body(p.body.expect("player body")).get_position();
@@ -1209,7 +1209,7 @@ fn egg(ctx: &mut Ctx<'_>, world: &mut World, i: usize, input: &Input) {
             restitution: gs.egg_restitution,
             bounce_limit: 99999.0,
             explode_radius: gs.egg_explode_radius,
-            team: p.eo.team,
+            team: p.row.team,
             damage: 999.0,
             align: false,
             angular_velocity: vx * gs.egg_spin,
@@ -1218,26 +1218,26 @@ fn egg(ctx: &mut Ctx<'_>, world: &mut World, i: usize, input: &Input) {
         });
     };
     if held {
-        ctx.players[i].su = true;
-        if frame == 0.0 && ctx.players[i].eo.stamina >= gs.egg_cost {
+        ctx.players[i].special_held = true;
+        if frame == 0.0 && ctx.players[i].row.stamina >= gs.egg_cost {
             frame += 1.0;
             aim(ctx, world);
         } else if frame == gs.egg_delay1 {
             frame += 1.0;
-            ctx.players[i].eo.stamina -= gs.egg_cost;
+            ctx.players[i].row.stamina -= gs.egg_cost;
         } else if frame > 0.0 {
             frame += 1.0;
             let p = &mut ctx.players[i];
-            p.eo.stamina -= gs.ammo_regen;
+            p.row.stamina -= gs.ammo_regen;
             if frame > gs.egg_delay2 + gs.egg_delay_ammo {
-                p.eo.stamina = js::max(0.0, p.eo.stamina - 1.0);
+                p.row.stamina = js::max(0.0, p.row.stamina - 1.0);
             }
             if input.left {
-                p.eo.egg_aim -= gs.egg_aim_rate;
+                p.row.egg_aim -= gs.egg_aim_rate;
             } else if input.right {
-                p.eo.egg_aim += gs.egg_aim_rate;
+                p.row.egg_aim += gs.egg_aim_rate;
             }
-            if p.eo.stamina == 0.0 {
+            if p.row.stamina == 0.0 {
                 throw(ctx, world, js::min((frame - gs.egg_delay1) / gs.egg_delay2, 1.0));
                 frame = 0.0;
             }
@@ -1248,10 +1248,10 @@ fn egg(ctx: &mut Ctx<'_>, world: &mut World, i: usize, input: &Input) {
         }
         frame = 0.0;
     }
-    ctx.players[i].eo.egg_frame = frame;
+    ctx.players[i].row.egg_frame = frame;
 }
 
-/// `Cu`: ghosts float (cancel gravity).
+/// Ghosts float (cancel gravity).
 fn ghost_float(ctx: &mut Ctx<'_>, world: &mut World, i: usize) {
     let body = player_body(ctx, i);
     let g = world.get_gravity().y;
@@ -1262,13 +1262,13 @@ fn ghost_float(ctx: &mut Ctx<'_>, world: &mut World, i: usize) {
     store.body_mut(body).apply_force(f, c);
 }
 
-/// `Tu`: ghost movement and ghost rockets.
+/// Ghost movement and ghost rockets.
 fn ghost_move(ctx: &mut Ctx<'_>, world: &mut World, i: usize, input: &Input) {
     let gs = ctx.gs;
     let body = player_body(ctx, i);
     let p = &mut ctx.players[i];
-    p.eo.rocket_frame = -1.0;
-    p.eo.bat_frame = -1.0;
+    p.row.rocket_frame = -1.0;
+    p.row.bat_frame = -1.0;
     let mut f = v2(0.0, 0.0);
     if input.left {
         f.x -= 1.0;
@@ -1288,7 +1288,7 @@ fn ghost_move(ctx: &mut Ctx<'_>, world: &mut World, i: usize, input: &Input) {
     let c = store.body(body).get_world_center();
     store.body_mut(body).apply_force(f, c);
     let pos = store.body(body).get_position();
-    if input.rocket && p.eo.stamina >= 100.0 {
+    if input.rocket && p.row.stamina >= 100.0 {
         let mut vx = gs.ghost_rocket_speed;
         if store.body(body).get_linear_velocity().x < 0.1 {
             vx *= -1.0;
@@ -1308,47 +1308,47 @@ fn ghost_move(ctx: &mut Ctx<'_>, world: &mut World, i: usize, input: &Input) {
             restitution: gs.rocket_restitution,
             bounce_limit: gs.rocket_bounce_limit,
             explode_radius: gs.ghost_rocket_explode,
-            team: p.eo.team,
+            team: p.row.team,
             damage: 999.0,
             object_damage: 40.0,
             align: true,
             ..Projectile::default()
         });
-        p.eo.stamina -= 100.0;
+        p.row.stamina -= 100.0;
         p.new_sounds.push(Sound { x: pos.x, y: pos.y, ttl: 15.0, kind: sound::ROCKET_FIRE, player: p.id(), volume: 0.3, effect_row: false });
     } else {
-        p.eo.stamina += gs.ghost_regen;
-        if p.eo.stamina > gs.max_stamina {
-            p.eo.stamina = gs.max_stamina;
+        p.row.stamina += gs.ghost_regen;
+        if p.row.stamina > gs.max_stamina {
+            p.row.stamina = gs.max_stamina;
         }
     }
-    if p.eo.age % 3.0 == 0.0 {
+    if p.row.age % 3.0 == 0.0 {
         p.new_sounds.push(Sound { x: pos.x, y: pos.y, ttl: 5.0, kind: sound::GHOST_TRAIL, player: p.id(), volume: 1.0, effect_row: false });
     }
 }
 
-/// `wl` (BeginContact) for a player.
+/// Handles the start of a contact for a player.
 pub(crate) fn begin_contact(ctx: &mut Ctx<'_>, store: &mut Store, i: usize, other: BodyId, c: ContactId) {
     let gs = ctx.gs;
     let (k, oi) = crate::step::body_tag(store, other);
     if k == kind::BODY {
-        let def = ctx.bodies[oi].eo.def.clone();
+        let def = ctx.bodies[oi].row.def.clone();
         let p = &mut ctx.players[i];
-        if def.player_pass == 1.0 || def.player_pass == p.eo.team {
+        if def.player_pass == 1.0 || def.player_pass == p.row.team {
             store.contact_mut(c).set_enabled(false);
         }
-        if def.kill_players && p.eo.age > 10.0 {
+        if def.kill_players && p.row.age > 10.0 {
             p.damage(999.0);
         }
         // the next race checkpoint (heav.io builds)
-        if def.checkpoint == p.eo.checkpoint + 1.0 {
+        if def.checkpoint == p.row.checkpoint + 1.0 {
             p.passed = true;
         }
         if def.freeze_players {
-            if p.eo.freeze_ready {
+            if p.row.freeze_ready {
                 p.sound_at(store, sound::FREEZE, 30.0, 0.6);
-                p.eo.frozen = 33.0;
-                p.eo.freeze_ready = false;
+                p.row.frozen = 33.0;
+                p.row.freeze_ready = false;
             }
             p.froze = true;
         }
@@ -1357,10 +1357,10 @@ pub(crate) fn begin_contact(ctx: &mut Ctx<'_>, store: &mut Store, i: usize, othe
         }
     }
     if k == kind::PLAYER {
-        let my_age = ctx.players[i].eo.age;
-        let my_team = ctx.players[i].eo.team;
+        let my_age = ctx.players[i].row.age;
+        let my_team = ctx.players[i].row.team;
         let o = &ctx.players[oi];
-        if my_age > SPAWN_GRACE && o.eo.age > SPAWN_GRACE && !o.same_team(my_team) {
+        if my_age > SPAWN_GRACE && o.row.age > SPAWN_GRACE && !o.same_team(my_team) {
             let me = player_body(ctx, i);
             let mut d = store.body(other).get_position();
             d.subtract(store.body(me).get_position());
@@ -1370,10 +1370,10 @@ pub(crate) fn begin_contact(ctx: &mut Ctx<'_>, store: &mut Store, i: usize, othe
             let other_id = o.id();
             if angle > -140.0 && angle < -40.0 && rel > 5.0 && !ctx.players[i].dashing(gs) {
                 let p = &mut ctx.players[i];
-                p.dead = true;
-                p.gone = true;
-                p.eo.attacker = other_id;
-                p.eo.attacker_timer = CREDIT_TICKS;
+                p.died = true;
+                p.leaving = true;
+                p.row.attacker = other_id;
+                p.row.attacker_timer = CREDIT_TICKS;
                 let v = store.body(me).get_linear_velocity();
                 store.body_mut(me).set_linear_velocity(v2(v.x, other_vy + 3.0));
             }
@@ -1381,21 +1381,21 @@ pub(crate) fn begin_contact(ctx: &mut Ctx<'_>, store: &mut Store, i: usize, othe
     }
 }
 
-/// `yl` (PostSolve) for a player.
+/// Post-solve handler for a player.
 pub(crate) fn post_solve(ctx: &mut Ctx<'_>, store: &mut Store, i: usize, other: BodyId, impulse: &ContactImpulse) {
     let n0 = impulse.normal_impulses[0];
     {
         let p = &mut ctx.players[i];
-        if n0 > 50.0 && p.eo.age > SPAWN_GRACE {
-            p.gone = true;
-            p.dead = true;
+        if n0 > 50.0 && p.row.age > SPAWN_GRACE {
+            p.leaving = true;
+            p.died = true;
         }
     }
     let (k, oi) = crate::step::body_tag(store, other);
     if k == kind::BODY {
         let mut best = -1.0;
         let mut top = 0.0;
-        for (pid, w) in ctx.bodies[oi].eo.push_from.iter() {
+        for (pid, w) in ctx.bodies[oi].row.push_from.iter() {
             if *w > top {
                 best = pid as f64;
                 top = *w;
@@ -1403,26 +1403,26 @@ pub(crate) fn post_solve(ctx: &mut Ctx<'_>, store: &mut Store, i: usize, other: 
         }
         if best != -1.0 {
             let p = &mut ctx.players[i];
-            p.eo.attacker = best;
-            p.eo.attacker_timer = CREDIT_TICKS;
+            p.row.attacker = best;
+            p.row.attacker_timer = CREDIT_TICKS;
         }
     }
     let body = player_body(ctx, i);
     let per_mass = n0 / store.body(body).get_mass();
     if per_mass > 1.0 && !ctx.players[i].grabbed.contains(&other) {
-        let kind_ = if k == kind::BODY && ctx.bodies[oi].eo.def.no_jump { sound::IMPACT_NOJUMP } else { sound::IMPACT };
+        let kind_ = if k == kind::BODY && ctx.bodies[oi].row.def.no_jump { sound::IMPACT_NOJUMP } else { sound::IMPACT };
         let p = &mut ctx.players[i];
         let vol = 0.025 * per_mass * p.limiter.request();
         p.sound_at(store, kind_, 10.0, vol);
     }
 }
 
-/// `ro`: edge wrapping, death, kill credit.
+/// Edge wrapping, death, kill credit.
 pub(crate) fn post_step(ctx: &mut Ctx<'_>, world: &mut World, i: usize) {
     let gs = ctx.gs;
     let body = player_body(ctx, i);
-    if !ctx.players[i].froze && !ctx.players[i].eo.freeze_ready {
-        ctx.players[i].eo.freeze_ready = true;
+    if !ctx.players[i].froze && !ctx.players[i].row.freeze_ready {
+        ctx.players[i].row.freeze_ready = true;
     }
     let wrap = ctx.settings.wrap;
     let (aw, ah) = (ctx.settings.width, ctx.settings.height);
@@ -1434,76 +1434,76 @@ pub(crate) fn post_step(ctx: &mut Ctx<'_>, world: &mut World, i: usize) {
         let p = &mut ctx.players[i];
         if pos.y > ah + half {
             pos.y -= ah + 2.0 * half;
-            p.eo.teleported = true;
+            p.row.teleported = true;
         } else if pos.y < 0.0 - half {
             pos.y += ah + 2.0 * half;
-            p.eo.teleported = true;
+            p.row.teleported = true;
         }
         if pos.x > aw + half {
             pos.x -= aw + 2.0 * half;
             vel.x += 5.0;
-            p.eo.teleported = true;
+            p.row.teleported = true;
         } else if pos.x < 0.0 - half {
             pos.x += aw + 2.0 * half;
             vel.x -= 5.0;
-            p.eo.teleported = true;
+            p.row.teleported = true;
         }
         world.set_position(body, pos);
         world.store_mut().body_mut(body).set_linear_velocity(vel);
     }
     let y = world.store().body(body).get_position().y;
     let p = &ctx.players[i];
-    if p.eo.health <= 0.0 || (!wrap && y > ah + p.eu) {
-        if p.eo.checkpoint > 0.0 {
+    if p.row.health <= 0.0 || (!wrap && y > ah + p.half_height) {
+        if p.row.checkpoint > 0.0 {
             // heav.io race: back to the last checkpoint instead of dying
             crate::race::back_to_checkpoint(ctx, i);
         } else {
             let p = &mut ctx.players[i];
-            p.dead = true;
-            p.xl = true;
+            p.died = true;
+            p.debris_up = true;
         }
     }
     if ctx.players[i].passed {
         crate::race::passed(ctx, i);
     }
     crate::race::run_time(ctx, i);
-    if ctx.players[i].dead {
+    if ctx.players[i].died {
         let me = ctx.players[i].id();
-        let attacker = ctx.players[i].eo.attacker;
-        if ctx.players[i].eo.attacker_timer > 0.0 && attacker != me {
+        let attacker = ctx.players[i].row.attacker;
+        if ctx.players[i].row.attacker_timer > 0.0 && attacker != me {
             crate::round::kill(ctx, attacker, me);
             if let Some(ai) = ctx.player_index(attacker) {
                 let a = &mut ctx.players[ai];
-                a.eo.kills += 1.0;
-                if a.eo.kills == gs.ghost_after {
-                    a.eo.ghost = true;
+                a.row.kills += 1.0;
+                if a.row.kills == gs.ghost_after {
+                    a.row.ghost = true;
                 }
             }
         } else {
             crate::round::suicide(ctx, me);
         }
         crate::round::respawn_in(ctx, me, 60.0);
-        ctx.players[i].gone = true;
+        ctx.players[i].leaving = true;
     }
 }
 
-/// `lo`: write the player into the next state (or leave debris when dead).
+/// Writes the player into the next state (or leaves debris when dead).
 pub(crate) fn serialize(ctx: &mut Ctx<'_>, world: &mut World, i: usize, next: &mut State) {
     let body = player_body(ctx, i);
     let chute = ctx.players[i].chute;
     {
         let p = &mut ctx.players[i];
         let store = world.store();
-        if p.gone {
-            if p.dead {
+        if p.leaving {
+            if p.died {
                 debris(p, store, next);
                 let pos = store.body(body).get_position();
                 p.new_sounds.push(Sound { x: pos.x, y: pos.y, ttl: 5.0, kind: sound::DEATH, player: p.id(), volume: 0.23, effect_row: false });
             }
-        } else if let (false, Some((x, y))) = (p.dead, p.to_checkpoint) {
+        } else if let (false, Some((x, y))) = (p.died, p.to_checkpoint) {
             // the old body breaks up; a fresh player appears at the checkpoint, its run time still going
             debris(p, store, next);
-            let e = &p.eo;
+            let e = &p.row;
             let back = Player {
                 id: e.id,
                 x,
@@ -1514,22 +1514,22 @@ pub(crate) fn serialize(ctx: &mut Ctx<'_>, world: &mut World, i: usize, next: &m
                 teleported: true,
                 checkpoint: e.checkpoint,
                 age: e.age,
-                en: e.en,
+                reset_count: e.reset_count,
                 ..Player::default()
             };
             next.players.insert(p.index, back);
-        } else if !p.dead {
+        } else if !p.died {
             let b = store.body(body);
             let pos = b.get_position();
             let vel = b.get_linear_velocity();
-            p.eo.x = pos.x;
-            p.eo.y = pos.y;
-            p.eo.angle = b.get_angle();
-            p.eo.angular_velocity = b.get_angular_velocity();
-            p.eo.vx = vel.x;
-            p.eo.vy = vel.y;
-            p.eo.age += 1.0;
-            if let (Some(pc), Some(cb)) = (p.eo.parachute.as_mut(), chute) {
+            p.row.x = pos.x;
+            p.row.y = pos.y;
+            p.row.angle = b.get_angle();
+            p.row.angular_velocity = b.get_angular_velocity();
+            p.row.vx = vel.x;
+            p.row.vy = vel.y;
+            p.row.age += 1.0;
+            if let (Some(pc), Some(cb)) = (p.row.parachute.as_mut(), chute) {
                 let c = store.body(cb);
                 let cp = c.get_position();
                 let cv = c.get_linear_velocity();
@@ -1543,8 +1543,8 @@ pub(crate) fn serialize(ctx: &mut Ctx<'_>, world: &mut World, i: usize, next: &m
                     pc.deploy -= 1.0;
                 }
             }
-            p.eo.sound_limiter = p.limiter.value();
-            next.players.insert(p.index, p.eo.clone());
+            p.row.sound_limiter = p.limiter.value();
+            next.players.insert(p.index, p.row.clone());
         }
     }
     let p = &mut ctx.players[i];
@@ -1564,9 +1564,9 @@ pub(crate) fn serialize(ctx: &mut Ctx<'_>, world: &mut World, i: usize, next: &m
     next.sounds.append(&mut p.new_sounds);
 }
 
-/// `ru`: split the dead player's box into two dynamic debris halves.
+/// Splits the dead player's box into two dynamic debris halves.
 fn debris(p: &mut PlayerObj, store: &Store, next: &mut State) {
-    let h = p.hu;
+    let h = p.half_width;
     let tl = [-h, -h];
     let tr = [h, -h];
     let br = [h, h];
@@ -1585,7 +1585,7 @@ fn debris(p: &mut PlayerObj, store: &Store, next: &mut State) {
         let vx = vel.x + 2.0 * r1 - 1.0;
         let r2 = next.round.random();
         let mut vy = vel.y + 2.0 * r2 - 1.0;
-        if p.xl {
+        if p.debris_up {
             let over = vy - 10.0;
             if over > 0.0 {
                 vy = 10.0 + over / 4.0;
@@ -1594,7 +1594,7 @@ fn debris(p: &mut PlayerObj, store: &Store, next: &mut State) {
         }
         let shape = MapShape {
             kind: crate::map::SHAPE_POLYGON,
-            color: p.eo.team,
+            color: p.row.team,
             points: pts.to_vec(),
             ..MapShape::default()
         };

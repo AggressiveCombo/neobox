@@ -1,5 +1,5 @@
-//! Map bodies, joints, projectiles, turrets, capture points and the unused
-//! `pu` bucket.
+//! Map bodies, joints, projectiles, turrets, capture points and the
+//! pickup bucket.
 
 use crate::js;
 use crate::map::{BodyDef, MapCap, MapJoint, MapShape, MapTurret, BODY_DYNAMIC, BODY_KINEMATIC, BODY_STATIC, SHAPE_CIRCLE, SHAPE_POLYGON};
@@ -39,29 +39,29 @@ const GROUP_D: u16 = 64;
 
 pub(crate) struct BodyObj {
     pub index: u32,
-    pub eo: Body,
+    pub row: Body,
     pub body: Option<BodyId>,
-    /// `el` removed this tick
+    /// removed this tick
     pub removed: bool,
-    /// `ol` impact sounds this tick
+    /// impact sounds this tick
     pub impacts: u32,
-    /// `rl` objective delivered for team (-1 none)
+    /// objective delivered for team (-1 none)
     pub objective: f64,
-    /// `al` touched by a player (releases latched joints)
+    /// touched by a player (releases latched joints)
     pub player_touch: bool,
-    /// `Tr` a race object touched its next checkpoint this tick
+    /// a race object touched its next checkpoint this tick
     pub race_passed: bool,
     pub new_sounds: Vec<Sound>,
     pub limiter: Limiter,
 }
 
 impl BodyObj {
-    pub fn new(index: u32, mut eo: Body) -> BodyObj {
-        eo.teleported = false;
-        let limiter = Limiter::new(eo.sound_limiter, 1.0, 0.1, 0.4);
+    pub fn new(index: u32, mut row: Body) -> BodyObj {
+        row.teleported = false;
+        let limiter = Limiter::new(row.sound_limiter, 1.0, 0.1, 0.4);
         BodyObj {
             index,
-            eo,
+            row,
             body: None,
             removed: false,
             impacts: 0,
@@ -104,14 +104,14 @@ fn physics_shape(s: &MapShape) -> Option<Shape> {
     }
 }
 
-/// `oo` for a map body.
+/// Creates the physics body for a map body.
 pub(crate) fn body_create(ctx: &mut Ctx<'_>, world: &mut World, i: usize) {
     let o = &mut ctx.bodies[i];
-    let def = o.eo.def.clone();
+    let def = o.row.def.clone();
     if def.no_physics {
         if def.motion == BODY_KINEMATIC {
-            o.eo.x += o.eo.vx / 30.0;
-            o.eo.y += o.eo.vy / 30.0;
+            o.row.x += o.row.vx / 30.0;
+            o.row.y += o.row.vy / 30.0;
         }
         return;
     }
@@ -123,9 +123,9 @@ pub(crate) fn body_create(ctx: &mut Ctx<'_>, world: &mut World, i: usize) {
     } else if def.motion == BODY_DYNAMIC {
         bd.body_type = BodyType::Dynamic;
     }
-    bd.position = v2(o.eo.x, o.eo.y);
-    bd.angle = o.eo.angle;
-    bd.angular_velocity = o.eo.angular_velocity;
+    bd.position = v2(o.row.x, o.row.y);
+    bd.angle = o.row.angle;
+    bd.angular_velocity = o.row.angular_velocity;
     bd.fixed_rotation = def.fixed_rotation;
     bd.linear_damping = def.linear_damping;
     bd.angular_damping = def.angular_damping;
@@ -173,7 +173,7 @@ pub(crate) fn body_create(ctx: &mut Ctx<'_>, world: &mut World, i: usize) {
         world.create_fixture(body, &fd);
     }
     let store = world.store_mut();
-    store.body_mut(body).set_linear_velocity(v2(o.eo.vx, o.eo.vy));
+    store.body_mut(body).set_linear_velocity(v2(o.row.vx, o.row.vy));
     if def.pinned {
         let anchor = v2(def.pin_x, def.pin_y);
         let wp = store.body(body).get_world_point(anchor);
@@ -206,7 +206,7 @@ pub(crate) fn body_create(ctx: &mut Ctx<'_>, world: &mut World, i: usize) {
     }
 }
 
-/// `dl`: wrap a body around the arena when its bounds leave it entirely.
+/// Wraps a body around the arena when its bounds leave it entirely.
 fn body_wrap(ctx: &mut Ctx<'_>, world: &mut World, i: usize) {
     let w = ctx.prev_settings.width;
     let h = ctx.prev_settings.height;
@@ -231,36 +231,36 @@ fn body_wrap(ctx: &mut Ctx<'_>, world: &mut World, i: usize) {
     };
     if aabb.upper_bound.x < 0.0 {
         shift_x(world, dx);
-        o.eo.teleported = true;
+        o.row.teleported = true;
     }
     if aabb.lower_bound.x > w {
         shift_x(world, -dx);
-        o.eo.teleported = true;
+        o.row.teleported = true;
     }
     if aabb.upper_bound.y < 0.0 {
         shift_y(world, dy);
-        o.eo.teleported = true;
+        o.row.teleported = true;
     }
     if aabb.lower_bound.y > h {
         shift_y(world, -dy);
-        o.eo.teleported = true;
+        o.row.teleported = true;
     }
 }
 
-/// `ao`: push attribution decays.
+/// Pre-step: push attribution decays.
 pub(crate) fn body_pre_step(o: &mut BodyObj) {
-    o.eo.push_from.retain(|_, w| {
+    o.row.push_from.retain(|_, w| {
         *w *= 0.985;
         !(*w < 0.8)
     });
 }
 
-/// `ro`: lifetime, objective delivery, latch release.
+/// Post-step: lifetime, objective delivery, latch release.
 pub(crate) fn body_post_step(ctx: &mut Ctx<'_>, i: usize) {
     let o = &mut ctx.bodies[i];
-    if o.eo.lifetime > 0.0 {
-        o.eo.lifetime -= 1.0;
-        if o.eo.lifetime == 0.0 {
+    if o.row.lifetime > 0.0 {
+        o.row.lifetime -= 1.0;
+        if o.row.lifetime == 0.0 {
             o.removed = true;
         }
     }
@@ -272,16 +272,16 @@ pub(crate) fn body_post_step(ctx: &mut Ctx<'_>, i: usize) {
     }
     if touch {
         for j in ctx.joints.iter_mut() {
-            if j.eo.body_b == id && j.eo.motor_mode == MOTOR_LATCH && j.eo.latched {
-                j.eo.latched = false;
+            if j.row.body_b == id && j.row.motor_mode == MOTOR_LATCH && j.row.latched {
+                j.row.latched = false;
             }
         }
     }
 }
 
-/// `wl` for a map body.
+/// Begin-contact handler for a map body.
 pub(crate) fn body_begin_contact(ctx: &mut Ctx<'_>, store: &mut Store, i: usize, other: BodyId, c: ContactId) {
-    let def = ctx.bodies[i].eo.def.clone();
+    let def = ctx.bodies[i].row.def.clone();
     let (k, oi) = body_tag(store, other);
     if def.zone_x != 0.0 || def.zone_y != 0.0 {
         // force zone
@@ -292,27 +292,27 @@ pub(crate) fn body_begin_contact(ctx: &mut Ctx<'_>, store: &mut Store, i: usize,
         let center = store.body(other).get_world_center();
         store.body_mut(other).apply_force(f, center);
     } else if k == kind::PROJECTILE {
-        let team = ctx.projectiles[oi].eo.team;
+        let team = ctx.projectiles[oi].row.team;
         if def.projectile_pass == 1.0 || def.projectile_pass == team {
             store.contact_mut(c).set_enabled(false);
         } else {
-            // `fl`: projectile damage
-            let dmg = ctx.projectiles[oi].eo.object_damage;
+            // projectile damage
+            let dmg = ctx.projectiles[oi].row.object_damage;
             let o = &mut ctx.bodies[i];
-            o.eo.damage += dmg;
+            o.row.damage += dmg;
             // the heav.io builds turned the body dynamic here; today's
             // original throws instead (its definition is frozen)
-            if o.eo.damage >= def.dynamic_threshold && def.dynamic_threshold > 0.0 && def.motion != BODY_DYNAMIC {
-                let mut d = (*o.eo.def).clone();
+            if o.row.damage >= def.dynamic_threshold && def.dynamic_threshold > 0.0 && def.motion != BODY_DYNAMIC {
+                let mut d = (*o.row.def).clone();
                 d.motion = BODY_DYNAMIC;
-                o.eo.def = std::sync::Arc::new(d);
+                o.row.def = std::sync::Arc::new(d);
             }
-            if o.eo.damage >= def.removal_threshold && def.removal_threshold > 0.0 {
+            if o.row.damage >= def.removal_threshold && def.removal_threshold > 0.0 {
                 o.removed = true;
             }
         }
     } else if def.objective > 0.0 && k == kind::BODY {
-        let target = ctx.bodies[oi].eo.def.objective_target;
+        let target = ctx.bodies[oi].row.def.objective_target;
         let o = &mut ctx.bodies[i];
         if (def.objective == 1.0 || def.objective == 2.0) && target == 2.0 {
             o.objective = 2.0;
@@ -329,10 +329,10 @@ pub(crate) fn body_begin_contact(ctx: &mut Ctx<'_>, store: &mut Store, i: usize,
     }
 }
 
-/// `yl` for a map body: impact sounds.
+/// Post-solve handler for a map body: impact sounds.
 pub(crate) fn body_post_solve(ctx: &mut Ctx<'_>, store: &mut Store, i: usize, impulse: &ContactImpulse) {
     let o = &mut ctx.bodies[i];
-    if o.eo.def.motion != BODY_DYNAMIC || o.eo.def.source_player > -1.0 {
+    if o.row.def.motion != BODY_DYNAMIC || o.row.def.source_player > -1.0 {
         return;
     }
     let body = o.body.expect("body");
@@ -345,25 +345,25 @@ pub(crate) fn body_post_solve(ctx: &mut Ctx<'_>, store: &mut Store, i: usize, im
     }
 }
 
-/// `lo` for a map body.
+/// Serializes a map body into the next state.
 pub(crate) fn body_serialize(ctx: &mut Ctx<'_>, world: &World, i: usize, next: &mut State) {
     let o = &mut ctx.bodies[i];
     if o.removed {
         return;
     }
-    if !o.eo.def.no_physics {
+    if !o.row.def.no_physics {
         let b = world.store().body(o.body.expect("body"));
         let p = b.get_position();
         let v = b.get_linear_velocity();
-        o.eo.x = p.x;
-        o.eo.y = p.y;
-        o.eo.angle = b.get_angle();
-        o.eo.angular_velocity = b.get_angular_velocity();
-        o.eo.vx = v.x;
-        o.eo.vy = v.y;
-        o.eo.sound_limiter = o.limiter.value();
+        o.row.x = p.x;
+        o.row.y = p.y;
+        o.row.angle = b.get_angle();
+        o.row.angular_velocity = b.get_angular_velocity();
+        o.row.vx = v.x;
+        o.row.vy = v.y;
+        o.row.sound_limiter = o.limiter.value();
     }
-    next.bodies.insert(o.eo.def.id, o.eo.clone());
+    next.bodies.insert(o.row.def.id, o.row.clone());
     next.sounds.append(&mut o.new_sounds);
 }
 
@@ -371,20 +371,20 @@ pub(crate) fn body_serialize(ctx: &mut Ctx<'_>, world: &World, i: usize, next: &
 
 pub(crate) struct JointObj {
     pub index: u32,
-    pub eo: MapJoint,
+    pub row: MapJoint,
     /// prismatic joint handle and its moving body
     pub prismatic: Option<(JointId, BodyId)>,
 }
 
 impl JointObj {
-    pub fn new(index: u32, eo: MapJoint) -> JointObj {
-        JointObj { index, eo, prismatic: None }
+    pub fn new(index: u32, row: MapJoint) -> JointObj {
+        JointObj { index, row, prismatic: None }
     }
 }
 
-/// `ao` for a joint: create it in the world.
+/// Creates the joint in the world.
 pub(crate) fn joint_create(ctx: &mut Ctx<'_>, world: &mut World, i: usize) {
-    let j = ctx.joints[i].eo.clone();
+    let j = ctx.joints[i].row.clone();
     let body_of = |ctx: &Ctx<'_>, id: f64| ctx.body_index(id).map(|bi| ctx.bodies[bi].body);
     let mut a_obj = body_of(ctx, j.body_a);
     let b_obj = body_of(ctx, j.body_b);
@@ -472,28 +472,28 @@ pub(crate) fn joint_create(ctx: &mut Ctx<'_>, world: &mut World, i: usize) {
         let t = prismatic(store, id).get_joint_translation(store);
         let at_lower = t - lower < 0.1;
         let at_upper = upper - t < 0.1;
-        let eo = &mut ctx.joints[i].eo;
-        if eo.motor_mode == MOTOR_STOP {
-            if (eo.motor_speed < 0.0 && at_lower) || (eo.motor_speed > 0.0 && at_upper) {
+        let row = &mut ctx.joints[i].row;
+        if row.motor_mode == MOTOR_STOP {
+            if (row.motor_speed < 0.0 && at_lower) || (row.motor_speed > 0.0 && at_upper) {
                 // box2dweb's setters wake both bodies first
                 joints::wake_bodies(store, id);
                 prismatic_mut(store, id).set_motor_speed(0.0);
             }
-        } else if eo.motor_mode == MOTOR_PING_PONG || eo.motor_mode == MOTOR_LATCH {
-            let before = eo.motor_speed;
+        } else if row.motor_mode == MOTOR_PING_PONG || row.motor_mode == MOTOR_LATCH {
+            let before = row.motor_speed;
             if at_lower {
-                eo.motor_speed = eo.motor_speed.abs();
+                row.motor_speed = row.motor_speed.abs();
             }
             if at_upper {
-                eo.motor_speed = -eo.motor_speed.abs();
+                row.motor_speed = -row.motor_speed.abs();
             }
             joints::wake_bodies(store, id);
-            prismatic_mut(store, id).set_motor_speed(eo.motor_speed);
-            if eo.motor_mode == MOTOR_LATCH {
+            prismatic_mut(store, id).set_motor_speed(row.motor_speed);
+            if row.motor_mode == MOTOR_LATCH {
                 if at_lower && before < 0.0 {
-                    eo.latched = true;
+                    row.latched = true;
                 }
-                if eo.latched {
+                if row.latched {
                     joints::wake_bodies(store, id);
                     prismatic_mut(store, id).set_motor_speed(0.0);
                     joints::wake_bodies(store, id);
@@ -518,9 +518,9 @@ fn prismatic_mut(store: &mut Store, id: JointId) -> &mut PrismaticJoint {
     }
 }
 
-/// `ro` for a joint: prismatic bodies stop at their limits.
+/// Post-step for a joint: prismatic bodies stop at their limits.
 pub(crate) fn joint_post_step(ctx: &mut Ctx<'_>, world: &mut World, i: usize) {
-    if ctx.joints[i].eo.kind != JOINT_PRISMATIC {
+    if ctx.joints[i].row.kind != JOINT_PRISMATIC {
         return;
     }
     let Some((id, body)) = ctx.joints[i].prismatic else { return };
@@ -538,25 +538,25 @@ pub(crate) fn joint_post_step(ctx: &mut Ctx<'_>, world: &mut World, i: usize) {
 
 pub(crate) struct ProjObj {
     pub index: u32,
-    pub eo: Projectile,
+    pub row: Projectile,
     pub body: Option<BodyId>,
-    /// `el` terminated by a hit
+    /// terminated by a hit
     pub terminated: bool,
-    /// `Ul` hit point (explosion centre)
+    /// hit point (explosion centre)
     pub hit_point: Option<Vec2>,
     pub new_effects: Vec<Effect>,
     pub new_sounds: Vec<Sound>,
 }
 
 impl ProjObj {
-    pub fn new(index: u32, eo: Projectile) -> ProjObj {
-        ProjObj { index, eo, body: None, terminated: false, hit_point: None, new_effects: Vec::new(), new_sounds: Vec::new() }
+    pub fn new(index: u32, row: Projectile) -> ProjObj {
+        ProjObj { index, row, body: None, terminated: false, hit_point: None, new_effects: Vec::new(), new_sounds: Vec::new() }
     }
 }
 
 pub(crate) fn projectile_create(ctx: &mut Ctx<'_>, world: &mut World, i: usize) {
     let o = &mut ctx.projectiles[i];
-    let e = &o.eo;
+    let e = &o.row;
     let mut bd = B2BodyDef::default();
     bd.body_type = BodyType::Dynamic;
     bd.position = v2(e.x, e.y);
@@ -607,14 +607,14 @@ pub(crate) fn projectile_create(ctx: &mut Ctx<'_>, world: &mut World, i: usize) 
     b.apply_force(v2(0.0, -anti * mass), c);
 }
 
-/// `ao`: homing.
+/// Pre-step: homing.
 pub(crate) fn projectile_pre_step(ctx: &mut Ctx<'_>, world: &mut World, i: usize) {
-    let turn = ctx.projectiles[i].eo.turn_rate;
+    let turn = ctx.projectiles[i].row.turn_rate;
     if !(turn > 0.0) {
         return;
     }
-    let team = ctx.projectiles[i].eo.team;
-    let owner = ctx.player_index(ctx.projectiles[i].eo.owner);
+    let team = ctx.projectiles[i].row.team;
+    let owner = ctx.player_index(ctx.projectiles[i].row.owner);
     let mut cands = Vec::new();
     for pi in 0..ctx.players.len() {
         cands.push((kind::PLAYER, pi));
@@ -628,8 +628,8 @@ pub(crate) fn projectile_pre_step(ctx: &mut Ctx<'_>, world: &mut World, i: usize
     let mut target = None;
     for n in near {
         let t_team = match n.kind {
-            kind::PLAYER => ctx.players[n.index].eo.team,
-            _ => ctx.turrets[n.index].eo.team,
+            kind::PLAYER => ctx.players[n.index].row.team,
+            _ => ctx.turrets[n.index].row.team,
         };
         let same = t_team == team && team > 1.0;
         let is_owner = n.kind == kind::PLAYER && Some(n.index) == owner;
@@ -657,16 +657,16 @@ pub(crate) fn projectile_pre_step(ctx: &mut Ctx<'_>, world: &mut World, i: usize
     store.body_mut(body).set_linear_velocity(v2(js::qcos(a) * speed, js::qsin(a) * speed));
 }
 
-/// `ro`: age and explode.
+/// Post-step: age and explode.
 pub(crate) fn projectile_post_step(ctx: &mut Ctx<'_>, world: &mut World, i: usize) {
     let o = &mut ctx.projectiles[i];
-    o.eo.life -= 1.0;
-    if (o.terminated || o.eo.life == 0.0) && o.eo.explode_radius > 0.0 {
+    o.row.life -= 1.0;
+    if (o.terminated || o.row.life == 0.0) && o.row.explode_radius > 0.0 {
         explode(ctx, world, i);
     }
 }
 
-/// `Jl`: explosion impulse (and optional damage) around the projectile.
+/// Explosion impulse (and optional damage) around the projectile.
 fn explode(ctx: &mut Ctx<'_>, world: &mut World, i: usize) {
     let gs = ctx.gs;
     let body = ctx.projectiles[i].body.expect("projectile body");
@@ -683,7 +683,7 @@ fn explode(ctx: &mut Ctx<'_>, world: &mut World, i: usize) {
     };
     let near = sort_near(world.store(), ctx, origin, &cands, (kind::PROJECTILE, i));
     let (radius, owner, team, damage, explode_damage) = {
-        let e = &ctx.projectiles[i].eo;
+        let e = &ctx.projectiles[i].row;
         (e.explode_radius, e.owner, e.team, e.damage, e.explode_damage)
     };
     for n in near {
@@ -708,8 +708,8 @@ fn explode(ctx: &mut Ctx<'_>, world: &mut World, i: usize) {
             let t = &mut ctx.players[n.index];
             if !t.same_team(team) && t.id() != owner {
                 t.damage(damage);
-                t.eo.attacker = owner;
-                t.eo.attacker_timer = 10.0;
+                t.row.attacker = owner;
+                t.row.attacker_timer = 10.0;
             }
         }
     }
@@ -718,39 +718,39 @@ fn explode(ctx: &mut Ctx<'_>, world: &mut World, i: usize) {
         Some(p) => p,
         None => world.store().body(body).get_position(),
     };
-    o.new_effects.push(Effect { x: at.x, y: at.y, ttl: 5.0, kind: effect::EXPLOSION, volume: o.eo.explode_radius, ..Effect::default() });
-    if o.eo.explode_radius > 0.1 {
+    o.new_effects.push(Effect { x: at.x, y: at.y, ttl: 5.0, kind: effect::EXPLOSION, volume: o.row.explode_radius, ..Effect::default() });
+    if o.row.explode_radius > 0.1 {
         o.new_sounds.push(Sound { x: at.x, y: at.y, ttl: 15.0, kind: sound::EXPLOSION, volume: 0.3, ..Sound::default() });
     }
 }
 
-/// `wl` for a projectile.
+/// Begin-contact handler for a projectile.
 pub(crate) fn projectile_begin_contact(ctx: &mut Ctx<'_>, store: &mut Store, i: usize, other: BodyId, point: Vec2, c: ContactId) {
     let (k, oi) = body_tag(store, other);
     let (owner, team, damage, object_damage, bounces) = {
-        let e = &ctx.projectiles[i].eo;
+        let e = &ctx.projectiles[i].row;
         (e.owner, e.team, e.damage, e.object_damage, e.bounces)
     };
     let mut ignore = false;
     if k == kind::PLAYER {
         let t = &mut ctx.players[oi];
-        if t.id() == owner || t.eo.age < crate::player::SPAWN_GRACE || t.same_team(team) {
+        if t.id() == owner || t.row.age < crate::player::SPAWN_GRACE || t.same_team(team) {
             ignore = true;
             store.contact_mut(c).set_enabled(false);
         } else {
             t.damage(damage);
-            t.eo.attacker = owner;
-            t.eo.attacker_timer = 10.0;
+            t.row.attacker = owner;
+            t.row.attacker_timer = 10.0;
         }
     }
     if k == kind::TURRET {
-        let t = &mut ctx.turrets[oi].eo;
+        let t = &mut ctx.turrets[oi].row;
         if !(t.team == team && t.team != 1.0) {
             t.health = js::max(0.0, t.health - object_damage);
         }
     }
-    if k == kind::PU {
-        let t = &mut ctx.pu[oi].eo;
+    if k == kind::PICKUP {
+        let t = &mut ctx.pickups[oi].row;
         if !(t.team == team && t.team != 1.0) {
             t.health = js::max(0.0, t.health - object_damage);
         }
@@ -760,7 +760,7 @@ pub(crate) fn projectile_begin_contact(ctx: &mut Ctx<'_>, store: &mut Store, i: 
         ignore = true;
     }
     if k == kind::BODY {
-        let def = &ctx.bodies[oi].eo.def;
+        let def = &ctx.bodies[oi].row.def;
         if def.projectile_pass == 1.0 || def.projectile_pass == team {
             ignore = true;
         }
@@ -781,32 +781,32 @@ pub(crate) fn projectile_begin_contact(ctx: &mut Ctx<'_>, store: &mut Store, i: 
             o.hit_point = Some(point);
         }
         if k == kind::BODY {
-            if o.eo.bounce_count >= o.eo.bounce_limit && o.eo.bounce_limit > 0.0 {
+            if o.row.bounce_count >= o.row.bounce_limit && o.row.bounce_limit > 0.0 {
                 o.terminated = true;
                 o.hit_point = Some(point);
             } else {
-                o.eo.bounce_count += 1.0;
+                o.row.bounce_count += 1.0;
             }
         }
     }
 }
 
-/// `lo` for a projectile.
+/// Serializes a projectile into the next state.
 pub(crate) fn projectile_serialize(ctx: &mut Ctx<'_>, world: &World, i: usize, next: &mut State) {
     let o = &mut ctx.projectiles[i];
     let b = world.store().body(o.body.expect("projectile body"));
     let p = b.get_position();
     let v = b.get_linear_velocity();
-    o.eo.x = p.x;
-    o.eo.y = p.y;
-    o.eo.vx = v.x;
-    o.eo.vy = v.y;
-    if !o.eo.align {
-        o.eo.angle = b.get_angle();
-        o.eo.angular_velocity = b.get_angular_velocity();
+    o.row.x = p.x;
+    o.row.y = p.y;
+    o.row.vx = v.x;
+    o.row.vy = v.y;
+    if !o.row.align {
+        o.row.angle = b.get_angle();
+        o.row.angular_velocity = b.get_angular_velocity();
     }
-    if o.eo.life > 0.0 && !o.terminated {
-        next.projectiles.insert(o.index, o.eo.clone());
+    if o.row.life > 0.0 && !o.terminated {
+        next.projectiles.insert(o.index, o.row.clone());
     }
     for e in o.new_effects.drain(..) {
         let slot = next.counters.next_effect();
@@ -821,15 +821,15 @@ pub(crate) fn projectile_serialize(ctx: &mut Ctx<'_>, world: &World, i: usize, n
 
 pub(crate) struct TurretObj {
     pub index: u32,
-    pub eo: MapTurret,
+    pub row: MapTurret,
     pub body: Option<BodyId>,
     pub dead: bool,
     pub shot: Option<Projectile>,
 }
 
 impl TurretObj {
-    pub fn new(index: u32, eo: MapTurret) -> TurretObj {
-        TurretObj { index, eo, body: None, dead: false, shot: None }
+    pub fn new(index: u32, row: MapTurret) -> TurretObj {
+        TurretObj { index, row, body: None, dead: false, shot: None }
     }
 }
 
@@ -837,7 +837,7 @@ pub(crate) fn turret_create(ctx: &mut Ctx<'_>, world: &mut World, i: usize) {
     let o = &mut ctx.turrets[i];
     let mut bd = B2BodyDef::default();
     bd.body_type = BodyType::Static;
-    bd.position = v2(o.eo.x, o.eo.y);
+    bd.position = v2(o.row.x, o.row.y);
     bd.user_data = tag(kind::TURRET, i);
     let body = world.create_body(&bd);
     o.body = Some(body);
@@ -851,16 +851,16 @@ pub(crate) fn turret_create(ctx: &mut Ctx<'_>, world: &mut World, i: usize) {
     world.create_fixture(body, &FixtureDef::new(Shape::Polygon(p)));
     let store = world.store_mut();
     let b = store.body_mut(body);
-    b.set_linear_velocity(v2(o.eo.vx, o.eo.vy));
+    b.set_linear_velocity(v2(o.row.vx, o.row.vy));
     let mass = b.get_mass_data().mass;
     let c = b.get_world_center();
     b.apply_force(v2(0.0, -14.0 * mass), c);
 }
 
-/// `ao`: cooldown and firing at the nearest visible enemy.
+/// Pre-step: cooldown and firing at the nearest visible enemy.
 pub(crate) fn turret_pre_step(ctx: &mut Ctx<'_>, world: &mut World, i: usize) {
-    if ctx.turrets[i].eo.cooldown != 0.0 {
-        ctx.turrets[i].eo.cooldown -= 1.0;
+    if ctx.turrets[i].row.cooldown != 0.0 {
+        ctx.turrets[i].row.cooldown -= 1.0;
         return;
     }
     let mut cands = Vec::new();
@@ -873,27 +873,27 @@ pub(crate) fn turret_pre_step(ctx: &mut Ctx<'_>, world: &mut World, i: usize) {
     let body = ctx.turrets[i].body.expect("turret body");
     let origin = world.store().body(body).get_position();
     let near = sort_near(world.store(), ctx, origin, &cands, (kind::TURRET, i));
-    let (range, team) = (ctx.turrets[i].eo.range, ctx.turrets[i].eo.team);
+    let (range, team) = (ctx.turrets[i].row.range, ctx.turrets[i].row.team);
     for n in near {
         let (t_team, tb) = match n.kind {
-            kind::PLAYER => (ctx.players[n.index].eo.team, ctx.players[n.index].body),
-            _ => (ctx.turrets[n.index].eo.team, ctx.turrets[n.index].body),
+            kind::PLAYER => (ctx.players[n.index].row.team, ctx.players[n.index].body),
+            _ => (ctx.turrets[n.index].row.team, ctx.turrets[n.index].body),
         };
         if n.dist < range && (t_team != team || team == 1.0) {
             let tb = tb.expect("target body");
             if line_of_sight(world, body, tb) {
                 let a = js::qatan2(n.dy, n.dx);
                 let o = &mut ctx.turrets[i];
-                let mut shot = o.eo.bullet.clone();
+                let mut shot = o.row.bullet.clone();
                 let dist = 1.5 + shot.size;
                 let speed = shot.vx;
-                shot.x = o.eo.x + js::qcos(a) * dist;
-                shot.y = o.eo.y + js::qsin(a) * dist;
+                shot.x = o.row.x + js::qcos(a) * dist;
+                shot.y = o.row.y + js::qsin(a) * dist;
                 shot.vx = js::qcos(a) * speed;
                 shot.vy = js::qsin(a) * speed;
                 shot.owner = 999.0;
-                shot.team = o.eo.team;
-                o.eo.cooldown = o.eo.fire_interval;
+                shot.team = o.row.team;
+                o.row.cooldown = o.row.fire_interval;
                 o.shot = Some(shot);
                 break;
             }
@@ -901,7 +901,7 @@ pub(crate) fn turret_pre_step(ctx: &mut Ctx<'_>, world: &mut World, i: usize) {
     }
 }
 
-/// `Bl`: nothing blocks the ray before the target body.
+/// Line-of-sight check: nothing blocks the ray before the target body.
 fn line_of_sight(world: &World, from: BodyId, to: BodyId) -> bool {
     let store = world.store();
     let p1 = store.body(from).get_position();
@@ -929,9 +929,9 @@ fn line_of_sight(world: &World, from: BodyId, to: BodyId) -> bool {
     !(nearest < target)
 }
 
-/// `ro`
+/// Post-step: marks the turret dead once its health runs out.
 pub(crate) fn turret_post_step(o: &mut TurretObj) {
-    if o.eo.health <= 0.0 {
+    if o.row.health <= 0.0 {
         o.dead = true;
     }
 }
@@ -942,13 +942,13 @@ pub(crate) fn turret_serialize(ctx: &mut Ctx<'_>, world: &World, i: usize, next:
         let b = world.store().body(o.body.expect("turret body"));
         let p = b.get_position();
         let v = b.get_linear_velocity();
-        o.eo.x = p.x;
-        o.eo.y = p.y;
-        o.eo.angle = b.get_angle();
-        o.eo.angular_velocity = b.get_angular_velocity();
-        o.eo.vx = v.x;
-        o.eo.vy = v.y;
-        next.turrets.insert(o.index, o.eo.clone());
+        o.row.x = p.x;
+        o.row.y = p.y;
+        o.row.angle = b.get_angle();
+        o.row.angular_velocity = b.get_angular_velocity();
+        o.row.vx = v.x;
+        o.row.vy = v.y;
+        next.turrets.insert(o.index, o.row.clone());
     }
     if let Some(s) = o.shot.take() {
         if let Some(slot) = index_of(next.counters.projectile) {
@@ -961,18 +961,18 @@ pub(crate) fn turret_serialize(ctx: &mut Ctx<'_>, world: &World, i: usize, next:
 // ------------------------------------------------------------------ capture points
 
 pub(crate) struct CapObj {
-    pub eo: MapCap,
+    pub row: MapCap,
     pub body: Option<BodyId>,
-    /// players touching per team (`Xu`)
+    /// players touching per team
     pub per_team: [u32; 4],
-    /// ids of touching players (`Zu`)
+    /// ids of touching players
     pub touching: Vec<f64>,
     pub touched: bool,
 }
 
 impl CapObj {
-    pub fn new(eo: MapCap) -> CapObj {
-        CapObj { eo, body: None, per_team: [0; 4], touching: Vec::new(), touched: false }
+    pub fn new(row: MapCap) -> CapObj {
+        CapObj { row, body: None, per_team: [0; 4], touching: Vec::new(), touched: false }
     }
 }
 
@@ -980,11 +980,11 @@ pub(crate) fn cap_create(ctx: &mut Ctx<'_>, world: &mut World, i: usize) {
     let o = &mut ctx.caps[i];
     let mut bd = B2BodyDef::default();
     bd.body_type = BodyType::Static;
-    bd.position = v2(o.eo.x, o.eo.y);
+    bd.position = v2(o.row.x, o.row.y);
     bd.user_data = tag(kind::CAP, i);
     let body = world.create_body(&bd);
     o.body = Some(body);
-    let h = o.eo.width / 2.0;
+    let h = o.row.width / 2.0;
     let pts = [v2(-h - 0.5, 0.0), v2(-h, -0.5), v2(h, -0.5), v2(h + 0.5, 0.0)];
     let mut p = PolygonShape::new();
     p.set_as_array(&pts, pts.len());
@@ -994,7 +994,7 @@ pub(crate) fn cap_create(ctx: &mut Ctx<'_>, world: &mut World, i: usize) {
 pub(crate) fn cap_begin_contact(ctx: &mut Ctx<'_>, store: &mut Store, i: usize, other: BodyId) {
     let (k, oi) = body_tag(store, other);
     if k == kind::PLAYER {
-        let team = ctx.players[oi].eo.team;
+        let team = ctx.players[oi].row.team;
         let id = ctx.players[oi].id();
         let o = &mut ctx.caps[i];
         if let Some(t) = index_of(team).filter(|t| *t < 4) {
@@ -1005,14 +1005,14 @@ pub(crate) fn cap_begin_contact(ctx: &mut Ctx<'_>, store: &mut Store, i: usize, 
     }
 }
 
-/// `ro`: capture progress.
+/// Post-step: capture progress.
 pub(crate) fn cap_post_step(ctx: &mut Ctx<'_>, i: usize) {
     if crate::round::round_over(ctx) || crate::round::game_over(ctx) {
         return;
     }
     let gs = ctx.gs;
     if !ctx.caps[i].touched {
-        let e = &mut ctx.caps[i].eo;
+        let e = &mut ctx.caps[i].row;
         if e.progress > 0.0 {
             e.progress -= 0.25;
             if e.progress <= 0.0 {
@@ -1030,19 +1030,19 @@ pub(crate) fn cap_post_step(ctx: &mut Ctx<'_>, i: usize) {
         }
         let team = if red > 0 { 2.0 } else { 3.0 };
         let count = ctx.caps[i].per_team[team as usize] as f64;
-        let (owner, seq) = (ctx.caps[i].eo.owner, ctx.caps[i].eo.sequence);
+        let (owner, seq) = (ctx.caps[i].row.owner, ctx.caps[i].row.sequence);
         if owner != team {
             let mut allowed = true;
             if seq != -1.0 {
                 let prev = if team == 2.0 { seq - 1.0 } else { seq + 1.0 };
                 for c in ctx.caps.iter() {
-                    if c.eo.sequence == prev && c.eo.owner != team && prev >= 0.0 {
+                    if c.row.sequence == prev && c.row.owner != team && prev >= 0.0 {
                         allowed = false;
                     }
                 }
             }
             if allowed {
-                let e = &mut ctx.caps[i].eo;
+                let e = &mut ctx.caps[i].row;
                 if e.capturer != team {
                     e.progress -= count;
                     if e.progress <= 0.0 {
@@ -1057,19 +1057,19 @@ pub(crate) fn cap_post_step(ctx: &mut Ctx<'_>, i: usize) {
                         e.capturer = -1.0;
                         let next_seq = if team == 2.0 { seq - 1.0 } else { seq + 1.0 };
                         for c in ctx.caps.iter_mut() {
-                            if c.eo.sequence == next_seq && c.eo.progress > 0.0 {
-                                c.eo.progress = 0.0;
-                                c.eo.capturer = -1.0;
+                            if c.row.sequence == next_seq && c.row.progress > 0.0 {
+                                c.row.progress = 0.0;
+                                c.row.capturer = -1.0;
                             }
                         }
-                        if ctx.caps.iter().all(|c| c.eo.owner == team) {
+                        if ctx.caps.iter().all(|c| c.row.owner == team) {
                             crate::round::objective(ctx, team);
                         }
                     }
                 }
             }
         } else {
-            let e = &mut ctx.caps[i].eo;
+            let e = &mut ctx.caps[i].row;
             if e.progress > 0.0 {
                 e.progress -= count;
                 if e.progress < 0.0 {
@@ -1078,13 +1078,13 @@ pub(crate) fn cap_post_step(ctx: &mut Ctx<'_>, i: usize) {
             }
         }
     } else {
-        let capturer = ctx.caps[i].eo.capturer;
+        let capturer = ctx.caps[i].row.capturer;
         let n = ctx.caps[i].touching.len();
         let first = ctx.caps[i].touching.first().copied().unwrap_or(f64::NAN);
-        let e = &mut ctx.caps[i].eo;
+        let e = &mut ctx.caps[i].row;
         if n > 1 {
             if !ctx.caps[i].touching.contains(&capturer) {
-                let e = &mut ctx.caps[i].eo;
+                let e = &mut ctx.caps[i].row;
                 e.progress -= n as f64;
                 if e.progress < 0.0 {
                     e.progress = 0.0;
@@ -1111,39 +1111,39 @@ pub(crate) fn cap_post_step(ctx: &mut Ctx<'_>, i: usize) {
                 }
             }
         }
-        let e = &mut ctx.caps[i].eo;
+        let e = &mut ctx.caps[i].row;
         if e.progress >= e.capture_time {
             e.owner = first;
             e.capturer = -1.0;
             e.progress = 0.0;
-            if ctx.caps.iter().all(|c| c.eo.owner == first) {
+            if ctx.caps.iter().all(|c| c.row.owner == first) {
                 crate::round::capture_win(ctx, first);
             }
         }
     }
 }
 
-// ------------------------------------------------------------------ pu (unused bucket)
+// ------------------------------------------------------------------ pickups
 
-pub(crate) struct PuObj {
+pub(crate) struct PickupObj {
     pub index: u32,
-    pub eo: PuRow,
+    pub row: PickupRow,
     pub body: Option<BodyId>,
 }
 
-impl PuObj {
-    pub fn new(index: u32, eo: PuRow) -> PuObj {
-        PuObj { index, eo, body: None }
+impl PickupObj {
+    pub fn new(index: u32, row: PickupRow) -> PickupObj {
+        PickupObj { index, row, body: None }
     }
 }
 
-pub(crate) fn pu_create(ctx: &mut Ctx<'_>, world: &mut World, i: usize) {
-    let o = &mut ctx.pu[i];
+pub(crate) fn pickup_create(ctx: &mut Ctx<'_>, world: &mut World, i: usize) {
+    let o = &mut ctx.pickups[i];
     let mut bd = B2BodyDef::default();
     bd.body_type = BodyType::Static;
-    bd.position = v2(o.eo.x, o.eo.y);
-    bd.angle = o.eo.angle;
-    bd.user_data = tag(kind::PU, i);
+    bd.position = v2(o.row.x, o.row.y);
+    bd.angle = o.row.angle;
+    bd.user_data = tag(kind::PICKUP, i);
     let body = world.create_body(&bd);
     let mut p = PolygonShape::new();
     p.set_as_box(2.0, 0.5);
@@ -1151,14 +1151,14 @@ pub(crate) fn pu_create(ctx: &mut Ctx<'_>, world: &mut World, i: usize) {
     o.body = Some(body);
 }
 
-pub(crate) fn pu_serialize(ctx: &mut Ctx<'_>, world: &World, i: usize, next: &mut State) {
-    let o = &mut ctx.pu[i];
-    if o.eo.health != 0.0 {
-        let b = world.store().body(o.body.expect("pu body"));
+pub(crate) fn pickup_serialize(ctx: &mut Ctx<'_>, world: &World, i: usize, next: &mut State) {
+    let o = &mut ctx.pickups[i];
+    if o.row.health != 0.0 {
+        let b = world.store().body(o.body.expect("pickup body"));
         let p = b.get_position();
-        o.eo.x = p.x;
-        o.eo.y = p.y;
-        o.eo.angle = b.get_angle();
-        next.pu.insert(o.index, o.eo.clone());
+        o.row.x = p.x;
+        o.row.y = p.y;
+        o.row.angle = b.get_angle();
+        next.pickups.insert(o.index, o.row.clone());
     }
 }

@@ -4,14 +4,14 @@
 //! 1. reset the physics world and set gravity;
 //! 2. during the intro countdown, only tick round state (no physics);
 //! 3. otherwise wrap every row in a runtime object (bucket order, id order),
-//!    create physics bodies (`oo`), run player input (`mu`), apply
-//!    join/leave events (`qo`), run pre-step logic (`ao`), step Box2D,
-//!    clear forces, run post-step logic (`ro`) and serialize every object
-//!    into a fresh state (`lo`).
+//!    create physics bodies, run player input, apply
+//!    join/leave events, run pre-step logic, step Box2D,
+//!    clear forces, run post-step logic and serialize every object
+//!    into a fresh state.
 
 use crate::input::Input;
 use crate::map::MapSettings;
-use crate::objects::{BodyObj, CapObj, JointObj, ProjObj, PuObj, TurretObj};
+use crate::objects::{BodyObj, CapObj, JointObj, PickupObj, ProjObj, TurretObj};
 use crate::player::PlayerObj;
 use crate::round::RoundObj;
 use crate::settings::GameSettings;
@@ -19,7 +19,7 @@ use crate::state::*;
 use neobox_box2d::math::Vec2;
 use neobox_box2d::{BodyId, ContactId, ContactImpulse, ContactListener, FixtureId, Manifold, Store, World};
 
-/// Sound effect kinds (`Cr` bucket `type`).
+/// Sound effect kinds (the `type` of each sound record).
 pub mod sound {
     pub const JUMP: f64 = 1.0;
     pub const AIR_JUMP: f64 = 2.0;
@@ -42,7 +42,7 @@ pub mod sound {
     pub const GHOST_TRAIL: f64 = 19.0;
 }
 
-/// Visual effect kinds (`zl` bucket `type`).
+/// Visual effect kinds (the `type` of each visual record).
 pub mod effect {
     pub const EXPLOSION: f64 = 0.0;
     pub const PUSH_LINE: f64 = 33.0;
@@ -51,7 +51,7 @@ pub mod effect {
     pub const AIR_JUMP: f64 = 18.0;
 }
 
-/// Object kinds (the original's `ho` values).
+/// Object kinds (the original's numeric values).
 pub mod kind {
     pub const NONE: u32 = u32::MAX;
     pub const BODY: u32 = 0;
@@ -60,7 +60,7 @@ pub mod kind {
     pub const GRAPPLE: u32 = 3;
     pub const TURRET: u32 = 4;
     pub const PARACHUTE: u32 = 14;
-    pub const PU: u32 = 15;
+    pub const PICKUP: u32 = 15;
     pub const CAP: u32 = 16;
 }
 
@@ -95,9 +95,9 @@ pub(crate) fn v2(x: f64, y: f64) -> Vec2 {
 /// Join/leave events applied at a tick.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Events {
-    /// Players that left (`Vo`).
+    /// Players that left.
     pub removed: Vec<u32>,
-    /// Players that joined, with their team (`Xo`).
+    /// Players that joined, with their team.
     pub joined: Vec<(u32, f64)>,
 }
 
@@ -106,7 +106,7 @@ pub(crate) struct Ctx<'g> {
     pub gs: &'g GameSettings,
     /// Map settings of the previous state (read by bodies).
     pub prev_settings: MapSettings,
-    /// Map settings wrapper (`I$`), serialized into the new state.
+    /// Map settings wrapper, serialized into the new state.
     pub settings: MapSettings,
     pub sounds: Vec<Sound>,
     pub spawns: Vec<(u32, crate::map::MapSpawn)>,
@@ -119,7 +119,7 @@ pub(crate) struct Ctx<'g> {
     pub projectiles: Vec<ProjObj>,
     pub turrets: Vec<TurretObj>,
     pub grapples: Vec<(u32, crate::map::MapGrapple)>,
-    pub pu: Vec<PuObj>,
+    pub pickups: Vec<PickupObj>,
     pub caps: Vec<CapObj>,
     pub prev_caps: Vec<crate::map::MapCap>,
     /// (x, y, team) of the previous state's players (round logic reads them).
@@ -185,7 +185,7 @@ impl Sim {
 
         let mut ctx = build(prev, gs);
 
-        // oo: create physics bodies in bucket/id order
+        // create physics bodies in bucket/id order
         for i in 0..ctx.bodies.len() {
             crate::objects::body_create(&mut ctx, world, i);
         }
@@ -198,31 +198,31 @@ impl Sim {
         for i in 0..ctx.turrets.len() {
             crate::objects::turret_create(&mut ctx, world, i);
         }
-        for i in 0..ctx.pu.len() {
-            crate::objects::pu_create(&mut ctx, world, i);
+        for i in 0..ctx.pickups.len() {
+            crate::objects::pickup_create(&mut ctx, world, i);
         }
         for i in 0..ctx.caps.len() {
             crate::objects::cap_create(&mut ctx, world, i);
         }
 
-        // mu: player input
+        // player input
         for i in 0..ctx.players.len() {
             let id = ctx.players[i].index as usize;
             let mask = inputs.get(id).copied().unwrap_or(0);
             crate::player::update(&mut ctx, world, i, Input::from_mask(mask));
         }
 
-        // qo: join/leave events
+        // join/leave events
         crate::round::events(&mut ctx, events);
         if let Some(ev) = events {
             for p in ctx.players.iter_mut() {
                 if ev.removed.contains(&p.index) {
-                    p.gone = true;
+                    p.leaving = true;
                 }
             }
         }
 
-        // ao: pre-step logic
+        // pre-step logic
         crate::round::pre_step(&mut ctx);
         for b in ctx.bodies.iter_mut() {
             crate::objects::body_pre_step(b);
@@ -251,7 +251,7 @@ impl Sim {
         }
         world.clear_forces();
 
-        // ro: post-step logic
+        // post-step logic
         crate::round::post_step(&mut ctx);
         for i in 0..ctx.bodies.len() {
             crate::race::object_step(&mut ctx, world, i);
@@ -273,7 +273,7 @@ impl Sim {
             crate::objects::cap_post_step(&mut ctx, i);
         }
 
-        // lo: serialize
+        // serialize
         serialize(ctx, world)
     }
 }
@@ -320,7 +320,7 @@ fn build<'g>(prev: &State, gs: &'g GameSettings) -> Ctx<'g> {
         projectiles: prev.projectiles.iter().map(|(k, p)| ProjObj::new(k, p.clone())).collect(),
         turrets: prev.turrets.iter().map(|(k, t)| TurretObj::new(k, t.clone())).collect(),
         grapples: prev.grapples.iter().map(|(k, g)| (k, g.clone())).collect(),
-        pu: prev.pu.iter().map(|(k, p)| PuObj::new(k, p.clone())).collect(),
+        pickups: prev.pickups.iter().map(|(k, p)| PickupObj::new(k, p.clone())).collect(),
         caps: prev.caps.iter().map(|c| CapObj::new(c.clone())).collect(),
         prev_caps: prev.caps.clone(),
         prev_players: prev.players.values().map(|p| (p.x, p.y, p.team)).collect(),
@@ -329,7 +329,7 @@ fn build<'g>(prev: &State, gs: &'g GameSettings) -> Ctx<'g> {
     }
 }
 
-/// `lo` for every object, in bucket order, into a fresh state.
+/// Serialize every object, in bucket order, into a fresh state.
 fn serialize(mut ctx: Ctx<'_>, world: &mut World) -> State {
     let mut next = State { settings: std::mem::take(&mut ctx.settings), ..State::default() };
     // sounds: decrement, keep living ones
@@ -348,7 +348,7 @@ fn serialize(mut ctx: Ctx<'_>, world: &mut World) -> State {
         crate::objects::body_serialize(&mut ctx, world, i, &mut next);
     }
     for j in ctx.joints.iter() {
-        next.joints.insert(j.index, j.eo.clone());
+        next.joints.insert(j.index, j.row.clone());
     }
     for (k, mut e) in std::mem::take(&mut ctx.effects) {
         e.ttl -= 1.0;
@@ -368,11 +368,11 @@ fn serialize(mut ctx: Ctx<'_>, world: &mut World) -> State {
     for (k, g) in std::mem::take(&mut ctx.grapples) {
         next.grapples.insert(k, g);
     }
-    for i in 0..ctx.pu.len() {
-        crate::objects::pu_serialize(&mut ctx, world, i, &mut next);
+    for i in 0..ctx.pickups.len() {
+        crate::objects::pickup_serialize(&mut ctx, world, i, &mut next);
     }
     for c in ctx.caps.drain(..) {
-        next.caps.push(c.eo);
+        next.caps.push(c.row);
     }
     next
 }
@@ -436,7 +436,7 @@ pub(crate) struct Near {
     pub dy: f64,
 }
 
-/// `J$.ss`: sort candidates by distance from `origin` (player candidates
+/// Sort candidates by distance from `origin` (player candidates
 /// measure to their surface: distance minus half the player size).
 pub(crate) fn sort_near(store: &Store, ctx: &Ctx<'_>, origin: Vec2, cands: &[(u32, usize)], exclude: (u32, usize)) -> Vec<Near> {
     let mut out = Vec::with_capacity(cands.len());
@@ -444,11 +444,11 @@ pub(crate) fn sort_near(store: &Store, ctx: &Ctx<'_>, origin: Vec2, cands: &[(u3
         if (k, i) == exclude {
             continue;
         }
-        let (pos, hs) = match k {
+        let (pos, sort_half_width) = match k {
             kind::PLAYER => {
                 let p = &ctx.players[i];
                 match p.body {
-                    Some(b) => (store.body(b).get_position(), p.hs),
+                    Some(b) => (store.body(b).get_position(), p.sort_half_width),
                     None => continue,
                 }
             }
@@ -469,8 +469,8 @@ pub(crate) fn sort_near(store: &Store, ctx: &Ctx<'_>, origin: Vec2, cands: &[(u3
         let mut d = pos;
         d.subtract(origin);
         let mut dist = d.length();
-        if hs != 0.0 {
-            dist -= hs;
+        if sort_half_width != 0.0 {
+            dist -= sort_half_width;
         }
         out.push(Near { kind: k, index: i, dist, dx: d.x, dy: d.y });
     }

@@ -5,11 +5,15 @@
 //! `State(t) + inputs + events -> State(t+1)` ([`Sim::step`], or
 //! [`start::advance`] which also performs round transitions). This makes
 //! rollback netcode, replays and server-side verification straightforward.
+//!
+//! Names here are descriptive. The original game's internal names, and the
+//! field each one maps to, are listed in `docs/ORIGINAL-NAMES.md`.
 
 pub mod compat;
 pub mod input;
 pub mod js;
 pub mod map;
+mod map_keys;
 mod objects;
 mod player;
 mod race;

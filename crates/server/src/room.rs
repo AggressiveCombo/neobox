@@ -44,7 +44,7 @@ const LOBBY_VIEW_GAP: Duration = Duration::from_secs(1);
 /// Typing signals relayed per player at most this often.
 const TYPING_GAP: Duration = Duration::from_millis(800);
 /// The quick-play rotation awards experience when the game-over countdown
-/// reaches this tick (the original's `xo == 10`).
+/// reaches this tick (the original's countdown-finished check).
 const QUICK_AWARD_TICK: f64 = 10.0;
 /// Ticks run at 30 per second in the original, whatever rate the room simulates at.
 const RECORD_TICKS_PER_SECOND: f64 = 30.0;
@@ -1818,7 +1818,7 @@ impl Room {
             return;
         }
         let finishes: Vec<(u32, i64)> =
-            g.m.state.round.players.iter().filter(|(_, r)| r.co > 0.0).map(|(id, r)| (id, r.co as i64)).collect();
+            g.m.state.round.players.iter().filter(|(_, r)| r.best_finish_time > 0.0).map(|(id, r)| (id, r.best_finish_time as i64)).collect();
         let mut found = Vec::new();
         for (id, ticks) in finishes {
             let Some(p) = self.players.iter_mut().find(|p| p.id == id) else { continue };
@@ -1879,7 +1879,7 @@ impl Room {
             let checksum = (g.m.tick % CHECKSUM_INTERVAL == 0).then(|| g.m.checksum());
             let outcome = g.m.last_outcome;
             let quick_game_over = self.quick.is_some() && g.m.state.round.game_over == QUICK_AWARD_TICK;
-            let rotation_index = g.m.state.round.io;
+            let rotation_index = g.m.state.round.map_index;
             self.check_records();
             self.send_batches(checksum);
             if too_heavy {

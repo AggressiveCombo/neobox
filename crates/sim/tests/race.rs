@@ -64,10 +64,10 @@ fn checkpoints_count_in_order_and_a_fall_returns_to_the_last_one() {
     let mut run = Run::new(vec![platform(5.0, 4.0, 1), platform(35.0, 4.0, 2)], kills());
     run.until(0, 120, "passing checkpoint 1", |s| s.players.get(0).is_some_and(|p| p.checkpoint == 1.0));
     let rec = run.state.round.players.get(0).unwrap();
-    assert_eq!(rec.mo.len(), 2);
-    assert!(rec.mo[0].is_nan(), "no checkpoint 0");
-    assert_eq!(rec.fo, rec.mo[1], "the last checkpoint's time");
-    assert_eq!(rec.co, 0.0, "no finish yet");
+    assert_eq!(rec.checkpoint_times.len(), 2);
+    assert!(rec.checkpoint_times[0].is_nan(), "no checkpoint 0");
+    assert_eq!(rec.last_checkpoint_time, rec.checkpoint_times[1], "the last checkpoint's time");
+    assert_eq!(rec.best_finish_time, 0.0, "no finish yet");
 
     // fall out of the arena: back at checkpoint 1, run time still going
     run.until(0, 300, "the return to checkpoint 1", |s| {
@@ -85,14 +85,14 @@ fn checkpoints_count_in_order_and_a_fall_returns_to_the_last_one() {
 fn finishing_records_the_time_and_starts_a_new_run() {
     // checkpoint 1 above the finish (2): falling passes both
     let mut run = Run::new(vec![platform(5.0, 4.0, 1), platform(5.0, 10.0, 2)], kills());
-    run.until(0, 120, "the finish", |s| s.round.players.get(0).is_some_and(|r| r.co > 0.0));
+    run.until(0, 120, "the finish", |s| s.round.players.get(0).is_some_and(|r| r.best_finish_time > 0.0));
     let rec = run.state.round.players.get(0).unwrap().clone();
     assert!(run.state.players.get(0).is_none(), "the finisher leaves without dying");
-    assert_eq!(rec.po, rec.co, "the last finish");
-    assert_eq!(rec.mo[2], rec.co, "the finish split");
-    assert!(rec.mo[1] < rec.mo[2]);
-    assert_eq!(format!("{:?}", rec.wo), format!("{:?}", rec.mo), "the best run's splits");
-    assert!(rec.yo.is_nan(), "no earlier best to compare with");
+    assert_eq!(rec.last_finish_time, rec.best_finish_time, "the last finish");
+    assert_eq!(rec.checkpoint_times[2], rec.best_finish_time, "the finish split");
+    assert!(rec.checkpoint_times[1] < rec.checkpoint_times[2]);
+    assert_eq!(format!("{:?}", rec.best_checkpoint_times), format!("{:?}", rec.checkpoint_times), "the best run's splits");
+    assert!(rec.checkpoint_delta.is_nan(), "no earlier best to compare with");
     assert_eq!(rec.respawn, 59.0, "a new run starts 60 ticks after the finish");
     run.until(0, 70, "the respawn", |s| s.players.get(0).is_some_and(|p| p.checkpoint == 0.0 && p.age == 0.0));
 }
@@ -101,7 +101,7 @@ fn finishing_records_the_time_and_starts_a_new_run() {
 fn record_mode_finishers_sit_out_the_round() {
     let gs = GameSettings { record_mode: true, ..kills() };
     let mut run = Run::new(vec![platform(5.0, 4.0, 1), platform(5.0, 10.0, 2)], gs);
-    run.until(0, 120, "the finish", |s| s.round.players.get(0).is_some_and(|r| r.co > 0.0));
+    run.until(0, 120, "the finish", |s| s.round.players.get(0).is_some_and(|r| r.best_finish_time > 0.0));
     let rec = run.state.round.players.get(0).unwrap();
     assert!(!rec.alive, "out of play");
     assert_eq!(rec.respawn, -1.0, "no new run this round");
@@ -116,7 +116,7 @@ fn a_map_without_checkpoints_keeps_the_race_slots_unused() {
         run.tick(0);
     }
     let rec = run.state.round.players.get(0).unwrap();
-    assert_eq!((rec.co, rec.do_, rec.po, rec.fo), (0.0, 0.0, 0.0, 0.0));
-    assert!(rec.mo.is_empty() && rec.wo.is_empty());
+    assert_eq!((rec.best_finish_time, rec.checkpoint_age, rec.last_finish_time, rec.last_checkpoint_time), (0.0, 0.0, 0.0, 0.0));
+    assert!(rec.checkpoint_times.is_empty() && rec.best_checkpoint_times.is_empty());
     assert_eq!(run.state.players.get(0).unwrap().checkpoint, 0.0);
 }

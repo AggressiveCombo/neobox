@@ -164,7 +164,7 @@ struct Mesh {
 
 /// Projectile bodies are drawn grey whatever their owner (the original's `beginFill(0xBBBBBB)`); the trail carries the owner's colour.
 const PROJECTILE_RGB: u32 = 0xbbbbbb;
-/// How long a projectile's trail lasts, in milliseconds (the original's `Wy`).
+/// How long a projectile's trail lasts, in milliseconds (the original's trail-lifetime constant).
 const TRAIL_MS: f64 = 140.0;
 
 /// How fresh the position recorded at tick `at` is: 1 now, 0 once it is `TRAIL_MS` old.
@@ -204,7 +204,7 @@ fn circle_points(cx: f64, cy: f64, r: f64, out: &mut Vec<[f32; 2]>) {
     }
 }
 
-/// Triangulates a ring exactly as PIXI fills it (legacy-654 `Us.triangulate`): reverse to earcut's winding, then
+/// Triangulates a ring exactly as PIXI fills it (legacy-654's triangulate): reverse to earcut's winding, then
 /// earcut. Triangles are appended three points each; self-intersecting rings fill the way earcut fills them.
 fn triangulate(pts: &[[f32; 2]], out: &mut Vec<[f32; 2]>) {
     let ring: Vec<[f64; 2]> = pts.iter().map(|p| [f64::from(p[0]), f64::from(p[1])]).collect();
@@ -240,7 +240,7 @@ impl Earcut {
         self.v[p].next
     }
 
-    /// earcut's St(p, q, r): twice the signed area of p, q, r.
+    /// earcut's signed-area helper: twice the signed area of p, q, r.
     fn st(&self, p: usize, q: usize, r: usize) -> f64 {
         let (p, q, r) = (self.v[p], self.v[q], self.v[r]);
         (q.y - p.y) * (r.x - q.x) - (q.x - p.x) * (r.y - q.y)
@@ -256,14 +256,14 @@ impl Earcut {
         self.v.len() - 1
     }
 
-    /// earcut's wt: unlinks p (its own links are kept).
+    /// earcut's unlink helper: unlinks p (its own links are kept).
     fn remove(&mut self, p: usize) {
         let (a, b) = (self.v[p].prev, self.v[p].next);
         self.v[b].prev = a;
         self.v[a].next = b;
     }
 
-    /// earcut's Ct: appends a node for point `i` after `last` (or starts the ring when `last` is NIL).
+    /// earcut's link-insert helper: appends a node for point `i` after `last` (or starts the ring when `last` is NIL).
     fn insert(&mut self, i: usize, pt: [f64; 2], last: usize) -> usize {
         let n = self.v.len();
         self.v.push(Node { i, x: pt[0], y: pt[1], prev: NIL, next: NIL });
@@ -280,7 +280,7 @@ impl Earcut {
         n
     }
 
-    /// earcut's dt (clockwise = true, no holes). Returns the last node built.
+    /// earcut's linked-list builder (clockwise = true, no holes). Returns the last node built.
     fn linked_list(&mut self, pts: &[[f64; 2]]) -> usize {
         let n = pts.len();
         let mut sum = 0.0;
@@ -306,7 +306,7 @@ impl Earcut {
         last
     }
 
-    /// earcut's ft: drops duplicate and zero-area vertices, starting at `start`.
+    /// earcut's filter helper: drops duplicate and zero-area vertices, starting at `start`.
     fn filter(&mut self, start: usize, end: usize) -> usize {
         if start == NIL {
             return NIL;
@@ -555,14 +555,14 @@ fn sign(x: f64) -> i32 {
     }
 }
 
-/// earcut's xt: point p inside (boundary included) triangle a, b, c.
+/// earcut's point-in-triangle helper: point p inside (boundary included) triangle a, b, c.
 fn in_triangle(a: Node, b: Node, c: Node, p: Node) -> bool {
     (c.x - p.x) * (a.y - p.y) >= (a.x - p.x) * (c.y - p.y)
         && (a.x - p.x) * (b.y - p.y) >= (b.x - p.x) * (a.y - p.y)
         && (b.x - p.x) * (c.y - p.y) >= (c.x - p.x) * (b.y - p.y)
 }
 
-/// Fills one ring the way PIXI does: reverse when the shoelace sum is positive (`Fs`), then earcut. Triangles go to
+/// Fills one ring the way PIXI does: reverse when the shoelace sum is positive, then earcut. Triangles go to
 /// `out`, three points each.
 fn fill_ring(pts: &[[f64; 2]], out: &mut Vec<[f64; 2]>) {
     let n = pts.len();
@@ -703,8 +703,8 @@ impl FrameBuilder {
         }
     }
 
-    /// Trail of projectile `id`: the polyline through its recent positions, each segment as wide as the rocket
-    /// (`2u`) times how fresh its newer end is and in the owner's colour, drawn under the body as the original does.
+    /// Trail of projectile `id`: the polyline through its recent positions, each segment as wide as twice the projectile size
+    /// times how fresh its newer end is and in the owner's colour, drawn under the body as the original does.
     fn trail(&mut self, id: u32, q: &Projectile, head: (f64, f64), meta: Meta) {
         if !(meta.tick_hz > 0.0) {
             return;
@@ -776,7 +776,7 @@ impl FrameBuilder {
         }
     }
 
-    /// The bat head (the original's `gu`): a brown wedge and head swung at the aim. It starts
+    /// The bat head (the original's bat-head drawing routine): a brown wedge and head swung at the aim. It starts
     /// behind the player during the windup, and a dashed trail shows while it winds up.
     fn bat_head(&mut self, prev: Option<&Player>, p: &Player, t: f64, gs: &GameSettings, px: f64, py: f64) {
         if p.bat_frame < 0.0 || !gs.bat_enabled || p.ghost {
@@ -790,7 +790,7 @@ impl FrameBuilder {
             return;
         }
         let rotation = lerp_aim(prev_aim, p.bat_aim, t) + if frame < fire { std::f64::consts::PI } else { 0.0 };
-        // the head grows from 0.4 to 1 over the hold window (the original's `cs` easing)
+        // the head grows from 0.4 to 1 over the hold window (the original's ease-out curve)
         let o = 1.0 - 0.6 * (frame.min(hold) / hold * std::f64::consts::FRAC_PI_2).cos();
         let flip = if (std::f64::consts::FRAC_PI_2..=1.5 * std::f64::consts::PI).contains(&rotation) { -1.0 } else { 1.0 };
         let d = (gs.bat_range - 0.125) * o;
@@ -889,7 +889,7 @@ impl FrameBuilder {
                 self.quad_line(px, py, c.x - w * c.angle.cos(), c.y - w * c.angle.sin(), 0.04, rgba(0xdddddd, 0.7));
                 self.quad_line(px, py, c.x + w * c.angle.cos(), c.y + w * c.angle.sin(), 0.04, rgba(0xdddddd, 0.7));
             }
-            // grab lines (the original's `Lm`): from each held grab point on the player to the
+            // grab lines (the original's grab-line routine): from each held grab point on the player to the
             // grabbed body's anchor
             let pa = interp_angle(pp, p, t);
             let (hu, eu) = (gs.player_width / 2.0, gs.player_height / 2.0);
@@ -1081,7 +1081,7 @@ fn body_pose(prev: Option<&Body>, cur: &Body, t: f64) -> (f64, f64, f64) {
     }
 }
 
-/// The original's damage bar (`Md`): the fraction shown (0..1) and its colour, or None while
+/// The original's damage bar routine: the fraction shown (0..1) and its colour, or None while
 /// hidden. The nearer threshold ahead sets the colour: yellow for dynamic, red for removal.
 /// A body with neither threshold has no bar.
 fn damage_bar(damage: f64, dynamic: f64, removal: f64) -> Option<(f64, u32)> {

@@ -160,8 +160,8 @@ Turrets: 5 words each, `x f32, y f32, range f32, fraction f32, colour u32`
 
 ## Camera
 
-The original shows a view `W` = header word 9 world units wide and `W / A` high,
-where `A` is the map's view aspect: 1.6 (16:10) for classic maps, 16/9 for wide maps. The sim decides it per map
+The original shows a view as wide as header word 9 world units, and as high as that width divided by the map's view aspect:
+1.6 (16:10) for classic maps, 16/9 for wide maps. The sim decides it per map
 (`MapSettings.wide`, the settings key `aspect` = `"wide"`; absent or `"classic"` is 16:10); the frame carries it as
 header word 42 (`Scene.viewAspect` in `frame.ts`, `aspectFor` in `map-aspect.ts`). Imported Hitbox maps are classic;
 new Neobox maps are wide. The game view is that rect, as large as the window
