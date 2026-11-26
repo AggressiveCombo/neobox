@@ -18,7 +18,7 @@ import {
   shapeWorld,
   toWorld,
 } from "./model";
-import { type Obj, asObj, list, num } from "./schema";
+import { BODY, JOINT, MAP, MARKER, SETTINGS, SHAPE, type Obj, asObj, list, num } from "./schema";
 
 /** `scale` is screen pixels per map unit; (x, y) is the map point at the canvas centre. */
 export interface View {
@@ -133,7 +133,7 @@ function drawBodyAt(c: CanvasRenderingContext2D, body: Obj, i: number, scopeBi: 
   const geo = bodyGeo(body);
   const bb = geo.bounds;
   if (!bb || bb.maxX * k + ox < 0 || bb.minX * k + ox > w || bb.maxY * k + oy < 0 || bb.minY * k + oy > h) return;
-  drawBody(c, geo, body["50"] === true, ox, oy, k, scopeBi >= 0 && i !== scopeBi ? 0.3 : 1);
+  drawBody(c, geo, body[BODY.invisible] === true, ox, oy, k, scopeBi >= 0 && i !== scopeBi ? 0.3 : 1);
 }
 
 /** A canvas of the given device size, reusing `reuse` when it is given. */
@@ -309,7 +309,7 @@ export function drawMap(canvas: HTMLCanvasElement, doc: Obj, view: View, scene: 
     drawJointSet(c, doc, getList(doc, "joint"), S, scopeBi);
   }
   for (const kind of MARKER_KINDS) {
-    for (const o of getList(doc, kind)) drawMarker(c, kind, screenAt(view, w, h, { x: num(o, "1", 0), y: num(o, "2", 0) }));
+    for (const o of getList(doc, kind)) drawMarker(c, kind, screenAt(view, w, h, { x: num(o, MARKER.x, 0), y: num(o, MARKER.y, 0) }));
   }
   c.globalAlpha = 1;
   drawSelection(c, doc, scene.sel, S);
@@ -354,11 +354,11 @@ function drawGrid(c: CanvasRenderingContext2D, v: View, w: number, h: number): v
  * it; a view wider than the arena stays centred on it. Map units; the y axis points down.
  */
 function frameOf(doc: Obj): { cx: number; cy: number; width: number; height: number } {
-  const set = asObj(doc.set);
-  const width = num(set, "3", 30);
-  const height = width / aspectFor(set.aspect === "wide");
-  const arenaW = num(set, "15", 0);
-  const arenaH = num(set, "16", 0);
+  const settings = asObj(doc[MAP.settings]);
+  const width = num(settings, SETTINGS.screenWidth, 30);
+  const height = width / aspectFor(settings[SETTINGS.aspect] === "wide");
+  const arenaW = num(settings, SETTINGS.width, 0);
+  const arenaH = num(settings, SETTINGS.height, 0);
   return { cx: clampAxis(arenaW / 2, width, arenaW), cy: clampAxis(arenaH / 2, height, arenaH), width, height };
 }
 
@@ -428,7 +428,7 @@ function drawJoints(c: CanvasRenderingContext2D, doc: Obj, joints: readonly Obj[
   const groups = new Map<number, { segs: Pt[]; ends: Pt[] }>();
   for (const j of joints) {
     const [a, b] = jointAnchors(doc, j);
-    const kind = num(j, "5", 0);
+    const kind = num(j, JOINT.kind, 0);
     let g = groups.get(kind);
     if (!g) groups.set(kind, (g = { segs: [], ends: [] }));
     const pa = S(a);
@@ -474,7 +474,7 @@ function splitJoints(doc: Obj, skip: readonly number[]): { fixed: Obj[]; live: O
   const fixed: Obj[] = [];
   const live: Obj[] = [];
   for (const j of joints) {
-    const touches = [num(j, "7", -1), num(j, "8", -1)].some((id) => {
+    const touches = [num(j, JOINT.bodyA, -1), num(j, JOINT.bodyB, -1)].some((id) => {
       const b = id < 0 ? null : bodyById(doc, id);
       return b !== null && moved.has(b);
     });
@@ -535,7 +535,7 @@ function drawSelection(c: CanvasRenderingContext2D, doc: Obj, sel: readonly Ref[
         c.stroke();
       }
     } else {
-      const q = S({ x: num(o, "1", 0), y: num(o, "2", 0) });
+      const q = S({ x: num(o, MARKER.x, 0), y: num(o, MARKER.y, 0) });
       c.beginPath();
       c.arc(q.x, q.y, 14, 0, TAU);
       c.stroke();
@@ -557,15 +557,15 @@ function drawScope(c: CanvasRenderingContext2D, body: Obj, sel: readonly number[
     c.strokeRect(a.x - 4, a.y - 4, b.x - a.x + 8, b.y - a.y + 8);
     c.setLineDash([]);
   }
-  const shapes = list(body, "s");
+  const shapes = list(body, BODY.shapes);
   for (const si of sel) {
     const s = shapes[si];
     if (s === undefined) continue;
     const shape = asObj(s);
     c.beginPath();
     if (isCircle(shape)) {
-      const centre = S(toWorld(bodyXf(body), { x: num(shape, "2", 0), y: num(shape, "3", 0) }));
-      c.arc(centre.x, centre.y, num(shape, "9", 0) * scale + 3, 0, TAU);
+      const centre = S(toWorld(bodyXf(body), { x: num(shape, SHAPE.x, 0), y: num(shape, SHAPE.y, 0) }));
+      c.arc(centre.x, centre.y, num(shape, SHAPE.radius, 0) * scale + 3, 0, TAU);
     } else {
       shapeWorld(body, shape).forEach((q, i) => {
         const p = S(q);
@@ -583,7 +583,7 @@ function drawVertexHandles(c: CanvasRenderingContext2D, body: Obj, S: (p: Pt) =>
   c.fillStyle = ACCENT;
   c.strokeStyle = BG;
   c.lineWidth = 1;
-  for (const s of list(body, "s")) {
+  for (const s of list(body, BODY.shapes)) {
     const shape = asObj(s);
     if (isCircle(shape)) continue;
     for (const q of shapeWorld(body, shape)) {

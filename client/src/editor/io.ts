@@ -2,7 +2,7 @@
 // the map JSON the sim reads; the engine validates it when it is tested or
 // encoded, so this module only checks the outer shape.
 
-import { type Obj, LIST_KEYS, asObj } from "./schema";
+import { type Obj, LIST_KEYS, MAP, asObj } from "./schema";
 import { DRAFT_KEY } from "../storage-keys";
 
 
@@ -17,11 +17,11 @@ export function normalise(value: unknown): Obj {
       throw new Error(`"${key}" must be a list of objects`);
     }
   }
-  const set = src.set;
-  if (set !== undefined && (set === null || typeof set !== "object" || Array.isArray(set))) {
-    throw new Error('"set" must be an object');
+  const settings = src[MAP.settings];
+  if (settings !== undefined && (settings === null || typeof settings !== "object" || Array.isArray(settings))) {
+    throw new Error(`"${MAP.settings}" must be an object`);
   }
-  return { ...src, set: asObj(set) };
+  return { ...src, [MAP.settings]: asObj(settings) };
 }
 
 /** Parse map JSON text (a file or the engine's decoded map) into a document. */

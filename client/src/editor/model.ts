@@ -4,13 +4,19 @@
 
 import { type Pt, bbox, convexParts, pointInPoly } from "./geom";
 import {
+  BODY,
   BODY_DEFAULTS,
   CAP_DEFAULTS,
+  GRAPPLE,
   GRAPPLE_DEFAULTS,
+  JOINT,
   JOINT_DEFAULTS,
+  MAP,
+  MARKER,
   MAX_OBJECT_ID,
   type ListKey,
   type Obj,
+  SHAPE,
   SHAPE_DEFAULTS,
   SPAWN_DEFAULTS,
   TURRET_DEFAULTS,
@@ -39,12 +45,12 @@ export interface BodyScope {
 }
 
 export const LIST_OF: Record<Kind, ListKey> = {
-  body: "b",
-  joint: "j",
-  spawn: "s",
-  turret: "tu",
-  grapple: "gp",
-  cap: "c",
+  body: MAP.bodies,
+  joint: MAP.joints,
+  spawn: MAP.spawns,
+  turret: MAP.turrets,
+  grapple: MAP.grapples,
+  cap: MAP.caps,
 };
 
 const DEFAULTS_OF: Record<Kind, Obj> = {
@@ -85,12 +91,12 @@ function round(v: number): number {
 
 export function nextBodyId(doc: Obj): number {
   let max = -1;
-  for (const b of getList(doc, "body")) max = Math.max(max, num(b, "1", 0));
+  for (const b of getList(doc, "body")) max = Math.max(max, num(b, BODY.id, 0));
   return Math.min(max + 1, MAX_OBJECT_ID);
 }
 
 export function bodyIdAt(doc: Obj, i: number): number {
-  return num(getList(doc, "body")[i] ?? {}, "1", -1);
+  return num(getList(doc, "body")[i] ?? {}, BODY.id, -1);
 }
 
 export function bodyColor(id: number): number {
@@ -107,8 +113,8 @@ export interface Xf {
 }
 
 export function bodyXf(b: Obj): Xf {
-  const a = num(b, "4", 0);
-  return { x: num(b, "2", 0), y: num(b, "3", 0), c: Math.cos(a), s: Math.sin(a) };
+  const a = num(b, BODY.angle, 0);
+  return { x: num(b, BODY.x, 0), y: num(b, BODY.y, 0), c: Math.cos(a), s: Math.sin(a) };
 }
 
 export function toWorld(xf: Xf, p: Pt): Pt {
@@ -122,13 +128,13 @@ export function toLocal(xf: Xf, w: Pt): Pt {
 }
 
 export function isCircle(shape: Obj): boolean {
-  return num(shape, "1", 0) === 1;
+  return num(shape, SHAPE.kind, 0) === 1;
 }
 
 /** A polygon shape's points relative to the body (shape offset applied). */
 export function shapeLocal(shape: Obj): Pt[] {
-  const ox = num(shape, "2", 0);
-  const oy = num(shape, "3", 0);
+  const ox = num(shape, SHAPE.x, 0);
+  const oy = num(shape, SHAPE.y, 0);
   const flat = flatPoints(shape);
   const out: Pt[] = [];
   for (let i = 0; i + 1 < flat.length; i += 2) out.push({ x: ox + flat[i]!, y: oy + flat[i + 1]! });
@@ -183,12 +189,12 @@ export function bodyGeo(body: Obj): BodyGeo {
   const xf = bodyXf(body);
   const shapes: ShapeGeo[] = [];
   const all: Pt[] = [];
-  for (const s of list(body, "s")) {
+  for (const s of list(body, BODY.shapes)) {
     const shape = asObj(s);
     const colour = shapeColor(shape);
     if (isCircle(shape)) {
-      const c = toWorld(xf, { x: num(shape, "2", 0), y: num(shape, "3", 0) });
-      const r = num(shape, "9", 0);
+      const c = toWorld(xf, { x: num(shape, SHAPE.x, 0), y: num(shape, SHAPE.y, 0) });
+      const r = num(shape, SHAPE.radius, 0);
       shapes.push({ circle: true, x: c.x, y: c.y, r, pts: [], colour });
       all.push({ x: c.x - r, y: c.y - r }, { x: c.x + r, y: c.y + r });
     } else {
@@ -213,20 +219,20 @@ export function refCenter(doc: Obj, ref: Ref): Pt | null {
   if (!o) return null;
   if (ref.kind === "body") {
     const b = bodyBounds(o);
-    return b ? { x: (b.minX + b.maxX) / 2, y: (b.minY + b.maxY) / 2 } : { x: num(o, "2", 0), y: num(o, "3", 0) };
+    return b ? { x: (b.minX + b.maxX) / 2, y: (b.minY + b.maxY) / 2 } : { x: num(o, BODY.x, 0), y: num(o, BODY.y, 0) };
   }
   if (ref.kind === "joint") {
     const [a, b] = jointAnchors(doc, o);
     return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
   }
-  return { x: num(o, "1", 0), y: num(o, "2", 0) };
+  return { x: num(o, MARKER.x, 0), y: num(o, MARKER.y, 0) };
 }
 
 /** The two anchor points of a joint in world space. Anchors are local to their body; ground anchors are world. */
 export function jointAnchors(doc: Obj, j: Obj): [Pt, Pt] {
   return [
-    anchorWorld(doc, num(j, "7", -1), { x: num(j, "1", 0), y: num(j, "2", 0) }),
-    anchorWorld(doc, num(j, "8", -1), { x: num(j, "3", 0), y: num(j, "4", 0) }),
+    anchorWorld(doc, num(j, JOINT.bodyA, -1), { x: num(j, JOINT.anchorAX, 0), y: num(j, JOINT.anchorAY, 0) }),
+    anchorWorld(doc, num(j, JOINT.bodyB, -1), { x: num(j, JOINT.anchorBX, 0), y: num(j, JOINT.anchorBY, 0) }),
   ];
 }
 
@@ -239,7 +245,7 @@ export function bodyById(doc: Obj, id: number): Obj | null {
   if (!index) {
     index = new Map();
     for (const b of bodies) {
-      const bid = num(b, "1", -1);
+      const bid = num(b, BODY.id, -1);
       if (!index.has(bid)) index.set(bid, b);
     }
     bodyIndexes.set(bodies, index);
@@ -268,7 +274,7 @@ export function hitTest(doc: Obj, w: Pt, tol: number): Ref | null {
       } else if (kind === "joint") {
         const [a, b] = jointAnchors(doc, o);
         if (Math.hypot(w.x - a.x, w.y - a.y) <= tol || Math.hypot(w.x - b.x, w.y - b.y) <= tol) return { kind, i };
-      } else if (Math.hypot(w.x - num(o, "1", 0), w.y - num(o, "2", 0)) <= tol) {
+      } else if (Math.hypot(w.x - num(o, MARKER.x, 0), w.y - num(o, MARKER.y, 0)) <= tol) {
         return { kind, i };
       }
     }
@@ -325,7 +331,7 @@ export function moveRefs(doc: Obj, refs: Ref[], dx: number, dy: number): Obj {
 }
 
 function shiftEntity(kind: Kind, o: Obj, dx: number, dy: number): Obj {
-  const [kx, ky] = kind === "body" ? ["2", "3"] : ["1", "2"];
+  const [kx, ky] = kind === "body" ? [BODY.x, BODY.y] : [MARKER.x, MARKER.y];
   return { ...o, [kx!]: num(o, kx!, 0) + dx, [ky!]: num(o, ky!, 0) + dy };
 }
 
@@ -333,8 +339,8 @@ function shiftEntity(kind: Kind, o: Obj, dx: number, dy: number): Obj {
 function shiftJoint(doc: Obj, j: Obj, moved: Set<number>, dx: number, dy: number): Obj {
   const out: Obj = { ...j };
   const ends: [number, string, string][] = [
-    [num(j, "7", -1), "1", "2"],
-    [num(j, "8", -1), "3", "4"],
+    [num(j, JOINT.bodyA, -1), JOINT.anchorAX, JOINT.anchorAY],
+    [num(j, JOINT.bodyB, -1), JOINT.anchorBX, JOINT.anchorBY],
   ];
   for (const [id, kx, ky] of ends) {
     if (moved.has(id)) continue;
@@ -363,7 +369,7 @@ export function removeRefs(doc: Obj, refs: Ref[]): Obj {
   if (bodyIds.size > 0) {
     const set = kill.get("joint") ?? new Set<number>();
     getList(doc, "joint").forEach((j, i) => {
-      if (bodyIds.has(num(j, "7", -1)) || bodyIds.has(num(j, "8", -1))) set.add(i);
+      if (bodyIds.has(num(j, JOINT.bodyA, -1)) || bodyIds.has(num(j, JOINT.bodyB, -1))) set.add(i);
     });
     kill.set("joint", set);
   }
@@ -393,14 +399,14 @@ export function setBodyShapes(doc: Obj, bodyIdx: number, shapes: Obj[]): Obj {
   const bodies = getList(doc, "body");
   const b = bodies[bodyIdx];
   if (!b) return doc;
-  return withList(doc, "body", replaceAt(bodies, bodyIdx, { ...b, s: shapes }));
+  return withList(doc, "body", replaceAt(bodies, bodyIdx, { ...b, [BODY.shapes]: shapes }));
 }
 
 /** Append shapes to one body, in its frame. `first` is the index of the first one added (-1 if no such body). */
 export function addShapes(doc: Obj, bodyIdx: number, shapes: Obj[]): { doc: Obj; first: number } {
   const body = getList(doc, "body")[bodyIdx];
   if (!body) return { doc, first: -1 };
-  const old = list(body, "s");
+  const old = list(body, BODY.shapes);
   return { doc: setBodyShapes(doc, bodyIdx, [...old, ...shapes]), first: old.length };
 }
 
@@ -412,7 +418,7 @@ export function removeShapes(doc: Obj, bodyIdx: number, shapeIdxs: readonly numb
   return setBodyShapes(
     doc,
     bodyIdx,
-    list(body, "s").filter((_, i) => !drop.has(i)),
+    list(body, BODY.shapes).filter((_, i) => !drop.has(i)),
   );
 }
 
@@ -424,11 +430,11 @@ export function moveShapes(doc: Obj, bodyIdx: number, shapeIdxs: readonly number
   const lx = xf.c * dx + xf.s * dy;
   const ly = -xf.s * dx + xf.c * dy;
   const sel = new Set(shapeIdxs);
-  const shapes = list(body, "s").map((s, i) => {
+  const shapes = list(body, BODY.shapes).map((s, i) => {
     if (!sel.has(i)) return s;
     const shape = asObj(s);
-    const moved = withField(shape, "2", round(num(shape, "2", 0) + lx), SHAPE_DEFAULTS);
-    return withField(moved, "3", round(num(moved, "3", 0) + ly), SHAPE_DEFAULTS);
+    const moved = withField(shape, SHAPE.x, round(num(shape, SHAPE.x, 0) + lx), SHAPE_DEFAULTS);
+    return withField(moved, SHAPE.y, round(num(moved, SHAPE.y, 0) + ly), SHAPE_DEFAULTS);
   });
   return setBodyShapes(doc, bodyIdx, shapes);
 }
@@ -440,33 +446,33 @@ export function moveShapes(doc: Obj, bodyIdx: number, shapeIdxs: readonly number
 export function setShapeOutline(doc: Obj, bodyIdx: number, shapeIdx: number, outline: Pt[]): Obj {
   const body = getList(doc, "body")[bodyIdx];
   if (!body) return doc;
-  const shapes = list(body, "s");
+  const shapes = list(body, BODY.shapes);
   const shape = asObj(shapes[shapeIdx]);
-  const made = convexParts(outline).map((part) => ({ ...shape, p: part.flatMap((p) => [round(p.x), round(p.y)]) }));
+  const made = convexParts(outline).map((part) => ({ ...shape, [SHAPE.points]: part.flatMap((p) => [round(p.x), round(p.y)]) }));
   return setBodyShapes(doc, bodyIdx, [...shapes.slice(0, shapeIdx), ...made, ...shapes.slice(shapeIdx + 1)]);
 }
 
 /** Append a body with the given shapes (already relative to `centre`) and rotation `angle`. Returns the new doc and its index. */
 export function addBody(doc: Obj, shapes: Obj[], centre: Pt, angle = 0): { doc: Obj; index: number } {
   const items = getList(doc, "body");
-  const body: Obj = { "1": nextBodyId(doc), "2": round(centre.x), "3": round(centre.y), s: shapes };
-  if (angle !== 0) body["4"] = round(angle);
+  const body: Obj = { [BODY.id]: nextBodyId(doc), [BODY.x]: round(centre.x), [BODY.y]: round(centre.y), [BODY.shapes]: shapes };
+  if (angle !== 0) body[BODY.angle] = round(angle);
   return { doc: withList(doc, "body", [...items, body]), index: items.length };
 }
 
 /** Polygon shapes for world-space convex parts, positioned relative to `centre`. */
 export function polyShapes(parts: Pt[][], centre: Pt, colour: number): Obj[] {
   return parts.map((part) => ({
-    p: part.flatMap((p) => [round(p.x - centre.x), round(p.y - centre.y)]),
-    "7": colour,
+    [SHAPE.points]: part.flatMap((p) => [round(p.x - centre.x), round(p.y - centre.y)]),
+    [SHAPE.color]: colour,
   }));
 }
 
 /** Circle shape; `at` is its centre in the body's frame (omitted when at the origin). */
 export function circleShape(r: number, colour: number, at: Pt = { x: 0, y: 0 }): Obj {
-  const shape: Obj = { "1": 1, "9": round(r), "7": colour };
-  if (at.x !== 0) shape["2"] = round(at.x);
-  if (at.y !== 0) shape["3"] = round(at.y);
+  const shape: Obj = { [SHAPE.kind]: 1, [SHAPE.radius]: round(r), [SHAPE.color]: colour };
+  if (at.x !== 0) shape[SHAPE.x] = round(at.x);
+  if (at.y !== 0) shape[SHAPE.y] = round(at.y);
   return shape;
 }
 
@@ -475,9 +481,9 @@ export function localPolyShapes(parts: Pt[][], colour: number): Obj[] {
   return parts.map((part) => {
     const box = bbox(part);
     const c = { x: (box.minX + box.maxX) / 2, y: (box.minY + box.maxY) / 2 };
-    const shape: Obj = { p: part.flatMap((p) => [round(p.x - c.x), round(p.y - c.y)]), "7": colour };
-    if (c.x !== 0) shape["2"] = round(c.x);
-    if (c.y !== 0) shape["3"] = round(c.y);
+    const shape: Obj = { [SHAPE.points]: part.flatMap((p) => [round(p.x - c.x), round(p.y - c.y)]), [SHAPE.color]: colour };
+    if (c.x !== 0) shape[SHAPE.x] = round(c.x);
+    if (c.y !== 0) shape[SHAPE.y] = round(c.y);
     return shape;
   });
 }
@@ -485,20 +491,20 @@ export function localPolyShapes(parts: Pt[][], colour: number): Obj[] {
 /** Append an anchored entity (spawn, turret, grapple, capture point) at (x, y). */
 export function addMarker(doc: Obj, kind: Exclude<Kind, "body" | "joint">, x: number, y: number): { doc: Obj; index: number } {
   const items = getList(doc, kind);
-  return { doc: withList(doc, kind, [...items, { "1": round(x), "2": round(y) }]), index: items.length };
+  return { doc: withList(doc, kind, [...items, { [MARKER.x]: round(x), [MARKER.y]: round(y) }]), index: items.length };
 }
 
 /** Append a joint between two anchored points. `body` is a body id, or -1 for the ground. */
 export function addJoint(doc: Obj, a: { body: number; p: Pt }, b: { body: number; p: Pt }, kind: number): { doc: Obj; index: number } {
   const items = getList(doc, "joint");
   const joint: Obj = {
-    "1": round(a.p.x),
-    "2": round(a.p.y),
-    "3": round(b.p.x),
-    "4": round(b.p.y),
-    "5": kind,
-    "7": a.body,
-    "8": b.body,
+    [JOINT.anchorAX]: round(a.p.x),
+    [JOINT.anchorAY]: round(a.p.y),
+    [JOINT.anchorBX]: round(b.p.x),
+    [JOINT.anchorBY]: round(b.p.y),
+    [JOINT.kind]: kind,
+    [JOINT.bodyA]: a.body,
+    [JOINT.bodyB]: b.body,
   };
   return { doc: withList(doc, "joint", [...items, joint]), index: items.length };
 }
@@ -510,7 +516,7 @@ export function kindLabel(kind: Kind): string {
 /** Set a shape's keys in place: undefined removes a key, values equal to the default are dropped. */
 export function patchShape(doc: Obj, bodyIdx: number, shapeIdx: number, patch: Obj): Obj {
   const body = getList(doc, "body")[bodyIdx];
-  const shapes = body ? list(body, "s") : [];
+  const shapes = body ? list(body, BODY.shapes) : [];
   if (!body || !shapes[shapeIdx]) return doc;
   const next: Obj = { ...asObj(shapes[shapeIdx]) };
   for (const [k, v] of Object.entries(patch)) {
@@ -522,7 +528,7 @@ export function patchShape(doc: Obj, bodyIdx: number, shapeIdx: number, patch: O
 
 /** Set one shape's fill colour (0xRRGGBB). */
 export function setShapeColor(doc: Obj, bodyIdx: number, shapeIdx: number, colour: number): Obj {
-  return patchShape(doc, bodyIdx, shapeIdx, { "7": colour });
+  return patchShape(doc, bodyIdx, shapeIdx, { [SHAPE.color]: colour });
 }
 
 /**
@@ -549,10 +555,10 @@ export function mergeBodies(doc: Obj, bodyIdxs: number[]): { doc: Obj; index: nu
       const w = toLocal(sx, toWorld(bx, { x, y }));
       return { x: w.x - origin.x, y: w.y - origin.y };
     };
-    for (const s of list(b, "s")) {
+    for (const s of list(b, BODY.shapes)) {
       const shape = asObj(s);
-      const at = toLocal(sx, toWorld(bx, { x: num(shape, "2", 0), y: num(shape, "3", 0) }));
-      const next: Obj = { ...shape, "2": round(at.x), "3": round(at.y) };
+      const at = toLocal(sx, toWorld(bx, { x: num(shape, SHAPE.x, 0), y: num(shape, SHAPE.y, 0) }));
+      const next: Obj = { ...shape, [SHAPE.x]: round(at.x), [SHAPE.y]: round(at.y) };
       const pts = flatPoints(shape);
       if (pts.length) {
         const rot: number[] = [];
@@ -565,7 +571,7 @@ export function mergeBodies(doc: Obj, bodyIdxs: number[]): { doc: Obj; index: nu
       moved.push(next);
     }
   }
-  const survBody: Obj = { ...sb, s: [...list(sb, "s"), ...moved] };
+  const survBody: Obj = { ...sb, [BODY.shapes]: [...list(sb, BODY.shapes), ...moved] };
   const remap = (id: number): number => (merged.has(id) ? survId : id);
   let next = withList(
     doc,
@@ -574,16 +580,16 @@ export function mergeBodies(doc: Obj, bodyIdxs: number[]): { doc: Obj; index: nu
   );
   const joints: Obj[] = [];
   for (const j of getList(next, "joint")) {
-    const a = num(j, "7", -1);
-    const b = num(j, "8", -1);
+    const a = num(j, JOINT.bodyA, -1);
+    const b = num(j, JOINT.bodyB, -1);
     if (remap(a) === remap(b) && remap(a) !== -1) continue;
     const out: Obj = { ...j };
-    if (remap(a) !== a) out["7"] = remap(a);
-    if (remap(b) !== b) out["8"] = remap(b);
+    if (remap(a) !== a) out[JOINT.bodyA] = remap(a);
+    if (remap(b) !== b) out[JOINT.bodyB] = remap(b);
     joints.push(out);
   }
   next = withList(next, "joint", joints);
-  const grapples = getList(next, "grapple").map((g) => (merged.has(num(g, "4", -1)) ? { ...g, "4": survId } : g));
+  const grapples = getList(next, "grapple").map((g) => (merged.has(num(g, GRAPPLE.body, -1)) ? { ...g, [GRAPPLE.body]: survId } : g));
   next = withList(next, "grapple", grapples);
   return { doc: next, index: surv };
 }
@@ -601,9 +607,9 @@ function cloneObj(o: Obj): Obj {
 function turnShape(shape: Obj, angle: number): Obj {
   const c = Math.cos(angle);
   const s = Math.sin(angle);
-  const x = num(shape, "2", 0);
-  const y = num(shape, "3", 0);
-  const next = withField(withField(shape, "2", round(c * x - s * y), SHAPE_DEFAULTS), "3", round(s * x + c * y), SHAPE_DEFAULTS);
+  const x = num(shape, SHAPE.x, 0);
+  const y = num(shape, SHAPE.y, 0);
+  const next = withField(withField(shape, SHAPE.x, round(c * x - s * y), SHAPE_DEFAULTS), SHAPE.y, round(s * x + c * y), SHAPE_DEFAULTS);
   const flat = flatPoints(shape);
   if (flat.length === 0) return next;
   const rot: number[] = [];
@@ -612,7 +618,7 @@ function turnShape(shape: Obj, angle: number): Obj {
     const py = flat[k + 1]!;
     rot.push(round(c * px - s * py), round(s * px + c * py));
   }
-  return { ...next, p: rot };
+  return { ...next, [SHAPE.points]: rot };
 }
 
 /**
@@ -622,8 +628,8 @@ function turnShape(shape: Obj, angle: number): Obj {
  */
 function relinkJoint(j: Obj, idMap: Map<number, number>, doc: Obj, sameMap: boolean, dx: number, dy: number): boolean {
   const ends: [string, string, string][] = [
-    ["7", "1", "2"],
-    ["8", "3", "4"],
+    [JOINT.bodyA, JOINT.anchorAX, JOINT.anchorAY],
+    [JOINT.bodyB, JOINT.anchorBX, JOINT.anchorBY],
   ];
   for (const [kid, kx, ky] of ends) {
     const oldId = num(j, kid, -1);
@@ -667,14 +673,14 @@ export function copyRefs(doc: Obj, refs: readonly Ref[], source: number): Clipbo
   for (const i of [...(byKind.get("body") ?? [])].sort((a, b) => a - b)) {
     const b = getList(doc, "body")[i];
     if (!b) continue;
-    copiedBodyIds.add(num(b, "1", -1));
+    copiedBodyIds.add(num(b, BODY.id, -1));
     bodies.push(cloneObj(b));
   }
   const jointIdxs = new Set<number>(byKind.get("joint") ?? []);
   if (copiedBodyIds.size > 0) {
     getList(doc, "joint").forEach((j, i) => {
-      const a = num(j, "7", -1);
-      const b = num(j, "8", -1);
+      const a = num(j, JOINT.bodyA, -1);
+      const b = num(j, JOINT.bodyB, -1);
       if (a >= 0 && b >= 0 && copiedBodyIds.has(a) && copiedBodyIds.has(b)) jointIdxs.add(i);
     });
   }
@@ -700,14 +706,14 @@ export function copyRefs(doc: Obj, refs: readonly Ref[], source: number): Clipbo
 export function copyShapes(doc: Obj, bodyIdx: number, shapeIdxs: readonly number[]): ClipboardData | null {
   const body = getList(doc, "body")[bodyIdx];
   if (!body || shapeIdxs.length === 0) return null;
-  const src = list(body, "s");
+  const src = list(body, BODY.shapes);
   const shapes: Obj[] = [];
   for (const i of [...new Set(shapeIdxs)].sort((a, b) => a - b)) {
     const s = src[i];
     if (s) shapes.push(cloneObj(asObj(s)));
   }
   if (shapes.length === 0) return null;
-  return { mode: "shapes", shapes, origin: { x: num(body, "2", 0), y: num(body, "3", 0) }, angle: num(body, "4", 0) };
+  return { mode: "shapes", shapes, origin: { x: num(body, BODY.x, 0), y: num(body, BODY.y, 0) }, angle: num(body, BODY.angle, 0) };
 }
 
 /** Paste copied top-level entities with fresh body IDs, remapped joints/grapples, and a world offset. `sameMap` is false when the clip came from another map: references to bodies it did not copy are dropped. */
@@ -727,13 +733,13 @@ export function pasteClipboard(doc: Obj, clip: ClipboardData, dx: number, dy: nu
     const added: Obj[] = [];
     for (const raw of clip.bodies) {
       const b = cloneObj(raw);
-      const oldId = num(b, "1", -1);
+      const oldId = num(b, BODY.id, -1);
       const newId = Math.min(allocId, MAX_OBJECT_ID);
       allocId = Math.min(allocId + 1, MAX_OBJECT_ID);
       if (oldId >= 0) idMap.set(oldId, newId);
-      b["1"] = newId;
-      b["2"] = round(num(b, "2", 0) + dx);
-      b["3"] = round(num(b, "3", 0) + dy);
+      b[BODY.id] = newId;
+      b[BODY.x] = round(num(b, BODY.x, 0) + dx);
+      b[BODY.y] = round(num(b, BODY.y, 0) + dy);
       refs.push({ kind: "body", i: existing.length + added.length });
       added.push(b);
     }
@@ -745,8 +751,8 @@ export function pasteClipboard(doc: Obj, clip: ClipboardData, dx: number, dy: nu
     const existing = getList(next, kind);
     const added = items.map((raw, k) => {
       const o = cloneObj(raw);
-      o["1"] = round(num(o, "1", 0) + dx);
-      o["2"] = round(num(o, "2", 0) + dy);
+      o[MARKER.x] = round(num(o, MARKER.x, 0) + dx);
+      o[MARKER.y] = round(num(o, MARKER.y, 0) + dy);
       refs.push({ kind, i: existing.length + k });
       return o;
     });
@@ -760,13 +766,13 @@ export function pasteClipboard(doc: Obj, clip: ClipboardData, dx: number, dy: nu
     const existing = getList(next, "grapple");
     const added = clip.grapples.map((raw, k) => {
       const g = cloneObj(raw);
-      g["1"] = round(num(g, "1", 0) + dx);
-      g["2"] = round(num(g, "2", 0) + dy);
-      const attached = num(g, "4", -1);
+      g[MARKER.x] = round(num(g, MARKER.x, 0) + dx);
+      g[MARKER.y] = round(num(g, MARKER.y, 0) + dy);
+      const attached = num(g, GRAPPLE.body, -1);
       if (attached >= 0) {
         const mapped = idMap.get(attached);
-        if (mapped !== undefined) g["4"] = mapped;
-        else if (!sameMap || !bodyById(next, attached)) delete g["4"];
+        if (mapped !== undefined) g[GRAPPLE.body] = mapped;
+        else if (!sameMap || !bodyById(next, attached)) delete g[GRAPPLE.body];
       }
       refs.push({ kind: "grapple", i: existing.length + k });
       return g;
@@ -794,7 +800,7 @@ export function pasteShapes(doc: Obj, bodyIdx: number, clip: ClipboardData, dx: 
   if (clip.mode !== "shapes") return { doc, shapes: [] };
   const target = getList(doc, "body")[bodyIdx];
   if (!target) return { doc, shapes: [] };
-  const turn = clip.angle - num(target, "4", 0);
+  const turn = clip.angle - num(target, BODY.angle, 0);
   const pasted = turn === 0 ? clip.shapes.map(cloneObj) : clip.shapes.map((s) => turnShape(s, turn));
   const made = addShapes(doc, bodyIdx, pasted);
   const idxs = pasted.map((_, i) => made.first + i);

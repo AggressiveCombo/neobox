@@ -43,7 +43,7 @@ import {
   toWorld,
 } from "./model";
 import { type MarkerKind, type Preview, type Scene, type View, clampScale, drawMap, fitView, worldAt } from "./view";
-import { type Obj, asObj, emptyDoc, list, num } from "./schema";
+import { BODY, MAP, SETTINGS, SHAPE, type Obj, asObj, emptyDoc, list, num } from "./schema";
 import { loadDraft, saveDraft } from "./io";
 
 export type Tool = "select" | "rect" | "circle" | "poly" | "joint" | "fill" | MarkerKind;
@@ -118,12 +118,12 @@ function errText(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
-/** Physics shapes a map costs: shapes of bodies that are not scenery (body 23) and are not scenery shapes (shape 14). */
+/** Physics shapes a map costs: shapes of bodies that are not scenery (BODY.scenery) and are not scenery shapes (SHAPE.noPhysics). */
 export function physicsShapeCount(doc: Obj): number {
   let n = 0;
   for (const b of getList(doc, "body")) {
-    if (b["23"]) continue;
-    for (const s of list(b, "s")) if (!asObj(s)?.["14"]) n++;
+    if (b[BODY.scenery]) continue;
+    for (const s of list(b, BODY.shapes)) if (!asObj(s)?.[SHAPE.noPhysics]) n++;
   }
   return n;
 }
@@ -168,7 +168,7 @@ function vertexAt(doc: Obj, bodyIdx: number, w: Pt, tol: number): { si: number; 
   const xf = bodyXf(body);
   let best: { si: number; k: number } | null = null;
   let bestD = tol;
-  list(body, "s").forEach((s, si) => {
+  list(body, BODY.shapes).forEach((s, si) => {
     const shape = asObj(s);
     if (isCircle(shape)) return;
     shapeLocal(shape).forEach((p, k) => {
@@ -185,13 +185,13 @@ function vertexAt(doc: Obj, bodyIdx: number, w: Pt, tol: number): { si: number; 
 /** Index of the topmost shape of a body that `w` lies in (within `tol` for circles), if any. */
 function shapeAt(body: Obj, w: Pt, tol: number): number | null {
   const xf = bodyXf(body);
-  const shapes = list(body, "s");
+  const shapes = list(body, BODY.shapes);
   for (let si = shapes.length - 1; si >= 0; si--) {
     const shape = asObj(shapes[si]);
     if (!shape) continue;
     if (isCircle(shape)) {
-      const c = toWorld(xf, { x: num(shape, "2", 0), y: num(shape, "3", 0) });
-      if (dist(c, w) <= num(shape, "9", 0) + tol) return si;
+      const c = toWorld(xf, { x: num(shape, SHAPE.x, 0), y: num(shape, SHAPE.y, 0) });
+      if (dist(c, w) <= num(shape, SHAPE.radius, 0) + tol) return si;
     } else if (pointInPoly(w, shapeWorld(body, shape))) return si;
   }
   return null;
@@ -199,7 +199,7 @@ function shapeAt(body: Obj, w: Pt, tol: number): number | null {
 
 /** World-space centre of a shape: the circle centre, or the mean of a polygon's points. */
 function shapeMid(body: Obj, shape: Obj): Pt {
-  if (isCircle(shape)) return toWorld(bodyXf(body), { x: num(shape, "2", 0), y: num(shape, "3", 0) });
+  if (isCircle(shape)) return toWorld(bodyXf(body), { x: num(shape, SHAPE.x, 0), y: num(shape, SHAPE.y, 0) });
   const pts = shapeWorld(body, shape);
   const n = pts.length || 1;
   return { x: pts.reduce((a, q) => a + q.x, 0) / n, y: pts.reduce((a, q) => a + q.y, 0) / n };
@@ -212,7 +212,7 @@ function shapesIn(body: Obj, a: Pt, b: Pt): number[] {
   const y0 = Math.min(a.y, b.y);
   const y1 = Math.max(a.y, b.y);
   const out: number[] = [];
-  list(body, "s").forEach((s, si) => {
+  list(body, BODY.shapes).forEach((s, si) => {
     const m = shapeMid(body, asObj(s));
     if (m.x >= x0 && m.x <= x1 && m.y >= y0 && m.y <= y1) out.push(si);
   });
@@ -298,9 +298,9 @@ export class EditorController {
   /** The body being edited in place and its selected shapes, or null. Found by map id, so it follows the body through edits. */
   get scope(): BodyScope | null {
     if (this.scopeId === null) return null;
-    const index = getList(this.doc, "body").findIndex((b) => num(b, "1", -1) === this.scopeId);
+    const index = getList(this.doc, "body").findIndex((b) => num(b, BODY.id, -1) === this.scopeId);
     if (index < 0) return null;
-    const count = list(getList(this.doc, "body")[index]!, "s").length;
+    const count = list(getList(this.doc, "body")[index]!, BODY.shapes).length;
     return { index, id: this.scopeId, shapes: this.shapeSel.filter((i) => i < count) };
   }
 
@@ -496,7 +496,7 @@ export class EditorController {
     const scope = this.scope;
     if (scope) {
       const body = getList(this.doc, "body")[scope.index];
-      this.shapeSel = list(body ?? {}, "s").map((_, i) => i);
+      this.shapeSel = list(body ?? {}, BODY.shapes).map((_, i) => i);
     } else {
       const all: Ref[] = [];
       for (const kind of KIND_ORDER) getList(this.doc, kind).forEach((_, i) => all.push({ kind, i }));
@@ -792,11 +792,11 @@ export class EditorController {
 
   private dragVertex(g: Extract<Gesture, { kind: "vertex" }>, target: Pt): void {
     const body = getList(g.base, "body")[g.bi];
-    const shape = body ? asObj(list(body, "s")[g.si]) : null;
+    const shape = body ? asObj(list(body, BODY.shapes)[g.si]) : null;
     if (!body || !shape) return;
     const local = toLocal(bodyXf(body), target);
-    const ox = num(shape, "2", 0);
-    const oy = num(shape, "3", 0);
+    const ox = num(shape, SHAPE.x, 0);
+    const oy = num(shape, SHAPE.y, 0);
     const outline = shapeOutline(shape).map((q, i) => (i === g.k ? { x: local.x - ox, y: local.y - oy } : q));
     try {
       this.history.live(setShapeOutline(g.base, g.bi, g.si, outline));
@@ -1216,7 +1216,7 @@ export class EditorController {
   private cycle(step: 1 | -1): void {
     const scope = this.scope;
     if (scope) {
-      const n = list(getList(this.doc, "body")[scope.index] ?? {}, "s").length;
+      const n = list(getList(this.doc, "body")[scope.index] ?? {}, BODY.shapes).length;
       if (n === 0) return;
       const cur = scope.shapes.length === 1 ? scope.shapes[0]! : step > 0 ? -1 : 0;
       this.shapeSel = [(((cur + step) % n) + n) % n];
@@ -1266,7 +1266,7 @@ export class EditorController {
   }
 
   private snapStep(): number {
-    return num(asObj(this.doc.set), "4", 0.5);
+    return num(asObj(this.doc[MAP.settings]), SETTINGS.snap, 0.5);
   }
 
   private snap(p: Pt): Pt {

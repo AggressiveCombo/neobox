@@ -5,16 +5,25 @@
 import { h } from "../ui/dom";
 import { icon, type IconName } from "../ui/icons";
 import {
+  BODY,
   BODY_DEFAULTS,
+  CAP,
   CAP_DEFAULTS,
+  GRAPPLE,
   GRAPPLE_DEFAULTS,
+  JOINT,
   JOINT_DEFAULTS,
   JOINT_KINDS,
+  MAP,
   MOTOR_MODES,
   type Obj,
+  SETTINGS,
   SETTINGS_DEFAULTS,
+  SHAPE,
   SHAPE_DEFAULTS,
+  SPAWN,
   SPAWN_DEFAULTS,
+  TURRET,
   TURRET_DEFAULTS,
   asObj,
   colorHex,
@@ -86,93 +95,93 @@ const BODY_GROUPS: Group[] = [
   [
     "Position",
     [
-      { key: "2", label: "X", kind: "num", step: 0.5 },
-      { key: "3", label: "Y", kind: "num", step: 0.5 },
-      { key: "4", label: "Angle (deg)", kind: "num", step: 1, deg: true },
-      { key: "14", label: "Motion", kind: "select", options: MOTION },
-      { key: "15", label: "Wrap", kind: "bool" },
+      { key: BODY.x, label: "X", kind: "num", step: 0.5 },
+      { key: BODY.y, label: "Y", kind: "num", step: 0.5 },
+      { key: BODY.angle, label: "Angle (deg)", kind: "num", step: 1, deg: true },
+      { key: BODY.motion, label: "Motion", kind: "select", options: MOTION },
+      { key: BODY.wrap, label: "Wrap", kind: "bool" },
     ],
   ],
   [
     "Start motion",
     [
-      { key: "6", label: "Start velocity X", kind: "num", step: 0.5 },
-      { key: "7", label: "Start velocity Y", kind: "num", step: 0.5 },
-      { key: "5", label: "Start spin (rad/s)", kind: "num", step: 0.1 },
+      { key: BODY.velocityX, label: "Start velocity X", kind: "num", step: 0.5 },
+      { key: BODY.velocityY, label: "Start velocity Y", kind: "num", step: 0.5 },
+      { key: BODY.angularVelocity, label: "Start spin (rad/s)", kind: "num", step: 0.1 },
     ],
   ],
   [
     "Material",
     [
-      { key: "8", label: "Density", kind: "num", step: 0.1, min: 0 },
-      { key: "9", label: "Bounce", kind: "num", step: 0.05, min: 0 },
-      { key: "10", label: "Friction", kind: "num", step: 0.05, min: 0 },
-      { key: "11", label: "Linear damping", kind: "num", step: 0.05, min: 0 },
-      { key: "12", label: "Angular damping", kind: "num", step: 0.05, min: 0 },
-      { key: "57", label: "Fixed rotation", kind: "bool" },
+      { key: BODY.density, label: "Density", kind: "num", step: 0.1, min: 0 },
+      { key: BODY.restitution, label: "Bounce", kind: "num", step: 0.05, min: 0 },
+      { key: BODY.friction, label: "Friction", kind: "num", step: 0.05, min: 0 },
+      { key: BODY.linearDamping, label: "Linear damping", kind: "num", step: 0.05, min: 0 },
+      { key: BODY.angularDamping, label: "Angular damping", kind: "num", step: 0.05, min: 0 },
+      { key: BODY.fixedRotation, label: "Fixed rotation", kind: "bool" },
     ],
   ],
   [
     "Forces",
     [
-      { key: "17", label: "Force X", kind: "num", step: 0.5 },
-      { key: "18", label: "Force Y", kind: "num", step: 0.5 },
-      { key: "19", label: "Torque", kind: "num", step: 0.5 },
-      { key: "21", label: "Dynamic threshold", kind: "num", step: 0.1, min: 0 },
-      { key: "22", label: "Removal threshold", kind: "num", step: 0.1, min: 0 },
+      { key: BODY.forceX, label: "Force X", kind: "num", step: 0.5 },
+      { key: BODY.forceY, label: "Force Y", kind: "num", step: 0.5 },
+      { key: BODY.torque, label: "Torque", kind: "num", step: 0.5 },
+      { key: BODY.dynamicThreshold, label: "Dynamic threshold", kind: "num", step: 0.1, min: 0 },
+      { key: BODY.removalThreshold, label: "Removal threshold", kind: "num", step: 0.1, min: 0 },
     ],
   ],
   [
     "Appearance",
     [
-      { key: "24", label: "Z index", kind: "num", step: 1 },
-      { key: "55", label: "Parallax", kind: "num", step: 0.05 },
-      { key: "50", label: "Invisible", kind: "bool" },
-      { key: "23", label: "Scenery (no physics)", kind: "bool" },
-      { key: "56", label: "Lifetime (ticks, -1 = forever)", kind: "num", step: 1 },
+      { key: BODY.zIndex, label: "Z index", kind: "num", step: 1 },
+      { key: BODY.parallax, label: "Parallax", kind: "num", step: 0.05 },
+      { key: BODY.invisible, label: "Invisible", kind: "bool" },
+      { key: BODY.scenery, label: "Scenery (no physics)", kind: "bool" },
+      { key: BODY.lifetime, label: "Lifetime (ticks, -1 = forever)", kind: "num", step: 1 },
     ],
   ],
   [
     "Gameplay",
     [
-      { key: "13", label: "Kills players", kind: "bool" },
-      { key: "20", label: "Damage", kind: "num", step: 1, min: 0 },
-      { key: "32", label: "Freeze players", kind: "bool" },
-      { key: "43", label: "No jump", kind: "bool" },
-      { key: "45", label: "Bullet", kind: "bool" },
-      { key: "60", label: "Immune to abilities", kind: "bool" },
-      { key: "31", label: "Race checkpoint (0 = none, highest = finish)", kind: "num", step: 1, min: 0 },
-      { key: "34", label: "Race object", kind: "bool" },
+      { key: BODY.killsPlayers, label: "Kills players", kind: "bool" },
+      { key: BODY.damage, label: "Damage", kind: "num", step: 1, min: 0 },
+      { key: BODY.freezePlayers, label: "Freeze players", kind: "bool" },
+      { key: BODY.noJump, label: "No jump", kind: "bool" },
+      { key: BODY.continuousCollision, label: "Bullet", kind: "bool" },
+      { key: BODY.abilityImmune, label: "Immune to abilities", kind: "bool" },
+      { key: BODY.checkpoint, label: "Race checkpoint (0 = none, highest = finish)", kind: "num", step: 1, min: 0 },
+      { key: BODY.raceObject, label: "Race object", kind: "bool" },
     ],
   ],
   [
     "Objective",
     [
-      { key: "61", label: "Objective", kind: "select", options: OBJECTIVES },
-      { key: "62", label: "Objective target", kind: "select", options: OBJECTIVE_TARGETS },
+      { key: BODY.objective, label: "Objective", kind: "select", options: OBJECTIVES },
+      { key: BODY.objectiveTarget, label: "Objective target", kind: "select", options: OBJECTIVE_TARGETS },
     ],
   ],
   [
     "Collisions",
     [
-      { key: "30", label: "Players", kind: "select", options: PASS },
-      { key: "65", label: "Projectiles", kind: "select", options: PASS },
-      { key: "25", label: "Group", kind: "select", options: GROUPS },
-      { key: "26", label: "Collides with group A", kind: "bool" },
-      { key: "27", label: "Collides with group B", kind: "bool" },
-      { key: "28", label: "Collides with group C", kind: "bool" },
-      { key: "29", label: "Collides with group D", kind: "bool" },
+      { key: BODY.playerPass, label: "Players", kind: "select", options: PASS },
+      { key: BODY.projectilePass, label: "Projectiles", kind: "select", options: PASS },
+      { key: BODY.group, label: "Group", kind: "select", options: GROUPS },
+      { key: BODY.collideA, label: "Collides with group A", kind: "bool" },
+      { key: BODY.collideB, label: "Collides with group B", kind: "bool" },
+      { key: BODY.collideC, label: "Collides with group C", kind: "bool" },
+      { key: BODY.collideD, label: "Collides with group D", kind: "bool" },
     ],
   ],
   [
     "Pinning and zones",
     [
-      { key: "36", label: "Pinned", kind: "bool" },
-      { key: "37", label: "Pin X", kind: "num", step: 0.5 },
-      { key: "38", label: "Pin Y", kind: "num", step: 0.5 },
-      { key: "39", label: "Force zone", kind: "bool" },
-      { key: "40", label: "Zone X", kind: "num", step: 0.5 },
-      { key: "41", label: "Zone Y", kind: "num", step: 0.5 },
+      { key: BODY.pinned, label: "Pinned", kind: "bool" },
+      { key: BODY.pinX, label: "Pin X", kind: "num", step: 0.5 },
+      { key: BODY.pinY, label: "Pin Y", kind: "num", step: 0.5 },
+      { key: BODY.forceZone, label: "Force zone", kind: "bool" },
+      { key: BODY.zoneX, label: "Zone X", kind: "num", step: 0.5 },
+      { key: BODY.zoneY, label: "Zone Y", kind: "num", step: 0.5 },
     ],
   ],
 ];
@@ -181,25 +190,25 @@ const JOINT_GROUPS: Group[] = [
   [
     "Joint",
     [
-      { key: "5", label: "Kind", kind: "select", options: JOINT_KINDS },
-      { key: "6", label: "Bodies collide", kind: "bool" },
-      { key: "17", label: "Latched", kind: "bool" },
+      { key: JOINT.kind, label: "Kind", kind: "select", options: JOINT_KINDS },
+      { key: JOINT.collideConnected, label: "Bodies collide", kind: "bool" },
+      { key: JOINT.latched, label: "Latched", kind: "bool" },
     ],
   ],
   [
     "Spring",
     [
-      { key: "9", label: "Frequency", kind: "num", step: 0.1, min: 0 },
-      { key: "10", label: "Damping", kind: "num", step: 0.05, min: 0 },
-      { key: "11", label: "Length", kind: "num", step: 0.5, min: 0 },
+      { key: JOINT.frequency, label: "Frequency", kind: "num", step: 0.1, min: 0 },
+      { key: JOINT.damping, label: "Damping", kind: "num", step: 0.05, min: 0 },
+      { key: JOINT.length, label: "Length", kind: "num", step: 0.5, min: 0 },
     ],
   ],
   [
     "Motor",
     [
-      { key: "12", label: "Motor speed", kind: "num", step: 0.5 },
-      { key: "13", label: "Max motor force", kind: "num", step: 1, min: 0 },
-      { key: "16", label: "Motor mode", kind: "select", options: MOTOR_MODES },
+      { key: JOINT.motorSpeed, label: "Motor speed", kind: "num", step: 0.5 },
+      { key: JOINT.maxMotor, label: "Max motor force", kind: "num", step: 1, min: 0 },
+      { key: JOINT.motorMode, label: "Motor mode", kind: "select", options: MOTOR_MODES },
     ],
   ],
 ];
@@ -210,7 +219,7 @@ const TURRET_GROUPS: Group[] = [
     "Turret",
     [
       {
-        key: "9",
+        key: TURRET.team,
         label: "Team",
         kind: "select",
         options: [
@@ -219,49 +228,49 @@ const TURRET_GROUPS: Group[] = [
           { value: 3, label: "Blue" },
         ],
       },
-      { key: "7", label: "Health", kind: "num", step: 1, min: 1 },
-      { key: "24", label: "Max health", kind: "num", step: 1, min: 1 },
-      { key: "10", label: "Fire interval (ticks)", kind: "num", step: 1, min: 1 },
-      { key: "11", label: "Range", kind: "num", step: 0.5, min: 0 },
+      { key: TURRET.health, label: "Health", kind: "num", step: 1, min: 1 },
+      { key: TURRET.maxHealth, label: "Max health", kind: "num", step: 1, min: 1 },
+      { key: TURRET.fireInterval, label: "Fire interval (ticks)", kind: "num", step: 1, min: 1 },
+      { key: TURRET.range, label: "Range", kind: "num", step: 0.5, min: 0 },
     ],
   ],
   [
     "Bullet",
     [
-      { key: "12", label: "Bullet speed", kind: "num", step: 0.5, min: 0 },
-      { key: "13", label: "Bullet size", kind: "num", step: 0.1, min: 0 },
-      { key: "14", label: "Bullet density", kind: "num", step: 0.1, min: 0 },
-      { key: "15", label: "Bullet friction", kind: "num", step: 0.05, min: 0 },
-      { key: "16", label: "Bullet bounce", kind: "num", step: 0.05, min: 0 },
-      { key: "17", label: "Bullet life (ticks)", kind: "num", step: 1, min: 0 },
-      { key: "18", label: "Bullet damage", kind: "num", step: 1, min: 0 },
-      { key: "19", label: "Bullet turn rate", kind: "num", step: 0.1 },
-      { key: "20", label: "Explosion radius", kind: "num", step: 0.5, min: 0 },
-      { key: "21", label: "Bullets bounce", kind: "bool" },
-      { key: "22", label: "Bullet shape", kind: "num", step: 1, min: 0 },
-      { key: "23", label: "Bullet linear damping", kind: "num", step: 0.05, min: 0 },
+      { key: TURRET.bulletVx, label: "Bullet speed", kind: "num", step: 0.5, min: 0 },
+      { key: TURRET.bulletSize, label: "Bullet size", kind: "num", step: 0.1, min: 0 },
+      { key: TURRET.bulletDensity, label: "Bullet density", kind: "num", step: 0.1, min: 0 },
+      { key: TURRET.bulletFriction, label: "Bullet friction", kind: "num", step: 0.05, min: 0 },
+      { key: TURRET.bulletRestitution, label: "Bullet bounce", kind: "num", step: 0.05, min: 0 },
+      { key: TURRET.bulletLife, label: "Bullet life (ticks)", kind: "num", step: 1, min: 0 },
+      { key: TURRET.bulletDamage, label: "Bullet damage", kind: "num", step: 1, min: 0 },
+      { key: TURRET.bulletTurnRate, label: "Bullet turn rate", kind: "num", step: 0.1 },
+      { key: TURRET.bulletExplodeRadius, label: "Explosion radius", kind: "num", step: 0.5, min: 0 },
+      { key: TURRET.bulletBounces, label: "Bullets bounce", kind: "bool" },
+      { key: TURRET.bulletShape, label: "Bullet shape", kind: "num", step: 1, min: 0 },
+      { key: TURRET.bulletLinearDamping, label: "Bullet linear damping", kind: "num", step: 0.05, min: 0 },
     ],
   ],
 ];
 
 const SPAWN_FIELDS: Field[] = [
-  { key: "3", label: "Priority", kind: "num", step: 1 },
-  { key: "4", label: "Angle (deg)", kind: "num", step: 1, deg: true },
+  { key: SPAWN.priority, label: "Priority", kind: "num", step: 1 },
+  { key: SPAWN.angle, label: "Angle (deg)", kind: "num", step: 1, deg: true },
   {
-    key: "8",
+    key: SPAWN.capSequence,
     label: "Activated by capture zone",
     kind: "select",
     options: [{ value: -2, label: "Not activated" }, ...ZONES],
   },
 ];
 
-const GRAPPLE_FIELDS: Field[] = [{ key: "3", label: "Range", kind: "num", step: 0.5, min: 0 }];
+const GRAPPLE_FIELDS: Field[] = [{ key: GRAPPLE.range, label: "Range", kind: "num", step: 0.5, min: 0 }];
 
 const CAP_FIELDS: Field[] = [
-  { key: "3", label: "Width", kind: "num", step: 0.5, min: 0 },
-  { key: "4", label: "Sequence", kind: "select", options: [{ value: -1, label: "None" }, ...ZONES] },
+  { key: CAP.width, label: "Width", kind: "num", step: 0.5, min: 0 },
+  { key: CAP.sequence, label: "Sequence", kind: "select", options: [{ value: -1, label: "None" }, ...ZONES] },
   {
-    key: "5",
+    key: CAP.owner,
     label: "Owner",
     kind: "select",
     options: [
@@ -270,16 +279,16 @@ const CAP_FIELDS: Field[] = [
       { value: 3, label: "Blue" },
     ],
   },
-  { key: "7", label: "Capture time (ticks)", kind: "num", step: 1, min: 1 },
+  { key: CAP.captureTime, label: "Capture time (ticks)", kind: "num", step: 1, min: 1 },
 ];
 
 const MAP_GROUPS: Group[] = [
   [
     "Screen",
     [
-      { key: "3", label: "Screen width", kind: "num", step: 1, min: 1, max: 100 },
+      { key: SETTINGS.screenWidth, label: "Screen width", kind: "num", step: 1, min: 1, max: 100 },
       {
-        key: "4",
+        key: SETTINGS.snap,
         label: "Snap",
         kind: "select",
         options: [
@@ -292,7 +301,7 @@ const MAP_GROUPS: Group[] = [
         ],
       },
       {
-        key: "aspect",
+        key: SETTINGS.aspect,
         label: "View",
         kind: "select",
         options: [
@@ -305,27 +314,27 @@ const MAP_GROUPS: Group[] = [
   [
     "Physics",
     [
-      { key: "18", label: "Gravity", kind: "num", step: 1 },
-      { key: "19", label: "Wrap players", kind: "bool" },
+      { key: SETTINGS.gravity, label: "Gravity", kind: "num", step: 1 },
+      { key: SETTINGS.wrap, label: "Wrap players", kind: "bool" },
     ],
   ],
   [
     "Arena",
     [
-      { key: "15", label: "Arena width", kind: "num", step: 1, min: 0 },
-      { key: "16", label: "Arena height", kind: "num", step: 1, min: 0 },
+      { key: SETTINGS.width, label: "Arena width", kind: "num", step: 1, min: 0 },
+      { key: SETTINGS.height, label: "Arena height", kind: "num", step: 1, min: 0 },
     ],
   ],
   [
     "Background",
     [
-      { key: "12", label: "Background top colour", kind: "colour" },
-      { key: "17", label: "Background bottom colour", kind: "colour" },
-      { key: "9", label: "Background image", kind: "num", step: 1, min: 0 },
-      { key: "10", label: "Background scale", kind: "num", step: 0.1, min: 0 },
-      { key: "7", label: "Background offset X", kind: "num", step: 1 },
-      { key: "8", label: "Background offset Y", kind: "num", step: 1 },
-      { key: "11", label: "Background parallax", kind: "num", step: 0.05, min: 0 },
+      { key: SETTINGS.colorTop, label: "Background top colour", kind: "colour" },
+      { key: SETTINGS.colorBottom, label: "Background bottom colour", kind: "colour" },
+      { key: SETTINGS.bgImage, label: "Background image", kind: "num", step: 1, min: 0 },
+      { key: SETTINGS.bgScale, label: "Background scale", kind: "num", step: 0.1, min: 0 },
+      { key: SETTINGS.bgOffsetX, label: "Background offset X", kind: "num", step: 1 },
+      { key: SETTINGS.bgOffsetY, label: "Background offset Y", kind: "num", step: 1 },
+      { key: SETTINGS.parallax, label: "Background parallax", kind: "num", step: 0.05, min: 0 },
     ],
   ],
 ];
@@ -338,9 +347,9 @@ const SPAWN_TEAMS: Option[] = [
 
 /** Shape keys that can be overridden per shape: shape key, label, body key it inherits from. */
 const OVERRIDES: [string, string, string][] = [
-  ["4", "Density", "8"],
-  ["5", "Friction", "10"],
-  ["6", "Bounce", "9"],
+  [SHAPE.density, "Density", BODY.density],
+  [SHAPE.friction, "Friction", BODY.friction],
+  [SHAPE.restitution, "Bounce", BODY.restitution],
 ];
 
 /** Current value of a field, as the input shows it (degrees for angles). */
@@ -519,34 +528,34 @@ export function renderInspector(o: InspectorOpts): HTMLElement {
 
   const children: (Node | string | false | null | undefined)[] = [
     // bodies go by their map id: the id joints and grapple points refer to
-    h("h2", { class: "inspector-title" }, icon(KIND_ICONS[ref.kind] ?? "pencil-ruler", 20), ref.kind === "body" ? `Body ${num(item, "1", ref.i)}` : `${kindLabel(ref.kind)} ${ref.i + 1}`),
+    h("h2", { class: "inspector-title" }, icon(KIND_ICONS[ref.kind] ?? "pencil-ruler", 20), ref.kind === "body" ? `Body ${num(item, BODY.id, ref.i)}` : `${kindLabel(ref.kind)} ${ref.i + 1}`),
   ];
   if (ref.kind === "body") {
     children.push(...fieldGroups(BODY_GROUPS, item, BODY_DEFAULTS, setField), shapesBlock(doc, ref.i, o.commit));
   } else if (ref.kind === "joint") {
     children.push(
-      h("p", { class: "hint" }, `Joins ${anchorName(num(item, "7", -1))} and ${anchorName(num(item, "8", -1))}`),
+      h("p", { class: "hint" }, `Joins ${anchorName(num(item, JOINT.bodyA, -1))} and ${anchorName(num(item, JOINT.bodyB, -1))}`),
       ...fieldGroups(JOINT_GROUPS, item, JOINT_DEFAULTS, setField),
     );
   } else if (ref.kind === "spawn") {
-    const team = flag(item, "6", false) ? 1 : flag(item, "7", false) ? 2 : 0;
+    const team = flag(item, SPAWN.teamRed, false) ? 1 : flag(item, SPAWN.teamBlue, false) ? 2 : 0;
     children.push(
       ...fields(SPAWN_FIELDS, SPAWN_DEFAULTS),
       fieldRow({ key: "team", label: "Team", kind: "select", options: SPAWN_TEAMS }, team, (v) => {
         const t = Number(v);
-        apply({ "5": t === 0, "6": t === 1, "7": t === 2 });
+        apply({ [SPAWN.teamFreeForAll]: t === 0, [SPAWN.teamRed]: t === 1, [SPAWN.teamBlue]: t === 2 });
       }),
     );
   } else if (ref.kind === "turret") {
     children.push(...fieldGroups(TURRET_GROUPS, item, TURRET_DEFAULTS, setField));
   } else if (ref.kind === "grapple") {
     const attach: Field = {
-      key: "4",
+      key: GRAPPLE.body,
       label: "Attached to",
       kind: "select",
       options: [
         { value: -1, label: "Nothing (static)" },
-        ...getList(doc, "body").map((b) => ({ value: num(b, "1", -1), label: `Body ${num(b, "1", -1)}` })),
+        ...getList(doc, "body").map((b) => ({ value: num(b, BODY.id, -1), label: `Body ${num(b, BODY.id, -1)}` })),
       ],
     };
     children.push(...fields([...GRAPPLE_FIELDS, attach], GRAPPLE_DEFAULTS));
@@ -593,7 +602,7 @@ function multiInspector(doc: Obj, sel: readonly Ref[], commit: Commit, remove: (
     const bodyObjs = bodies.map((bi) => getList(doc, "body")[bi]).filter((b): b is Obj => b !== undefined);
     const allColours: string[] = [];
     for (const b of bodyObjs) {
-      for (const s of list(b, "s")) allColours.push(shapeColor(asObj(s)));
+      for (const s of list(b, BODY.shapes)) allColours.push(shapeColor(asObj(s)));
     }
     const firstHex = allColours[0] ?? "#ffffff";
     const mixedCol = allColours.some((c) => c !== firstHex);
@@ -608,7 +617,7 @@ function multiInspector(doc: Obj, sel: readonly Ref[], commit: Commit, remove: (
           for (const bi of bodies) {
             const b = getList(next, "body")[bi];
             if (!b) continue;
-            const nShapes = list(b, "s").length;
+            const nShapes = list(b, BODY.shapes).length;
             for (let si = 0; si < nShapes; si++) next = setShapeColor(next, bi, si, hex);
           }
           return next;
@@ -632,7 +641,7 @@ function multiInspector(doc: Obj, sel: readonly Ref[], commit: Commit, remove: (
     children.push(...multiFieldGroups(JOINT_GROUPS, items, JOINT_DEFAULTS, setAllField(sel)));
   } else if (singleKind === "spawn") {
     const items = sel.map((r) => getList(doc, "spawn")[r.i]).filter((x): x is Obj => x !== undefined);
-    const teams = items.map((item) => (flag(item, "6", false) ? 1 : flag(item, "7", false) ? 2 : 0));
+    const teams = items.map((item) => (flag(item, SPAWN.teamRed, false) ? 1 : flag(item, SPAWN.teamBlue, false) ? 2 : 0));
     const mixedTeam = teams.some((t) => t !== teams[0]);
     children.push(
       ...SPAWN_FIELDS.map((f) => {
@@ -644,7 +653,7 @@ function multiInspector(doc: Obj, sel: readonly Ref[], commit: Commit, remove: (
         teams[0] ?? 0,
         (v) => {
           const t = Number(v);
-          patchAll(sel, { "5": t === 0, "6": t === 1, "7": t === 2 });
+          patchAll(sel, { [SPAWN.teamFreeForAll]: t === 0, [SPAWN.teamRed]: t === 1, [SPAWN.teamBlue]: t === 2 });
         },
         mixedTeam,
       ),
@@ -655,12 +664,12 @@ function multiInspector(doc: Obj, sel: readonly Ref[], commit: Commit, remove: (
   } else if (singleKind === "grapple") {
     const items = sel.map((r) => getList(doc, "grapple")[r.i]).filter((x): x is Obj => x !== undefined);
     const attach: Field = {
-      key: "4",
+      key: GRAPPLE.body,
       label: "Attached to",
       kind: "select",
       options: [
         { value: -1, label: "Nothing (static)" },
-        ...getList(doc, "body").map((b) => ({ value: num(b, "1", -1), label: `Body ${num(b, "1", -1)}` })),
+        ...getList(doc, "body").map((b) => ({ value: num(b, BODY.id, -1), label: `Body ${num(b, BODY.id, -1)}` })),
       ],
     };
     children.push(
@@ -689,14 +698,14 @@ function scopeInspector(doc: Obj, bi: number, body: Obj, shapes: readonly number
     return h(
       "div",
       { class: "inspector" },
-      h("h2", { class: "inspector-title" }, icon("square", 20), `Body ${num(body, "1", bi)}`),
+      h("h2", { class: "inspector-title" }, icon("square", 20), `Body ${num(body, BODY.id, bi)}`),
       h("p", { class: "hint" }, "Click a shape to edit it."),
       shapesBlock(doc, bi, commit),
     );
   }
   const del = h("button", { type: "button", class: "danger", onclick: remove }, icon("trash-2", 18), "Delete");
   if (shapes.length > 1) {
-    const allShapes = list(body, "s");
+    const allShapes = list(body, BODY.shapes);
     const picked = shapes.map((si) => asObj(allShapes[si] ?? {}));
     const allCircles = picked.every(isCircle);
     const allPolys = picked.every((s) => !isCircle(s));
@@ -713,12 +722,12 @@ function scopeInspector(doc: Obj, bi: number, body: Obj, shapes: readonly number
       },
     });
     const fs: Field[] = [
-      { key: "2", label: "Offset X", kind: "num", step: 0.5 },
-      { key: "3", label: "Offset Y", kind: "num", step: 0.5 },
-      ...(allCircles ? [{ key: "9", label: "Radius", kind: "num" as const, step: 0.5, min: 0 }] : []),
-      ...(allPolys ? [{ key: "8", label: "Closed", kind: "bool" as const }] : []),
-      { key: "14", label: "Scenery (no physics)", kind: "bool" },
-      { key: "15", label: "Z index", kind: "num", step: 1 },
+      { key: SHAPE.x, label: "Offset X", kind: "num", step: 0.5 },
+      { key: SHAPE.y, label: "Offset Y", kind: "num", step: 0.5 },
+      ...(allCircles ? [{ key: SHAPE.radius, label: "Radius", kind: "num" as const, step: 0.5, min: 0 }] : []),
+      ...(allPolys ? [{ key: SHAPE.closed, label: "Closed", kind: "bool" as const }] : []),
+      { key: SHAPE.noPhysics, label: "Scenery (no physics)", kind: "bool" },
+      { key: SHAPE.zIndex, label: "Z index", kind: "num", step: 1 },
     ];
     return h(
       "div",
@@ -742,8 +751,8 @@ function scopeInspector(doc: Obj, bi: number, body: Obj, shapes: readonly number
   return h(
     "div",
     { class: "inspector" },
-    h("h2", { class: "inspector-title" }, icon("pentagon", 20), `Shape ${si + 1} in body ${num(body, "1", bi)}`),
-    shapeBlock(bi, body, si, asObj(list(body, "s")[si] ?? {}), commit),
+    h("h2", { class: "inspector-title" }, icon("pentagon", 20), `Shape ${si + 1} in body ${num(body, BODY.id, bi)}`),
+    shapeBlock(bi, body, si, asObj(list(body, BODY.shapes)[si] ?? {}), commit),
     del,
   );
 }
@@ -751,7 +760,7 @@ function scopeInspector(doc: Obj, bi: number, body: Obj, shapes: readonly number
 /** Editable rows for every shape of a body. A shape's rows are built when its disclosure first opens, so a selection with many shapes does not rebuild them all. A lone shape starts open. */
 function shapesBlock(doc: Obj, bodyIdx: number, commit: Commit): HTMLElement {
   const body = getList(doc, "body")[bodyIdx] ?? {};
-  const shapes = list(body, "s");
+  const shapes = list(body, BODY.shapes);
   const lone = shapes.length === 1;
   return h(
     "section",
@@ -811,18 +820,18 @@ function pointFields(bodyIdx: number, si: number, shape: Obj, commit: Commit): H
 
 /** The stored shape `si` of body `bodyIdx` in `doc`, or an empty object. */
 function shapeAt(doc: Obj, bodyIdx: number, si: number): Obj {
-  return asObj(list(getList(doc, "body")[bodyIdx] ?? {}, "s")[si] ?? {});
+  return asObj(list(getList(doc, "body")[bodyIdx] ?? {}, BODY.shapes)[si] ?? {});
 }
 
 function shapeBlock(bodyIdx: number, body: Obj, si: number, shape: Obj, commit: Commit): HTMLElement {
   const set = (patch: Obj): void => commit((d) => patchShape(d, bodyIdx, si, patch));
   const circle = isCircle(shape);
   const fs: Field[] = [
-    { key: "2", label: "Offset X", kind: "num", step: 0.5 },
-    { key: "3", label: "Offset Y", kind: "num", step: 0.5 },
-    circle ? { key: "9", label: "Radius", kind: "num", step: 0.5, min: 0 } : { key: "8", label: "Closed", kind: "bool" },
-    { key: "14", label: "Scenery (no physics)", kind: "bool" },
-    { key: "15", label: "Z index", kind: "num", step: 1 },
+    { key: SHAPE.x, label: "Offset X", kind: "num", step: 0.5 },
+    { key: SHAPE.y, label: "Offset Y", kind: "num", step: 0.5 },
+    circle ? { key: SHAPE.radius, label: "Radius", kind: "num", step: 0.5, min: 0 } : { key: SHAPE.closed, label: "Closed", kind: "bool" },
+    { key: SHAPE.noPhysics, label: "Scenery (no physics)", kind: "bool" },
+    { key: SHAPE.zIndex, label: "Z index", kind: "num", step: 1 },
   ];
   const colour = h("input", {
     type: "color",
@@ -877,12 +886,12 @@ function shapeBlock(bodyIdx: number, body: Obj, si: number, shape: Obj, commit: 
 
 /** Map-wide settings, shown when nothing is selected. */
 function mapSettings(doc: Obj, commit: Commit): HTMLElement {
-  const set = asObj(doc.set);
+  const set = asObj(doc[MAP.settings]);
   return h(
     "div",
     { class: "inspector" },
     h("h2", { class: "inspector-title" }, icon("map", 20), "Map"),
     h("p", { class: "hint" }, `${getList(doc, "body").length} bodies, ${getList(doc, "joint").length} joints`),
-    ...fieldGroups(MAP_GROUPS, set, SETTINGS_DEFAULTS, (f, v) => commit((d) => ({ ...d, set: withField(asObj(d.set), f.key, stored(f, v), SETTINGS_DEFAULTS) }))),
+    ...fieldGroups(MAP_GROUPS, set, SETTINGS_DEFAULTS, (f, v) => commit((d) => ({ ...d, [MAP.settings]: withField(asObj(d[MAP.settings]), f.key, stored(f, v), SETTINGS_DEFAULTS) }))),
   );
 }
