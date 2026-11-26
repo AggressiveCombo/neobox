@@ -39,6 +39,8 @@ const IDLE_LIMIT: Duration = Duration::from_secs(120);
 const PLAY_MIN_ELAPSED: Duration = Duration::from_secs(10);
 /// Minimum time between counted plays of the same library map in one room.
 const PLAY_COOLDOWN: Duration = Duration::from_secs(30);
+/// Minimum time between rebuilds of a lobby's preview frame (admin view polls ~8/s).
+const LOBBY_VIEW_GAP: Duration = Duration::from_secs(1);
 /// Typing signals relayed per player at most this often.
 const TYPING_GAP: Duration = Duration::from_millis(800);
 /// The quick-play rotation awards experience when the game-over countdown
@@ -336,6 +338,8 @@ pub struct Room {
     map_meta: Option<MapMeta>,
     /// Last time a play was counted for each library map ID in this room (anti-spam cooldown).
     last_play: HashMap<i64, Instant>,
+    /// The last lobby preview frame built and when, so polling admins do not rebuild it every time.
+    lobby_view: Option<(Instant, Vec<u8>)>,
     /// Quick-play mode (`qp_N`): no host, the rotation plays by itself.
     quick: Option<String>,
     /// Maps the quick-play rotation plays, in order.
@@ -458,6 +462,7 @@ pub fn spawn(
         map_name: map.map(|m| m.name).unwrap_or_default(),
         map_meta: None,
         last_play: HashMap::new(),
+        lobby_view: None,
         quick,
         rotation,
         starting: None,
@@ -640,13 +645,18 @@ impl Room {
                     Some((fb.words.iter().flat_map(|w| w.to_le_bytes()).collect(), true))
                 } else {
                     // In the lobby, render the selected map's arena so admins can inspect the room before the match starts.
-                    MapData::from_code(&self.map_code).ok().map(|map| {
-                        let st = neobox_sim::State::from_map(&map);
-                        let mut fb = neobox_wasm::frame::FrameBuilder::default();
-                        let meta = neobox_wasm::frame::Meta { tick: 0, local: -1, ..Default::default() };
-                        fb.build(&st, &st, 1.0, &self.settings, meta, &neobox_wasm::frame::Feed::default());
-                        (fb.words.iter().flat_map(|w| w.to_le_bytes()).collect(), false)
-                    })
+                    match self.lobby_view.as_ref().filter(|(at, _)| at.elapsed() < LOBBY_VIEW_GAP).map(|(_, b)| b.clone()) {
+                        Some(bytes) => Some((bytes, false)),
+                        None => MapData::from_code(&self.map_code).ok().map(|map| {
+                            let st = neobox_sim::State::from_map(&map);
+                            let mut fb = neobox_wasm::frame::FrameBuilder::default();
+                            let meta = neobox_wasm::frame::Meta { tick: 0, local: -1, ..Default::default() };
+                            fb.build(&st, &st, 1.0, &self.settings, meta, &neobox_wasm::frame::Feed::default());
+                            let bytes: Vec<u8> = fb.words.iter().flat_map(|w| w.to_le_bytes()).collect();
+                            self.lobby_view = Some((Instant::now(), bytes.clone()));
+                            (bytes, false)
+                        }),
+                    }
                 };
                 let _ = reply.send(frame);
             }
