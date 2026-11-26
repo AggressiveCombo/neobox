@@ -741,32 +741,42 @@ async function matchBoot(s) {
   return "boot card (status, Loading neobox) shown on load, hidden once the menu is up";
 }
 
-/** phone-splash-play and phone-splash-dismiss: a touch-only first visit shows no Welcome on the menu; the first match shows it, Play closes it, and it stays gone in a later match. */
+/** phone-splash-play and phone-splash-dismiss: a touch-only first visit shows no Welcome on the menu; a portrait match shows
+ *  only the rotate gate (never the Welcome on top of it); the first landscape match shows the Welcome, Play closes it, and it
+ *  stays gone in a later match. */
 async function matchPhoneSplash(s) {
   const h = await s.open("splash", { phone: true });
   const { page } = h;
+  const welcome = page.getByRole("dialog", { name: "Welcome", exact: true });
+  const quickMatch = async () => {
+    await page.goto(s.base);
+    await menuName(page).waitFor();
+    await playFromMenu(page, null, { quick: true });
+    await page.locator(".quick-choose").first().click();
+    await page.locator(".hud-leave").waitFor({ state: "attached", timeout: 30_000 });
+  };
   await page.goto(s.base);
   await menuName(page).waitFor();
-  check((await page.getByRole("dialog", { name: "Welcome", exact: true }).count()) === 0, "the menu shows the Welcome sheet");
-  await playFromMenu(page, null, { quick: true });
-  await page.locator(".quick-choose").first().click();
-  await page.locator(".hud-leave").waitFor({ state: "attached", timeout: 30_000 });
+  check((await welcome.count()) === 0, "the menu shows the Welcome sheet");
+  await quickMatch();
+  await page.getByRole("dialog", { name: "Turn your phone sideways", exact: true }).waitFor({ state: "visible" });
+  await sleep(800);
+  check((await welcome.count()) === 0, "a portrait match shows the Welcome sheet on top of the rotate gate");
   await dismissRotateGate(page);
-  const welcome = page.getByRole("dialog", { name: "Welcome", exact: true });
+  await page.locator(".hud-leave").click();
+  await page.locator(".hud-leave").waitFor({ state: "hidden" });
+  const portrait = page.viewportSize();
+  await page.setViewportSize({ width: portrait.height, height: portrait.width });
+  await quickMatch();
   await welcome.waitFor({ state: "visible" });
   await welcome.getByRole("button", { name: "Play", exact: true }).click();
   await welcome.waitFor({ state: "detached" });
   await page.locator(".hud-leave").click();
   await page.locator(".hud-leave").waitFor({ state: "hidden" });
-  await page.goto(s.base);
-  await menuName(page).waitFor();
-  await playFromMenu(page, null, { quick: true });
-  await page.locator(".quick-choose").first().click();
-  await page.locator(".hud-leave").waitFor({ state: "attached", timeout: 30_000 });
-  await dismissRotateGate(page);
+  await quickMatch();
   await sleep(800);
   check((await welcome.count()) === 0, "the Welcome sheet came back in a later match");
-  return "Welcome sheet: first match shows it, Play closes it, a later match has none";
+  return "Welcome sheet: none on the menu or over the portrait rotate gate; first landscape match shows it, Play closes it, a later match has none";
 }
 
 /** practice-setup and practice-play: the setup lists the built-in maps with Start; a map plays, Leave returns to setup, Back to the menu. */

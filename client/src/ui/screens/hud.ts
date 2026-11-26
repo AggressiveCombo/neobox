@@ -291,7 +291,7 @@ export const hudScreen: HudFactory = (ctx) => {
   let xpTimer: number | undefined;
   let typingLine = "";
 
-  // Phone welcome, once per device: it is about turning the phone for play, so it waits for a match.
+  // Phone welcome, once per device, in the first landscape match (in portrait the rotate gate below asks instead).
   showPhoneSplash();
 
   // Touch controls. The Chat button sits in the top-right bar (shown on touch devices).
