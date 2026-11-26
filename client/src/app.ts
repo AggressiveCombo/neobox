@@ -14,7 +14,6 @@ import { Input } from "./input";
 import { Net, type CloseNotice, type NetStatus } from "./net";
 import { NAME_RE, PROTOCOL_VERSION, type ClientMsg, type MatchStart, type RoomState, type ServerMsg } from "./protocol";
 import { createRenderer, type Renderer } from "./render";
-import { cssHex } from "./render/geometry";
 import { Overlay } from "./render/overlay";
 import { CHAT_LIMIT, Store, initialState, type AppState, type ChatLine, type Pending, type Screen } from "./state";
 import { NAME_STORAGE_KEY, SEAT_STORAGE_KEY } from "./storage-keys";
@@ -241,15 +240,6 @@ export function start(): Store<AppState> {
   let backdrop = false;
   const overlayCanvas = byId("overlay");
   const stageSurround = byId("stage-surround");
-  let stageKey = -1;
-  /** The map's background colours, painted around the view (the arena gradient extended past its edges). */
-  const paintStage = (scene: { bgTop: number; bgBottom: number }): void => {
-    const key = scene.bgTop * 0x1000000 + scene.bgBottom;
-    if (key === stageKey) return;
-    stageKey = key;
-    stageSurround.style.setProperty("--stage-top", cssHex(scene.bgTop));
-    stageSurround.style.setProperty("--stage-bottom", cssHex(scene.bgBottom));
-  };
   let surroundShown: boolean | null = null;
   /** The surround shows behind game views only: the menu clip's backdrop is drawn on the page's own ground. */
   const syncSurround = (): void => {
@@ -284,7 +274,6 @@ export function start(): Store<AppState> {
     // is told nothing was shown (a clip's first frame would otherwise go live as an empty page-colour square).
     if (!renderer) return null;
     const scene = readScene(fb);
-    if (!backdrop) paintStage(scene);
     syncSurround();
     if (!backdrop && scene.viewAspect !== viewAspect) {
       viewAspect = scene.viewAspect;
