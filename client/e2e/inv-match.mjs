@@ -1,7 +1,7 @@
 // Inventory rows for the match HUD, its menu, chat, input, offline, phone and editor screens. Each scenario names
 // the rows it proves in `inv`; every check asserts a row's "shows" column, with role/name locators where they exist.
 
-import { builtinMaps, button, createRoom, dismissPhoneSplash, dismissRotateGate, joinByInvite, matchWithGuest, menuName, navTo, playFromMenu, probeChanges, roomTitle, signedIn, sleep, startMatch, uniqueName, waitForPixels, waitQuiet, waitStable } from "./lib.mjs";
+import { builtinMaps, button, createRoom, dismissPhoneSplash, dismissRotateGate, joinByInvite, matchWithGuest, menuName, navTo, playFromMenu, probeChanges, roomTitle, showJukeboxPopup, signedIn, sleep, startMatch, uniqueName, waitForPixels, waitQuiet, waitStable } from "./lib.mjs";
 import { mkdtempSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -670,8 +670,10 @@ const editorCanvas = (page) => page.locator("canvas.editor-canvas");
 async function matchJukebox(s) {
   const roomName = uniqueName("jb");
   const host = await s.open("jb-host", { name: uniqueName("jh") });
+  await showJukeboxPopup(host, s.base);
   const code = await createRoom(host, s.base, roomName, { isPublic: true });
   const guest = await s.open("jb-guest", { name: uniqueName("jg") });
+  await showJukeboxPopup(guest, s.base);
   await joinByInvite(guest, s.base, code, roomName);
   const chat = guest.page.getByLabel("Chat message", { exact: true });
   await chat.fill("https://www.youtube.com/watch?v=dQw4w9WgXcQ");
@@ -1091,12 +1093,12 @@ async function matchWinnerCard(s) {
   await joinByInvite(guest, s.base, code, roomName);
   const { page } = host;
   await page.locator("li.room-player").filter({ hasText: guestName }).waitFor();
-  // no ground: the players fall off the map, so one round ends with a winner while the match (objectiveLimit 3) goes on
+  // no ground: the players fall off the map; Rounds (mode 2) ends each round with a winner while the match (objectiveLimit 10 round wins) goes on
   await button(page, "Change map").click();
   await page.getByLabel("Map code or JSON", { exact: true }).fill(SPECTATE_MAP);
   await button(page, "Use code").click();
   const chat = page.getByLabel("Chat message", { exact: true });
-  await chat.fill("/mode 1");
+  await chat.fill("/mode 2");
   await chat.press("Enter");
   await chat.fill("/set objectiveLimit 10");
   await chat.press("Enter");

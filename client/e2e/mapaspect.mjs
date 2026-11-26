@@ -162,7 +162,8 @@ async function matchStageSurround(s) {
   const view = await page.evaluate(() => {
     const cs = getComputedStyle(document.documentElement);
     const n = (name) => parseFloat(cs.getPropertyValue(name));
-    return { x: n("--view-x"), y: n("--view-y"), w: n("--view-w"), h: n("--view-h") };
+    const strip = document.querySelector("[data-wip]");
+    return { x: n("--view-x"), y: n("--view-y"), w: n("--view-w"), h: n("--view-h"), stripBottom: strip ? strip.getBoundingClientRect().bottom : 0 };
   });
   check(near(view.w / view.h, CLASSIC), `classic match view is ${(view.w / view.h).toFixed(3)}, want ${CLASSIC}`);
   check(view.y > 0 && view.y + view.h <= 1080, "match view is not inside the window");
@@ -175,18 +176,17 @@ async function matchStageSurround(s) {
   };
   const close = (a, b, tol) => a.every((v, k) => Math.abs(v - b[k]) <= tol);
   const bottom = view.y + view.h;
-  // The surround beside the view's top-left and bottom-left corners continues the arena's own colour there.
-  const topSurround = px(4, 4);
-  const topArena = px(view.x + 4, view.y + 4);
+  // The surround beside the view is the neutral #0a0a0a matte (87d3e21 replaced the arena-gradient extension, which leaked
+  // a mismatched colour into the pillarboxes of maps with opaque backgrounds).
+  const topSurround = px(4, view.stripBottom + 4);
   const sideTop = px(4, view.y + 4);
   const sideBottom = px(4, bottom - 4);
-  const arenaBottom = px(view.x + 4, bottom - 4);
-  check(close(sideTop, topArena, 12), `surround ${sideTop} does not continue arena top ${topArena}`);
-  check(close(sideBottom, arenaBottom, 12), `surround ${sideBottom} does not continue arena bottom ${arenaBottom}`);
-  check(!close(topSurround, [10, 10, 10], 3), `surround is the #0a0a0a letterbox ${topSurround}`);
+  check(close(topSurround, [10, 10, 10], 3), `surround ${topSurround} is not the #0a0a0a matte`);
+  check(close(sideTop, [10, 10, 10], 3), `surround beside the view top ${sideTop} is not the #0a0a0a matte`);
+  check(close(sideBottom, [10, 10, 10], 3), `surround beside the view bottom ${sideBottom} is not the #0a0a0a matte`);
   check(!close(topSurround, [247, 247, 247], 3), `surround is the page ground ${topSurround}`);
   await button(page, "Edit").click();
-  return `classic match view ${(view.w / view.h).toFixed(3)}; surround ${sideTop} continues arena ${topArena}, bottom ${sideBottom}`;
+  return `classic match view ${(view.w / view.h).toFixed(3)}; surround matte #0a0a0a (${sideTop}, ${sideBottom})`;
 }
 
 export const mapAspectScenarios = [

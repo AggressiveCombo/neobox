@@ -21,6 +21,7 @@ import {
   probeChanges,
   waitQuiet,
   roomCode,
+  showJukeboxPopup,
   roomTitle,
   signedIn,
   sleep,
@@ -308,14 +309,14 @@ async function library(s) {
   let vote = await openMap(voter.page, name);
   await vote.getByRole("button", { name: "Upvote", exact: true }).click();
   await vote.locator('button[aria-pressed="true"]', { hasText: "Upvote" }).waitFor();
-  await vote.getByText("1 vote ·", { exact: false }).waitFor();
+  await vote.getByText("1 vote", { exact: true }).waitFor();
   await voter.page.keyboard.press("Escape");
   await vote.waitFor({ state: "detached" });
   await voter.page.reload();
   await navTo(voter.page, "Library");
   vote = await openMap(voter.page, name);
   await vote.locator('button[aria-pressed="true"]', { hasText: "Upvote" }).waitFor();
-  await vote.getByText("1 vote ·", { exact: false }).waitFor();
+  await vote.getByText("1 vote", { exact: true }).waitFor();
 
   // A room host picks the approved map from the room's Library picker.
   await back(page).click();
@@ -915,9 +916,11 @@ async function jukebox(s) {
   const play = host.page.getByRole("button", { name: "Play on jukebox" });
   await play.waitFor({ timeout: 15_000 });
   await play.click();
-  await host.page.getByLabel("Jukebox", { exact: true }).waitFor({ state: "visible" });
-  await guest.page.getByLabel("Jukebox", { exact: true }).waitFor({ state: "visible" });
-  return "suggestion line, host play, jukebox on both pages";
+  for (const page of [host.page, guest.page]) {
+    await page.locator(".jukebox-audio-host iframe").waitFor({ state: "attached", timeout: 15_000 });
+    await page.getByLabel("Jukebox", { exact: true }).waitFor({ state: "hidden" });
+  }
+  return "suggestion line, host play, audio plays on both pages with the popup off";
 }
 
 /** The page area of an element that is on screen: its box clipped by the viewport and every overflow ancestor. */
@@ -940,7 +943,7 @@ const shownArea = (locator) =>
     return Math.max(0, right - left) * Math.max(0, bottom - top);
   });
 
-/** Jukebox panel, audio first: by default the room's video plays with no picture on screen and its state reads
+/** Jukebox panel with the popup opted in: by default the room's video plays with no picture on screen and its state reads
  *  playing; "Show video" shows it at 16:9 and that choice is kept on this device across a reload. */
 async function jukeboxPanel(s) {
   const need = (ok, message) => {
@@ -948,6 +951,7 @@ async function jukeboxPanel(s) {
   };
   const roomName = uniqueName("jbp");
   const host = await s.open("jbp-host", { name: uniqueName("jph") });
+  await showJukeboxPopup(host, s.base);
   const code = await createRoom(host, s.base, roomName, { isPublic: true });
   const guestName = uniqueName("jpg");
   const guest = await s.open("jbp-guest", { name: guestName });
@@ -960,20 +964,20 @@ async function jukeboxPanel(s) {
   await play.click();
   const panel = host.page.getByLabel("Jukebox", { exact: true });
   await panel.waitFor({ state: "visible" });
-  const frame = panel.locator("iframe");
+  const frame = host.page.locator(".jukebox-screen iframe");
   await frame.waitFor({ state: "attached", timeout: 15_000 });
-  const titleFirst = await panel.evaluate((p) => {
-    const title = p.querySelector(".jukebox-title");
-    const video = p.querySelector("iframe");
-    return title !== null && video !== null && (title.compareDocumentPosition(video) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0;
-  });
-  need(titleFirst, "the title does not come before the player");
   await panel.getByText(`suggested by ${guestName}`, { exact: true }).waitFor({ state: "visible" });
   const quiet = await shownArea(frame);
   need(quiet <= 1, `by default ${quiet} px² of the video shows; the room should hear music only`);
   const playing = host.page.locator('section.jukebox[aria-label="Jukebox"][data-player-state="1"]');
   await playing.waitFor({ state: "attached", timeout: 15_000 });
   await host.page.getByRole("button", { name: "Show video", exact: true }).click();
+  const titleFirst = await panel.evaluate((p) => {
+    const title = p.querySelector(".jukebox-title");
+    const video = p.querySelector("iframe");
+    return title !== null && video !== null && (title.compareDocumentPosition(video) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0;
+  });
+  need(titleFirst, "the title does not come before the player");
   const big = await frame.boundingBox();
   need(big !== null && big.width > 200 && Math.abs(big.width / big.height - 16 / 9) < 0.02, `Show video made the player ${big?.width}x${big?.height}, not 16:9`);
   need((await shownArea(frame)) >= 0.95 * big.width * big.height, "Show video did not show the 16:9 player on screen");
@@ -1022,6 +1026,9 @@ function wipProbe() {
     if (!text || !el || el.closest("[data-wip], script, style, template") || !visible(el)) continue;
     const range = document.createRange();
     range.selectNodeContents(n);
+    // The text's content area can overhang its element box by a few px of font metrics; a hit needs both the content area and the element box under the strip.
+    const box = el.getBoundingClientRect();
+    if (!touches(box)) continue;
     for (const rc of range.getClientRects()) {
       // Live text (the match timer, the kill feed) changes every second, so only text overlap is checked here; the controls and canvases below show any shift.
       if (touches(rc)) hits.add(`text "${text.slice(0, 30)}"`);
@@ -1766,11 +1773,13 @@ async function pinnedPartsHoldStill(s) {
   await page.goto(s.base);
   await menuName(page).waitFor();
   const sticky = () =>
-    page.evaluate(() =>
-      [...document.querySelectorAll("#ui *")]
+    page.evaluate(() => {
+      // #ui is the scrollport, inset by the WIP strip: pinning is measured from its top edge.
+      const ui = document.getElementById("ui").getBoundingClientRect().top;
+      return [...document.querySelectorAll("#ui *")]
         .filter((el) => getComputedStyle(el).position === "sticky" && el.getClientRects().length > 0)
-        .map((el) => ({ cls: el.className, top: Math.round(el.getBoundingClientRect().top), pin: Math.round(parseFloat(getComputedStyle(el).top) || 0) })),
-    );
+        .map((el) => ({ cls: el.className, top: Math.round(el.getBoundingClientRect().top - ui), pin: Math.round(parseFloat(getComputedStyle(el).top) || 0) }));
+    });
   const checked = [];
   for (const link of ["Settings", "Library", "Friends", "About", "Replay"]) {
     await navTo(page, link);
@@ -2206,9 +2215,9 @@ async function geoRoomList(s) {
   const nyRow = await openRoomList(ny, s.base, roomName);
   const flag = nyRow.locator("img.room-flag");
   const src = (await flag.getAttribute("src")) ?? "";
-  check(src.endsWith("flags/gb.svg"), `the London host's row shows flag "${src}", expected GB`);
+  check(src.endsWith("flags/de.svg"), `the Frankfurt server's row shows flag "${src}", expected DE (server country, commit 2119017)`);
   const alt = await flag.getAttribute("alt");
-  check(alt === "United Kingdom", `flag alt is "${alt}", expected "United Kingdom"`);
+  check(alt === "Germany", `flag alt is "${alt}", expected "Germany"`);
   const nyDist = await rowDistance(nyRow);
   check(
     nyDist.unit === "mi" && nyDist.value >= 3000 && nyDist.value <= 4500,
@@ -2222,7 +2231,7 @@ async function geoRoomList(s) {
   const unknown = await s.open("unknown", { name: uniqueName("unk") });
   const unkDist = await rowDistance(await openRoomList(unknown, s.base, roomName));
   check(unkDist.text === "—", `viewer of unknown location sees "${unkDist.text}", expected "—"`);
-  return `GB flag; New York ${nyDist.text}; Frankfurt ${fraDist.text}; unknown "${unkDist.text}"`;
+  return `DE server-country flag; New York ${nyDist.text}; Frankfurt ${fraDist.text}; unknown "${unkDist.text}"`;
 }
 
 /** Regions: a room opened on the New York node is listed on the Frankfurt main server and joins from there. */

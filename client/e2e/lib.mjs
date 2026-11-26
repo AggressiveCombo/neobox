@@ -825,6 +825,16 @@ export async function joinByInvite(h, base, code, roomName) {
   await roomTitle(h.page, roomName).waitFor();
 }
 
+/** Turns the jukebox popup on (it is off by default; the audio plays either way). Loads the app first so its localStorage is readable. */
+export async function showJukeboxPopup(h, base) {
+  await gotoApp(h.page, base);
+  await h.page.evaluate(() => {
+    const prefs = JSON.parse(localStorage.getItem("neobox.prefs") || "{}");
+    localStorage.setItem("neobox.prefs", JSON.stringify({ ...prefs, jukeboxPopup: true }));
+  });
+  await gotoApp(h.page, base);
+}
+
 /** Makes the room's map a built-in one when none is selected yet. */
 export async function ensureRoomMap(page) {
   const mapName = page.locator(".room-map-name");

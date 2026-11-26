@@ -207,7 +207,7 @@ async function browseEmpty(s) {
   await page.getByRole("heading", { name: "Create a room", exact: true }).waitFor();
   check(await page.getByRole("textbox", { name: "room name", exact: true }).isVisible(), "the create form has no room name field");
   check(await page.getByLabel("Password", { exact: true }).isVisible(), "the create form has no Password field");
-  check((await page.getByLabel("Max players", { exact: true }).inputValue()) === "8", "Max players does not default to 8");
+  check((await page.getByLabel("Max players", { exact: true }).inputValue()) === "32", "Max players does not default to 32");
   check(await page.getByLabel("Public", { exact: true }).isChecked(), "Public is not checked by default");
   await page.getByText(`Leave empty for "${name}'s game".`, { exact: true }).waitFor({ state: "visible" });
 
@@ -233,9 +233,9 @@ async function browseRows(s) {
   await rowA.locator("button.room-row").waitFor({ state: "visible" });
   await rowB.locator("button.room-row").waitFor({ state: "visible" });
 
-  // browse-row: the open room is listed once, with its 1/8 count.
+  // browse-row: the open room is listed once, with its 1/32 count (the default max is 32, see DEFAULT_MAX_PLAYERS).
   check(await page.locator('ul[aria-label="rooms"] li').filter({ hasText: "Open lobby one" }).count() === 1, "Open lobby one is not listed once");
-  check(/1\s*\/\s*8/.test((await rowA.textContent()) ?? ""), "the open room row does not show 1/8 players");
+  check(/1\s*\/\s*32/.test((await rowA.textContent()) ?? ""), "the open room row does not show 1/32 players");
 
   // browse-locked-row: a lock icon; the password field opens on click; the row Join stays disabled until typed.
   check(await rowB.getByRole("img", { name: "password protected", exact: true }).count() === 1, "the locked row has no password lock icon");
@@ -272,7 +272,7 @@ async function browseRows(s) {
   check(await codeJoin(page).isEnabled(), "Join stays disabled for a valid room code");
   await codeJoin(page).click();
   await roomTitle(page, "Open lobby one").waitFor({ state: "visible" });
-  return `rows: "Open lobby one" 1/8, locked row + password field, wrong password, filter empty text, Hide full rooms switch, code join`;
+  return `rows: "Open lobby one" 1/32, locked row + password field, wrong password, filter empty text, Hide full rooms switch, code join`;
 }
 
 // ---------------------------------------------------------------- group 3: create room, room page and host controls
@@ -339,7 +339,7 @@ async function roomPlayers(s) {
   const { h, name, code, roomName } = await openHostRoomNamed(s);
   const { page } = h;
   const heading = page.locator(".room-players-head h2.panel-title");
-  check(((await heading.textContent()) ?? "").replace(/\s/g, "") === "Players1/8", `Players heading is "${await heading.textContent()}", not Players 1/8`);
+  check(((await heading.textContent()) ?? "").replace(/\s/g, "") === "Players1/32", `Players heading is "${await heading.textContent()}", not Players 1/32`);
   check(await page.getByRole("radiogroup", { name: "Join or spectate", exact: true }).isVisible(), "no Join or spectate choice for the host");
   check(await rosterRows(page).count() === 1, "the host's roster is not one row");
   const mine = rosterRows(page).filter({ hasText: name });
@@ -354,7 +354,7 @@ async function roomPlayers(s) {
   check(await rosterRows(g.page).count() === 2, "the guest's roster does not list two players");
   check(await rosterRows(g.page).filter({ hasText: name }).getByRole("img", { name: "Room host", exact: true }).count() === 1, "the guest's view has no crown on the host");
   check(await guestHasNoManage(g.page), "the Manage panel shows host controls to a guest");
-  return `host: Players 1/8, Join or spectate, own row you+crown; guest sees 2 rows and the host crown; Manage hidden for guest`;
+  return `host: Players 1/32, Join or spectate, own row you+crown; guest sees 2 rows and the host crown; Manage hidden for guest`;
 }
 
 /** room-mode: the Mode panel, the Game mode dialog's options, and picking one sets the mode (the team choice follows). */
@@ -465,27 +465,26 @@ async function roomDock(s) {
   const { page } = h;
   const dock = page.locator("footer.room-dock");
   check((await dock.getAttribute("aria-label")) === "Match controls", "the dock is not labelled Match controls");
-  await dock.getByText("1 player ready", { exact: true }).waitFor({ state: "visible" });
   check(await dock.getByRole("button", { name: "Start", exact: true }).isEnabled(), "Start is disabled with one player");
 
   // A lone host starts at once; with a guest there is a one-second countdown, during which Abort start shows.
-  const { g } = await joinGuest(s, code, roomName);
-  await dock.getByText("2 players ready", { exact: true }).waitFor({ state: "visible" });
+  const { g, name: guestName } = await joinGuest(s, code, roomName);
+  await rosterRows(page).filter({ hasText: guestName }).waitFor({ state: "visible" });
   await g.page.locator("footer.room-dock").getByText("Waiting for host to start", { exact: true }).waitFor({ state: "visible" });
   await dock.getByRole("button", { name: "Start", exact: true }).click();
   await button(page, "Abort start").waitFor({ state: "visible" });
-  // The server gives a one-second countdown, and the match starts when it ends; read the dock in one round trip, then click at once.
-  const dockState = await dock.evaluate((d) => ({
-    starting: [...d.querySelectorAll("*")].some((el) => el.childElementCount === 0 && el.textContent.trim() === "Match starting"),
-    startDisabled: [...d.querySelectorAll("button")].find((b) => b.textContent.trim() === "Start")?.disabled,
+  // The server gives a one-second countdown, and the match starts when it ends; read the notice and Start in one round trip, then click at once.
+  const startState = await page.evaluate(() => ({
+    starting: [...document.querySelectorAll(".room-starting span")].some((el) => el.textContent.trim() === "Match starting"),
+    startDisabled: [...document.querySelectorAll("footer.room-dock button")].find((b) => b.textContent.trim() === "Start")?.disabled,
   }));
-  check(dockState.starting, "the dock does not say Match starting");
-  check(dockState.startDisabled === true, "Start is enabled while starting");
+  check(startState.starting, "the start notice does not say Match starting");
+  check(startState.startDisabled === true, "Start is enabled while starting");
   await button(page, "Abort start").click();
   await button(page, "Abort start").waitFor({ state: "hidden" });
   check(await page.locator(".hud-leave").count() === 0, "the match started after Abort start");
-  await dock.getByText("2 players ready", { exact: true }).waitFor({ state: "visible" });
-  return `dock: "1 player ready" alone; with a guest "2 players ready"; Start -> "Match starting" + Abort start; Abort returns to "2 players ready"; guest dock "Waiting for host to start"`;
+  check(await dock.getByRole("button", { name: "Start", exact: true }).isEnabled(), "Start is still disabled after Abort start");
+  return `dock: lone host Start enabled; with a guest the host sees the roster row; Start -> "Match starting" + Abort start; Abort re-enables Start; guest dock "Waiting for host to start"`;
 }
 
 // ---------------------------------------------------------------- group 4: room chat, commands and their notices
@@ -527,7 +526,7 @@ async function chatNotices(s) {
   await sendChat(page, "hello from host");
   await chatLine(page, `${name}: hello from host`).waitFor({ state: "visible" });
   await sendChat(page, "/help");
-  await chatLine(page, "Commands: /set <key> <value>, /settings, /reset, /mode <n>, /start, /end, /lock, /unlock, /kick <name>, /ban <name>, /unban <name>, /mute <name>, /unmute <name>, /host <name>, /team <name> <ffa|red|blue|spec>, /join <ffa|red|blue|spec>, /upvote, /downvote, /fav, /unfav, /record").waitFor({ state: "visible" });
+  await chatLine(page, "Commands: /set <key> <value>, /settings, /reset, /mode <n>, /start, /end, /lock, /unlock, /kick <name>, /ban <name>, /unban <name>, /mute <name>, /unmute <name>, /host <name>, /team <name> <ffa|red|blue|spec>, /join <ffa|red|blue|spec>, /play <youtube>, /pause, /resume, /stop, /upvote, /downvote, /fav, /unfav, /record").waitFor({ state: "visible" });
   await sendChat(page, "/nosuch");
   await chatLine(page, "Unknown command, try /help").waitFor({ state: "visible" });
   await sendChat(page, "/set");
