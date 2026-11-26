@@ -1291,15 +1291,15 @@ export function start(): Store<AppState> {
     net.send({ t: "quick_play", queue, exclude: [...quickVisited] });
   }
 
-  /** Close the connection and return to the main menu. */
-  function disconnect(): void {
+  /** Close the connection and return to the main menu, or to `screen` (one state change: no transient menu entry). */
+  function disconnect(screen: Screen = "menu"): void {
     loop?.stop();
     pendingName = null;
     pendingJoin = null;
     matching = null;
     store.set({ pending: null });
     net.close();
-    resetToMenu();
+    resetToMenu(screen);
   }
 
   input.onKey = (code, down) => {

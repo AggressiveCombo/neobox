@@ -7,7 +7,7 @@ import type { ClientMsg } from "./protocol";
 import type { Sfx } from "./audio";
 import type { Engine, FrameView } from "./engine";
 import type { Scene } from "./frame";
-import type { AppState, Store } from "./state";
+import type { AppState, Screen, Store } from "./state";
 import type { Net } from "./net";
 
 /**
@@ -51,8 +51,8 @@ export interface AppCtx {
   cancelJoin(): void;
   /** Quick play: find a room of mode `queue` (`qp_1`, ...), skipping quick-play rooms already visited. */
   quickPlay(queue: string): void;
-  /** Close the connection and return to the main menu. */
-  disconnect(): void;
+  /** Close the connection and return to the main menu, or to `screen` in the same state change (no transient menu entry). */
+  disconnect(screen?: Screen): void;
   /** Built-in maps from /api/maps (cached). */
   maps(): Promise<BuiltinMap[]>;
   /** The current room's map code and name (asks the server; rejects outside a room or after 5 s). */
