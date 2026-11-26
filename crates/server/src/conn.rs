@@ -21,6 +21,9 @@ const MAX_TEXT: usize = crate::room::MAX_MAP_CODE + 4096;
 const MAX_BINARY: usize = 4096;
 /// Messages per second before a connection is dropped.
 const MAX_MSG_RATE: u32 = 400;
+/// Close code a page sends when the user leaves it (tab closed or navigated away; client `leavePage`). It is the only
+/// close that is a deliberate leave: any other close, and any dropped socket, holds the player's slot for a reconnect.
+pub const LEAVE_CODE: u16 = 4000;
 
 /// One of an address's connection slots; released when dropped.
 pub struct IpSlot {
@@ -94,11 +97,11 @@ impl Session {
         }
     }
 
-    /// The socket closed or dropped: a clean browser close leaves the lobby immediately,
-    /// while an unexpected drop holds the slot for reconnect.
-    fn drop_room(&mut self, clean: bool) {
+    /// The socket closed or dropped: a page leave (`LEAVE_CODE`) leaves the lobby at once; any other drop holds the
+    /// slot for a reconnect.
+    fn drop_room(&mut self, leaving: bool) {
         if let Some((r, id)) = self.room.take() {
-            let _ = r.tx.send(RoomCmd::Lost { player: id, out: self.out.clone(), clean });
+            let _ = r.tx.send(RoomCmd::Lost { player: id, out: self.out.clone(), leaving });
         }
     }
 
@@ -468,7 +471,7 @@ async fn run(hub: &Arc<Hub>, socket: WebSocket, ip: IpAddr, conn_id: u64, accoun
     // why the server closes this socket, if it does: sent as the close frame. subscribe() marks the current value as
     // seen, so a shutdown that began before this socket subscribed is read here, not awaited by changed().
     let mut closing: Option<Close> = if *stop.borrow_and_update() { Some(close::SHUTDOWN) } else { None };
-    let mut clean_close = false;
+    let mut leaving = false;
     while closing.is_none() {
         let msg = tokio::select! {
             m = stream.next() => match m {
@@ -535,7 +538,7 @@ async fn run(hub: &Arc<Hub>, socket: WebSocket, ip: IpAddr, conn_id: u64, accoun
             }
             Message::Ping(_) => {}
             Message::Close(frame) => {
-                clean_close = frame.as_ref().is_none_or(|f| f.code == 1000 || f.code == 1001);
+                leaving = frame.is_some_and(|f| f.code == LEAVE_CODE);
                 break;
             }
         }
@@ -547,7 +550,7 @@ async fn run(hub: &Arc<Hub>, socket: WebSocket, ip: IpAddr, conn_id: u64, accoun
         // queued behind everything sent so far; the writer sends it and exits
         let _ = s.out.send(Out::Close(c));
     }
-    s.drop_room(clean_close);
+    s.drop_room(leaving);
     drop(s);
     if closing.is_some() {
         // keep reading until the writer has sent the close frame and the client has answered it: dropping the socket

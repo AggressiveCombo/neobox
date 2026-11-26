@@ -346,6 +346,22 @@ async function disconnectHold(s) {
   return `"${left.text}" after ${Math.round(held / 1000)} s`;
 }
 
+/** A page leave (close code 4000, net.ts PAGE_LEAVE_CODE) frees the lobby seat at once. */
+async function pageLeave(s) {
+  const base = s.base;
+  const host = await player(base, uniqueName("Stay"));
+  const { code } = await host.createRoom("Leave", { max_players: 4 });
+  const guest = await player(base, uniqueName("Closed"));
+  await guest.joinRoom(code);
+  const t0 = Date.now();
+  guest.ws.close(4000, "bye");
+  await host.until((m) => m.t === "chat" && m.text.endsWith("has left the game"), 0, 10_000);
+  const after = Date.now() - t0;
+  check(after < 5_000, `page leave removed the guest after ${after} ms (expected at once)`);
+  host.shut();
+  return `guest removed after ${after} ms on a page leave (code 4000)`;
+}
+
 async function idleKick(s) {
   const base = s.base;
   const c = await player(base, uniqueName("Idle"));
@@ -437,6 +453,7 @@ const edgeCases = [
   },
   { name: "edge replaced account", run: replacedAccount, inv: ["replaced"] },
   { name: "edge disconnect hold", run: disconnectHold, inv: ["timeout"] },
+  { name: "edge page leave", run: pageLeave, inv: ["leave-page"] },
   { name: "edge idle kick", run: idleKick, serial: true, inv: ["kicked-idle"] },
   { name: "edge bad ticket", topology: regionServers, run: badTicket, inv: ["err-bad-ticket"] },
   { name: "edge room cap", topology: roomCapTopology, run: roomCap, inv: ["err-server-full-rooms"] },

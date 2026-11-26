@@ -28,9 +28,9 @@ const HISTORY: usize = 256;
 const MAX_CATCHUP: u32 = 90;
 /// A player whose connection dropped unexpectedly keeps their slot this long.
 const LOST_LIMIT: Duration = Duration::from_secs(60);
-/// A clean tab close / page unload during a match keeps the slot briefly so F5 reloads resume,
-/// without leaving a closed tab stuck on "Reconnecting" for a minute.
-const CLEAN_LOST_LIMIT: Duration = Duration::from_secs(5);
+/// A page left during a match (`conn::LEAVE_CODE`) keeps the slot briefly so F5 reloads resume, without leaving a
+/// closed tab stuck on "Reconnecting" for a minute.
+const LEAVING_LIMIT: Duration = Duration::from_secs(5);
 /// Countdown between the host's start and the match (two or more players).
 const START_DELAY: Duration = Duration::from_secs(1);
 /// Quick-play players who change no input and say nothing this long are removed.
@@ -65,8 +65,8 @@ pub enum RoomCmd {
     /// The connection left on purpose. `out` identifies the connection, so a
     /// stale command from a replaced connection changes nothing.
     Leave { player: u32, out: mpsc::UnboundedSender<Out> },
-    /// The connection dropped: its slot is held for a reconnect (`clean` = browser closed/unloaded cleanly).
-    Lost { player: u32, out: mpsc::UnboundedSender<Out>, clean: bool },
+    /// The connection dropped or closed: its slot is held for a reconnect (`leaving` = the page was left on purpose).
+    Lost { player: u32, out: mpsc::UnboundedSender<Out>, leaving: bool },
     /// Chat or a game command. `out` identifies the connection; a stale one changes nothing (see `Leave`).
     Msg { player: u32, msg: ClientMsg, out: mpsc::UnboundedSender<Out> },
     Frame { player: u32, frame: ClientFrame, out: mpsc::UnboundedSender<Out> },
@@ -622,7 +622,7 @@ impl Room {
                     self.remove(player, "left");
                 }
             }
-            RoomCmd::Lost { player, out, clean } => self.lost(player, &out, clean),
+            RoomCmd::Lost { player, out, leaving } => self.lost(player, &out, leaving),
             RoomCmd::Msg { player, msg, out } => {
                 if self.is_live_as(player, &out) {
                     self.message(player, msg);
@@ -885,22 +885,21 @@ impl Room {
         }
     }
 
-    /// The connection closed or dropped. A clean tab close in the lobby leaves immediately
-    /// (no stuck "Reconnecting"); a clean close in-match holds briefly for F5 reloads;
-    /// an unexpected network drop holds for the full grace period.
-    fn lost(&mut self, id: u32, out: &mpsc::UnboundedSender<Out>, clean: bool) {
+    /// The connection closed or dropped. A page leave in the lobby removes the player at once (no stuck
+    /// "Reconnecting"); a page leave in-match holds briefly for F5 reloads; any other drop holds the full grace period.
+    fn lost(&mut self, id: u32, out: &mpsc::UnboundedSender<Out>, leaving: bool) {
         if !self.is_live_as(id, out) {
             return;
         }
-        if clean && self.game.is_none() {
+        if leaving && self.game.is_none() {
             self.remove(id, "left");
             return;
         }
         let Some(p) = self.player_mut(id) else { return };
-        let limit = if clean { CLEAN_LOST_LIMIT } else { LOST_LIMIT };
+        let limit = if leaving { LEAVING_LIMIT } else { LOST_LIMIT };
         p.link = Link::Lost { at: Instant::now(), limit };
         let in_match = p.in_match;
-        info!(room = %self.code, player = id, clean, "connection lost");
+        info!(room = %self.code, player = id, leaving, "connection lost");
         if in_match {
             if let Some(g) = self.game.as_mut() {
                 g.m.neutralize(id);

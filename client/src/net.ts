@@ -75,6 +75,8 @@ const CONNECT_MS = 8_000;
 /** Tags of the app-level ping and its pong (crates/net protocol.rs). */
 const C_PING = 2;
 const S_PONG = 0x82;
+/** Close code of a page leave (tab closed or navigated away): the server removes a lobby seat at once on it (crates/server conn.rs LEAVE_CODE). */
+const PAGE_LEAVE_CODE = 4000;
 
 export class Net {
   private ws: WebSocket | null = null;
@@ -92,8 +94,8 @@ export class Net {
   status: NetStatus = "closed";
 
   constructor(private readonly handlers: NetHandlers) {
-    // The page goes away with its socket open: close it quietly here. The server holds the seat for the resume,
-    // and no status is set, so the session (and its seat) is kept. A bfcache freeze keeps the socket.
+    // The page goes away with its socket open: close it as a page leave (the server removes a lobby seat at once,
+    // holds an in-match seat briefly for a reload). No status is set. A bfcache freeze keeps the socket.
     window.addEventListener("pagehide", (ev) => {
       if (!ev.persisted) this.leavePage();
     });
@@ -106,7 +108,7 @@ export class Net {
     this.ws = null;
     this.stopWatch();
     this.dropRtc();
-    if (ws.readyState <= WebSocket.OPEN) ws.close(1000, "bye");
+    if (ws.readyState <= WebSocket.OPEN) ws.close(PAGE_LEAVE_CODE, "bye");
   }
 
   get transport(): Transport {
