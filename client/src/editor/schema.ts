@@ -300,6 +300,9 @@ export const BODY_DEFAULTS: Obj = {
   [BODY.collideC]: true,
   [BODY.collideD]: true,
   [BODY.playerPass]: 0,
+  [BODY.checkpoint]: 0,
+  [BODY.raceObject]: false,
+  [BODY.raceProgress]: 0,
   [BODY.pinned]: false,
   [BODY.pinX]: 0,
   [BODY.pinY]: 0,
@@ -365,10 +368,6 @@ export const SPAWN_DEFAULTS: Obj = {
 };
 
 export const TURRET_DEFAULTS: Obj = {
-  [TURRET.x]: 0,
-  [TURRET.y]: 0,
-  [TURRET.vx]: 0,
-  [TURRET.vy]: 0,
   [TURRET.angle]: 0,
   [TURRET.angularVelocity]: 0,
   [TURRET.health]: 20,
@@ -405,7 +404,7 @@ export const CAP_DEFAULTS: Obj = {
 /** Map settings defaults (sim MapSettings::default). */
 export const SETTINGS_DEFAULTS: Obj = {
   [SETTINGS.screenWidth]: 30,
-  [SETTINGS.snap]: 1,
+  [SETTINGS.snap]: 0.5,
   [SETTINGS.unused5]: 1,
   [SETTINGS.bgOffsetX]: 0,
   [SETTINGS.bgOffsetY]: 0,
@@ -419,6 +418,7 @@ export const SETTINGS_DEFAULTS: Obj = {
   [SETTINGS.colorBottom]: 16777215,
   [SETTINGS.gravity]: 15,
   [SETTINGS.wrap]: false,
+  [SETTINGS.aspect]: "classic",
 };
 
 export function emptyDoc(): Obj {
@@ -429,7 +429,8 @@ export function emptyDoc(): Obj {
     [MAP.turrets]: [],
     [MAP.grapples]: [],
     [MAP.caps]: [],
-    [MAP.settings]: {},
+    // A new map starts 16:9; maps without the key (every Hitbox map) are the classic 16:10.
+    [MAP.settings]: { [SETTINGS.aspect]: "wide" },
   };
 }
 
