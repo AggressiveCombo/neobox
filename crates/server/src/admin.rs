@@ -464,12 +464,16 @@ async fn map_preview(State(hub): State<Arc<Hub>>, headers: HeaderMap, Path(id): 
         return Ok(StatusCode::UNAUTHORIZED.into_response());
     }
     let d = db(&hub, move |s| s.get(id, None, true)).await?;
-    let map = neobox_sim::MapData::from_code(&d.code).map_err(|_| Error::Invalid("Could not decode map"))?;
-    let st = neobox_sim::State::from_map(&map);
-    let mut fb = neobox_wasm::frame::FrameBuilder::default();
-    let meta = neobox_wasm::frame::Meta { tick: 0, local: -1, ..Default::default() };
-    fb.build(&st, &st, 1.0, &neobox_sim::GameSettings::default(), meta, &neobox_wasm::frame::Feed::default());
-    let bytes: Vec<u8> = fb.words.iter().flat_map(|w| w.to_le_bytes()).collect();
+    let bytes = tokio::task::spawn_blocking(move || -> Result<Vec<u8>, Error> {
+        let map = neobox_sim::MapData::from_code(&d.code).map_err(|_| Error::Invalid("Could not decode map"))?;
+        let st = neobox_sim::State::from_map(&map);
+        let mut fb = neobox_wasm::frame::FrameBuilder::default();
+        let meta = neobox_wasm::frame::Meta { tick: 0, local: -1, ..Default::default() };
+        fb.build(&st, &st, 1.0, &neobox_sim::GameSettings::default(), meta, &neobox_wasm::frame::Feed::default());
+        Ok(fb.words.iter().flat_map(|w| w.to_le_bytes()).collect())
+    })
+    .await
+    .map_err(|e| Error::Internal(e.to_string()))??;
     Ok((
         [
             (header::CONTENT_TYPE, "application/octet-stream"),
