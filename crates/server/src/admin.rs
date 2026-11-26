@@ -197,6 +197,23 @@ async fn session(State(hub): State<Arc<Hub>>, ConnectInfo(peer): ConnectInfo<Soc
     Json(serde_json::json!({ "admin": false })).into_response()
 }
 
+/// The dashboard polls every second; the counts are cached this long so each poll does not run the queries under the database lock.
+const COUNTS_TTL: Duration = Duration::from_secs(10);
+
+async fn admin_counts(hub: &Hub) -> neobox_store::AdminCounts {
+    let cached = hub.counts.lock().unwrap().as_ref().filter(|(at, _)| at.elapsed() < COUNTS_TTL).map(|(_, c)| c.clone());
+    if let Some(c) = cached {
+        return c;
+    }
+    match db(hub, |s| s.admin_counts()).await {
+        Ok(c) => {
+            *hub.counts.lock().unwrap() = Some((Instant::now(), c.clone()));
+            c
+        }
+        Err(_) => Default::default(),
+    }
+}
+
 async fn state(State(hub): State<Arc<Hub>>, headers: HeaderMap) -> Response {
     if !authorized(&hub, &headers) {
         return StatusCode::UNAUTHORIZED.into_response();
@@ -260,7 +277,7 @@ async fn state(State(hub): State<Arc<Hub>>, headers: HeaderMap) -> Response {
     let avg_ping_ms = if pings.is_empty() { 0.0 } else { pings.iter().map(|&x| x as f64).sum::<f64>() / pings.len() as f64 };
     let p95_ping_ms = if pings.is_empty() { 0 } else { pings[((pings.len() - 1) * 95) / 100] };
     let avg_step_us = if step_rooms == 0 { 0.0 } else { step_sum / step_rooms as f64 };
-    let counts = db(&hub, |s| s.admin_counts()).await.unwrap_or_default();
+    let counts = admin_counts(&hub).await;
 
     let rooms_json: Vec<serde_json::Value> = rooms
         .iter()

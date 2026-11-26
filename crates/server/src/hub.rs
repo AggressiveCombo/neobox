@@ -280,6 +280,8 @@ pub struct Hub {
     pub reports: Limiter<IpAddr>,
     /// Bug reports and suggestions per address.
     pub feedback: Limiter<IpAddr>,
+    /// Admin dashboard summary counts, reused for a few seconds (see `admin::admin_counts`).
+    pub counts: Mutex<Option<(Instant, neobox_store::AdminCounts)>>,
     /// Signed-in accounts with an open WebSocket, with the number of sockets.
     pub online: Mutex<HashMap<i64, usize>>,
     /// Regional game nodes that beat at this (main) server, by public URL.
@@ -325,6 +327,7 @@ impl Hub {
             uploads: Limiter::new(10, Duration::from_secs(3600)),
             reports: Limiter::new(10, Duration::from_secs(3600)),
             feedback: Limiter::new(12, Duration::from_secs(600)),
+            counts: Mutex::new(None),
             online: Mutex::new(HashMap::new()),
             nodes: Mutex::new(HashMap::new()),
             beat: tokio::sync::Notify::new(),
