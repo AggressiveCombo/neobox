@@ -20,6 +20,17 @@ interface NewsEntry {
  */
 const NEWS: NewsEntry[] = [
   {
+    date: "2026-11-26",
+    items: [
+      "Phones and tablets: the main menu's buttons and the Bug and Suggest buttons are bigger and easier to tap (thanks for the suggestion, whaleice).",
+      "Connection drops: if your connection drops, your seat is held for 60 seconds again so you can rejoin; closing the tab still leaves the room straight away.",
+      "Sound: effects play from the centre, without random pitch changes, jumps are softer, and the rocket hum no longer keeps playing over the menu.",
+      "Lobby: less repeated information and no duplicate controls; the host's End match button is back.",
+      "Map editor: pasted shapes keep their rotation, and pasting into another map no longer attaches joints to the wrong objects.",
+      "Account: the Account screen stays open when room updates arrive and when you sign in or out.",
+    ],
+  },
+  {
     date: "2026-11-24",
     items: [
       "Bug reports & suggestions: click Bug or Suggest in the top bar at any time to report issues or share ideas directly from the game.",
