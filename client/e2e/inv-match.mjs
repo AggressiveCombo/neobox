@@ -1,7 +1,7 @@
 // Inventory rows for the match HUD, its menu, chat, input, offline, phone and editor screens. Each scenario names
 // the rows it proves in `inv`; every check asserts a row's "shows" column, with role/name locators where they exist.
 
-import { builtinMaps, button, createRoom, dismissPhoneSplash, dismissRotateGate, joinByInvite, matchWithGuest, menuName, navTo, playFromMenu, probeChanges, roomTitle, showJukeboxPopup, signedIn, sleep, startMatch, uniqueName, waitForPixels, waitQuiet, waitStable } from "./lib.mjs";
+import { allowYouTube, answerInvite, builtinMaps, button, createRoom, dismissPhoneSplash, dismissRotateGate, joinByInvite, matchWithGuest, menuName, navTo, playFromMenu, probeChanges, roomTitle, showJukeboxPopup, signedIn, sleep, startMatch, uniqueName, waitForPixels, waitQuiet, waitStable } from "./lib.mjs";
 import { mkdtempSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -352,6 +352,7 @@ async function matchSpectateJoin(s) {
   const late = await s.open("spc", { name: uniqueName("spl") });
   // a running match moves the joiner straight to the HUD, so the room title may pass unseen; accept either
   await late.page.goto(`${s.base}/${code}`);
+  await answerInvite(late.page);
   await late.page.locator("h1.room-title").or(late.page.locator(".hud-root")).first().waitFor();
   await late.page.locator(".hud-root").waitFor({ state: "visible" });
   await openMenu(late.page);
@@ -671,9 +672,11 @@ async function matchJukebox(s) {
   const roomName = uniqueName("jb");
   const host = await s.open("jb-host", { name: uniqueName("jh") });
   await showJukeboxPopup(host, s.base);
+  await allowYouTube(host, s.base);
   const code = await createRoom(host, s.base, roomName, { isPublic: true });
   const guest = await s.open("jb-guest", { name: uniqueName("jg") });
   await showJukeboxPopup(guest, s.base);
+  await allowYouTube(guest, s.base);
   await joinByInvite(guest, s.base, code, roomName);
   const chat = guest.page.getByLabel("Chat message", { exact: true });
   await chat.fill("https://www.youtube.com/watch?v=dQw4w9WgXcQ");

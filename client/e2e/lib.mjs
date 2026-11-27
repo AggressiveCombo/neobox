@@ -819,9 +819,24 @@ export async function roomCode(page) {
   return code;
 }
 
-/** Opens the room page directly from an invite URL (`origin/CODE`). */
-export async function joinByInvite(h, base, code, roomName) {
+/**
+ * Answers the join prompt an invite link opens for a guest (client/src/ui/invite-prompt.ts): types `name` when given, then
+ * Join. Passes through when no prompt shows (a signed-in player, or a tab that already holds its seat), once the room or the
+ * match is up.
+ */
+export async function answerInvite(page, name = null) {
+  const prompt = page.getByRole("dialog", { name: /^Join room / });
+  await prompt.or(page.locator("h1.room-title, .hud-root")).first().waitFor();
+  if ((await prompt.count()) === 0) return;
+  if (name !== null) await prompt.getByRole("textbox", { name: "Your name", exact: true }).fill(name);
+  await button(prompt, "Join").click();
+  await prompt.waitFor({ state: "detached" });
+}
+
+/** Opens the room page directly from an invite URL (`origin/CODE`), answering the guest's join prompt. */
+export async function joinByInvite(h, base, code, roomName, name = null) {
   await gotoApp(h.page, `${base}/${code}`);
+  await answerInvite(h.page, name);
   await roomTitle(h.page, roomName).waitFor();
 }
 
@@ -832,6 +847,13 @@ export async function showJukeboxPopup(h, base) {
     const prefs = JSON.parse(localStorage.getItem("neobox.prefs") || "{}");
     localStorage.setItem("neobox.prefs", JSON.stringify({ ...prefs, jukeboxPopup: true }));
   });
+  await gotoApp(h.page, base);
+}
+
+/** Allows YouTube for this browser, as the player does once in the jukebox panel or Settings. Loads the app first so its localStorage is readable. */
+export async function allowYouTube(h, base) {
+  await gotoApp(h.page, base);
+  await h.page.evaluate(() => localStorage.setItem("neobox.youtubeAllowed", "1"));
   await gotoApp(h.page, base);
 }
 
@@ -894,6 +916,7 @@ export async function matchWithGuest(s, { clipboard: wantClipboard = true, keepR
     }
     if (url !== `${s.base}/${code}`) throw new Error(`invite link is "${url}", expected ${s.base}/${code}`);
     await gotoApp(guest.page, url);
+    await answerInvite(guest.page);
   } else {
     await joinByInvite(guest, s.base, code, roomName);
   }

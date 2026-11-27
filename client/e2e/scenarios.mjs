@@ -21,6 +21,7 @@ import {
   probeChanges,
   waitQuiet,
   roomCode,
+  allowYouTube,
   showJukeboxPopup,
   roomTitle,
   signedIn,
@@ -29,6 +30,7 @@ import {
   waitForPixels,
   ensureProbe,
   joinByInvite,
+  answerInvite,
   ensureRoomMap,
   startMatch,
   signUp,
@@ -907,8 +909,10 @@ async function clipsLeaveQuietly(s) {
 async function jukebox(s) {
   const roomName = uniqueName("jb");
   const host = await s.open("jb-host", { name: uniqueName("jh") });
+  await allowYouTube(host, s.base);
   const code = await createRoom(host, s.base, roomName, { isPublic: true });
   const guest = await s.open("jb-guest", { name: uniqueName("jg") });
+  await allowYouTube(guest, s.base);
   await joinByInvite(guest, s.base, code, roomName);
   const chat = guest.page.getByLabel("Chat message", { exact: true });
   await chat.fill("https://www.youtube.com/watch?v=dQw4w9WgXcQ");
@@ -952,6 +956,7 @@ async function jukeboxPanel(s) {
   const roomName = uniqueName("jbp");
   const host = await s.open("jbp-host", { name: uniqueName("jph") });
   await showJukeboxPopup(host, s.base);
+  await allowYouTube(host, s.base);
   const code = await createRoom(host, s.base, roomName, { isPublic: true });
   const guestName = uniqueName("jpg");
   const guest = await s.open("jbp-guest", { name: guestName });
@@ -1215,6 +1220,7 @@ async function phone(s) {
   const code = await roomCode(host.page);
   await page.goto(`${s.base}/${code}`);
   await dismissPhoneSplash(page);
+  await answerInvite(page);
   await page.locator("h1.room-title").waitFor();
   await expectNoOverflow(page, "room");
   return "menu, practice touch layer, room: no overflow";

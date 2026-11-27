@@ -4,7 +4,7 @@
 
 import os from "node:os";
 import { deflateSync } from "node:zlib";
-import { ADMIN_PASSWORD, PASSWORD, adminRoom, button, createRoom, dismissPhoneSplash, drumOption, freePort, gotoApp, ipIn, joinByInvite, matchWithGuest, menuName, navTo, playFromMenu, regionServers, roomCode, roomTitle, signedIn, sleep, startMatch, startServer, uniqueName } from "./lib.mjs";
+import { ADMIN_PASSWORD, PASSWORD, adminRoom, answerInvite, button, createRoom, dismissPhoneSplash, drumOption, freePort, gotoApp, ipIn, joinByInvite, matchWithGuest, menuName, navTo, playFromMenu, regionServers, roomCode, roomTitle, signedIn, sleep, startMatch, startServer, uniqueName } from "./lib.mjs";
 
 const check = (ok, message) => {
   if (!ok) throw new Error(message);
@@ -627,11 +627,13 @@ async function inviteLinks(s) {
 
   const guest = await s.open("guest", { name: uniqueName("guest") });
   await gotoApp(guest.page, `${s.base}/${code}`);
+  await answerInvite(guest.page);
   await roomTitle(guest.page, roomName).waitFor();
   check(new URL(guest.page.url()).pathname === `/${code}`, `address is ${guest.page.url()}, expected /${code}`);
 
   const query = await s.open("query", { name: uniqueName("q") });
   await gotoApp(query.page, `${s.base}/?room=${code.toLowerCase()}`);
+  await answerInvite(query.page);
   await roomTitle(query.page, roomName).waitFor();
   check(new URL(query.page.url()).pathname === `/${code}`, `?room= address is ${query.page.url()}, expected /${code}`);
 
@@ -654,6 +656,7 @@ async function regionRedirect(s) {
   const sockets = [];
   guest.page.on("websocket", (ws) => sockets.push(ws.url()));
   await gotoApp(guest.page, `${s.base}/${code}`);
+  await answerInvite(guest.page);
   await roomTitle(guest.page, roomName).waitFor();
   const nodePort = new URL(s.env.nodeBase).port;
   check(sockets.some((url) => new URL(url).port === nodePort), `guest sockets ${JSON.stringify(sockets)} never reach the node port ${nodePort}`);
@@ -668,11 +671,34 @@ async function joinAnnounced(s) {
   return `host chat: "${guestName} has joined the game"`;
 }
 
+/** invite prompt: a guest who opens an invite link is asked for a name first, focused and filled with the stored name; Enter joins under the name typed. */
+async function invitePrompt(s) {
+  const { h, code, roomName } = await openHostRoomNamed(s);
+  const guestName = uniqueName("guest");
+  const guest = await s.open("guest", { name: guestName });
+  await gotoApp(guest.page, `${s.base}/${code}`);
+  const prompt = guest.page.getByRole("dialog", { name: `Join room ${code}`, exact: true });
+  await prompt.waitFor({ state: "visible" });
+  const field = prompt.getByRole("textbox", { name: "Your name", exact: true });
+  const shown = await field.inputValue();
+  check(shown === guestName, `the prompt starts with "${shown}", not the stored name ${guestName}`);
+  check(await field.evaluate((el) => el === el.ownerDocument.activeElement), "the name field is not focused");
+  const typed = uniqueName("typed");
+  await field.fill(typed);
+  await field.press("Enter");
+  await roomTitle(guest.page, roomName).waitFor({ state: "visible" });
+  await rosterRows(h.page).filter({ hasText: typed }).waitFor({ state: "visible" });
+  const kept = await guest.page.evaluate(() => localStorage.getItem("neobox.name"));
+  check(kept === typed, `the typed name is kept as "${kept}", not "${typed}"`);
+  return `prompt for ${code} starts with ${guestName} and is focused; Enter joins as "${typed}", listed in the host's roster`;
+}
+
 /** late join: a player who joins while the match runs is taken into it at the current tick (server join), so the HUD opens and the match announces the join. */
 async function lateJoinNotice(s) {
   const { code, roomName } = await matchWithGuest(s);
   const late = await s.open("late", { name: uniqueName("late") });
   await gotoApp(late.page, `${s.base}/${code}`);
+  await answerInvite(late.page);
   await late.page.locator(".hud-root").waitFor({ state: "visible" });
   await late.page.getByText("has joined the game").first().waitFor({ state: "visible" });
   return `late joiner: the match HUD opens with "has joined the game" (room ${roomName})`;
@@ -715,6 +741,7 @@ async function roomTabs(s) {
   const guest = await s.open("guest", { name: uniqueName("guest"), phone: true });
   await gotoApp(guest.page, `${s.base}/${code}`);
   await dismissPhoneSplash(guest.page);
+  await answerInvite(guest.page);
   // Firefox's non-mobile phone context keeps the window size past the splash (see phoneSoloMatch in inv-match.mjs).
   await guest.page.setViewportSize({ width: 390, height: 844 });
   await guest.page.waitForFunction(() => innerWidth === 390);
@@ -732,6 +759,7 @@ async function roomTabs(s) {
   const tiny = await s.open("tiny", { name: uniqueName("tiny"), phone: true, viewport: { width: 320, height: 256 } });
   await gotoApp(tiny.page, `${s.base}/${code}`);
   await dismissPhoneSplash(tiny.page);
+  await answerInvite(tiny.page);
   // Firefox's non-mobile phone context keeps the window size past the splash (as for the guest above).
   await tiny.page.setViewportSize({ width: 320, height: 256 });
   await tiny.page.waitForFunction(() => innerWidth === 320);
@@ -759,14 +787,14 @@ async function reportPlayer(s) {
   await menu.getByRole("menuitem", { name: "Report", exact: true }).click();
   const dialog = page.getByRole("dialog", { name: `Report ${hostName}`, exact: true });
   await dialog.waitFor({ state: "visible" });
-  for (const reason of ["Harassment", "Offensive name", "Cheating", "Other"]) {
+  for (const reason of ["Illegal content", "Harassment or hate", "Cheating", "Spam", "Offensive name", "Other"]) {
     check((await dialog.getByRole("radio", { name: reason, exact: true }).count()) === 1, `the report has no ${reason} reason`);
   }
   await dialog.getByRole("radio", { name: "Cheating", exact: true }).click();
   await dialog.getByRole("button", { name: "Send report", exact: true }).click();
   await page.getByText(`Thanks. An admin will look at ${hostName}.`, { exact: true }).waitFor({ state: "visible" });
   await dialog.waitFor({ state: "hidden" });
-  return `row menu: ["Report"]; "Report ${hostName}" with 4 reasons; Send report -> "Thanks. An admin will look at ${hostName}."`;
+  return `row menu: ["Report"]; "Report ${hostName}" with 6 reasons; Send report -> "Thanks. An admin will look at ${hostName}."`;
 }
 
 // ---------------------------------------------------------------- group 6: host, kick, ban, leave
@@ -1093,6 +1121,7 @@ async function inviteLan(s) {
     check(value === `${s.base}/${code}`, `the invite field reads ${value}, expected ${s.base}/${code}`);
     const guest = await s.open("guest", { name: uniqueName("guest") });
     await guest.page.goto(value);
+    await answerInvite(guest.page);
     await roomTitle(guest.page, roomName).waitFor();
   }
   return `Invite on plain http over the LAN: link ${how}`;
@@ -1124,6 +1153,7 @@ export const roomsInvScenarios = [
   { name: "inv rooms chat settings", inv: ["cmd-settings", "cmd-set", "sys-settings", "cmd-reset", "cmd-mode", "sys-map"], run: chatSettings },
   { name: "inv rooms chat teams", inv: ["cmd-lock", "sys-teams-lock", "cmd-unlock", "cmd-team", "cmd-join", "sys-nobody", "sys-nobody-spec-guest", "sys-nobody-start", "restore-team-host", "restore-team-guest", "sys-countdown", "cmd-start"], run: chatTeams },
   { name: "inv rooms invite links", inv: ["app-invite", "app-invite-query"], run: inviteLinks },
+  { name: "inv rooms invite prompt", inv: ["NEW-invite-prompt"], run: invitePrompt },
   { name: "inv rooms region redirect", inv: ["redirect"], topology: regionServers, run: regionRedirect },
   { name: "inv rooms join announced", inv: ["sys-joined"], run: joinAnnounced },
   { name: "inv rooms late join notice", inv: [], run: lateJoinNotice },

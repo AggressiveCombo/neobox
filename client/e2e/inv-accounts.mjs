@@ -490,7 +490,7 @@ async function libraryFlow(s) {
   await vp.getByText("Map code copied.", { exact: true }).waitFor();
   await dlg.getByRole("button", { name: "Report map", exact: true }).click();
   const report = vp.getByRole("dialog", { name: /Report/ }).first();
-  for (const reason of ["Offensive", "Broken", "Stolen", "Other"]) {
+  for (const reason of ["Illegal content", "Offensive", "Broken", "Stolen", "Spam", "Other"]) {
     check(await report.getByRole("radio", { name: reason, exact: true }).count(), `report reason ${reason} missing`);
   }
   await report.getByRole("radio", { name: "Broken", exact: true }).check();
@@ -685,7 +685,7 @@ async function settingsPrefs(s) {
 
   await section(page, "Chat");
   await page.getByRole("switch", { name: /^Filter profanity/ }).click();
-  check((await prefs(page)).filterProfanity === false, "filterProfanity not stored as false");
+  check((await prefs(page)).filterProfanity === true, "filterProfanity not stored as true");
   return "touch size and left-handed, sound levels and switches, theme, scale, AA, stats, palette, colour picker keys, profanity filter";
 }
 
