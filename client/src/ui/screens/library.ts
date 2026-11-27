@@ -20,7 +20,7 @@ import {
   type MapRecord,
   type Visibility,
 } from "../../account";
-import { sendReport } from "../../api";
+import { MAP_REPORT_REASONS, sendReport } from "../../api";
 import type { AppCtx, ScreenFactory } from "../../ctx";
 import type { AppState } from "../../state";
 import { h, type Child } from "../dom";
@@ -54,11 +54,7 @@ const VISIBILITY_OPTIONS: SegOption<Visibility>[] = (["public", "unlisted", "pri
   label: VISIBILITY_LABELS[v],
 }));
 
-type ReportReason = "Offensive" | "Broken" | "Stolen" | "Other";
-const REPORT_OPTIONS: SegOption<ReportReason>[] = (["Offensive", "Broken", "Stolen", "Other"] as const).map((r) => ({
-  value: r,
-  label: r,
-}));
+const REPORT_OPTIONS: SegOption<string>[] = MAP_REPORT_REASONS.map((r) => ({ value: r.label, label: r.label }));
 
 /** The map dialog: the map as last fetched, and the element its counts and actions are painted into. */
 interface Detail {
@@ -538,7 +534,7 @@ export const libraryScreen: ScreenFactory = (ctx) => {
   }
 
   function openReport(map: LibraryMap): void {
-    let reason: ReportReason = "Offensive";
+    let reason = "Offensive";
     let modal: { close(): void } | undefined;
     let sending = false;
     const formId = uid("report");
@@ -559,7 +555,9 @@ export const libraryScreen: ScreenFactory = (ctx) => {
           formError.textContent = "";
           const extra = details.value.trim();
           try {
-            await sendReport({ kind: "map", map: map.id, reason: extra === "" ? reason : `${reason}: ${extra}` });
+            const category = MAP_REPORT_REASONS.find((r) => r.label === reason)?.category ?? "other";
+            const text = extra === "" ? reason : `${reason}: ${extra}`;
+            await sendReport({ kind: "map", map: map.id, category, reason: text });
             modal?.close();
             ctx.toast("Thanks. An admin will look at this map.");
           } catch (err) {

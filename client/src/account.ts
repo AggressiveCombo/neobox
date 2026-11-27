@@ -132,6 +132,8 @@ export interface LibraryMap {
   pick: boolean;
   my_vote?: number | null;
   favourite?: boolean;
+  /** Why an author's map was removed; shown to the author only. */
+  reject_reason?: string | null;
 }
 
 /** GET /api/library/{id}: the list entry plus the map code. */

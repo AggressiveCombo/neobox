@@ -118,6 +118,7 @@ export async function previewCode(ctx: AppCtx, canvas: HTMLCanvasElement, code: 
 
 /** Visibility and approval state of one of your own maps, e.g. "Public · Awaiting approval". */
 export function mapState(map: LibraryMap): string {
+  if (map.status === "rejected" && map.reject_reason) return `Removed: ${map.reject_reason}`;
   const parts = [VISIBILITY_LABELS[map.visibility]];
   if (map.visibility === "public") parts.push(STATUS_LABELS[map.status]);
   return parts.join(" · ");

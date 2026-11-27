@@ -4,7 +4,7 @@
 
 import { h, labelSwap, showLabel } from "../dom";
 import type { AppCtx, ScreenFactory } from "../../ctx";
-import { sendReport, type BuiltinMap } from "../../api";
+import { PLAYER_REPORT_REASONS, sendReport, type BuiltinMap } from "../../api";
 import type { AppState, ChatLine } from "../../state";
 import {
   GAME_MODES,
@@ -386,9 +386,8 @@ export const roomScreen: ScreenFactory = (ctx: AppCtx) => {
   function openPlayerReport(p: PlayerInfo): void {
     const room = st.room;
     if (room === null) return;
-    type Reason = "Harassment" | "Offensive name" | "Cheating" | "Other";
-    const reasons: SegOption<Reason>[] = (["Harassment", "Offensive name", "Cheating", "Other"] as const).map((r) => ({ value: r, label: r }));
-    let reason: Reason = "Harassment";
+    const reasons: SegOption<string>[] = PLAYER_REPORT_REASONS.map((r) => ({ value: r.label, label: r.label }));
+    let reason = "Harassment or hate";
     let modal: { close(): void } | undefined;
     let sending = false;
     const formId = uid("report");
@@ -409,7 +408,9 @@ export const roomScreen: ScreenFactory = (ctx: AppCtx) => {
           formError.textContent = "";
           const extra = details.value.trim();
           try {
-            await sendReport({ kind: "player", room: room.code, player: p.id, reason: extra === "" ? reason : `${reason}: ${extra}` });
+            const category = PLAYER_REPORT_REASONS.find((r) => r.label === reason)?.category ?? "other";
+            const text = extra === "" ? reason : `${reason}: ${extra}`;
+            await sendReport({ kind: "player", room: room.code, player: p.id, category, reason: text });
             modal?.close();
             ctx.toast(`Thanks. An admin will look at ${p.name}.`);
           } catch (err: unknown) {

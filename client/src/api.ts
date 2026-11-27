@@ -104,11 +104,38 @@ export async function fetchTicket(): Promise<string | null> {
   }
 }
 
+/** Why a report is filed. The admin list sorts illegal content first. */
+export type ReportCategory = "illegal" | "harassment" | "cheating" | "spam" | "inappropriate" | "other";
+
+/** A reason a player picks in a report dialog, and the category the server files it under. */
+export interface ReportReason {
+  label: string;
+  category: ReportCategory;
+}
+
+export const PLAYER_REPORT_REASONS: readonly ReportReason[] = [
+  { label: "Illegal content", category: "illegal" },
+  { label: "Harassment or hate", category: "harassment" },
+  { label: "Cheating", category: "cheating" },
+  { label: "Spam", category: "spam" },
+  { label: "Offensive name", category: "inappropriate" },
+  { label: "Other", category: "other" },
+];
+
+export const MAP_REPORT_REASONS: readonly ReportReason[] = [
+  { label: "Illegal content", category: "illegal" },
+  { label: "Offensive", category: "inappropriate" },
+  { label: "Broken", category: "other" },
+  { label: "Stolen", category: "other" },
+  { label: "Spam", category: "spam" },
+  { label: "Other", category: "other" },
+];
+
 /** A report filed from inside a room (a player, or the room's map), or on a library map from outside any room. */
 export type ReportInput =
-  | { kind: "player"; room: string; player: number; reason: string }
-  | { kind: "map"; room: string; reason: string }
-  | { kind: "map"; map: number; reason: string };
+  | { kind: "player"; room: string; player: number; category: ReportCategory; reason: string }
+  | { kind: "map"; room: string; category: ReportCategory; reason: string }
+  | { kind: "map"; map: number; category: ReportCategory; reason: string };
 
 /** POST /api/report. Resolves once the server has stored the report; errors carry the server's message. */
 export async function sendReport(input: ReportInput): Promise<void> {
