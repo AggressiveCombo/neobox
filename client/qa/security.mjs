@@ -1,5 +1,5 @@
 // Security instrument: XSS payload injection, server name limit, WebSocket origin check, chat
-// rate-limit feedback, and server-side profanity masking.
+// rate-limit feedback, and the per-player profanity filter.
 //
 // Keys (RUBRIC D24 / section 9.1):
 //   sec.xss.hits              payloads that run or inject markup, over the name, room name (room title and
@@ -7,8 +7,8 @@
 //   sec.server.nameLimit      1 when a 16-char hello name is refused with invalid_playername (raw WebSocket).
 //   sec.ws.originRejected     1 when an upgrade with a foreign Origin is refused, or closes before any frame.
 //   sec.chat.rateLimited      1 when 20 chats sent in one tick are cut off by the server and the sender sees a toast.
-//   sec.profanity.viewerMasked  1 when a profane line sent over raw WebSocket shows masked in a browser viewer's room
-//                             chat (filter on), and shows unmasked after the viewer turns the profanity filter off.
+//   sec.profanity.viewerMasked  1 when a profane line sent over raw WebSocket shows as typed in a browser viewer's room
+//                             chat with the default prefs, and shows masked after the viewer turns the profanity filter on.
 //   sec.mod.muteBlocked        1 when a muted guest's chat is refused with a `muted` error and never reaches the host.
 //   sec.mod.kickVisible        1 when a kicked guest receives the `kicked` notice with a reason.
 //   sec.chat.dupDelivered      1 when a host's chat line reaches a watcher exactly once (raw WebSocket).
@@ -643,13 +643,14 @@ async function gotoSettled(page, url) {
 }
 
 /**
- * A raw-WebSocket host (client bypassed) posts profane lines into its room. The browser viewer's own client must
- * mask them with the filter on, and show them as typed after the viewer turns the filter off in settings.
+ * A raw-WebSocket host (client bypassed) posts a rude line into its room. The server does not mask words, so with the
+ * default prefs the browser viewer must see it as typed. After the viewer turns the profanity filter on in settings, a
+ * second rude line must show masked on the viewer's screen.
  */
 async function profanityCase(s, base, { phone = false } = {}) {
   const clean = MODE === "profanity";
-  const first = clean ? "hello there" : "fuck";
-  const second = "shit";
+  const first = "fuck";
+  const second = clean ? "hello there" : "shit";
   const sender = await connect(base);
   if (!sender.raw) return { pass: false, metrics: { "sec.profanity.viewerMasked": 0 }, detail: `upgrade status ${sender.status}` };
   const raw = sender.raw;
@@ -668,11 +669,11 @@ async function profanityCase(s, base, { phone = false } = {}) {
   await joinByInvite(viewer, base, code, roomName);
 
   raw.send({ t: "chat", text: first });
-  const sawFirst = await seenInChat(page, "QAProfanity");
+  const sawFirst = await seenInChat(page, first);
   const shownFirst = sawFirst ? ((await chatLinesWith(page, "QAProfanity")).at(-1) ?? "") : "none";
-  const masked = sawFirst && !/fuck/i.test(shownFirst) && shownFirst.includes("****") ? 1 : 0;
+  const typed = sawFirst && shownFirst.includes(first) ? 1 : 0;
 
-  // Prefs live in page memory, so the viewer leaves the room, changes the setting, and joins again.
+  // Prefs live in page memory, so the viewer leaves the room, turns the filter on, and joins again.
   await page.getByRole("button", { name: "Leave", exact: true }).click();
   await gotoSettled(page, base);
   await menuName(page).waitFor();
@@ -680,20 +681,20 @@ async function profanityCase(s, base, { phone = false } = {}) {
   await sec(page, "Chat");
   await sw(page, "Filter profanity");
   await sleep(300);
-  const off = await page.evaluate(() => JSON.parse(localStorage.getItem("neobox.prefs") ?? "null")?.filterProfanity === false);
+  const on = await page.evaluate(() => JSON.parse(localStorage.getItem("neobox.prefs") ?? "null")?.filterProfanity === true);
   await joinByInvite(viewer, base, code, roomName);
 
   raw.send({ t: "chat", text: second });
-  const sawSecond = await seenInChat(page, second);
-  const shownSecond = sawSecond ? ((await chatLinesWith(page, second)).at(-1) ?? "") : "none";
-  const unmasked = sawSecond && shownSecond.includes(second) ? 1 : 0;
+  const sawSecond = await seenInChat(page, "****");
+  const shownSecond = sawSecond ? ((await chatLinesWith(page, "QAProfanity")).at(-1) ?? "") : "none";
+  const masked = sawSecond && !/shit/i.test(shownSecond) && shownSecond.includes("****") ? 1 : 0;
   raw.close();
 
-  const v = masked === 1 && off && unmasked === 1 ? 1 : 0;
+  const v = typed === 1 && on && masked === 1 ? 1 : 0;
   return {
     pass: v === 1,
     metrics: { "sec.profanity.viewerMasked": v },
-    detail: `filter on: "${shownFirst}" (masked ${masked}); filter off (pref off ${off}): "${shownSecond}" (unmasked ${unmasked})`,
+    detail: `filter off (default): "${shownFirst}" (typed ${typed}); filter on (pref on ${on}): "${shownSecond}" (masked ${masked})`,
   };
 }
 

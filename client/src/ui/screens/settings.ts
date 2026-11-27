@@ -306,7 +306,7 @@ export const settingsScreen: ScreenFactory = (ctx) => {
   );
 
   // Chat
-  const filterProfanity = switchField("Filter profanity", "Masks rude words in other players' chat.", (on) =>
+  const filterProfanity = switchField("Filter profanity", "Off by default. Masks rude words in other players' chat on your own screen only.", (on) =>
     prefs.set({ filterProfanity: on }),
   );
 

@@ -98,7 +98,7 @@ export interface Prefs {
   sfxVolume: number;
   /** Button, toggle, tab, modal and toast sounds. */
   uiSounds: boolean;
-  /** Mask rude words in other players' chat. */
+  /** Mask rude words in other players' chat on this player's screen. Off by default. */
   filterProfanity: boolean;
   /** Jukebox volume (0..1), on top of the master volume. */
   jukeboxVolume: number;
@@ -133,7 +133,7 @@ export const DEFAULT_PREFS: Prefs = {
   musicVolume: 0.6,
   sfxVolume: 0.8,
   uiSounds: true,
-  filterProfanity: true,
+  filterProfanity: false,
   jukeboxVolume: 0.5,
   jukeboxPopup: false,
   theme: "system",
