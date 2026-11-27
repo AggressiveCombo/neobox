@@ -1,7 +1,7 @@
 // Jukebox: a YouTube video the whole room hears together. A small panel shows while the room has one:
 // the title, who suggested it, and the transport. The host plays a link, pauses, resumes or stops it.
 // Everyone hears it at the jukebox volume: the master volume times the jukebox slider.
-// The video plays through YouTube's IFrame player API, loaded on first use.
+// The video plays through YouTube's IFrame player API, loaded on first use once the player allows YouTube.
 // Audio first by default: the owner chose this over YouTube's embed rules. The player stays in the page
 // (clipped out of view) so the audio keeps playing; "Show video" turns on the 16:9 picture.
 
@@ -12,6 +12,7 @@ import type { JukeboxState } from "../protocol";
 import type { AppState } from "../state";
 import { local } from "../storage";
 import { JUKEBOX_VIDEO_KEY } from "../storage-keys";
+import { onYouTubeAllowed, setYouTubeAllowed, youtubeAllowed } from "../youtube-consent";
 import { h } from "./dom";
 import { icon } from "./icons";
 
@@ -23,6 +24,9 @@ const PLAYER_READY_MS = 15000;
 const VIDEO_ID_RE = /^[A-Za-z0-9_-]{11}$/;
 /** YouTube player states that mean "not playing yet": unstarted, paused, cued. */
 const NOT_PLAYING = new Set([-1, 2, 5]);
+/** Shown in the jukebox panel until the player allows YouTube. */
+const YOUTUBE_PROMPT =
+  "This room plays music from YouTube. Turning it on loads YouTube's player, which receives your IP address and may store cookies. If you're under 16, ask a parent or guardian first.";
 
 interface YtPlayer {
   cueVideoById(id: string, start: number): void;
@@ -35,6 +39,7 @@ interface YtPlayer {
   setVolume(volume: number): void;
   mute(): void;
   unMute(): void;
+  destroy(): void;
 }
 
 interface YtApi {
@@ -43,6 +48,7 @@ interface YtApi {
     options: {
       width: string;
       height: string;
+      host: string;
       playerVars: { origin: string };
       events: { onReady: () => void; onError: () => void; onStateChange: (e: { data: number }) => void };
     },
@@ -120,6 +126,8 @@ function writeLarge(large: boolean): void {
 export function mountJukebox(ctx: AppCtx): void {
   let player: YtPlayer | null = null;
   let playerBuild: Promise<YtPlayer> | null = null;
+  /** Bumped when the player is dropped, so a build that finishes late is discarded. */
+  let buildGen = 0;
   /** The video the player has loaded, so a new one is loaded only when it changes. */
   let loadedId: string | null = null;
   let current: JukeboxState | null = null;
@@ -169,11 +177,13 @@ export function mountJukebox(ctx: AppCtx): void {
   /** Creates the player once the API has loaded; it applies the room's state when ready. A load that fails, or a
    *  player that never reports ready, makes the jukebox unavailable until a later attempt succeeds. */
   function ensurePlayer(): void {
-    if (playerBuild !== null) return;
+    if (playerBuild !== null || !youtubeAllowed()) return;
     const { promise, resolve, reject } = Promise.withResolvers<YtPlayer>();
     playerBuild = promise;
+    const gen = buildGen;
     const readyTimer = setTimeout(() => reject(new Error("The video player did not start.")), PLAYER_READY_MS);
     loadApi().then((yt) => {
+      if (gen !== buildGen) return;
       try {
         // YouTube replaces its target with the player frame: a fresh inner node keeps the frame inside the mount,
         // so hiding the mount hides it and clearing the mount removes a frame that becomes ready too late.
@@ -182,6 +192,7 @@ export function mountJukebox(ctx: AppCtx): void {
         const created = new yt.Player(target, {
           width: "100%",
           height: "100%",
+          host: "https://www.youtube-nocookie.com",
           // The page origin lets the embed target its postMessage calls; without it the API warns on each message.
           playerVars: { origin: location.origin },
           events: {
@@ -201,6 +212,10 @@ export function mountJukebox(ctx: AppCtx): void {
     promise.then(
       (p) => {
         clearTimeout(readyTimer);
+        if (gen !== buildGen) {
+          p.destroy();
+          return;
+        }
         player = p;
         unavailable = false;
         applyVolume();
@@ -208,6 +223,7 @@ export function mountJukebox(ctx: AppCtx): void {
       },
       () => {
         clearTimeout(readyTimer);
+        if (gen !== buildGen) return;
         playerBuild = null;
         playerMount.replaceChildren();
         unavailable = true;
@@ -215,6 +231,18 @@ export function mountJukebox(ctx: AppCtx): void {
         render(ctx.store.state);
       },
     );
+  }
+
+  /** Removes the player and forgets its build, so nothing from YouTube stays loaded once it is refused. */
+  function dropPlayer(): void {
+    buildGen++;
+    player?.destroy();
+    player = null;
+    playerBuild = null;
+    loadedId = null;
+    playerState = -1;
+    unavailable = false;
+    playerMount.replaceChildren();
   }
 
   /** Brings the player in line with the room's jukebox: load, play, pause, or seek when it drifted. */
@@ -297,10 +325,13 @@ export function mountJukebox(ctx: AppCtx): void {
     h("div", { class: "jukebox-info" }, title, by, h("div", { class: "jukebox-meta" }, stateChip, sizeBtn)),
     note,
   );
+  const consentBtn = h("button", { type: "button", onclick: () => setYouTubeAllowed(true) }, icon("play", 18), "Allow YouTube");
+  const consent = h("div", { class: "jukebox-consent" }, h("p", { class: "jukebox-note" }, YOUTUBE_PROMPT), consentBtn);
   const panel = h(
     "section",
     { class: "jukebox", "aria-label": "Jukebox", hidden: true },
     topRow,
+    consent,
     tapBtn,
     hostRow,
     h("label", { class: "jukebox-volume" }, h("span", { title: "Volume" }, icon("volume-2", 18)), volume),
@@ -308,18 +339,20 @@ export function mountJukebox(ctx: AppCtx): void {
 
   function render(state: AppState): void {
     const jb = state.room?.jukebox ?? null;
-    const showPanel = jb !== null && prefs.value.jukeboxPopup;
+    const allowed = youtubeAllowed();
+    const showPanel = jb !== null && (prefs.value.jukeboxPopup || !allowed);
     panel.hidden = !showPanel;
     // Keep the iframe inside the clipped audioHost whenever the popup is hidden or video is off,
     // so display:none on the hidden popup never pauses or blocks audio playback.
-    const showVideo = showPanel && large && !unavailable;
+    const showVideo = showPanel && large && !unavailable && allowed;
     const targetParent = showVideo ? topRow : audioHost;
     if (playerMount.parentElement !== targetParent) {
       if (showVideo) topRow.insertBefore(playerMount, note);
       else audioHost.append(playerMount);
     }
     playerMount.toggleAttribute("inert", !showVideo);
-    playerMount.hidden = unavailable;
+    playerMount.hidden = unavailable || !allowed;
+    consent.hidden = allowed;
     if (!showPanel || jb === null) return;
     title.textContent = jb.title;
     // The latest chat line that pasted the room's link names its suggester; the server does not send one.
@@ -327,13 +360,15 @@ export function mountJukebox(ctx: AppCtx): void {
     const suggester = suggests.length > 0 ? suggests[suggests.length - 1].name : null;
     by.hidden = suggester === null;
     by.textContent = suggester === null ? "" : `suggested by ${suggester}`;
-    stateChip.replaceChildren(icon(unavailable ? "triangle-alert" : jb.playing ? "play" : "pause", 14), unavailable ? "Unavailable" : jb.playing ? "Playing" : "Paused");
-    stateChip.className = jb.playing && !unavailable ? "chip ink" : "chip";
+    const silent = !allowed || unavailable;
+    stateChip.replaceChildren(icon(silent ? "triangle-alert" : jb.playing ? "play" : "pause", 14), !allowed ? "Off until allowed" : unavailable ? "Unavailable" : jb.playing ? "Playing" : "Paused");
+    stateChip.className = jb.playing && !unavailable && allowed ? "chip ink" : "chip";
     panel.classList.toggle("is-large", large);
     panel.dataset.playerState = String(playerState);
     sizeBtn.textContent = large ? "Hide video" : "Show video";
+    sizeBtn.hidden = !allowed;
     note.hidden = !unavailable;
-    tapBtn.hidden = unavailable || !jb.playing || !NOT_PLAYING.has(playerState);
+    tapBtn.hidden = unavailable || !allowed || !jb.playing || !NOT_PLAYING.has(playerState);
     toggleBtn.replaceChildren(icon(jb.playing ? "pause" : "play", 18), jb.playing ? "Pause" : "Resume");
     hostRow.hidden = !isHost(state);
   }
@@ -341,6 +376,13 @@ export function mountJukebox(ctx: AppCtx): void {
   document.body.append(audioHost, panel);
   prefs.subscribe(() => {
     applyVolume();
+    render(ctx.store.state);
+  });
+  onYouTubeAllowed((on) => {
+    if (!on) dropPlayer();
+    else if (current !== null) ensurePlayer();
+    apply();
+    music.setJukebox(current?.playing === true && !unavailable && on);
     render(ctx.store.state);
   });
   ctx.store.subscribe((next, prev) => {
@@ -351,7 +393,7 @@ export function mountJukebox(ctx: AppCtx): void {
       if (jb === null) unavailable = false;
       if (jb !== null) ensurePlayer();
       apply();
-      music.setJukebox(jb?.playing === true && !unavailable);
+      music.setJukebox(jb?.playing === true && !unavailable && youtubeAllowed());
     }
     if (next.room !== prev.room || next.myId !== prev.myId || next.chat !== prev.chat) render(next);
   });

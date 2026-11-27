@@ -15,6 +15,7 @@ import { clear, h } from "../dom";
 import { countryName, flagUrl, formatDistance, sortRooms } from "../../rooms";
 import { field, openModal, page, pageHead, toggle, uid } from "../kit";
 import { icon } from "../icons";
+import { youtubeAllowed } from "../../youtube-consent";
 
 const SVG_NS = "http://www.w3.org/2000/svg";
 const DEFAULT_MAX_PLAYERS = 32;
@@ -49,7 +50,9 @@ function lockIcon(): SVGSVGElement {
 /** The playing video's thumbnail and title in a room's map cell; nothing when no jukebox is playing. */
 function jukeboxCell(box: { video: string; title: string }): HTMLElement {
   const thumb = YT_ID_RE.test(box.video)
-    ? h("img", { class: "room-thumb", src: `https://i.ytimg.com/vi/${box.video}/default.jpg`, alt: "", loading: "lazy" })
+    ? youtubeAllowed()
+      ? h("img", { class: "room-thumb", src: `https://i.ytimg.com/vi/${box.video}/default.jpg`, alt: "", loading: "lazy" })
+      : h("span", { class: "room-thumb", "aria-hidden": "true" })
     : null;
   return h("span", { class: "room-jukebox", title: box.title }, thumb, h("span", { class: "room-track" }, box.title));
 }
@@ -359,7 +362,7 @@ export const browserScreen: ScreenFactory = (ctx) => {
     );
     // Thumbnails load small; hovering or focusing the row swaps in the larger one.
     const sharpen = (): void => {
-      for (const img of row.querySelectorAll<HTMLImageElement>(".room-thumb")) {
+      for (const img of row.querySelectorAll<HTMLImageElement>("img.room-thumb")) {
         img.src = img.src.replace("/default.jpg", "/hqdefault.jpg");
       }
     };

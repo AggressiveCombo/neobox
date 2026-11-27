@@ -5,6 +5,7 @@
 import { prefs, type Prefs } from "../prefs";
 import { h } from "./dom";
 import { toggle } from "./kit";
+import { onYouTubeAllowed, setYouTubeAllowed, youtubeAllowed } from "../youtube-consent";
 
 interface Level {
   el: HTMLElement;
@@ -62,6 +63,19 @@ export function soundSettingsSection(): HTMLElement {
     flag("Interface sounds", "Hovers, clicks, switches, tabs, dialogs and toasts.", (p) => p.uiSounds, (on) => prefs.set({ uiSounds: on })),
     flag("Jukebox popup", "Show the floating jukebox controls when a song plays (audio plays either way).", (p) => p.jukeboxPopup, (on) => prefs.set({ jukeboxPopup: on })),
   ];
+  const youtube = toggle(
+    "Allow YouTube",
+    youtubeAllowed(),
+    (on) => setYouTubeAllowed(on),
+    "Jukebox videos load YouTube's player only while this is on. The player receives your IP address and may store cookies.",
+  );
+  const youtubeBox = youtube.querySelector("input");
+  if (!youtubeBox) throw new Error("toggle without a switch");
+  const unsubscribe = onYouTubeAllowed((on) => {
+    youtubeBox.checked = on;
+    // The Sound panel is built each time Settings opens: stop listening once it has left the page.
+    if (!root.isConnected) unsubscribe();
+  });
 
   const root = h(
     "div",
@@ -70,6 +84,7 @@ export function soundSettingsSection(): HTMLElement {
     music.el,
     effects.el,
     jukebox.el,
+    youtube,
     ...switches.map((s) => s.el),
   );
 

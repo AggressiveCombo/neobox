@@ -21,6 +21,8 @@ export const TRAINING_SEEN_KEY = "neobox.hintSeen";
 export const PREFS_PENDING_KEY = "neobox.prefsPending";
 /** The jukebox shows its video at 16:9: a choice made on this device, off by default so the room hears music only. */
 export const JUKEBOX_VIDEO_KEY = "neobox.jukeboxVideo";
+/** Whether the player may load YouTube for jukebox videos and room thumbnails: off until the player allows it. */
+export const YOUTUBE_ALLOWED_KEY = "neobox.youtubeAllowed";
 
 export interface StorageKey {
   key: string;
@@ -42,5 +44,6 @@ export const STORAGE_KEYS: readonly StorageKey[] = [
   { key: PHONE_SPLASH_SEEN_KEY, scope: "local", purpose: "whether you have seen the phone welcome" },
   { key: TRAINING_SEEN_KEY, scope: "local", purpose: "whether you have dismissed the Training badge" },
   { key: JUKEBOX_VIDEO_KEY, scope: "local", purpose: "whether the jukebox shows its video large" },
+  { key: YOUTUBE_ALLOWED_KEY, scope: "local", purpose: "whether you allowed YouTube's player to load for jukebox videos and room thumbnails" },
   { key: SEAT_STORAGE_KEY, scope: "session", purpose: "the room seat you hold, so a reload can rejoin the match" },
 ];
