@@ -1,0 +1,28 @@
+/* The join prompt for an invite link (invite-prompt.ts): a modal with one name field. */
+
+.invite-dialog {
+  width: min(calc(100vw - 32px), 400px);
+}
+
+.invite-form {
+  margin: 0;
+}
+
+/* 16px stops iOS zooming the page into the field when it is focused. */
+.invite-name-input {
+  font-size: 16px;
+}
+
+/* The error line keeps its place when a message appears, so the dialog does not change height under the keyboard. */
+.invite-dialog .field-error:empty {
+  display: block;
+  min-height: 1.5em;
+}
+
+/* Phones: pinned to the top, so the keyboard and a message do not move the dialog. */
+@media (max-width: 600px) {
+  .invite-dialog {
+    margin-top: max(16px, env(safe-area-inset-top));
+    margin-bottom: auto;
+  }
+}

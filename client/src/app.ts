@@ -21,7 +21,7 @@ import { local, session } from "./storage";
 import { aboutScreen } from "./ui/screens/about";
 import { browserScreen } from "./ui/screens/browser";
 import { hudScreen } from "./ui/screens/hud";
-import { guestName, menuScreen } from "./ui/screens/menu";
+import { guestName, menuScreen, nameProblem, readStoredName, writeStoredName } from "./ui/screens/menu";
 import { roomScreen } from "./ui/screens/room";
 import { practiceScreen } from "./ui/screens/practice";
 import { settingsScreen } from "./ui/screens/settings";
@@ -37,6 +37,7 @@ import { privacyScreen } from "./ui/screens/privacy";
 import { termsScreen } from "./ui/screens/terms";
 import { mountJukebox } from "./ui/jukebox";
 import { mountFeedbackBar, openFeedbackModal } from "./ui/feedback";
+import { openInvitePrompt } from "./ui/invite-prompt";
 import { showPostGame } from "./ui/postgame";
 import { prefs } from "./prefs";
 import { music } from "./music";
@@ -177,6 +178,10 @@ export function start(): Store<AppState> {
   let pendingJoin: { room: string; password: string | null } | null = null;
   /** The screen a join was started from: Back or Cancel on its pending state returns there. */
   let joinFrom: Screen = "browse";
+  /** The room an invite link named, from its join until the server answers: a name the server refuses sends the player back to the prompt. */
+  let inviteJoin: string | null = null;
+  /** The room an invite named when the player chose Sign in: joined once the account is in place. */
+  let inviteAfterSignIn: string | null = null;
   /** The room we are in and its resume token (from `joined`); kept across a dropped connection. */
   let roomCode: string | null = null;
   let resumeToken: string | null = null;
@@ -434,10 +439,17 @@ export function start(): Store<AppState> {
     openFeedback: (kind) => openFeedbackModal(ctx, kind),
   };
 
-  // A signed-in player joins under the account's name, so the invite waits for the account lookup.
+  // A signed-in player, or a tab that already holds a seat in the room (a reload), joins at once; a guest first gives the name
+  // to join under, in the invite prompt.
   const invite = inviteFromUrl();
   startAccountSync(ctx, () => {
-    if (invite !== null && "code" in invite) joinRoom(invite.code);
+    if (invite === null || !("code" in invite)) return;
+    if (store.state.account !== null || seat(invite.code) !== null) {
+      joinRoom(invite.code);
+      return;
+    }
+    const stored = readStoredName();
+    promptInvite(invite.code, nameProblem(stored) === null ? stored : guestName());
   });
   mountJukebox(ctx);
   mountFeedbackBar(ctx);
@@ -508,6 +520,18 @@ export function start(): Store<AppState> {
     window.removeEventListener("keydown", escapeBack);
     window.addEventListener("keydown", escapeBack);
   }
+
+  // Sign in from an invite's prompt: the invite is joined once the account is in (applyAccount has reconnected by then).
+  // Leaving the Account screen without signing in drops it.
+  store.subscribe((state, prev) => {
+    if (inviteAfterSignIn === null) return;
+    if (state.account !== null && prev.account === null) {
+      const code = inviteAfterSignIn;
+      inviteAfterSignIn = null;
+      // Runs after applyAccount's own reconnect, which a join made now would cancel.
+      queueMicrotask(() => joinRoom(code));
+    } else if (state.account === null && state.screen !== "account") inviteAfterSignIn = null;
+  });
 
   store.subscribe((state, prev) => {
     if (state.screen !== mounted) mount(state.screen);
@@ -909,6 +933,7 @@ export function start(): Store<AppState> {
   function handleServer(msg: ServerMsg): void {
     switch (msg.t) {
       case "welcome": {
+        inviteJoin = null;
         // A reconnect rejoins the room with its resume token; the screen stays where it was.
         if (store.state.reconnecting && roomCode !== null && resumeToken !== null) {
           resuming = true;
@@ -948,6 +973,7 @@ export function start(): Store<AppState> {
         return;
       }
       case "joined":
+        inviteJoin = null;
         resumeToken = msg.token;
         store.set({ myId: msg.you });
         if (resuming || store.state.reconnecting) {
@@ -958,6 +984,14 @@ export function start(): Store<AppState> {
       case "error": {
         if (msg.code === "outdated") {
           versionRefused();
+          return;
+        }
+        // The invite's join has its answer: a name the server refuses goes back to the prompt, with the reason.
+        const invited = inviteJoin;
+        inviteJoin = null;
+        if (msg.code === "bad_name" && invited !== null) {
+          disconnect();
+          promptInvite(invited, store.state.name, msg.message);
           return;
         }
         if (resuming) {
@@ -1231,6 +1265,30 @@ export function start(): Store<AppState> {
     }
     pendingName = name;
     if (net.status === "closed") net.connect(socketUrl());
+  }
+
+  /**
+   * Ask a guest which name to join invite `code` under; `error` is the server's reason for refusing the last try. The address
+   * leaves the bar at once: a reload starts the menu, and a cancelled prompt leaves no invite behind.
+   */
+  function promptInvite(code: string, name: string, error?: string): void {
+    history.replaceState(history.state, "", "/");
+    openInvitePrompt({
+      code,
+      name,
+      error,
+      onJoin: (typed) => {
+        writeStoredName(typed);
+        store.set({ name: typed });
+        // Offline, joinRoom only says so: nothing is sent, so no refusal is coming.
+        if (navigator.onLine) inviteJoin = code;
+        joinRoom(code);
+      },
+      onSignIn: () => {
+        inviteAfterSignIn = code;
+        store.set({ screen: "account" });
+      },
+    });
   }
 
   /**
