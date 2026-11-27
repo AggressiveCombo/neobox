@@ -6,13 +6,14 @@
 use crate::backend::{Backend, MapCommandBody, RecordBody, StatsBody, XpBody};
 use crate::geo::distance_km;
 use crate::hub::Hub;
-use crate::room::{gather_evidence, AdminCmd, Evidence, RoomCmd, RoomSummary};
+use crate::room::{gather_evidence, AdminCmd, Evidence, RoomCmd, RoomSummary, Voter};
 use axum::extract::{Path, Query, State};
 use axum::http::{header, HeaderMap, StatusCode, Uri};
 use axum::response::{IntoResponse, Redirect, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use serde::{Deserialize, Serialize};
+use std::net::IpAddr;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -138,6 +139,23 @@ pub fn router() -> Router<Arc<Hub>> {
         .route("/internal/maps/{id}/play", post(record_play))
         .route("/internal/admin", post(admin))
         .route("/internal/evidence", post(evidence))
+        .route("/internal/ip-ban", get(ip_ban))
+}
+
+/// The ban message for an address, or `null` when it may connect. Game nodes ask the main server.
+async fn ip_ban(State(hub): State<Arc<Hub>>, headers: HeaderMap, Query(q): Query<IpQuery>) -> Response {
+    if !authorized(&hub, &headers) {
+        return denied();
+    }
+    match hub.backend.ip_ban(q.ip).await {
+        Ok(msg) => Json(msg).into_response(),
+        Err(e) => failed(e),
+    }
+}
+
+#[derive(Deserialize)]
+struct IpQuery {
+    ip: IpAddr,
 }
 
 async fn heartbeat(State(hub): State<Arc<Hub>>, headers: HeaderMap, Json(b): Json<Beat>) -> Response {
@@ -244,15 +262,16 @@ fn node_http() -> &'static reqwest::Client {
 }
 
 /// The evidence of `room` for a report: from this server's room, or from the
-/// node that runs it. `Ok(None)` when no live room has that code.
-pub async fn room_evidence(hub: &Hub, room: &str, player: Option<u32>) -> Result<Option<Evidence>, String> {
+/// node that runs it. `Ok(None)` when no live room has that code. `reporter` is
+/// who filed the report about `player`, for the room's auto-mute.
+pub async fn room_evidence(hub: &Hub, room: &str, player: Option<u32>, reporter: Option<Voter>) -> Result<Option<Evidence>, String> {
     if let Some(handle) = hub.room(room) {
-        return Ok(gather_evidence(&handle, player).await);
+        return Ok(gather_evidence(&handle, player, reporter).await);
     }
     let Some(node) = node_with_room(hub, room) else {
         return Ok(None);
     };
-    let body = serde_json::to_vec(&serde_json::json!({ "room": room, "player": player })).unwrap_or_default();
+    let body = serde_json::to_vec(&serde_json::json!({ "room": room, "player": player, "reporter": reporter })).unwrap_or_default();
     let resp = node_http()
         .post(format!("{}/internal/evidence", node.url))
         .bearer_auth(&hub.cfg.cluster_secret)
@@ -275,6 +294,8 @@ pub async fn room_evidence(hub: &Hub, room: &str, player: Option<u32>) -> Result
 struct EvidenceBody {
     room: String,
     player: Option<u32>,
+    #[serde(default)]
+    reporter: Option<Voter>,
 }
 
 async fn evidence(State(hub): State<Arc<Hub>>, headers: HeaderMap, Json(b): Json<EvidenceBody>) -> Response {
@@ -284,7 +305,7 @@ async fn evidence(State(hub): State<Arc<Hub>>, headers: HeaderMap, Json(b): Json
     let Some(handle) = hub.room(&b.room) else {
         return StatusCode::NOT_FOUND.into_response();
     };
-    match gather_evidence(&handle, b.player).await {
+    match gather_evidence(&handle, b.player, b.reporter).await {
         Some(ev) => Json(ev).into_response(),
         None => StatusCode::NOT_FOUND.into_response(),
     }

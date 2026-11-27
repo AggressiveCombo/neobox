@@ -2,7 +2,7 @@
 //! match runs, the authoritative input timeline ticking at the room's rate.
 
 use crate::hub::{close, AccountRef, ConnInfo, Hub, Out, RoomHandle};
-use crate::{award, emoji, qa_events, youtube};
+use crate::{award, emoji, moderation, qa_events, youtube};
 use base64::Engine;
 use neobox_net::*;
 use neobox_sim::start::Outcome;
@@ -28,6 +28,11 @@ const HISTORY: usize = 256;
 const MAX_CATCHUP: u32 = 90;
 /// A player whose connection dropped unexpectedly keeps their slot this long.
 const LOST_LIMIT: Duration = Duration::from_secs(60);
+/// Reports on one player within this window count towards an auto-mute.
+const REPORT_WINDOW: Duration = Duration::from_secs(10 * 60);
+/// Distinct reporters that mute a player (see `count_report`).
+const REPORTS_TO_MUTE: usize = 3;
+
 /// A page left during a match (`conn::LEAVE_CODE`) keeps the slot briefly so F5 reloads resume, without leaving a
 /// closed tab stuck on "Reconnecting" for a minute.
 const LEAVING_LIMIT: Duration = Duration::from_secs(5);
@@ -72,8 +77,8 @@ pub enum RoomCmd {
     Frame { player: u32, frame: ClientFrame, out: mpsc::UnboundedSender<Out> },
     Admin(AdminCmd),
     View { reply: oneshot::Sender<Option<(Vec<u8>, bool)>> },
-    /// What a report keeps of the room; `player` is the one reported.
-    Evidence { player: Option<u32>, reply: oneshot::Sender<Evidence> },
+    /// What a report keeps of the room; `player` is the one reported, `reporter` who filed it.
+    Evidence { player: Option<u32>, reporter: Option<Voter>, reply: oneshot::Sender<Evidence> },
     /// The title of a suggested video arrived (fetched off the room task).
     Suggested { from: u32, name: String, video: String, title: String },
     /// The title of the jukebox video arrived.
@@ -365,6 +370,10 @@ pub struct Room {
     closed: bool,
     /// The last chat lines, kept for reports.
     chat_log: VecDeque<ReportChat>,
+    /// Refuses a sender's third identical line within 30 seconds.
+    repeats: moderation::RepeatGuard<u32>,
+    /// Reports on players in this room, for the auto-mute (see `count_report`).
+    report_votes: Vec<ReportVote>,
     /// Chat budgets (see [`ChatKey`]).
     chat_buckets: HashMap<ChatKey, ChatBucket>,
 }
@@ -383,11 +392,47 @@ pub struct Evidence {
     pub chat: Vec<ReportChat>,
 }
 
-/// Ask a room task for its evidence. `None` once the room has closed.
-pub async fn gather_evidence(room: &RoomHandle, player: Option<u32>) -> Option<Evidence> {
+/// Who filed a report: the address and the signed-in account, if any.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct Voter {
+    pub ip: String,
+    pub account: Option<i64>,
+}
+
+impl Voter {
+    /// The account, or for a guest the address: two reports count as different reporters only if both differ.
+    fn who(&self) -> String {
+        match self.account {
+            Some(a) => format!("account:{a}"),
+            None => format!("guest:{}", self.ip),
+        }
+    }
+}
+
+/// A report on a player in the room, kept for the auto-mute.
+struct ReportVote {
+    at: Instant,
+    player: u32,
+    voter: Voter,
+}
+
+/// Ask a room task for its evidence, with the reporter when a player is reported. `None` once the room has closed.
+pub async fn gather_evidence(room: &RoomHandle, player: Option<u32>, reporter: Option<Voter>) -> Option<Evidence> {
     let (reply, rx) = oneshot::channel();
-    room.tx.send(RoomCmd::Evidence { player, reply }).ok()?;
+    room.tx.send(RoomCmd::Evidence { player, reporter, reply }).ok()?;
     rx.await.ok()
+}
+
+/// How many of `voters` count as different reporters: each one's address and account-or-guest must differ from every
+/// counted one. Greedy, so it can undercount.
+fn distinct_reporters(voters: &[&Voter]) -> usize {
+    let mut kept: Vec<&Voter> = Vec::new();
+    for v in voters {
+        if kept.iter().all(|k| k.ip != v.ip && k.who() != v.who()) {
+            kept.push(v);
+        }
+    }
+    kept.len()
 }
 
 /// How a new room starts.
@@ -479,6 +524,8 @@ pub fn spawn(
         created: now_ms(),
         closed: false,
         chat_log: VecDeque::new(),
+        repeats: moderation::RepeatGuard::new(),
+        report_votes: Vec::new(),
         chat_buckets: HashMap::new(),
     };
     let handle = RoomHandle { tx, summary };
@@ -634,7 +681,10 @@ impl Room {
                 }
             }
             RoomCmd::Admin(a) => self.admin(a),
-            RoomCmd::Evidence { player, reply } => {
+            RoomCmd::Evidence { player, reporter, reply } => {
+                if let (Some(id), Some(voter)) = (player, reporter) {
+                    self.count_report(id, voter);
+                }
                 let _ = reply.send(self.evidence(player));
             }
             RoomCmd::View { reply } => {
@@ -727,6 +777,46 @@ impl Room {
             self.chat_log.pop_front();
         }
         self.chat_log.push_back(ReportChat { name: name.into(), text: text.into(), at: (now_ms() / 1000) as i64 });
+    }
+
+    /// Records a report on `player` by `voter`. Reports from different addresses by different accounts or guests
+    /// within 10 minutes mute the player.
+    fn count_report(&mut self, player: u32, voter: Voter) {
+        if self.player(player).is_none() {
+            return;
+        }
+        let now = Instant::now();
+        self.report_votes.retain(|v| now.duration_since(v.at) <= REPORT_WINDOW);
+        self.report_votes.push(ReportVote { at: now, player, voter });
+        let voters: Vec<&Voter> = self.report_votes.iter().filter(|v| v.player == player).map(|v| &v.voter).collect();
+        if distinct_reporters(&voters) < REPORTS_TO_MUTE || self.player(player).is_some_and(|p| p.muted) {
+            return;
+        }
+        self.report_votes.retain(|v| v.player != player);
+        self.auto_mute(player);
+    }
+
+    /// Mutes `player` after reports from several players, and tells the player and the host.
+    fn auto_mute(&mut self, player: u32) {
+        let Some(name) = self.set_muted(player, true) else { return };
+        let line = format!("{name} was muted after reports from several players.");
+        self.notice(player, &line);
+        if let Some(host) = self.host.filter(|h| *h != player) {
+            self.notice(host, &line);
+        }
+    }
+
+    /// Sets a player's mute for this room; the mute keys keep it across a rejoin. Returns the player's name.
+    fn set_muted(&mut self, player: u32, muted: bool) -> Option<String> {
+        let p = self.player_mut(player)?;
+        p.muted = muted;
+        let keys = conn_keys(&p.ip, p.account.as_ref());
+        let name = p.name.clone();
+        self.mutes.retain(|m| !m.iter().any(|k| keys.contains(k)));
+        if muted {
+            self.mutes.push(keys);
+        }
+        Some(name)
     }
 
     fn is_host(&self, id: u32) -> bool {
@@ -1170,6 +1260,9 @@ impl Room {
                     });
                     return;
                 }
+                if !self.repeats.allow(&id, &text, Instant::now()) {
+                    return self.error(id, "repeat", "Don't repeat the same message.");
+                }
                 let text = emoji::replace_shortcodes(&text);
                 self.keep_chat(&name, &text);
                 let m = json(&ServerMsg::Chat { from: Some(id), name, text });
@@ -1381,14 +1474,7 @@ impl Room {
                 if player == id && muted {
                     return;
                 }
-                let Some(p) = self.player_mut(player) else { return };
-                p.muted = muted;
-                let keys = conn_keys(&p.ip, p.account.as_ref());
-                let name = p.name.clone();
-                self.mutes.retain(|m| !m.iter().any(|k| keys.contains(k)));
-                if muted {
-                    self.mutes.push(keys);
-                }
+                let Some(name) = self.set_muted(player, muted) else { return };
                 if muted {
                     self.notice(player, "The host muted you: your chat lines are not sent");
                     self.system_chat(&format!("{name} was muted"));
@@ -2265,5 +2351,84 @@ mod tests {
         say(&room, guest_id, &guest_out, "hi");
         settle(&room).await;
         assert!(texts(&mut guest_rx).iter().any(|t| t.contains("\"text\":\"hi\"")));
+    }
+
+    fn voter(ip: &str, account: Option<i64>) -> Voter {
+        Voter { ip: ip.into(), account }
+    }
+
+    /// Files a report on `player` by `reporter`, as the report endpoint does.
+    fn report(room: &RoomHandle, player: u32, reporter: Voter) {
+        let (reply, _rx) = oneshot::channel();
+        let _ = room.tx.send(RoomCmd::Evidence { player: Some(player), reporter: Some(reporter), reply });
+    }
+
+    /// The server messages received so far, parsed; each has its tag in `t`.
+    fn msgs(rx: &mut mpsc::UnboundedReceiver<Out>) -> Vec<serde_json::Value> {
+        texts(rx).iter().filter_map(|t| serde_json::from_str(t).ok()).collect()
+    }
+
+    #[test]
+    fn reports_count_distinct_reporters_only() {
+        let a = voter("10.0.0.1", Some(1));
+        let b = voter("10.0.0.2", Some(2));
+        let c = voter("10.0.0.3", None);
+        assert_eq!(distinct_reporters(&[&a, &b, &c]), 3);
+        // one account from two addresses, and two guests behind one address, count once
+        let a_elsewhere = voter("10.0.0.9", Some(1));
+        assert_eq!(distinct_reporters(&[&a, &a_elsewhere]), 1);
+        let g1 = voter("10.0.0.5", None);
+        let g2 = voter("10.0.0.5", None);
+        assert_eq!(distinct_reporters(&[&g1, &g2]), 1);
+        // the same address with two accounts is one reporter
+        let same_ip = voter("10.0.0.1", Some(7));
+        assert_eq!(distinct_reporters(&[&a, &same_ip]), 1);
+    }
+
+    #[tokio::test]
+    async fn third_identical_chat_line_is_refused() {
+        let (hub, _) = start().await;
+        let room = new_room(hub);
+        let (host, mut host_rx) = conn("Host", "10.0.0.1");
+        let _host_id = join(&room, host).await;
+        let (guest, mut guest_rx) = conn("Guest", "10.0.0.2");
+        let guest_out = guest.out.clone();
+        let guest_id = join(&room, guest).await;
+        for _ in 0..3 {
+            say(&room, guest_id, &guest_out, "same");
+        }
+        settle(&room).await;
+        let delivered = msgs(&mut host_rx).iter().filter(|m| m["t"] == "chat" && m["text"] == "same").count();
+        assert_eq!(delivered, 2);
+        assert!(msgs(&mut guest_rx).iter().any(|m| m["t"] == "error" && m["message"] == "Don't repeat the same message."));
+    }
+
+    #[tokio::test]
+    async fn three_reporters_mute_a_player_but_one_address_does_not() {
+        let (hub, _) = start().await;
+        let room = new_room(hub);
+        let (host, mut host_rx) = conn("Host", "10.0.0.1");
+        let _host_id = join(&room, host).await;
+        let (guest, mut guest_rx) = conn("Guest", "10.0.0.2");
+        let guest_out = guest.out.clone();
+        let guest_id = join(&room, guest).await;
+
+        // three reports from one address are one reporter
+        report(&room, guest_id, voter("10.0.1.1", Some(11)));
+        report(&room, guest_id, voter("10.0.1.1", Some(12)));
+        report(&room, guest_id, voter("10.0.1.1", Some(13)));
+        settle(&room).await;
+        assert!(!msgs(&mut guest_rx).iter().any(|m| m["text"].as_str().is_some_and(|t| t.contains("muted after reports"))));
+
+        // a third distinct reporter mutes the player, and both are told
+        report(&room, guest_id, voter("10.0.2.1", Some(21)));
+        report(&room, guest_id, voter("10.0.3.1", None));
+        settle(&room).await;
+        let line = "Guest was muted after reports from several players.";
+        assert!(msgs(&mut guest_rx).iter().any(|m| m["text"] == line));
+        assert!(msgs(&mut host_rx).iter().any(|m| m["text"] == line));
+        say(&room, guest_id, &guest_out, "hello");
+        settle(&room).await;
+        assert!(msgs(&mut guest_rx).iter().any(|m| m["t"] == "error" && m["code"] == "muted"));
     }
 }

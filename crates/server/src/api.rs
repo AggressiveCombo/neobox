@@ -4,6 +4,7 @@
 use crate::admin::client_ip;
 use crate::cluster;
 use crate::hub::{AccountRef, Hub, Limiter};
+use crate::room::Voter;
 use axum::body::Bytes;
 use axum::extract::{ConnectInfo, DefaultBodyLimit, Path, Query, State};
 use axum::http::{header, HeaderMap, StatusCode};
@@ -13,7 +14,7 @@ use axum::{Json, Router};
 use neobox_net::level_of;
 use neobox_store::{
     Account, Error, FeedbackKind, FriendState, MapDetail, MapSummary, MatchStats, NewFeedback, NewReport, Profile, ProfileMap, Record,
-    ReportKind, ReportedMap, Reporter, Sort, Status, Store, Visibility, MAX_CODE_BYTES, SESSION_TTL,
+    ReportCategory, ReportKind, ReportedMap, Reporter, Sort, Status, Store, Visibility, MAX_CODE_BYTES, SESSION_TTL,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
@@ -40,6 +41,7 @@ pub fn router() -> Router<Arc<Hub>> {
         .route("/api/account/logout", post(logout))
         .route("/api/account/password", post(change_password))
         .route("/api/account/delete", post(delete_account))
+        .route("/api/account/export", get(export_account))
         .route("/api/account/prefs", get(get_prefs).put(put_prefs))
         .route("/api/friends", get(friends))
         .route("/api/friends/request", post(friend_request))
@@ -81,6 +83,7 @@ impl From<Error> for Fail {
             Error::BadLogin => StatusCode::UNAUTHORIZED,
             Error::NotFound => StatusCode::NOT_FOUND,
             Error::Forbidden(_) => StatusCode::FORBIDDEN,
+            Error::Suspended(_) | Error::Banned(_) => StatusCode::FORBIDDEN,
             Error::Conflict(_) => StatusCode::CONFLICT,
             Error::Internal(m) => {
                 error!(%m, "store failure");
@@ -142,9 +145,19 @@ pub async fn socket_account(hub: &Hub, headers: &HeaderMap) -> Option<AccountRef
     signed_in(hub, headers).await.ok().map(|a| AccountRef { id: a.id, name: a.name })
 }
 
-/// Count a sign-in or registration attempt from this address.
-fn attempt(hub: &Hub, headers: &HeaderMap, peer: SocketAddr) -> Result<(), Fail> {
-    if hub.account_login.allow(client_ip(hub, headers, peer)) {
+/// The refusal for a banned address: its ban's message, or `None` when it may
+/// connect. A game node asks the main server, which keeps the bans.
+pub(crate) async fn ip_ban_message(hub: &Hub, ip: IpAddr) -> Result<Option<String>, Fail> {
+    Ok(hub.backend.ip_ban(ip).await.map_err(Error::Internal)?)
+}
+
+/// Count a sign-in or registration attempt from this address; a banned address is refused.
+async fn attempt(hub: &Hub, headers: &HeaderMap, peer: SocketAddr) -> Result<(), Fail> {
+    let ip = client_ip(hub, headers, peer);
+    if let Some(msg) = ip_ban_message(hub, ip).await? {
+        return Err(Fail::new(StatusCode::FORBIDDEN, &msg));
+    }
+    if hub.account_login.allow(ip) {
         Ok(())
     } else {
         Err(Fail::new(StatusCode::TOO_MANY_REQUESTS, "Too many attempts, wait a minute"))
@@ -262,7 +275,7 @@ async fn register(
     headers: HeaderMap,
     Json(b): Json<Credentials>,
 ) -> Result<Response, Fail> {
-    attempt(&hub, &headers, peer)?;
+    attempt(&hub, &headers, peer).await?;
     let acc = db(&hub, move |s| s.register(&b.name, &b.password)).await?;
     sign_in(&hub, &headers, acc, b.remember).await
 }
@@ -273,7 +286,7 @@ async fn login(
     headers: HeaderMap,
     Json(b): Json<Credentials>,
 ) -> Result<Response, Fail> {
-    attempt(&hub, &headers, peer)?;
+    attempt(&hub, &headers, peer).await?;
     let acc = db(&hub, move |s| s.login(&b.name, &b.password)).await?;
     sign_in(&hub, &headers, acc, b.remember).await
 }
@@ -325,6 +338,14 @@ async fn put_prefs(State(hub): State<Arc<Hub>>, headers: HeaderMap, body: Bytes)
     let json = String::from_utf8(body.to_vec()).map_err(|_| Error::Invalid("Preferences must be UTF-8"))?;
     db(&hub, move |s| s.set_prefs(id, &json)).await?;
     Ok(StatusCode::NO_CONTENT)
+}
+
+/// Everything stored about the signed-in account, as a JSON download.
+async fn export_account(State(hub): State<Arc<Hub>>, headers: HeaderMap) -> Result<Response, Fail> {
+    let me = signed_in(&hub, &headers).await?.id;
+    let doc = db(&hub, move |s| s.export_account(me)).await?;
+    let disposition = [(header::CONTENT_DISPOSITION, "attachment; filename=\"neobox-export.json\"")];
+    Ok((disposition, Json(doc)).into_response())
 }
 
 // Friends
@@ -419,6 +440,9 @@ pub struct MapJson {
     pub my_vote: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub favourite: Option<bool>,
+    /// Why an admin rejected the map; set for the map's author only.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reject_reason: Option<String>,
 }
 
 impl MapJson {
@@ -436,6 +460,7 @@ impl MapJson {
             pick: m.pick > 0,
             my_vote: None,
             favourite: None,
+            reject_reason: None,
         }
     }
 }
@@ -449,14 +474,22 @@ pub struct MapDetailJson {
 }
 
 impl MapDetailJson {
-    /// `signed_in`: whether the viewer has an account, which decides if their vote and star are shown.
-    pub fn of(d: MapDetail, signed_in: bool) -> MapDetailJson {
+    /// `viewer`: the signed-in viewer, if any. Their vote and star are shown, and on their own map the rejection reason.
+    pub fn of(d: MapDetail, viewer: Option<i64>) -> MapDetailJson {
         let mut map = MapJson::of(&d.map);
-        if signed_in {
+        if viewer.is_some() {
             map.my_vote = Some(d.vote);
             map.favourite = Some(d.favourite);
         }
+        show_reason(&mut map, &d.map, viewer);
         MapDetailJson { map, code: d.code }
+    }
+}
+
+/// The rejection reason goes to the map's author only (the statement of reasons).
+fn show_reason(j: &mut MapJson, m: &MapSummary, viewer: Option<i64>) {
+    if viewer == Some(m.author.id) && !m.reject_reason.is_empty() {
+        j.reject_reason = Some(m.reject_reason.clone());
     }
 }
 
@@ -471,6 +504,9 @@ async fn maps_json(hub: &Hub, viewer: Option<i64>, maps: Vec<MapSummary>) -> Res
             m.my_vote = Some(vote);
             m.favourite = Some(favourite);
         }
+    }
+    for (j, m) in out.iter_mut().zip(&maps) {
+        show_reason(j, m, viewer);
     }
     Ok(out)
 }
@@ -588,7 +624,7 @@ async fn library_upload(State(hub): State<Arc<Hub>>, headers: HeaderMap, Json(b)
 async fn library_get(State(hub): State<Arc<Hub>>, headers: HeaderMap, Path(id): Path<i64>) -> Result<Json<MapDetailJson>, Fail> {
     let me = viewer(&hub, &headers).await;
     let d = db(&hub, move |s| s.get(id, me, false)).await?;
-    Ok(Json(MapDetailJson::of(d, me.is_some())))
+    Ok(Json(MapDetailJson::of(d, me)))
 }
 
 /// Fastest Times: a library map's best time per player, fastest first.
@@ -729,8 +765,16 @@ async fn player(
 #[derive(Deserialize)]
 #[serde(tag = "kind", rename_all = "lowercase")]
 enum ReportBody {
-    Player { room: String, player: u32, reason: String },
-    Map { room: Option<String>, map: Option<i64>, reason: String },
+    Player { room: String, player: u32, reason: String, category: Option<String> },
+    Map { room: Option<String>, map: Option<i64>, reason: String, category: Option<String> },
+}
+
+impl ReportBody {
+    fn category(&self) -> Option<&str> {
+        match self {
+            ReportBody::Player { category, .. } | ReportBody::Map { category, .. } => category.as_deref(),
+        }
+    }
 }
 
 /// File a report on a player or a map, with the evidence the room's server keeps
@@ -750,10 +794,11 @@ async fn report(
         Ok(acc) => Reporter { account: Some(acc.id), name: acc.name, ip: ip.to_string() },
         Err(_) => Reporter { account: None, name: "Guest".to_string(), ip: ip.to_string() },
     };
+    let category = ReportCategory::parse(b.category().unwrap_or("")).unwrap_or(ReportCategory::Other);
     let report = match b {
-        ReportBody::Player { room, player, reason } => room_report(&hub, &room, Some(player), reason, reporter).await?,
-        ReportBody::Map { room: Some(room), map: None, reason } => room_report(&hub, &room, None, reason, reporter).await?,
-        ReportBody::Map { room: None, map: Some(map), reason } => library_map_report(&hub, map, reason, reporter).await?,
+        ReportBody::Player { room, player, reason, .. } => room_report(&hub, &room, Some(player), reason, reporter, category).await?,
+        ReportBody::Map { room: Some(room), map: None, reason, .. } => room_report(&hub, &room, None, reason, reporter, category).await?,
+        ReportBody::Map { room: None, map: Some(map), reason, .. } => library_map_report(&hub, map, reason, reporter, category).await?,
         ReportBody::Map { .. } => {
             return Err(Fail::new(StatusCode::BAD_REQUEST, "A map report names either a room or a library map"));
         }
@@ -763,8 +808,16 @@ async fn report(
 }
 
 /// A report on a player or the map of a room, from the room's own evidence.
-async fn room_report(hub: &Hub, room: &str, player: Option<u32>, reason: String, reporter: Reporter) -> Result<NewReport, Fail> {
-    let ev = cluster::room_evidence(hub, room, player)
+async fn room_report(
+    hub: &Hub,
+    room: &str,
+    player: Option<u32>,
+    reason: String,
+    reporter: Reporter,
+    category: ReportCategory,
+) -> Result<NewReport, Fail> {
+    let voter = Voter { ip: reporter.ip.clone(), account: reporter.account };
+    let ev = cluster::room_evidence(hub, room, player, Some(voter))
         .await
         .map_err(|e| {
             error!("report evidence: {e}");
@@ -778,15 +831,16 @@ async fn room_report(hub: &Hub, room: &str, player: Option<u32>, reason: String,
         }
         None => (ReportKind::Map, None),
     };
-    Ok(NewReport { kind, reason, reporter, room_code: ev.room_code, room_name: ev.room_name, player, map: Some(ev.map), chat: ev.chat })
+    Ok(NewReport { kind, category, reason, reporter, room_code: ev.room_code, room_name: ev.room_name, player, map: Some(ev.map), chat: ev.chat })
 }
 
 /// A report on a library map, made from outside any room. The map is named as the library has it.
-async fn library_map_report(hub: &Hub, id: i64, reason: String, reporter: Reporter) -> Result<NewReport, Fail> {
+async fn library_map_report(hub: &Hub, id: i64, reason: String, reporter: Reporter, category: ReportCategory) -> Result<NewReport, Fail> {
     let viewer = reporter.account;
     let map = db(hub, move |s| s.map_meta(id, viewer)).await?;
     Ok(NewReport {
         kind: ReportKind::Map,
+        category,
         reason,
         reporter,
         room_code: String::new(),

@@ -3,6 +3,7 @@
 
 use neobox_store::{MatchStats, RoomMap, Store, XpGrant};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use std::net::IpAddr;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -86,6 +87,18 @@ impl Backend {
         match self {
             Backend::Local(s) => Some(s),
             Backend::Remote(_) => None,
+        }
+    }
+
+    /// The refusal for a banned address (its ban's message), or `None` when it may connect.
+    pub async fn ip_ban(&self, ip: IpAddr) -> Result<Option<String>, String> {
+        match self {
+            Backend::Local(s) => {
+                let s = s.clone();
+                let ban = blocking(move || s.ip_ban(&ip.to_string())).await?;
+                Ok(ban.map(|b| neobox_store::Error::Banned(b).to_string()))
+            }
+            Backend::Remote(r) => r.send(r.http.get(r.url(&format!("/internal/ip-ban?ip={ip}")))).await,
         }
     }
 
@@ -213,5 +226,20 @@ impl Remote {
             return Err(msg);
         }
         serde_json::from_str(&text).map_err(|e| e.to_string())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn a_banned_address_is_refused_and_others_pass() {
+        let store = Arc::new(Store::open_in_memory().unwrap());
+        store.ban_ip("203.0.113.9", None, "spam").unwrap();
+        let backend = Backend::Local(store);
+        let msg = backend.ip_ban("203.0.113.9".parse().unwrap()).await.unwrap().unwrap();
+        assert!(msg.starts_with("This IP address is banned until permanently: spam."), "{msg}");
+        assert_eq!(backend.ip_ban("203.0.113.10".parse().unwrap()).await.unwrap(), None);
     }
 }

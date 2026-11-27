@@ -54,6 +54,13 @@ pub fn router() -> Router<Arc<Hub>> {
         .route("/admin/api/feedback/{id}/delete", post(feedback_delete))
         .route("/admin/api/accounts", get(accounts))
         .route("/admin/api/accounts/{id}/password", post(account_password))
+        .route("/admin/api/accounts/{id}/suspend", post(account_suspend))
+        .route("/admin/api/accounts/{id}/unsuspend", post(account_unsuspend))
+        .route("/admin/api/accounts/{id}/rename", post(account_rename))
+        .route("/admin/api/accounts/{id}/delete", post(account_delete))
+        .route("/admin/api/ip-bans", post(ip_ban))
+        .route("/admin/api/ip-bans/lift", post(ip_ban_lift))
+        .route("/admin/api/sanctions", get(sanctions))
 }
 
 async fn page() -> impl IntoResponse {
@@ -95,7 +102,7 @@ fn authorized(hub: &Hub, headers: &HeaderMap) -> bool {
 fn admin_cookie(hub: &Hub, peer: SocketAddr, headers: &HeaderMap, value: &str, max_age: i64) -> String {
     let secure = via_trusted_proxy(hub, peer) && headers.get("x-forwarded-proto").and_then(|v| v.to_str().ok()) == Some("https");
     format!(
-        "{COOKIE}={value}; Path=/admin; HttpOnly; SameSite=Lax; Max-Age={max_age}{}",
+        "{COOKIE}={value}; Path=/admin; HttpOnly; SameSite=Strict; Max-Age={max_age}{}",
         if secure { "; Secure" } else { "" }
     )
 }
@@ -455,7 +462,7 @@ async fn map_code(State(hub): State<Arc<Hub>>, headers: HeaderMap, Path(id): Pat
         return Ok(StatusCode::UNAUTHORIZED.into_response());
     }
     let d = db(&hub, move |s| s.get(id, None, true)).await?;
-    Ok(Json(MapDetailJson::of(d, false)).into_response())
+    Ok(Json(MapDetailJson::of(d, None)).into_response())
 }
 
 /// Rendered binary frame buffer preview of any map (works for pending, unlisted and private maps too).
@@ -553,7 +560,7 @@ async fn map_inspect(State(hub): State<Arc<Hub>>, headers: HeaderMap, Path(id): 
         }
         Err(e) => serde_json::json!({ "ok": false, "error": e.to_string(), "warnings": ["Map failed to decode"] }),
     };
-    let detail = MapDetailJson::of(d, false);
+    let detail = MapDetailJson::of(d, None);
     Ok(Json(serde_json::json!({
         "detail": detail,
         "code_size": code_size,
@@ -566,8 +573,18 @@ async fn approve_map(State(hub): State<Arc<Hub>>, headers: HeaderMap, Path(id): 
     moderate_map(&hub, &headers, id, Verdict::Approve).await
 }
 
-async fn reject_map(State(hub): State<Arc<Hub>>, headers: HeaderMap, Path(id): Path<i64>) -> Result<Response, Fail> {
-    moderate_map(&hub, &headers, id, Verdict::Reject).await
+#[derive(Deserialize)]
+struct RejectBody {
+    reason: String,
+}
+
+/// Rejecting a map takes the reason its author is shown (the statement of reasons).
+async fn reject_map(State(hub): State<Arc<Hub>>, headers: HeaderMap, Path(id): Path<i64>, body: Bytes) -> Result<Response, Fail> {
+    if !authorized(&hub, &headers) {
+        return Ok(StatusCode::UNAUTHORIZED.into_response());
+    }
+    let b: RejectBody = parse_body(&body)?;
+    moderate_map(&hub, &headers, id, Verdict::Reject { reason: b.reason }).await
 }
 
 async fn moderate_map(hub: &Hub, headers: &HeaderMap, id: i64, verdict: Verdict) -> Result<Response, Fail> {
@@ -644,15 +661,15 @@ async fn admin_delete_clip(State(hub): State<Arc<Hub>>, headers: HeaderMap, Path
 #[derive(Deserialize)]
 struct ReportsQuery {
     status: Option<ReportStatus>,
-    before: Option<i64>,
+    offset: Option<usize>,
 }
 
-/// Reports newest first, a page at a time; `status` filters, `before` is the last id seen.
+/// Reports newest first, a page at a time; `status` filters, `offset` skips that many.
 async fn reports(State(hub): State<Arc<Hub>>, headers: HeaderMap, Query(q): Query<ReportsQuery>) -> Result<Response, Fail> {
     if !authorized(&hub, &headers) {
         return Ok(StatusCode::UNAUTHORIZED.into_response());
     }
-    let list = db(&hub, move |s| s.reports(q.status, q.before, ADMIN_PAGE_SIZE)).await?;
+    let list = db(&hub, move |s| s.reports(q.status, q.offset.unwrap_or(0), ADMIN_PAGE_SIZE)).await?;
     Ok(Json(list).into_response())
 }
 
@@ -744,6 +761,94 @@ async fn account_password(State(hub): State<Arc<Hub>>, headers: HeaderMap, Path(
     let b: PasswordSetBody = parse_body(&body)?;
     db(&hub, move |s| s.admin_set_password(id, &b.password)).await?;
     Ok(StatusCode::NO_CONTENT.into_response())
+}
+
+#[derive(Deserialize)]
+struct SuspendBody {
+    days: Option<i64>,
+    reason: String,
+}
+
+/// Suspend an account for `days` days, or for good when `days` is absent.
+async fn account_suspend(State(hub): State<Arc<Hub>>, headers: HeaderMap, Path(id): Path<i64>, body: Bytes) -> Result<Response, Fail> {
+    if !authorized(&hub, &headers) {
+        return Ok(StatusCode::UNAUTHORIZED.into_response());
+    }
+    let b: SuspendBody = parse_body(&body)?;
+    db(&hub, move |s| s.suspend(id, b.days, &b.reason)).await?;
+    Ok(StatusCode::NO_CONTENT.into_response())
+}
+
+async fn account_unsuspend(State(hub): State<Arc<Hub>>, headers: HeaderMap, Path(id): Path<i64>) -> Result<Response, Fail> {
+    if !authorized(&hub, &headers) {
+        return Ok(StatusCode::UNAUTHORIZED.into_response());
+    }
+    db(&hub, move |s| s.lift_suspension(id)).await?;
+    Ok(StatusCode::NO_CONTENT.into_response())
+}
+
+#[derive(Deserialize)]
+struct RenameBody {
+    name: String,
+}
+
+/// Rename an account.
+async fn account_rename(State(hub): State<Arc<Hub>>, headers: HeaderMap, Path(id): Path<i64>, body: Bytes) -> Result<Response, Fail> {
+    if !authorized(&hub, &headers) {
+        return Ok(StatusCode::UNAUTHORIZED.into_response());
+    }
+    let b: RenameBody = parse_body(&body)?;
+    db(&hub, move |s| s.admin_rename_account(id, &b.name)).await?;
+    Ok(StatusCode::NO_CONTENT.into_response())
+}
+
+/// Delete an account and what it owns, as the account's owner could.
+async fn account_delete(State(hub): State<Arc<Hub>>, headers: HeaderMap, Path(id): Path<i64>) -> Result<Response, Fail> {
+    if !authorized(&hub, &headers) {
+        return Ok(StatusCode::UNAUTHORIZED.into_response());
+    }
+    db(&hub, move |s| s.admin_delete_account(id)).await?;
+    Ok(StatusCode::NO_CONTENT.into_response())
+}
+
+#[derive(Deserialize)]
+struct IpBanBody {
+    ip: String,
+    days: Option<i64>,
+    reason: String,
+}
+
+/// Ban an IP address for `days` days, or for good when `days` is absent.
+async fn ip_ban(State(hub): State<Arc<Hub>>, headers: HeaderMap, body: Bytes) -> Result<Response, Fail> {
+    if !authorized(&hub, &headers) {
+        return Ok(StatusCode::UNAUTHORIZED.into_response());
+    }
+    let b: IpBanBody = parse_body(&body)?;
+    db(&hub, move |s| s.ban_ip(&b.ip, b.days, &b.reason)).await?;
+    Ok(StatusCode::NO_CONTENT.into_response())
+}
+
+#[derive(Deserialize)]
+struct IpLiftBody {
+    ip: String,
+}
+
+async fn ip_ban_lift(State(hub): State<Arc<Hub>>, headers: HeaderMap, body: Bytes) -> Result<Response, Fail> {
+    if !authorized(&hub, &headers) {
+        return Ok(StatusCode::UNAUTHORIZED.into_response());
+    }
+    let b: IpLiftBody = parse_body(&body)?;
+    db(&hub, move |s| s.lift_ip_ban(&b.ip)).await?;
+    Ok(StatusCode::NO_CONTENT.into_response())
+}
+
+/// Suspensions and IP bans in force, for the admin page.
+async fn sanctions(State(hub): State<Arc<Hub>>, headers: HeaderMap) -> Result<Response, Fail> {
+    if !authorized(&hub, &headers) {
+        return Ok(StatusCode::UNAUTHORIZED.into_response());
+    }
+    let list = db(&hub, move |s| s.sanctions()).await?;
+    Ok(Json(list).into_response())
 }
 
 #[cfg(test)]

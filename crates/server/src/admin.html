@@ -288,7 +288,7 @@ dialog.inspector::backdrop { background:rgba(10,10,10,.58); }
   <section id="sec-reports">
     <h2>Reports</h2>
     <div class="row"><select id="repstatus"><option value="open">Open</option><option value="resolved">Resolved</option><option value="dismissed">Dismissed</option><option value="">All</option></select></div>
-    <div class="scroll"><table id="reports"><thead><tr><th>Kind</th><th>Subject</th><th>Reason</th><th>Reporter</th><th>Room</th><th>Created</th><th></th></tr></thead><tbody></tbody></table></div>
+    <div class="scroll"><table id="reports"><thead><tr><th>Kind</th><th>Category</th><th>Subject</th><th>Reason</th><th>Reporter</th><th>Room</th><th>Created</th><th></th></tr></thead><tbody></tbody></table></div>
     <div id="norep" class="muted" hidden>No reports.</div>
     <div class="row"><button id="repmore">More</button></div>
     <div id="repdetail" class="muted" style="white-space:pre-wrap"></div>
@@ -309,6 +309,10 @@ dialog.inspector::backdrop { background:rgba(10,10,10,.58); }
     <div class="scroll"><table id="accounts"><thead><tr><th>Name</th><th class="num">XP</th><th>Created</th><th></th></tr></thead><tbody></tbody></table></div>
     <div id="noacc" class="muted" hidden>No accounts.</div>
     <div id="accmsg" class="muted"></div>
+    <h3>Sanctions in force</h3>
+    <div class="scroll"><table id="sanctions"><thead><tr><th>Kind</th><th>Subject</th><th>Reason</th><th>Until</th><th></th></tr></thead><tbody></tbody></table></div>
+    <div id="nosanc" class="muted" hidden>No suspensions or IP bans in force.</div>
+    <div class="row"><input id="banip" placeholder="IP address"><input id="bandays" placeholder="Days (empty = forever)"><input id="banreason" placeholder="Reason" style="flex:1"><button id="banbtn" class="bad">Ban IP</button></div>
   </section>
 
   <section id="sec-logs" class="wide">

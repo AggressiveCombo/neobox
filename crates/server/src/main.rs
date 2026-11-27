@@ -16,6 +16,7 @@ mod emoji;
 mod geo;
 mod hub;
 mod logbuf;
+mod moderation;
 mod maps;
 mod origin;
 mod qa_events;
@@ -93,6 +94,11 @@ async fn api_not_found() -> Response {
 
 async fn ws(State(hub): State<Arc<Hub>>, ConnectInfo(peer): ConnectInfo<SocketAddr>, headers: HeaderMap, upgrade: WebSocketUpgrade) -> Response {
     let ip = admin::client_ip(&hub, &headers, peer);
+    match api::ip_ban_message(&hub, ip).await {
+        Ok(None) => {}
+        Ok(Some(msg)) => return (StatusCode::FORBIDDEN, msg).into_response(),
+        Err(f) => return f.into_response(),
+    }
     let Some(slot) = conn::take_ip_slot(&hub, ip) else {
         return StatusCode::TOO_MANY_REQUESTS.into_response();
     };
@@ -141,6 +147,7 @@ async fn main() {
     let store = if cfg.main_url.is_some() { None } else { Some(open_store(&cfg.data)) };
     let hub = Hub::new(cfg, maps, rotation, rtc, store);
     spawn_housekeeping(hub.clone());
+    spawn_retention(hub.clone());
     cluster::spawn_heartbeat(hub.clone());
 
     // Unknown paths get the app shell so the client can show its own not-found screen. A missing asset
@@ -244,6 +251,26 @@ fn spawn_housekeeping(hub: Arc<Hub>) {
                 Ok(Ok(_)) => {}
                 Ok(Err(e)) => tracing::warn!("cannot prune sessions: {e}"),
                 Err(e) => tracing::warn!("session pruning stopped: {e}"),
+            }
+        }
+    });
+}
+
+/// Once a day: delete what the retention rules expire (old reports and feedback,
+/// finished suspensions and IP bans). Game nodes keep no store and skip it.
+fn spawn_retention(hub: Arc<Hub>) {
+    tokio::spawn(async move {
+        let mut tick = tokio::time::interval(std::time::Duration::from_secs(24 * 60 * 60));
+        loop {
+            tick.tick().await;
+            let Some(store) = hub.store().cloned() else { continue };
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |d| d.as_secs() as i64);
+            match tokio::task::spawn_blocking(move || store.purge(now)).await {
+                Ok(Ok(_)) => {}
+                Ok(Err(e)) => tracing::warn!("cannot apply retention: {e}"),
+                Err(e) => tracing::warn!("retention stopped: {e}"),
             }
         }
     });

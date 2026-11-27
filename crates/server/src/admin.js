@@ -743,8 +743,9 @@ async function openMapInspector(id) {
   }
   if (d.status !== "rejected") {
     mk("Reject", async () => {
-      if (!confirm("Reject \"" + d.name + "\"? It stays hidden from everyone but its owner.")) return;
-      const r = await api("/admin/api/maps/" + d.id + "/reject", {});
+      const reason = rejectReason(d.name);
+      if (!reason) return;
+      const r = await api("/admin/api/maps/" + d.id + "/reject", { reason });
       $("#modalmsg").textContent = r.ok ? "Rejected." : "Failed (HTTP " + r.status + ").";
       refreshMaps(); refreshLibrary();
       if (r.ok) openMapInspector(d.id);
@@ -810,7 +811,7 @@ function renderMaps(maps) {
       const mk = (label, fn, cls) => { const b = document.createElement("button"); b.textContent = label; if (cls) b.className = cls; b.onclick = fn; actions.appendChild(b); };
       mk("Inspect", () => openMapInspector(m.id), "primary");
       mk("Approve", () => decideMap(m, "approve"), "good");
-      mk("Reject", () => { if (confirm("Reject \"" + m.name + "\"? It stays hidden from everyone but its owner.")) decideMap(m, "reject"); }, "bad");
+      mk("Reject", () => { const reason = rejectReason(m.name); if (reason) decideMap(m, "reject", { reason }); }, "bad");
       mk("Copy code", () => copyMapCode(m));
     },
     sync: (tr) => {
@@ -822,11 +823,16 @@ function renderMaps(maps) {
     },
   })));
 }
-async function decideMap(m, verb) {
-  const r = await api("/admin/api/maps/" + m.id + "/" + verb, {});
+async function decideMap(m, verb, body = {}) {
+  const r = await api("/admin/api/maps/" + m.id + "/" + verb, body);
   $("#mapmsg").textContent = r.ok ? (verb === "approve" ? "Approved " : "Rejected ") + m.name + "." : "Could not change " + m.name + " (HTTP " + r.status + ").";
   refreshMaps();
   refreshLibrary();
+}
+
+function rejectReason(name) {
+  const reason = prompt("Why is \"" + name + "\" removed? The author sees this reason in the library.");
+  return reason && reason.trim() ? reason.trim() : null;
 }
 async function copyMapCode(m) {
   const r = await api("/admin/api/maps/" + m.id + "/code");
@@ -1005,22 +1011,24 @@ $("#fbmore").onclick = () => loadFeedback(false);
 
 // --- Reports ---
 const REPORT_PAGE = 25;
-let repCursor = null;
+const REPORT_CATEGORY_LABELS = { illegal: "Illegal content", harassment: "Harassment or hate", cheating: "Cheating", spam: "Spam", inappropriate: "Inappropriate name or map", other: "Other" };
+let repOffset = 0;
 async function errorText(r) { return (await r.json().catch(() => ({}))).error || "HTTP " + r.status; }
 async function loadReports(reset) {
-  if (reset) { repCursor = null; $("#reports tbody").innerHTML = ""; $("#repdetail").textContent = ""; }
+  if (reset) { repOffset = 0; $("#reports tbody").innerHTML = ""; $("#repdetail").textContent = ""; }
   const q = new URLSearchParams();
   if ($("#repstatus").value) q.set("status", $("#repstatus").value);
-  if (repCursor !== null) q.set("before", repCursor);
+  q.set("offset", repOffset);
   try {
     const r = await api("/admin/api/reports?" + q);
     if (!r.ok) { $("#repmsg").textContent = "Could not load reports: " + (await errorText(r)) + "."; return; }
     const reports = await r.json();
+    repOffset += reports.length;
     const tb = $("#reports tbody");
     for (const rep of reports) {
       const tr = document.createElement("tr");
       const subject = rep.kind === "player" ? (rep.player ? rep.player.name : "(left the room)") : rep.map.name;
-      tr.innerHTML = `<td>${esc(rep.kind)}</td><td>${esc(subject)}</td><td>${esc(rep.reason)}</td><td>${esc(rep.reporter.name)}</td><td>${esc(rep.room_code || "-")}</td><td>${esc(fmtShortDate(rep.created))}</td><td></td>`;
+      tr.innerHTML = `<td>${esc(rep.kind)}</td><td>${esc(REPORT_CATEGORY_LABELS[rep.category] || rep.category)}</td><td>${esc(subject)}</td><td>${esc(rep.reason)}</td><td>${esc(rep.reporter.name)}</td><td>${esc(rep.room_code || "-")}</td><td>${esc(fmtShortDate(rep.created))}</td><td></td>`;
       const actions = tr.lastChild;
       const mk = (label, fn, cls) => { const b = document.createElement("button"); b.textContent = label; if (cls) b.className = cls; b.onclick = fn; actions.appendChild(b); };
       mk("Evidence", () => showReport(rep));
@@ -1031,7 +1039,6 @@ async function loadReports(reset) {
       else mk("Reopen", () => setReportStatus(rep, "open"));
       mk("Delete", () => { if (confirm("Delete report " + rep.id + " for good?")) deleteReport(rep); }, "bad");
       tb.appendChild(tr);
-      repCursor = rep.id;
     }
     $("#norep").hidden = tb.children.length > 0;
     $("#repmore").disabled = reports.length < REPORT_PAGE;
@@ -1061,6 +1068,7 @@ $("#repmore").onclick = () => loadReports(false);
 
 // --- Accounts ---
 async function loadAccounts() {
+  loadSanctions();
   try {
     const r = await api("/admin/api/accounts?q=" + encodeURIComponent($("#accq").value));
     if (!r.ok) { $("#accmsg").textContent = "Could not search accounts: " + (await errorText(r)) + "."; return; }
@@ -1070,10 +1078,12 @@ async function loadAccounts() {
     for (const a of accounts) {
       const tr = document.createElement("tr");
       tr.innerHTML = `<td><b>${esc(a.name)}</b></td><td class="num">${a.xp}</td><td>${esc(fmtShortDate(a.created))}</td><td></td>`;
-      const set = document.createElement("button");
-      set.textContent = "Set password";
-      set.onclick = () => setPassword(a);
-      tr.lastChild.appendChild(set);
+      const actions = tr.lastChild;
+      const mk = (label, fn, cls) => { const b = document.createElement("button"); b.textContent = label; if (cls) b.className = cls; b.onclick = fn; actions.appendChild(b); };
+      mk("Set password", () => setPassword(a));
+      mk("Rename", () => renameAccount(a));
+      mk("Suspend", () => suspendAccount(a), "bad");
+      mk("Delete", () => deleteAccount(a), "bad");
       tb.appendChild(tr);
     }
     $("#noacc").hidden = accounts.length > 0;
@@ -1085,6 +1095,84 @@ async function setPassword(a) {
   const r = await api("/admin/api/accounts/" + a.id + "/password", { password });
   $("#accmsg").textContent = r.ok ? "Password of " + a.name + " set." : "Could not set the password of " + a.name + ": " + (await errorText(r)) + ".";
 }
+async function renameAccount(a) {
+  const name = prompt("New name for " + a.name + ":");
+  if (!name) return;
+  const r = await api("/admin/api/accounts/" + a.id + "/rename", { name });
+  $("#accmsg").textContent = r.ok ? a.name + " is now " + name + "." : "Could not rename " + a.name + ": " + (await errorText(r)) + ".";
+  loadAccounts();
+}
+async function suspendAccount(a) {
+  const days = prompt("Suspend " + a.name + " for how many days? Leave empty for good.");
+  if (days === null) return;
+  const reason = prompt("Reason, shown to the player and in the sanctions list:");
+  if (!reason) return;
+  const body = { reason };
+  if (days.trim() !== "") {
+    const n = Number(days);
+    if (!Number.isInteger(n) || n < 1) { $("#accmsg").textContent = "Days must be a whole number, 1 or more."; return; }
+    body.days = n;
+  }
+  const r = await api("/admin/api/accounts/" + a.id + "/suspend", body);
+  $("#accmsg").textContent = r.ok ? a.name + " is suspended." : "Could not suspend " + a.name + ": " + (await errorText(r)) + ".";
+  loadSanctions();
+}
+async function deleteAccount(a) {
+  if (!confirm("Delete account " + a.name + " and everything it owns? This cannot be undone.")) return;
+  const r = await api("/admin/api/accounts/" + a.id + "/delete", {});
+  $("#accmsg").textContent = r.ok ? "Deleted " + a.name + "." : "Could not delete " + a.name + ": " + (await errorText(r)) + ".";
+  loadAccounts();
+}
+
+// --- Sanctions ---
+function untilText(until) { return until === null || until === undefined ? "permanently" : fmtShortDate(until); }
+async function loadSanctions() {
+  try {
+    const r = await api("/admin/api/sanctions");
+    if (!r.ok) { $("#accmsg").textContent = "Could not load sanctions: " + (await errorText(r)) + "."; return; }
+    const s = await r.json();
+    const tb = $("#sanctions tbody");
+    tb.innerHTML = "";
+    const row = (kind, subject, x, lift) => {
+      const tr = document.createElement("tr");
+      tr.innerHTML = `<td>${kind}</td><td>${esc(subject)}</td><td>${esc(x.reason)}</td><td>${esc(untilText(x.until))}</td><td></td>`;
+      const b = document.createElement("button");
+      b.textContent = "Lift";
+      b.onclick = lift;
+      tr.lastChild.appendChild(b);
+      tb.appendChild(tr);
+    };
+    for (const x of s.suspensions) row("Suspended account", x.name, x, () => liftSuspension(x));
+    for (const x of s.ip_bans) row("IP ban", x.ip, x, () => liftIpBan(x.ip));
+    $("#nosanc").hidden = tb.children.length > 0;
+  } catch (_) {}
+}
+async function liftSuspension(x) {
+  const r = await api("/admin/api/accounts/" + x.account_id + "/unsuspend", {});
+  $("#accmsg").textContent = r.ok ? "Lifted the suspension of " + x.name + "." : "Could not lift the suspension of " + x.name + ": " + (await errorText(r)) + ".";
+  loadSanctions();
+}
+async function liftIpBan(ip) {
+  const r = await api("/admin/api/ip-bans/lift", { ip });
+  $("#accmsg").textContent = r.ok ? "Lifted the ban on " + ip + "." : "Could not lift the ban on " + ip + ": " + (await errorText(r)) + ".";
+  loadSanctions();
+}
+$("#banbtn").onclick = async () => {
+  const ip = $("#banip").value.trim();
+  const reason = $("#banreason").value.trim();
+  const days = $("#bandays").value.trim();
+  if (!ip || !reason) { $("#accmsg").textContent = "An IP ban needs an address and a reason."; return; }
+  const body = { ip, reason };
+  if (days !== "") {
+    const n = Number(days);
+    if (!Number.isInteger(n) || n < 1) { $("#accmsg").textContent = "Days must be a whole number, 1 or more."; return; }
+    body.days = n;
+  }
+  const r = await api("/admin/api/ip-bans", body);
+  $("#accmsg").textContent = r.ok ? "Banned " + ip + "." : "Could not ban " + ip + ": " + (await errorText(r)) + ".";
+  if (r.ok) { $("#banip").value = ""; $("#banreason").value = ""; $("#bandays").value = ""; }
+  loadSanctions();
+};
 $("#accq").oninput = () => loadAccounts();
 
 // --- Polling & Logs ---
