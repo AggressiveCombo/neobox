@@ -558,6 +558,8 @@ export const menuScreen: ScreenFactory = (ctx) => {
         h("a", { href: REPO_URL, target: "_blank", rel: "noopener", tabindex: "0" }, "Source"),
         " · ",
         h("button", { type: "button", class: "quiet home-privacy", onclick: () => store.set({ screen: "privacy" }) }, "Privacy"),
+        " · ",
+        h("button", { type: "button", class: "quiet home-privacy", onclick: () => store.set({ screen: "terms" }) }, "Terms"),
       ),
     ),
   );

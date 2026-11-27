@@ -34,6 +34,7 @@ import { editorScreen } from "./ui/screens/editor";
 import { quickScreen } from "./ui/screens/quick";
 import { trainingScreen } from "./ui/screens/training";
 import { privacyScreen } from "./ui/screens/privacy";
+import { termsScreen } from "./ui/screens/terms";
 import { mountJukebox } from "./ui/jukebox";
 import { mountFeedbackBar, openFeedbackModal } from "./ui/feedback";
 import { showPostGame } from "./ui/postgame";
@@ -52,6 +53,7 @@ const SCREEN_FACTORIES: Record<Exclude<Screen, "match">, ScreenFactory> = {
   menu: menuScreen,
   about: aboutScreen,
   privacy: privacyScreen,
+  terms: termsScreen,
   browse: browserScreen,
   quick: quickScreen,
   room: roomScreen,
@@ -148,6 +150,7 @@ function inRoomScreen(screen: Screen, editorForRoom: boolean): boolean {
     screen === "account" ||
     screen === "friends" ||
     screen === "privacy" ||
+    screen === "terms" ||
     screen === "about" ||
     (screen === "editor" && editorForRoom)
   );

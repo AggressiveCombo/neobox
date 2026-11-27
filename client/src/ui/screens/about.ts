@@ -6,6 +6,7 @@ import { page, pageHead } from "../kit";
 import { icon } from "../icons";
 import { openNews } from "../news";
 import { privacyLink } from "./privacy";
+import { termsLink } from "./terms";
 import "./info.css";
 
 export const CREDIT_LINE = "neobox is a fan-made spiritual successor to Hitbox.io, created by Chaz. Not affiliated.";
@@ -130,6 +131,7 @@ export const aboutScreen: ScreenFactory = (ctx) => {
           { class: "info-actions" },
           h("button", { type: "button", onclick: () => openNews() }, icon("newspaper", 18), "News"),
           privacyLink(ctx.store),
+          termsLink(ctx.store),
         ),
       ),
       h(

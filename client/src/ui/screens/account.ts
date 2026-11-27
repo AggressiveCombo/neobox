@@ -7,11 +7,14 @@ import type { AppCtx, ScreenFactory } from "../../ctx";
 import { guestXp, levelOf, xpForLevel } from "../../levels";
 import { MAX_NAME_LEN, NAME_RE } from "../../protocol";
 import { type Account, type AppState } from "../../state";
+import { HttpError } from "../../http-error";
+import { pageFetch } from "../../page-leave";
 import { h, type Child } from "../dom";
 import { icon } from "../icons";
 import { field, page, pageHead, setFieldError, toggle } from "../kit";
 import { profileSummary } from "../profile";
 import { privacyLink } from "./privacy";
+import { termsLink } from "./terms";
 
 const NAME_ERROR = "Names are 1 to 15 letters, numbers, spaces or _.";
 const PASSWORD_HINT = "8 to 128 characters.";
@@ -176,6 +179,7 @@ export const accountScreen: ScreenFactory = (ctx) => {
           h("button", { type: "submit", class: "primary" }, icon("log-in", 18), "Sign in"),
           h("button", { type: "button", onclick: createAccount }, icon("user-plus", 18), "Create account"),
         ),
+        h("p", { class: "muted small" }, "By creating an account you agree to the ", termsLink(store), "."),
         status,
         h("div", { class: "account-foot" }, privacyLink(store)),
       ),
@@ -262,6 +266,7 @@ export const accountScreen: ScreenFactory = (ctx) => {
     );
 
     const signOutBtn = h("button", { type: "button", class: "quiet", onclick: signOut }, icon("log-out", 18), "Sign out");
+    const exportBtn = h("button", { type: "button", class: "quiet", onclick: () => exportData(account.name) }, icon("file-plus", 18), "Download my data");
 
     return h(
       "div",
@@ -281,6 +286,7 @@ export const accountScreen: ScreenFactory = (ctx) => {
           "div",
           { class: "actions" },
           h("button", { type: "button", class: "quiet", onclick: () => store.set({ screen: "friends" }) }, icon("users", 18), "Friends"),
+          exportBtn,
           signOutBtn,
         ),
       ),
@@ -299,6 +305,22 @@ export const accountScreen: ScreenFactory = (ctx) => {
       await signOutAccount(ctx);
       applyAccount(ctx, null);
     }, "Signed out.");
+  }
+
+  /** Downloads everything stored about the account from the server's export route, as a JSON file. */
+  function exportData(name: string): void {
+    void act(async () => {
+      const res = await pageFetch("/api/account/export", { credentials: "same-origin" });
+      if (!res.ok) throw new HttpError(res.status);
+      const url = URL.createObjectURL(await res.blob());
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `neobox-data-${name.trim().replace(/\s+/g, "-")}.json`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    }, "Your data was downloaded.");
   }
 
   const el = page(

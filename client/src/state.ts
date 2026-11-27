@@ -7,6 +7,7 @@ export type Screen =
   | "menu"
   | "about"
   | "privacy"
+  | "terms"
   | "browse"
   | "quick"
   | "room"
