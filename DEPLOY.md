@@ -223,10 +223,19 @@ EOF
 chmod 755 /etc/cron.daily/neobox-backup
 ```
 
-Copy `/var/backups/neobox` off the server now and then (a VPS can be lost).
+The PC that deploys keeps an off-server copy: the scheduled task `neobox-backup-pull`
+(`tools/ops/backup-pull.ps1` in the operator's scratch tools) copies the database and mail
+backups every 6 hours and keeps the newest 30 of each.
 To restore: `systemctl stop neobox`, copy a backup to
 `/var/lib/neobox/neobox.db`, delete `neobox.db-wal` and `neobox.db-shm` next to
 it, `chown neobox:neobox /var/lib/neobox/neobox.db`, `systemctl start neobox`.
+
+## Log retention
+
+Server logs include player IP addresses, so they are kept for 14 days (the privacy notice
+says so). Install `deploy/journald-retention.conf` as
+`/etc/systemd/journald.conf.d/neobox-retention.conf`, then
+`systemctl restart systemd-journald && journalctl --vacuum-time=14d`.
 
 ## Regional game servers (optional)
 

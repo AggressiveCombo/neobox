@@ -4,6 +4,15 @@ neobox.aggressivecombo.com {
 	encode zstd gzip
 	header Strict-Transport-Security "max-age=31536000; includeSubDomains"
 	reverse_proxy 127.0.0.1:8080
+	# While the game server restarts or is down, show a page that reloads itself instead of a blank 502.
+	# Install: copy deploy/maintenance.html to /opt/neobox/maint/maintenance.html.
+	handle_errors 502 503 504 {
+		root * /opt/neobox/maint
+		rewrite * /maintenance.html
+		header Cache-Control no-store
+		header Retry-After 15
+		file_server
+	}
 }
 
 # On a regional game node's own server, its block instead (the node's name):
