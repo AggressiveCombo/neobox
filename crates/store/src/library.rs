@@ -99,11 +99,15 @@ pub enum Sort {
     Picks,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Verdict {
     Approve,
-    Reject,
+    /// Rejected with the reason the author is shown (the DSA statement of reasons).
+    Reject { reason: String },
 }
+
+/// Longest rejection reason, in characters.
+pub const MAX_REJECT_REASON_CHARS: usize = 500;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MapSummary {
@@ -122,6 +126,8 @@ pub struct MapSummary {
     pub description: String,
     /// When an admin picked the map (unix seconds); 0 when it is not picked.
     pub pick: i64,
+    /// Why an admin rejected the map. Empty unless it is rejected. Shown to the author only.
+    pub reject_reason: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -157,7 +163,7 @@ pub struct Listing {
 /// Columns read by `summary_row`, for a query over `MAP_FROM` aliased `m`/`a`.
 const SUMMARY: &str = "m.id, m.name, a.id, a.name, m.visibility, m.status, m.size, m.plays, \
      (SELECT COALESCE(SUM(v.value), 0) FROM map_votes v WHERE v.map_id = m.id), m.created, m.updated, \
-     m.description, m.pick";
+     m.description, m.pick, m.reject_reason";
 const MAP_FROM: &str = "maps m JOIN accounts a ON a.id = m.owner_id";
 pub(crate) const SCORE: &str = "(SELECT COALESCE(SUM(v.value), 0) FROM map_votes v WHERE v.map_id = m.id)";
 /// Public, approved maps: the ones anyone may list.
@@ -177,6 +183,7 @@ fn summary_row(r: &Row<'_>) -> rusqlite::Result<MapSummary> {
         updated: r.get(10)?,
         description: r.get(11)?,
         pick: r.get(12)?,
+        reject_reason: r.get(13)?,
     })
 }
 
@@ -499,9 +506,10 @@ impl Store {
         } else {
             Status::Approved
         };
+        // the reason is kept only while the map stays rejected
         tx.execute(
-            "UPDATE maps SET name = ?1, code = ?2, size = ?3, visibility = ?4, status = ?5, updated = ?6, description = ?7 \
-             WHERE id = ?8",
+            "UPDATE maps SET name = ?1, code = ?2, size = ?3, visibility = ?4, status = ?5, updated = ?6, description = ?7, \
+             reject_reason = CASE WHEN ?5 = 'rejected' THEN reject_reason ELSE '' END WHERE id = ?8",
             params![name, code, code.len() as i64, visibility.as_str(), status.as_str(), now(), description, id],
         )?;
         tx.commit()?;
@@ -658,13 +666,23 @@ impl Store {
         now() - ACTIVITY_WINDOW
     }
 
-    /// Admin decision on a map.
+    /// Admin decision on a map. A rejection needs a reason, which the author
+    /// sees; an approval clears any earlier reason.
     pub fn moderate(&self, id: i64, verdict: Verdict) -> Result<()> {
-        let status = match verdict {
-            Verdict::Approve => Status::Approved,
-            Verdict::Reject => Status::Rejected,
+        let (status, reason) = match verdict {
+            Verdict::Approve => (Status::Approved, String::new()),
+            Verdict::Reject { reason } => {
+                let reason = reason.trim().to_owned();
+                if !(1..=MAX_REJECT_REASON_CHARS).contains(&reason.chars().count()) {
+                    return Err(Error::Invalid("Reject reasons are 1 to 500 characters"));
+                }
+                (Status::Rejected, reason)
+            }
         };
-        let n = self.db().execute("UPDATE maps SET status = ?1 WHERE id = ?2", params![status.as_str(), id])?;
+        let n = self.db().execute(
+            "UPDATE maps SET status = ?1, reject_reason = ?2 WHERE id = ?3",
+            params![status.as_str(), reason, id],
+        )?;
         if n == 0 { Err(Error::NotFound) } else { Ok(()) }
     }
 }
@@ -784,7 +802,7 @@ mod tests {
         let private = s.upload(o, "Mine", &valid_code(), Visibility::Private, "").unwrap();
         let public = live_public(&s, o, "Live");
         let rejected = s.upload(o, "Bad", &valid_code(), Visibility::Public, "").unwrap();
-        s.moderate(rejected, Verdict::Reject).unwrap();
+        s.moderate(rejected, Verdict::Reject { reason: "Off-topic".into() }).unwrap();
 
         for hidden in [pending, private, rejected] {
             assert!(matches!(s.get(hidden, Some(other), false), Err(Error::NotFound)), "{hidden}");
@@ -864,7 +882,7 @@ mod tests {
         let a = s.upload(ann, "Pending", &valid_code(), Visibility::Public, "").unwrap();
         let b = s.upload(ann, "Private", &valid_code(), Visibility::Private, "").unwrap();
         let c = s.upload(ann, "Rejected", &valid_code(), Visibility::Public, "").unwrap();
-        s.moderate(c, Verdict::Reject).unwrap();
+        s.moderate(c, Verdict::Reject { reason: "Off-topic".into() }).unwrap();
         let bo = raw_account(&s, "Bo");
         let d = s.upload(bo, "Other", &valid_code(), Visibility::Unlisted, "").unwrap();
         let all = s.admin_list("", 0, 50).unwrap();
@@ -1059,7 +1077,7 @@ mod tests {
         let s = store();
         let o = raw_account(&s, "Owner");
         let m = s.upload(o, "Map", &valid_code(), Visibility::Public, "").unwrap();
-        s.moderate(m, Verdict::Reject).unwrap();
+        s.moderate(m, Verdict::Reject { reason: "Off-topic".into() }).unwrap();
         s.update(o, m, "Map", None, Visibility::Public, "").unwrap();
         assert_eq!(status_of(&s, m), Status::Rejected);
         s.update(o, m, "Map", Some(edited_code().as_str()), Visibility::Unlisted, "").unwrap();
@@ -1209,7 +1227,7 @@ mod tests {
         let b = s.upload(o, "B", &valid_code(), Visibility::Public, "").unwrap();
         assert_eq!(s.pending().unwrap().iter().map(|m| m.id).collect::<Vec<_>>(), vec![a, b]);
         s.moderate(a, Verdict::Approve).unwrap();
-        s.moderate(b, Verdict::Reject).unwrap();
+        s.moderate(b, Verdict::Reject { reason: "Off-topic".into() }).unwrap();
         assert!(s.pending().unwrap().is_empty());
         assert_eq!(s.list(Sort::New, "", 0, 10).unwrap().total, 1);
         assert!(matches!(s.get(b, None, false), Err(Error::NotFound)));

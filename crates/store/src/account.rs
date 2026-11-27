@@ -103,7 +103,12 @@ impl Store {
             )
             .optional()?;
         match row {
-            Some((account, hash)) if verify(&hash, password) => Ok(account),
+            Some((account, hash)) if verify(&hash, password) => {
+                match self.active_suspension(account.id)? {
+                    Some(sanction) => Err(Error::Suspended(sanction)),
+                    None => Ok(account),
+                }
+            }
             Some(_) => Err(Error::BadLogin),
             None => {
                 verify(&DUMMY_HASH, password);
@@ -159,9 +164,33 @@ impl Store {
         self.remove_account(id)
     }
 
+    /// Delete the account. Cascades remove its sessions, friendships, votes,
+    /// favourites, preferences, maps and suspensions. Feedback it wrote and
+    /// reports it filed keep their text, but lose the name, IP and account link.
     fn remove_account(&self, id: i64) -> Result<()> {
-        // cascades remove sessions, friendships, votes, favourites, prefs and maps
-        let n = self.db().execute("DELETE FROM accounts WHERE id = ?1", [id])?;
+        let mut db = self.db();
+        let tx = db.transaction()?;
+        tx.execute("UPDATE feedback SET author_account = NULL, author_name = '', author_ip = '' WHERE author_account = ?1", [id])?;
+        tx.execute(
+            "UPDATE reports SET reporter_account = NULL, reporter_name = '', reporter_ip = '' WHERE reporter_account = ?1",
+            [id],
+        )?;
+        let n = tx.execute("DELETE FROM accounts WHERE id = ?1", [id])?;
+        if n == 0 {
+            return Err(Error::NotFound);
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// Change an account's name. Admin action only. The name must pass the
+    /// same format rule as sign-up; the caller checks content.
+    pub fn admin_rename_account(&self, id: i64, name: &str) -> Result<()> {
+        check_name(name)?;
+        let n = self
+            .db()
+            .execute("UPDATE accounts SET name = ?1, name_key = ?2 WHERE id = ?3", params![name, name_key(name), id])
+            .map_err(|e| if is_constraint(&e) { Error::Conflict("That name is taken") } else { e.into() })?;
         if n == 0 { Err(Error::NotFound) } else { Ok(()) }
     }
 
@@ -266,6 +295,38 @@ mod tests {
     }
 
     #[test]
+    fn suspended_accounts_cannot_log_in_until_the_suspension_ends() {
+        let s = store();
+        let id = s.register("Fay", PASSWORD).unwrap().id;
+        s.suspend(id, Some(3), "harassment").unwrap();
+        let err = s.login("Fay", PASSWORD).unwrap_err();
+        assert!(matches!(err, Error::Suspended(_)));
+        assert!(err.to_string().starts_with("This account is suspended until "));
+        assert!(err.to_string().ends_with(": harassment. To appeal, write to neobox@aggressivecombo.com."));
+        s.lift_suspension(id).unwrap();
+        assert_eq!(s.login("Fay", PASSWORD).unwrap().id, id);
+    }
+
+    #[test]
+    fn an_expired_suspension_allows_login() {
+        let s = store();
+        let id = s.register("Gus", PASSWORD).unwrap().id;
+        s.db()
+            .execute("INSERT INTO suspensions (account_id, reason, created, until) VALUES (?1, 'old', 0, ?2)", params![id, now() - 1])
+            .unwrap();
+        assert_eq!(s.login("Gus", PASSWORD).unwrap().id, id);
+    }
+
+    #[test]
+    fn permanent_suspension_says_permanently() {
+        let s = store();
+        let id = s.register("Hal", PASSWORD).unwrap().id;
+        s.suspend(id, None, "cheating").unwrap();
+        let msg = s.login("Hal", PASSWORD).unwrap_err().to_string();
+        assert_eq!(msg, "This account is suspended until permanently: cheating. To appeal, write to neobox@aggressivecombo.com.");
+    }
+
+    #[test]
     fn password_length_counts_characters() {
         let s = store();
         assert!(matches!(s.register("a1", "1234567"), Err(Error::Invalid(_))));
@@ -342,6 +403,51 @@ mod tests {
         }
         // the name is free again
         s.register("Fay", PASSWORD).unwrap();
+    }
+
+    #[test]
+    fn delete_account_keeps_text_but_drops_identity_from_feedback_and_reports() {
+        use crate::feedback::{FeedbackKind, NewFeedback};
+        use crate::reports::{NewReport, ReportCategory, ReportKind, ReportedPlayer, Reporter};
+        let s = store();
+        let a = s.register("Ivy", PASSWORD).unwrap();
+        s.create_feedback(&NewFeedback {
+            kind: FeedbackKind::Bug,
+            message: "the lag is bad".into(),
+            screen: "match".into(),
+            context: String::new(),
+            author_account: Some(a.id),
+            author_name: "Ivy".into(),
+            author_ip: "203.0.113.5".into(),
+        })
+        .unwrap();
+        s.create_report(&NewReport {
+            kind: ReportKind::Player,
+            category: ReportCategory::Harassment,
+            reason: "keeps shouting".into(),
+            reporter: Reporter { account: Some(a.id), name: "Ivy".into(), ip: "203.0.113.5".into() },
+            room_code: "ABCD".into(),
+            room_name: "Room".into(),
+            player: Some(ReportedPlayer { id: 3, name: "loud".into(), account: None, ip: String::new() }),
+            map: None,
+            chat: Vec::new(),
+        })
+        .unwrap();
+
+        s.delete_account(a.id, PASSWORD).unwrap();
+
+        let feedback = s.list_feedback(None, None, None, 10).unwrap();
+        assert_eq!(feedback.len(), 1);
+        assert_eq!(feedback[0].message, "the lag is bad");
+        assert_eq!(feedback[0].author_account, None);
+        assert_eq!(feedback[0].author_name, "");
+        assert_eq!(feedback[0].author_ip, "");
+        let reports = s.reports(None, 0, 10).unwrap();
+        assert_eq!(reports.len(), 1);
+        assert_eq!(reports[0].reason, "keeps shouting");
+        assert_eq!(reports[0].reporter.account, None);
+        assert_eq!(reports[0].reporter.name, "");
+        assert_eq!(reports[0].reporter.ip, "");
     }
 
     #[test]

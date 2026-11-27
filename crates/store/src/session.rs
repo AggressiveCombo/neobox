@@ -3,6 +3,7 @@
 //! be replayed.
 
 use crate::account::account_row;
+use crate::sanctions::active_suspension;
 use crate::{Account, Error, Result, Store, is_constraint, now};
 use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
@@ -76,6 +77,9 @@ impl Store {
         let Some((account, expires)) = found else {
             return Ok(None);
         };
+        if let Some(sanction) = active_suspension(&db, account.id, now)? {
+            return Err(Error::Suspended(sanction));
+        }
         if expires - now < SESSION_TTL / 2 {
             db.execute(
                 "UPDATE sessions SET expires = ?1 WHERE token_digest = ?2",

@@ -8,11 +8,14 @@
 
 mod account;
 mod clips;
+mod export;
 mod feedback;
 mod friends;
 mod library;
 mod records;
 mod reports;
+mod retention;
+mod sanctions;
 mod session;
 mod stats;
 mod xp;
@@ -23,13 +26,18 @@ pub use feedback::{Feedback, FeedbackKind, FeedbackStatus, NewFeedback, MAX_CONT
 pub use friends::{Friend, FriendState, MAX_FRIENDS, MAX_INCOMING_REQUESTS, MAX_OUTGOING_REQUESTS};
 pub use library::{
     Listing, MapDetail, MapSummary, RoomMap, Sort, Status, Verdict, Visibility, MAX_CODE_BYTES, MAX_FAVOURITES,
-    MAX_MAPS_PER_ACCOUNT, MAX_MAP_NAME_CHARS,
+    MAX_MAPS_PER_ACCOUNT, MAX_MAP_NAME_CHARS, MAX_REJECT_REASON_CHARS,
 };
 pub use session::{ADMIN_SESSION_TTL, MAX_SESSIONS_PER_ACCOUNT, SESSION_TTL};
 pub use xp::{XP_PER_DAY, XP_PER_HOUR, XpGrant, XpLimit};
 pub use records::{Record, MAX_RECORDS};
-pub use reports::{NewReport, Report, ReportChat, ReportKind, ReportStatus, ReportedMap, ReportedPlayer, Reporter, MAX_REASON_CHARS, MAX_REPORT_CHAT};
+pub use reports::{
+    NewReport, Report, ReportCategory, ReportChat, ReportKind, ReportStatus, ReportedMap, ReportedPlayer, Reporter,
+    MAX_REASON_CHARS, MAX_REPORT_CHAT,
+};
 pub use stats::{MatchStats, Profile, ProfileMap};
+pub use retention::Purged;
+pub use sanctions::{IpBanEntry, Sanction, Sanctions, SuspensionEntry};
 
 use rusqlite::{Connection, ErrorCode};
 use std::path::Path;
@@ -54,6 +62,10 @@ pub enum Error {
     Limit(&'static str),
     /// Database or hashing failure; not for players.
     Internal(String),
+    /// The account is suspended. The text says until when and why.
+    Suspended(Sanction),
+    /// The IP address is banned. The text says until when and why.
+    Banned(Sanction),
 }
 
 impl std::fmt::Display for Error {
@@ -63,6 +75,18 @@ impl std::fmt::Display for Error {
             Error::BadLogin => f.write_str("Wrong name or password"),
             Error::NotFound => f.write_str("Not found"),
             Error::Internal(e) => write!(f, "internal error: {e}"),
+            Error::Suspended(s) => write!(
+                f,
+                "This account is suspended until {}: {}. To appeal, write to neobox@aggressivecombo.com.",
+                sanctions::until_text(s.until),
+                s.reason
+            ),
+            Error::Banned(s) => write!(
+                f,
+                "This IP address is banned until {}: {}. To appeal, write to neobox@aggressivecombo.com.",
+                sanctions::until_text(s.until),
+                s.reason
+            ),
         }
     }
 }
@@ -76,6 +100,9 @@ impl From<rusqlite::Error> for Error {
 }
 
 pub type Result<T, E = Error> = std::result::Result<T, E>;
+
+/// Seconds in a day.
+pub(crate) const DAY: i64 = 24 * 60 * 60;
 
 /// The database. Every method takes `&self`; the mutex serialises access, so
 /// a method's read-check-write sequence is atomic with respect to others.
@@ -248,6 +275,29 @@ CREATE TABLE admin_sessions (
     expires INTEGER NOT NULL
 );
 CREATE INDEX admin_sessions_expires ON admin_sessions (expires);
+"#, r#"
+-- Account suspensions and global IP bans. `until` is unix seconds; a permanent sanction stores i64::MAX.
+CREATE TABLE suspensions (
+    id INTEGER PRIMARY KEY,
+    account_id INTEGER NOT NULL REFERENCES accounts (id) ON DELETE CASCADE,
+    reason TEXT NOT NULL,
+    created INTEGER NOT NULL,
+    until INTEGER NOT NULL
+);
+CREATE INDEX suspensions_account ON suspensions (account_id, until);
+CREATE TABLE ip_bans (
+    id INTEGER PRIMARY KEY,
+    ip TEXT NOT NULL,
+    reason TEXT NOT NULL,
+    created INTEGER NOT NULL,
+    until INTEGER NOT NULL
+);
+CREATE INDEX ip_bans_ip ON ip_bans (ip, until);
+
+-- Report categories ('illegal', 'harassment', 'cheating', 'spam', 'inappropriate', 'other') and
+-- the reason a map was rejected, which its author sees.
+ALTER TABLE reports ADD COLUMN category TEXT NOT NULL DEFAULT 'other';
+ALTER TABLE maps ADD COLUMN reject_reason TEXT NOT NULL DEFAULT '';
 "#];
 
 /// High-level database counts for the admin insights dashboard.

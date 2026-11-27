@@ -11,7 +11,7 @@ pub const MAX_REASON_CHARS: usize = 500;
 pub const MAX_REPORT_CHAT: usize = 30;
 
 const COLUMNS: &str = "id, kind, status, reason, reporter_account, reporter_name, reporter_ip, room_code, room_name, \
-     player_id, player_name, player_account, player_ip, map_id, map_name, map_author, chat, created, resolved";
+     player_id, player_name, player_account, player_ip, map_id, map_name, map_author, chat, created, resolved, category";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -64,6 +64,44 @@ impl ReportStatus {
     }
 }
 
+/// Why the report was filed. Illegal content sorts first in the admin list.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ReportCategory {
+    Illegal,
+    Harassment,
+    Cheating,
+    Spam,
+    Inappropriate,
+    Other,
+}
+
+impl ReportCategory {
+    fn as_str(self) -> &'static str {
+        match self {
+            ReportCategory::Illegal => "illegal",
+            ReportCategory::Harassment => "harassment",
+            ReportCategory::Cheating => "cheating",
+            ReportCategory::Spam => "spam",
+            ReportCategory::Inappropriate => "inappropriate",
+            ReportCategory::Other => "other",
+        }
+    }
+
+    /// The category named by a client key, if any.
+    pub fn parse(s: &str) -> Option<ReportCategory> {
+        match s {
+            "illegal" => Some(ReportCategory::Illegal),
+            "harassment" => Some(ReportCategory::Harassment),
+            "cheating" => Some(ReportCategory::Cheating),
+            "spam" => Some(ReportCategory::Spam),
+            "inappropriate" => Some(ReportCategory::Inappropriate),
+            "other" => Some(ReportCategory::Other),
+            _ => None,
+        }
+    }
+}
+
 /// Who filed the report. Guests have no account.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct Reporter {
@@ -102,6 +140,7 @@ pub struct ReportChat {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NewReport {
     pub kind: ReportKind,
+    pub category: ReportCategory,
     pub reason: String,
     pub reporter: Reporter,
     /// Empty when the report is not made from inside a room.
@@ -118,6 +157,7 @@ pub struct Report {
     pub id: i64,
     pub kind: ReportKind,
     pub status: ReportStatus,
+    pub category: ReportCategory,
     pub reason: String,
     pub reporter: Reporter,
     pub room_code: String,
@@ -139,6 +179,9 @@ fn report_row(r: &Row<'_>) -> rusqlite::Result<Report> {
     let kind = ReportKind::parse(&kind_text).ok_or_else(|| conv(1, format!("unknown kind {kind_text}").into()))?;
     let status_text: String = r.get(2)?;
     let status = ReportStatus::parse(&status_text).ok_or_else(|| conv(2, format!("unknown status {status_text}").into()))?;
+    let category_text: String = r.get(19)?;
+    let category =
+        ReportCategory::parse(&category_text).ok_or_else(|| conv(19, format!("unknown category {category_text}").into()))?;
     let chat_text: String = r.get(16)?;
     let chat = serde_json::from_str(&chat_text).map_err(|e| conv(16, Box::new(e)))?;
     let player_name: Option<String> = r.get(10)?;
@@ -164,6 +207,7 @@ fn report_row(r: &Row<'_>) -> rusqlite::Result<Report> {
         id: r.get(0)?,
         kind,
         status,
+        category,
         reason: r.get(3)?,
         reporter: Reporter { account: r.get(4)?, name: r.get(5)?, ip: r.get(6)? },
         room_code: r.get(7)?,
@@ -204,8 +248,8 @@ impl Store {
         let db = self.db();
         db.execute(
             "INSERT INTO reports (kind, status, reason, reporter_account, reporter_name, reporter_ip, room_code, room_name, \
-             player_id, player_name, player_account, player_ip, map_id, map_name, map_author, chat, created, resolved) \
-             VALUES (?1, 'open', ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, 0)",
+             player_id, player_name, player_account, player_ip, map_id, map_name, map_author, chat, created, resolved, category) \
+             VALUES (?1, 'open', ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, 0, ?17)",
             params![
                 report.kind.as_str(),
                 reason,
@@ -223,20 +267,22 @@ impl Store {
                 map_author,
                 chat_json,
                 now(),
+                report.category.as_str(),
             ],
         )?;
         Ok(db.last_insert_rowid())
     }
 
-    /// Up to `limit` reports, newest first, with ids below `before` (all when
-    /// `None`), optionally only those with `status`.
-    pub fn reports(&self, status: Option<ReportStatus>, before: Option<i64>, limit: usize) -> Result<Vec<Report>> {
+    /// One page of reports, optionally only those with `status`. Illegal
+    /// content comes first, then newest first.
+    pub fn reports(&self, status: Option<ReportStatus>, offset: usize, limit: usize) -> Result<Vec<Report>> {
         let db = self.db();
         let mut stmt = db.prepare(&format!(
-            "SELECT {COLUMNS} FROM reports WHERE (?1 IS NULL OR status = ?1) AND id < ?2 ORDER BY id DESC LIMIT ?3"
+            "SELECT {COLUMNS} FROM reports WHERE (?1 IS NULL OR status = ?1) \
+             ORDER BY CASE WHEN category = 'illegal' THEN 0 ELSE 1 END, id DESC LIMIT ?2 OFFSET ?3"
         ))?;
         let rows = stmt.query_map(
-            params![status.map(ReportStatus::as_str), before.unwrap_or(i64::MAX), limit as i64],
+            params![status.map(ReportStatus::as_str), limit as i64, offset as i64],
             report_row,
         )?;
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
@@ -275,6 +321,7 @@ mod tests {
     fn player_report(reason: &str) -> NewReport {
         NewReport {
             kind: ReportKind::Player,
+            category: ReportCategory::Other,
             reason: reason.to_owned(),
             reporter: Reporter { account: None, name: "guest".into(), ip: "10.0.0.1".into() },
             room_code: "ABCD".into(),
@@ -341,9 +388,9 @@ mod tests {
         let s = store();
         let ids: Vec<i64> = (0..4).map(|_| s.create_report(&player_report("x")).unwrap()).collect();
         s.set_report_status(ids[1], ReportStatus::Dismissed).unwrap();
-        let open = s.reports(Some(ReportStatus::Open), None, 10).unwrap();
+        let open = s.reports(Some(ReportStatus::Open), 0, 10).unwrap();
         assert_eq!(open.iter().map(|r| r.id).collect::<Vec<_>>(), vec![ids[3], ids[2], ids[0]]);
-        let page = s.reports(None, Some(ids[3]), 2).unwrap();
+        let page = s.reports(None, 1, 2).unwrap();
         assert_eq!(page.iter().map(|r| r.id).collect::<Vec<_>>(), vec![ids[2], ids[1]]);
         assert_eq!(page[1].status, ReportStatus::Dismissed);
         assert!(page[1].resolved > 0);
@@ -363,6 +410,19 @@ mod tests {
         assert!(s.report(other).unwrap().is_some());
         assert_eq!(s.delete_report(id), Err(Error::NotFound));
         assert_eq!(s.set_report_status(id, ReportStatus::Dismissed), Err(Error::NotFound));
+    }
+
+    #[test]
+    fn illegal_content_is_listed_first() {
+        let s = store();
+        let plain = s.create_report(&player_report("x")).unwrap();
+        let illegal = s.create_report(&NewReport { category: ReportCategory::Illegal, ..player_report("y") }).unwrap();
+        let newest = s.create_report(&player_report("z")).unwrap();
+        let ids: Vec<i64> = s.reports(None, 0, 10).unwrap().iter().map(|r| r.id).collect();
+        assert_eq!(ids, vec![illegal, newest, plain]);
+        assert_eq!(s.report(illegal).unwrap().unwrap().category, ReportCategory::Illegal);
+        assert_eq!(ReportCategory::parse("spam"), Some(ReportCategory::Spam));
+        assert_eq!(ReportCategory::parse("ILLEGAL"), None);
     }
 
     #[test]
