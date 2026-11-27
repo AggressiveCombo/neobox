@@ -20,6 +20,16 @@ interface NewsEntry {
  */
 const NEWS: NewsEntry[] = [
   {
+    date: "2026-11-27",
+    items: [
+      "Invite links: guests choose their name before joining a room from a link.",
+      "Swear filter: off by default. Turn it on in Settings to hide swearing on your screen.",
+      "Reports: new reasons, including illegal content, and a player reported by three different people in the same room is muted there.",
+      "YouTube: the jukebox and video thumbnails load only after you choose Allow YouTube (in the jukebox or in Settings).",
+      "New Terms page, a clearer Privacy page, and Download my data on the Account screen.",
+    ],
+  },
+  {
     date: "2026-11-26",
     items: [
       "Phones and tablets: the main menu's buttons and the Bug and Suggest buttons are bigger and easier to tap (thanks for the suggestion, whaleice).",
