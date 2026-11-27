@@ -1,0 +1,4 @@
+Contact: mailto:neobox@aggressivecombo.com
+Expires: 2027-11-27T00:00:00.000Z
+Preferred-Languages: en
+Canonical: https://neobox.aggressivecombo.com/.well-known/security.txt
