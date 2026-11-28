@@ -14,6 +14,7 @@ mod award;
 mod conn;
 mod emoji;
 mod geo;
+mod hitbox;
 mod hub;
 mod logbuf;
 mod moderation;

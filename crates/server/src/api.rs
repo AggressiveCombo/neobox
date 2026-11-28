@@ -3,6 +3,7 @@
 
 use crate::admin::client_ip;
 use crate::cluster;
+use crate::hitbox::{self, HitboxError, HitboxQuery};
 use crate::hub::{AccountRef, Hub, Limiter};
 use crate::room::Voter;
 use axum::body::Bytes;
@@ -29,6 +30,8 @@ const COOKIE: &str = "nb_session";
 const PAGE_SIZE: usize = 24;
 /// Player profile lookups per address per minute.
 static PLAYER_LOOKUPS: LazyLock<Limiter<IpAddr>> = LazyLock::new(|| Limiter::new(120, Duration::from_secs(60)));
+/// Hitbox.io map searches per address per minute.
+static HITBOX_LOOKUPS: LazyLock<Limiter<IpAddr>> = LazyLock::new(|| Limiter::new(60, Duration::from_secs(60)));
 
 pub fn router() -> Router<Arc<Hub>> {
     Router::new()
@@ -55,6 +58,7 @@ pub fn router() -> Router<Arc<Hub>> {
         .route("/api/library/{id}/vote", post(library_vote))
         .route("/api/library/{id}/favourite", post(library_favourite))
         .route("/api/library/{id}/records", get(library_records))
+        .route("/api/hitbox/maps", get(hitbox_maps))
         .route("/api/report", post(report))
         .route("/api/feedback", post(submit_feedback))
         .route("/api/players/{name}", get(player))
@@ -893,4 +897,21 @@ async fn submit_feedback(
     };
     db(&hub, move |s| s.create_feedback(&entry)).await?;
     Ok(StatusCode::NO_CONTENT)
+}
+
+async fn hitbox_maps(
+    State(hub): State<Arc<Hub>>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    Query(query): Query<HitboxQuery>,
+) -> Result<Json<hitbox::HitboxPage>, Fail> {
+    let ip = client_ip(&hub, &headers, peer);
+    if !HITBOX_LOOKUPS.allow(ip) {
+        return Err(Fail::new(StatusCode::TOO_MANY_REQUESTS, "Too many searches, try again in a moment"));
+    }
+    match hitbox::fetch_maps(&hub.cfg.hitbox_url, &query).await {
+        Ok(page) => Ok(Json(page)),
+        Err(HitboxError::Disabled) => Err(Fail::new(StatusCode::SERVICE_UNAVAILABLE, "Hitbox.io search is disabled on this server")),
+        Err(HitboxError::Upstream(msg)) => Err(Fail::new(StatusCode::BAD_GATEWAY, &msg)),
+    }
 }

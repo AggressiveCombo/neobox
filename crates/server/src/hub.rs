@@ -61,6 +61,8 @@ pub struct Config {
     /// The build this server runs: the client build's `build-id.txt` in the static dir. A client on another build
     /// is refused (see `close::OUTDATED`); `None` (no file, as in tests and dev runs): no check.
     pub build_id: Option<String>,
+    /// Base URL for the Hitbox.io map search proxy (`NEOBOX_HITBOX_URL`; defaults to `https://hitbox.io`, empty disables).
+    pub hitbox_url: String,
 }
 
 /// Origins that may open the game socket and post to this server: the
@@ -144,6 +146,7 @@ impl Config {
             cluster_secret: var("NEOBOX_CLUSTER_SECRET", ""),
             allowed_origins,
             build_id,
+            hitbox_url: var("NEOBOX_HITBOX_URL", "https://hitbox.io").trim().trim_end_matches('/').to_string(),
         }
     }
 }
