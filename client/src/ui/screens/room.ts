@@ -16,7 +16,7 @@ import {
   ROOM_MIN_PLAYERS,
   isTeamMode,
 } from "../../protocol";
-import type { MapMeta, PlayerInfo, RoomState } from "../../protocol";
+import type { PlayerInfo, RoomState } from "../../protocol";
 import { SETTINGS, formatValue, normalizeInput, readOnlyKeys, readOnlyLabel } from "../../settings";
 import type { SettingDef } from "../../settings";
 import { drawMapPreview } from "../../render/preview";
@@ -27,11 +27,9 @@ import {
   acceptFriend,
   errorText,
   listFriends,
-  listRecords,
   removeFriend,
   requestFriend,
   type FriendState,
-  type MapRecord,
 } from "../../account";
 import { filterProfanity } from "../../profanity";
 import { prefs } from "../../prefs";
@@ -129,67 +127,6 @@ function ageText(unixSeconds: number): string {
     }
   }
   return "just now";
-}
-
-/** The original's game clock: records are ticks, shown as seconds at two decimals. */
-const TICKS_PER_SECOND = 30;
-
-/** The table of a map's Fastest Times, fastest first. */
-function recordsTable(rows: MapRecord[]): HTMLElement {
-  return h(
-    "table",
-    { class: "data records-table" },
-    h(
-      "thead",
-      null,
-      h(
-        "tr",
-        null,
-        h("th", { scope: "col", class: "num" }, "Rank"),
-        h("th", { scope: "col" }, "Name"),
-        h("th", { scope: "col", class: "num" }, "Time"),
-        h("th", { scope: "col" }, "Date"),
-      ),
-    ),
-    h(
-      "tbody",
-      null,
-      rows.map((r) =>
-        h(
-          "tr",
-          null,
-          h("td", { class: "num" }, String(r.rank)),
-          h("td", null, r.name),
-          h("td", { class: "num" }, (r.ticks / TICKS_PER_SECOND).toFixed(2)),
-          h("td", null, ageText(r.date)),
-        ),
-      ),
-    ),
-  );
-}
-
-/** The Fastest Times window for a library map. Close, Escape or the backdrop dismisses it. */
-function showFastestTimes(map: MapMeta): void {
-  const status = h("p", { class: "room-muted", role: "status", "aria-live": "polite" }, "Fetching...");
-  const body = h("div", { class: "records-body" });
-  const { dialog } = openModal({
-    title: "Fastest Times",
-    body: [h("p", { class: "room-muted" }, `${map.name} by ${map.author}`), status, body],
-  });
-  listRecords(map.id).then(
-    (rows) => {
-      if (!dialog.isConnected) return;
-      if (rows.length === 0) {
-        status.textContent = "No Records";
-        return;
-      }
-      status.textContent = "";
-      body.replaceChildren(recordsTable(rows));
-    },
-    (err: unknown) => {
-      if (dialog.isConnected) status.textContent = errorText(err);
-    },
-  );
 }
 
 function chatLine(line: ChatLine, myId: number | null, text: string, onPlay: ((video: string) => void) | null): HTMLElement {
@@ -1129,28 +1066,15 @@ export const roomScreen: ScreenFactory = (ctx: AppCtx) => {
   }
 
   /**
-   * The library map's author, votes and age, with the Fastest Times button. Signed-in viewers
-   * open the vote menu from the counts; the button needs a library map (id > 0).
+   * The library map's author, votes and age, plus Change map for the host.
+   * Signed-in viewers open the vote menu from the counts.
    */
   function buildMapInfo(room: RoomState): Node[] {
     const m = room.map;
     const library = m !== null && m.id > 0;
-    const fastest = h(
-      "button",
-      {
-        type: "button",
-        class: "room-btn room-btn-small",
-        disabled: !library,
-        onclick: () => {
-          if (m !== null) showFastestTimes(m);
-        },
-      },
-      icon("trophy", 16),
-      "Fastest Times",
-    );
     const change = isHost() ? h("button", { type: "button", class: "room-btn room-btn-small", onclick: openMapPicker }, icon("map", 16), "Change map") : null;
-    const actions = h("div", { class: "room-map-actions" }, change, fastest);
-    if (m === null) return [actions];
+    const actions = change !== null ? h("div", { class: "room-map-actions" }, change) : null;
+    if (m === null) return actions !== null ? [actions] : [];
     const counts = `${m.up} up · ${m.down} down`;
     const votes =
       st.account !== null && library
@@ -1167,7 +1091,7 @@ export const roomScreen: ScreenFactory = (ctx: AppCtx) => {
         : counts;
     const nodes: Node[] = [h("p", { class: "room-map-meta" }, `by ${m.author} · `, votes, ` · added ${ageText(m.created)}`)];
     if (m.description !== "") nodes.push(h("p", { class: "room-map-desc" }, m.description));
-    nodes.push(actions);
+    if (actions !== null) nodes.push(actions);
     return nodes;
   }
 

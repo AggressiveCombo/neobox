@@ -1061,27 +1061,6 @@ async function racePersonalBest(s) {
   return `library map "${name}", /set recordMode true; personal best ${seconds[0]}s, then ${seconds[1]}s (faster, announced again)`;
 }
 
-/** room-fastest-modal: the built-in map's Fastest Times button is disabled; on an approved library map it opens "NAME by AUTHOR" with "No Records". */
-async function fastestModal(s) {
-  const user = await signedIn(s, "fastest");
-  const name = uniqueName("fast");
-  await uploadApprovedMap(s, user, mapCode(RACE_MAP), name);
-  const { page } = user;
-  await createRoom(user, s.base, uniqueName("room"), { isPublic: true });
-  const fastest = button(page, "Fastest Times");
-  await fastest.waitFor({ state: "visible" });
-  check(await fastest.isDisabled(), "Fastest Times is enabled on a built-in map");
-  await pickLibraryMap(page, name);
-  check(await fastest.isEnabled(), "Fastest Times is disabled on a library map");
-  await fastest.click();
-  const times = page.getByRole("dialog", { name: "Fastest Times", exact: true });
-  await times.getByText(`${name} by ${user.userName}`, { exact: true }).waitFor();
-  await times.getByText("No Records", { exact: true }).waitFor();
-  await page.keyboard.press("Escape");
-  await times.waitFor({ state: "detached" });
-  return `built-in map: Fastest Times disabled; library "${name}": "${name} by ${user.userName}", "No Records"`;
-}
-
 /** sys-too-complex: a host pastes a map of 1100 overlapping dynamic boxes; the match stops with the complexity notice. */
 async function tooComplex(s) {
   const { h } = await openHostRoomNamed(s);
@@ -1167,7 +1146,6 @@ export const roomsInvScenarios = [
   { name: "inv rooms match record end", inv: ["cmd-record", "cmd-end"], run: matchRecordEnd },
   { name: "inv rooms replay save", inv: ["room-replay-save"], run: replaySave },
   { name: "inv rooms map commands", inv: ["notice-map-cmd", "cmd-upvote", "cmd-downvote", "cmd-fav", "cmd-unfav", "cmd-fave", "cmd-unfave"], run: mapCommands },
-  { name: "inv rooms fastest modal", inv: ["room-fastest-modal"], run: fastestModal },
   { name: "inv rooms race pb", inv: ["sys-pb"], run: racePersonalBest },
   { name: "inv rooms too complex", inv: ["sys-too-complex"], run: tooComplex },
 ];
