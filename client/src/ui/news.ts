@@ -20,6 +20,13 @@ interface NewsEntry {
  */
 const NEWS: NewsEntry[] = [
   {
+    date: "2026-11-28",
+    items: [
+      "Hitbox.io map search: browse Hot, Top rated, Newest and Picks or search by map name and author, then click any map to import it straight into your room, the map editor or Practice. Also available under the Hitbox.io tab in the Library.",
+      "Lobby: removed the Fastest Times button from the room's map panel (Fastest Times stay on each map in the Library).",
+    ],
+  },
+  {
     date: "2026-11-27",
     items: [
       "Invite links: guests choose their name before joining a room from a link.",
