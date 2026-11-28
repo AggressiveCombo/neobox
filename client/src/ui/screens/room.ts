@@ -21,6 +21,7 @@ import { SETTINGS, formatValue, normalizeInput, readOnlyKeys, readOnlyLabel } fr
 import type { SettingDef } from "../../settings";
 import { drawMapPreview } from "../../render/preview";
 import { openLibraryPicker } from "../library-picker";
+import type { LibraryTab } from "../map-list";
 import { avatar, field, openModal, seg, uid, type SegOption } from "../kit";
 import {
   acceptFriend,
@@ -985,15 +986,23 @@ export const roomScreen: ScreenFactory = (ctx: AppCtx) => {
     submitMapText(text);
   }
 
-  /** Pick a map from the library: the server loads its code, names it and counts the play. */
-  function openLibrary(): void {
+  /** Pick a map from the library or Hitbox.io: the server loads its code and names it. */
+  function openLibrary(initialTab: LibraryTab = "browse"): void {
     closeLibrary?.();
-    closeLibrary = openLibraryPicker(ctx, (m) => {
-      closeLibrary = null;
-      if (!isHost() || !showPreview(m.code)) return;
-      ctx.send({ t: "set_library_map", id: m.id });
-      closeMapPicker?.();
-    });
+    closeLibrary = openLibraryPicker(
+      ctx,
+      (m) => {
+        closeLibrary = null;
+        if (m.id === null) {
+          if (chooseMap(m.code, m.name)) closeMapPicker?.();
+          return;
+        }
+        if (!isHost() || !showPreview(m.code)) return;
+        ctx.send({ t: "set_library_map", id: m.id });
+        closeMapPicker?.();
+      },
+      initialTab,
+    );
   }
 
   /** Runs a preview draw once the engine is loaded: a room that opens before the engine is not an error to show. */
@@ -1251,7 +1260,8 @@ export const roomScreen: ScreenFactory = (ctx: AppCtx) => {
         },
         "Use code",
       ),
-      h("button", { type: "button", class: "room-btn", onclick: openLibrary }, icon("library-big", 16), "Library"),
+      h("button", { type: "button", class: "room-btn", onclick: () => openLibrary("browse") }, icon("library-big", 16), "Library"),
+      h("button", { type: "button", class: "room-btn", onclick: () => openLibrary("hitbox") }, icon("globe", 16), "Hitbox.io"),
       h("button", { type: "button", class: "room-btn", onclick: openEditor }, icon("pencil-ruler", 16), "Editor"),
       h("label", { class: "room-file" }, icon("upload", 16), "Load file", fileInput),
     ),

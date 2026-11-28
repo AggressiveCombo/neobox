@@ -10,7 +10,7 @@ export interface LegalSection {
 
 /** The controller: the operator, a private individual. */
 export const OPERATOR_NAME = "aggressivecombo";
-export const PRIVACY_UPDATED = "2026-11-27";
+export const PRIVACY_UPDATED = "2026-11-28";
 // The operator's mailbox: GDPR contact and the Digital Services Act single point of contact.
 export const PRIVACY_CONTACT = "neobox@aggressivecombo.com";
 
@@ -81,7 +81,8 @@ export const PRIVACY_SECTIONS: LegalSection[] = [
     paragraphs: [
       "Hosting: neobox runs on a Vultr server (Vultr Holdings LLC, USA) in Chicago, USA. Your data is therefore transferred to the United States, a country outside the EU. The operator relies on the standard contractual clauses offered by the provider. DNS is served by Cloudflare (DNS only, not proxied).",
       "YouTube: the jukebox plays YouTube videos. Nothing loads from YouTube until you turn on Allow YouTube once, in the jukebox panel or under Settings. After that, your browser loads YouTube's player from www.youtube-nocookie.com, which receives your IP address and may store cookies. Room lists show video thumbnails only after you turn it on; until then a placeholder is shown. When a YouTube link is posted, the server asks YouTube's oEmbed service for the video's title, sending only the video id.",
-      "Regional game servers run by the operator receive a signed ticket with your account id, name and XP when you join, and they can see your IP address. Apart from YouTube, the game loads nothing from other outside services.",
+      "Hitbox.io map search: when you browse or search the Hitbox.io tab, the neobox server queries Hitbox.io's public map endpoints on your behalf, sending only your search query, sort order and page offset. Your browser does not contact Hitbox.io and your IP address and account are not sent to it.",
+      "Regional game servers run by the operator receive a signed ticket with your account id, name and XP when you join, and they can see your IP address. Apart from YouTube, the browser loads nothing from outside services.",
     ],
   },
   {

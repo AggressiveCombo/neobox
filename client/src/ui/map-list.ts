@@ -12,12 +12,31 @@ import {
   type MapStatus,
   type Visibility,
 } from "../account";
+import type { HitboxMap, HitboxSearchBy, HitboxSort } from "../api";
 import type { AppCtx } from "../ctx";
 import { drawMapPreview } from "../render/preview";
 import { h, type Child } from "./dom";
 import { icon, type IconName } from "./icons";
 
-export type LibraryTab = "browse" | "mine" | "favourites";
+export type LibraryTab = "browse" | "mine" | "favourites" | "hitbox";
+
+export const HITBOX_BROWSE_SORTS: readonly (readonly [HitboxSort, string])[] = [
+  ["hot", "Hot"],
+  ["top", "Top rated"],
+  ["new", "Newest"],
+  ["picks", "Picks"],
+];
+
+export const HITBOX_SEARCH_SORTS: readonly (readonly [HitboxSort, string])[] = [
+  ["best", "Best"],
+  ["new", "Newest"],
+];
+
+export const HITBOX_BY_OPTIONS: readonly (readonly [HitboxSearchBy, string])[] = [
+  ["both", "Name & author"],
+  ["name", "Map name"],
+  ["author", "Author"],
+];
 
 export const SORT_LABELS: Record<LibrarySort, string> = {
   hot: "Hot",
@@ -57,14 +76,15 @@ export function mapCode(id: number): Promise<string> {
   return code;
 }
 
-export function loadTab(tab: LibraryTab, query: LibraryQuery): Promise<LibraryMap[]> {
+export function loadTab(tab: Exclude<LibraryTab, "hitbox">, query: LibraryQuery): Promise<LibraryMap[]> {
   if (tab === "browse") return listLibrary(query);
   return tab === "mine" ? listMine() : listFavourites();
 }
 
 interface Pending {
   ctx: AppCtx;
-  id: number;
+  id?: number;
+  code?: string;
 }
 
 const waiting = new WeakMap<Element, Pending>();
@@ -77,17 +97,17 @@ function onVisible(entries: IntersectionObserverEntry[]): void {
     if (job === undefined) continue;
     observer?.unobserve(entry.target);
     waiting.delete(entry.target);
-    void drawThumb(entry.target, job.ctx, job.id);
+    void drawThumb(entry.target, job);
   }
 }
 
-async function drawThumb(box: Element, ctx: AppCtx, id: number): Promise<void> {
+async function drawThumb(box: Element, job: Pending): Promise<void> {
   const canvas = box.querySelector("canvas");
   if (!canvas) return;
   try {
-    const code = await mapCode(id);
-    await ctx.engine();
-    drawMapPreview(canvas, ctx.wasm.mapPreview(code));
+    const code = job.code ?? (await mapCode(job.id!));
+    await job.ctx.engine();
+    drawMapPreview(canvas, job.ctx.wasm.mapPreview(code));
   } catch {
     box.replaceChildren(h("span", { class: "thumb-missing" }, "No preview"));
   }
@@ -100,6 +120,15 @@ async function drawThumb(box: Element, ctx: AppCtx, id: number): Promise<void> {
 export function previewThumb(ctx: AppCtx, id: number, class_ = "map-thumb"): HTMLElement {
   const box = h("span", { class: class_ }, h("canvas", { "aria-hidden": "true" }));
   waiting.set(box, { ctx, id });
+  observer ??= new IntersectionObserver(onVisible, { rootMargin: "200px" });
+  observer.observe(box);
+  return box;
+}
+
+/** A preview thumbnail for a map whose code is already loaded (e.g. Hitbox.io search results). */
+export function previewCodeThumb(ctx: AppCtx, code: string, class_ = "map-thumb"): HTMLElement {
+  const box = h("span", { class: class_ }, h("canvas", { "aria-hidden": "true" }));
+  waiting.set(box, { ctx, code });
   observer ??= new IntersectionObserver(onVisible, { rootMargin: "200px" });
   observer.observe(box);
   return box;
@@ -156,7 +185,7 @@ export function tabStrip<T extends string>(
   );
 }
 
-/** The library's tab strip (browse, mine, favourites). */
+/** The library's tab strip (browse, mine, favourites, hitbox.io). */
 export function tabBar(current: LibraryTab, onSelect: (tab: LibraryTab) => void): HTMLElement {
   return tabStrip(
     "Library",
@@ -164,6 +193,7 @@ export function tabBar(current: LibraryTab, onSelect: (tab: LibraryTab) => void)
       ["browse", "Browse", "layout-grid"],
       ["mine", "Mine", "pencil-ruler"],
       ["favourites", "Favourites", "heart"],
+      ["hitbox", "Hitbox.io", "globe"],
     ] as const,
     current,
     onSelect,
@@ -213,5 +243,24 @@ export function mapCard(
     { class: del !== null ? "map-card-wrap" : undefined },
     h("button", { type: "button", class: "map-card", onclick: onOpen }, previewThumb(ctx, map.id), h("span", { class: "map-body" }, lines)),
     del,
+  );
+}
+
+/** A Hitbox.io map as a card: local WASM preview, name, author and votes. */
+export function hitboxMapCard(ctx: AppCtx, map: HitboxMap, onOpen: () => void): HTMLElement {
+  const lines: Child[] = [
+    h("span", { class: "map-name" }, map.name),
+    h("span", { class: "map-meta" }, `by ${map.author}`),
+    h(
+      "span",
+      { class: "map-stats num" },
+      h("span", null, icon("thumbs-up", 14), String(map.upvotes)),
+      h("span", null, icon("thumbs-down", 14), String(map.downvotes)),
+    ),
+  ];
+  return h(
+    "li",
+    null,
+    h("button", { type: "button", class: "map-card", onclick: onOpen }, previewCodeThumb(ctx, map.code), h("span", { class: "map-body" }, lines)),
   );
 }

@@ -13,15 +13,17 @@
   font-size: var(--step-small);
 }
 
-/* Tabs share the strip so "Favourites" keeps its whole word; at phone widths the glyphs go to make room. */
-.library-page .tabs .tab {
+/* Tabs share the strip so labels keep their whole words; at phone widths the glyphs go to make room. */
+.library-page .tabs .tab,
+.map-picker .tabs .tab {
   flex: 1 1 auto;
-  padding: 0 10px;
+  padding: 0 8px;
   white-space: nowrap;
 }
 
-@media (max-width: 420px) {
-  .library-page .tabs .tab > .icon {
+@media (max-width: 480px) {
+  .library-page .tabs .tab > .icon,
+  .map-picker .tabs .tab > .icon {
     display: none;
   }
 }
@@ -460,9 +462,13 @@ dialog.modal.map-picker {
   grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
 }
 
-/* .modal-body is a column flexbox: flex-basis on .library-search would otherwise stretch it to 240px tall. */
-.map-picker .library-search {
+/* .modal-body is a column flexbox: the toolbar keeps its natural height and its search field fills the row. */
+.map-picker .library-toolbar {
   flex: none;
+}
+
+.map-picker .library-search {
+  flex: 1 1 200px;
   max-width: none;
 }
 
@@ -553,7 +559,8 @@ dialog.modal.map-picker {
     gap: 8px;
   }
 
-  .library-search {
+  .library-search,
+  .map-picker .library-search {
     flex: none;
     max-width: none;
   }

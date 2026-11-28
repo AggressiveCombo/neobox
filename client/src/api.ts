@@ -156,3 +156,62 @@ export interface FeedbackInput {
 export async function sendFeedback(input: FeedbackInput): Promise<void> {
   await request<void>("POST", "/api/feedback", input);
 }
+
+export type HitboxSort = "hot" | "top" | "new" | "picks" | "best";
+export type HitboxSearchBy = "both" | "name" | "author";
+
+export interface HitboxMap {
+  id: number;
+  name: string;
+  author: string;
+  description: string;
+  upvotes: number;
+  downvotes: number;
+  published: string;
+  code: string;
+}
+
+export interface HitboxPage {
+  maps: HitboxMap[];
+  more: boolean;
+  next_offset: number | null;
+}
+
+export interface HitboxQuery {
+  q: string;
+  sort: HitboxSort;
+  by: HitboxSearchBy;
+  offset: number;
+}
+
+/** GET /api/hitbox/maps: server-proxied Hitbox.io map search and browse. */
+export async function fetchHitboxMaps(query: HitboxQuery, signal?: AbortSignal): Promise<HitboxPage> {
+  const params = new URLSearchParams({ sort: query.sort, by: query.by, offset: String(query.offset) });
+  const q = query.q.trim();
+  if (q !== "") params.set("q", q);
+  const res = await pageFetch(`/api/hitbox/maps?${params.toString()}`, {
+    signal,
+    headers: { accept: "application/json" },
+  });
+  const text = await res.text();
+  let data: unknown = null;
+  if (text !== "") {
+    try {
+      data = JSON.parse(text);
+    } catch {
+      // handled below
+    }
+  }
+  if (!res.ok) {
+    const msg =
+      typeof data === "object" && data !== null && "error" in data && typeof data.error === "string"
+        ? data.error
+        : null;
+    if (msg !== null) throw new Error(msg);
+    throw new HttpError(res.status);
+  }
+  if (typeof data !== "object" || data === null || !Array.isArray((data as HitboxPage).maps)) {
+    throw new Error("The server sent an unexpected reply. Try again in a moment.");
+  }
+  return data as HitboxPage;
+}

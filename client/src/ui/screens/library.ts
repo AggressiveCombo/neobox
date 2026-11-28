@@ -20,26 +20,32 @@ import {
   type MapRecord,
   type Visibility,
 } from "../../account";
-import { MAP_REPORT_REASONS, sendReport } from "../../api";
+import { fetchHitboxMaps, MAP_REPORT_REASONS, sendReport, type HitboxMap, type HitboxSearchBy, type HitboxSort } from "../../api";
 import type { AppCtx, ScreenFactory } from "../../ctx";
 import type { AppState } from "../../state";
 import { h, type Child } from "../dom";
 import { icon } from "../icons";
 import { confirmDialog, field, openModal, page, pageHead, seg, setFieldError, uid, type SegOption } from "../kit";
 import {
+  HITBOX_BROWSE_SORTS,
+  HITBOX_BY_OPTIONS,
+  HITBOX_SEARCH_SORTS,
   SORT_LABELS,
   VISIBILITY_LABELS,
+  hitboxMapCard,
   loadTab,
   mapCard,
   mapCode,
   mapState,
   plural,
   previewCode,
+  previewCodeThumb,
   previewThumb,
   tabBar,
   type LibraryTab,
 } from "../map-list";
 import { signInPrompt } from "./account";
+import { queueEditorMap } from "./editor";
 
 const SEARCH_DELAY_MS = 300;
 const PREVIEW_DELAY_MS = 300;
@@ -101,15 +107,21 @@ export const libraryScreen: ScreenFactory = (ctx) => {
   const { store } = ctx;
   let tab: LibraryTab = "browse";
   let sort: LibrarySort = "hot";
+  let hitboxSort: HitboxSort = "hot";
+  let hitboxBy: HitboxSearchBy = "both";
   let q = "";
   let pageNo = 0;
+  let hitboxOffset = 0;
   let more = false;
   let maps: LibraryMap[] = [];
+  let hitboxMaps: HitboxMap[] = [];
   let seq = 0;
   let busy = false;
   let detail: Detail | null = null;
+  let hitboxDetail: { map: HitboxMap; info: HTMLElement; close(): void } | null = null;
   let searchTimer: number | undefined;
   let previewTimer: number | undefined;
+  let hitboxAbort: AbortController | null = null;
 
   const status = h("p", { class: "status", role: "status", "aria-live": "polite" });
   const emptyBox = h("div", { class: "library-empty", hidden: true });
@@ -119,7 +131,7 @@ export const libraryScreen: ScreenFactory = (ctx) => {
   const searchInput = h("input", {
     type: "search",
     placeholder: "Search maps",
-    "aria-label": "search maps",
+    "aria-label": "Search maps",
     autocomplete: "off",
     spellcheck: "false",
     maxlength: 50,
@@ -128,12 +140,32 @@ export const libraryScreen: ScreenFactory = (ctx) => {
   const searchWrap = h("div", { class: "library-search" }, icon("search", 18), searchInput);
   const sortSelect = h(
     "select",
-    { "aria-label": "sort maps", onchange: () => selectSort(sortSelect.value as LibrarySort) },
+    { "aria-label": "Sort maps", onchange: () => selectSort(sortSelect.value as LibrarySort) },
     SORTS.map(([value, label]) => h("option", { value }, label)),
   );
   const sortWrap = h("div", { class: "library-sort" }, icon("arrow-up-down", 18), sortSelect);
+  const hitboxSortSelect = h("select", {
+    "aria-label": "Sort Hitbox.io maps",
+    onchange: () => {
+      hitboxSort = hitboxSortSelect.value as HitboxSort;
+      reload();
+    },
+  });
+  const hitboxSortWrap = h("div", { class: "library-sort", hidden: true }, icon("arrow-up-down", 18), hitboxSortSelect);
+  const hitboxBySelect = h(
+    "select",
+    {
+      "aria-label": "Search in",
+      onchange: () => {
+        hitboxBy = hitboxBySelect.value as HitboxSearchBy;
+        reload();
+      },
+    },
+    HITBOX_BY_OPTIONS.map(([value, label]) => h("option", { value }, label)),
+  );
+  const hitboxByWrap = h("div", { class: "library-sort", hidden: true }, icon("sliders-horizontal", 18), hitboxBySelect);
   const uploadBtn = h("button", { type: "button", class: "primary", onclick: () => openUpload() }, icon("upload", 18), "Upload a map");
-  const toolbar = h("div", { class: "library-toolbar" }, searchWrap, sortWrap, uploadBtn);
+  const toolbar = h("div", { class: "library-toolbar" }, searchWrap, sortWrap, hitboxSortWrap, hitboxByWrap, uploadBtn);
 
   const grid = h("ul", { class: "map-grid", "aria-label": "maps" });
   const moreBtn = h(
@@ -143,8 +175,12 @@ export const libraryScreen: ScreenFactory = (ctx) => {
       class: "library-more",
       hidden: true,
       onclick: () => {
-        pageNo += 1;
-        void load(true);
+        if (tab === "hitbox") {
+          void load(true);
+        } else {
+          pageNo += 1;
+          void load(true);
+        }
       },
     },
     icon("chevron-down", 18),
@@ -167,13 +203,28 @@ export const libraryScreen: ScreenFactory = (ctx) => {
     return true;
   }
 
+  function syncHitboxSortOptions(): void {
+    const searching = q !== "";
+    const opts = searching ? HITBOX_SEARCH_SORTS : HITBOX_BROWSE_SORTS;
+    if (!opts.some(([v]) => v === hitboxSort)) {
+      hitboxSort = opts[0][0];
+    }
+    hitboxSortSelect.replaceChildren(...opts.map(([value, label]) => h("option", { value }, label)));
+    hitboxSortSelect.value = hitboxSort;
+    hitboxByWrap.hidden = tab !== "hitbox" || !searching;
+  }
+
   function paintChrome(): void {
     scopeHost.replaceChildren(tabBar(tab, selectTab));
     const browse = tab === "browse";
-    const signedOut = tab !== "browse" && store.state.account === null;
+    const hitbox = tab === "hitbox";
+    const signedOut = !browse && !hitbox && store.state.account === null;
     sortSelect.value = sort;
-    searchWrap.hidden = !browse;
+    searchInput.placeholder = hitbox ? "Search Hitbox.io maps" : "Search maps";
+    searchWrap.hidden = !browse && !hitbox;
     sortWrap.hidden = !browse;
+    hitboxSortWrap.hidden = !hitbox;
+    syncHitboxSortOptions();
     uploadBtn.hidden = tab !== "mine" || signedOut;
     toolbar.hidden = searchWrap.hidden && uploadBtn.hidden;
     makers.hidden = !browse;
@@ -191,6 +242,8 @@ export const libraryScreen: ScreenFactory = (ctx) => {
     if (next === tab) return;
     tab = next;
     maps = [];
+    hitboxMaps = [];
+    grid.replaceChildren();
     paintChrome();
     reload();
   }
@@ -207,12 +260,14 @@ export const libraryScreen: ScreenFactory = (ctx) => {
     searchTimer = window.setTimeout(() => {
       searchTimer = undefined;
       q = searchInput.value.trim();
+      if (tab === "hitbox") syncHitboxSortOptions();
       reload();
     }, SEARCH_DELAY_MS);
   }
 
   function reload(): void {
     pageNo = 0;
+    hitboxOffset = 0;
     void load(false);
   }
 
@@ -230,6 +285,33 @@ export const libraryScreen: ScreenFactory = (ctx) => {
 
   async function load(append: boolean): Promise<void> {
     const req = ++seq;
+    hitboxAbort?.abort();
+    hitboxAbort = null;
+
+    if (tab === "hitbox") {
+      const controller = new AbortController();
+      hitboxAbort = controller;
+      status.textContent = q !== "" ? "Searching Hitbox.io…" : "Loading Hitbox.io maps…";
+      emptyBox.hidden = true;
+      if (!append) moreBtn.hidden = true;
+      try {
+        const res = await fetchHitboxMaps({ q, sort: hitboxSort, by: hitboxBy, offset: hitboxOffset }, controller.signal);
+        if (req !== seq) return;
+        hitboxMaps = append ? [...hitboxMaps, ...res.maps] : res.maps;
+        more = res.more && res.next_offset !== null;
+        if (res.next_offset !== null) hitboxOffset = res.next_offset;
+      } catch (err) {
+        if (req !== seq) return;
+        if (err instanceof DOMException && err.name === "AbortError") return;
+        status.textContent = errorText(err);
+        return;
+      } finally {
+        if (hitboxAbort === controller) hitboxAbort = null;
+      }
+      paintHitboxList(!append);
+      return;
+    }
+
     if (tab !== "browse" && store.state.account === null) {
       maps = [];
       more = false;
@@ -255,7 +337,23 @@ export const libraryScreen: ScreenFactory = (ctx) => {
   function emptyText(): string {
     if (tab === "mine") return "No maps yet. Upload one; it shows in Browse once an admin approves it.";
     if (tab === "favourites") return "No favourites yet. Star a map to keep it here.";
+    if (tab === "hitbox") return q === "" ? "No maps found on Hitbox.io." : `No Hitbox.io maps match "${q}".`;
     return q === "" ? "No maps yet. Maps show here once an admin approves them." : `No maps match "${q}".`;
+  }
+
+  function paintHitboxList(fresh = false): void {
+    grid.classList.toggle("enter", fresh);
+    if (fresh) {
+      grid.replaceChildren(...hitboxMaps.map((m) => hitboxMapCard(ctx, m, () => openHitboxDetail(m))));
+    } else {
+      const have = grid.children.length;
+      grid.append(...hitboxMaps.slice(have).map((m) => hitboxMapCard(ctx, m, () => openHitboxDetail(m))));
+    }
+    status.textContent = "";
+    const empty = hitboxMaps.length === 0;
+    emptyBox.replaceChildren(...(empty ? [icon(q !== "" ? "search-x" : "inbox", 40), h("p", null, emptyText())] : []));
+    emptyBox.hidden = !empty;
+    moreBtn.hidden = !more;
   }
 
   /** Cards by map, kept while the map's content and tab are unchanged, so a repaint keeps their drawn previews. */
@@ -384,6 +482,96 @@ export const libraryScreen: ScreenFactory = (ctx) => {
     const timer = setTimeout(unsubscribe, ROOM_WAIT_MS);
     ctx.send({ t: "create_room", name: roomName(map.name), password: null, max_players: ROOM_MAX_PLAYERS, public: true });
     detail?.close();
+  }
+
+  function openHitboxDetail(map: HitboxMap): void {
+    const info = h("div", { class: "map-info" });
+    const modal = openModal({
+      title: map.name,
+      body: [previewCodeThumb(ctx, map.code, "detail-thumb"), info],
+      onclose: () => {
+        hitboxDetail = null;
+      },
+    });
+    modal.dialog.classList.add("map-dialog");
+    hitboxDetail = { map, info, close: modal.close };
+    paintHitboxInfo();
+  }
+
+  function hitboxRoomAction(map: HitboxMap): HTMLElement {
+    const { room, myId } = store.state;
+    if (room !== null) {
+      const host = room.quick === null && room.players.some((p) => p.id === myId && p.host);
+      if (!host) return h("p", { class: "status" }, "Only the room's host can change the room's map.");
+      return h("button", { type: "button", class: "primary", onclick: () => useHitboxInRoom(map) }, icon("play", 18), "Use in my room");
+    }
+    return h("button", { type: "button", class: "primary", onclick: () => playHitboxInNewRoom(map) }, icon("play", 18), "Play in a new room");
+  }
+
+  function useHitboxInRoom(map: HitboxMap): void {
+    ctx.send({ t: "set_map", code: map.code, name: map.name });
+    hitboxDetail?.close();
+    ctx.toast(`${map.name} is the room's map.`);
+    store.set({ screen: returnScreen(store.state) });
+  }
+
+  function playHitboxInNewRoom(map: HitboxMap): void {
+    const unsubscribe = store.subscribe((s) => {
+      if (s.room === null) return;
+      clearTimeout(timer);
+      unsubscribe();
+      ctx.send({ t: "set_map", code: map.code, name: map.name });
+    });
+    const timer = setTimeout(unsubscribe, ROOM_WAIT_MS);
+    ctx.send({ t: "create_room", name: roomName(map.name), password: null, max_players: ROOM_MAX_PLAYERS, public: true });
+    hitboxDetail?.close();
+  }
+
+  function paintHitboxInfo(): void {
+    if (hitboxDetail === null) return;
+    const { map, info } = hitboxDetail;
+    info.replaceChildren(
+      h("p", { class: "map-byline" }, `by ${map.author}`, h("span", { class: "chip" }, icon("globe", 14), "Hitbox.io")),
+      h("p", { class: "map-desc" }, map.description !== "" ? map.description : "No description."),
+      h(
+        "p",
+        { class: "map-stats num" },
+        h("span", null, icon("thumbs-up", 14), String(map.upvotes)),
+        h("span", null, icon("thumbs-down", 14), String(map.downvotes)),
+      ),
+      h(
+        "div",
+        { class: "map-actions" },
+        h(
+          "button",
+          {
+            type: "button",
+            onclick: () => {
+              queueEditorMap(map.name, map.code);
+              hitboxDetail?.close();
+              store.set({ screen: "editor", editorForRoom: false });
+            },
+          },
+          icon("pencil-ruler", 18),
+          "Open in editor",
+        ),
+        h(
+          "button",
+          {
+            type: "button",
+            onclick: () => {
+              void navigator.clipboard
+                .writeText(map.code)
+                .then(() => ctx.toast("Code copied."))
+                .catch(() => ctx.toast("Could not copy the map code.", "error"));
+            },
+          },
+          icon("copy", 18),
+          "Copy code",
+        ),
+      ),
+      h("div", { class: "map-play" }, hitboxRoomAction(map)),
+    );
   }
 
   function openDetail(map: LibraryMap): void {
@@ -707,12 +895,16 @@ export const libraryScreen: ScreenFactory = (ctx) => {
         reload();
       }
       if (detail !== null && roomKey(state) !== roomKey(prev)) paintInfo();
+      if (hitboxDetail !== null && roomKey(state) !== roomKey(prev)) paintHitboxInfo();
     },
     destroy() {
       clearTimeout(searchTimer);
       clearTimeout(previewTimer);
+      hitboxAbort?.abort();
+      hitboxAbort = null;
       seq += 1;
       detail?.close();
+      hitboxDetail?.close();
       el.remove();
     },
   };

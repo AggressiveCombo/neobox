@@ -14,6 +14,7 @@ import { type Child, h } from "../dom";
 import { type EngineStatus, engineStatus } from "../engine-status";
 import { icon } from "../icons";
 import { field, page, pageHead, seg } from "../kit";
+import { openLibraryPicker } from "../library-picker";
 import { rotateGate, touchControls } from "./hud";
 import "./practice.css";
 
@@ -42,6 +43,7 @@ const PRESETS: Preset[] = [
 interface Choice {
   name: string;
   code: string;
+  source?: string;
 }
 
 function errText(err: unknown): string {
@@ -73,6 +75,7 @@ export const practiceScreen: ScreenFactory = (ctx) => {
   let preset = PRESETS[0];
   let setup: SetupUi | null = null;
   let engineUi: EngineStatus | null = null;
+  let closePicker: (() => void) | null = null;
   // Phones and short landscape phones: Start is a footer under the scrolling setup, not over it (practice.css). Desktop keeps it in the rules column.
   const phoneQuery = window.matchMedia("(max-width: 600px), (max-height: 500px) and (orientation: landscape)");
   function placeStart(): void {
@@ -206,7 +209,7 @@ export const practiceScreen: ScreenFactory = (ctx) => {
       );
     }
     for (const m of maps ?? []) {
-      const selected = choice?.code === m.code;
+      const selected = choice?.source === undefined && choice?.code === m.code;
       items.push(
         h(
           "button",
@@ -224,13 +227,13 @@ export const practiceScreen: ScreenFactory = (ctx) => {
         ),
       );
     }
-    if (choice && !maps?.some((m) => m.code === choice?.code)) {
+    if (choice && (choice.source !== undefined || !maps?.some((m) => m.code === choice?.code))) {
       items.push(
         h(
           "div",
           { class: "offline-choice", "aria-current": "true" },
           choice.name,
-          h("span", { class: "practice-choice-note" }, "Pasted code"),
+          h("span", { class: "practice-choice-note" }, choice.source ?? "Pasted code"),
         ),
       );
     }
@@ -263,7 +266,38 @@ export const practiceScreen: ScreenFactory = (ctx) => {
       return;
     }
     if (!setup) return;
-    choice = { name: "Pasted map", code };
+    choice = { name: "Pasted map", code, source: "Pasted code" };
+    setup.status.textContent = "";
+    setup.status.classList.remove("offline-error");
+    renderMaps();
+  }
+
+  /** Open the Hitbox.io map picker; clicking a map validates and selects it for practice. */
+  function openHitboxSearch(): void {
+    closePicker?.();
+    closePicker = openLibraryPicker(
+      ctx,
+      (picked) => {
+        closePicker = null;
+        void pickExternalMap(picked.name, picked.code, picked.id === null ? "Hitbox.io" : "Library");
+      },
+      "hitbox",
+    );
+  }
+
+  async function pickExternalMap(name: string, code: string, source: string): Promise<void> {
+    if (!setup) return;
+    try {
+      await ctx.engine();
+      ctx.wasm.mapPreview(code);
+    } catch (err) {
+      if (!setup) return;
+      setup.status.textContent = `Could not load ${name}: ${errText(err)}`;
+      setup.status.classList.add("offline-error");
+      return;
+    }
+    if (!setup) return;
+    choice = { name, code, source };
     setup.status.textContent = "";
     setup.status.classList.remove("offline-error");
     renderMaps();
@@ -344,7 +378,12 @@ export const practiceScreen: ScreenFactory = (ctx) => {
             "div",
             { class: "practice-code" },
             field("Map code", code, "Or paste a map code to play it."),
-            h("button", { type: "button", onclick: () => void useCode() }, icon("clipboard", 18), "Use code"),
+            h(
+              "div",
+              { class: "actions" },
+              h("button", { type: "button", onclick: () => void useCode() }, icon("clipboard", 18), "Use code"),
+              h("button", { type: "button", onclick: () => openHitboxSearch() }, icon("globe", 18), "Search Hitbox.io"),
+            ),
           ),
           h("h2", null, icon("book-open", 20), "Rules"),
           rulesSeg.el,
@@ -387,7 +426,7 @@ export const practiceScreen: ScreenFactory = (ctx) => {
   }
 
   const onKey = (e: KeyboardEvent): void => {
-    if (e.code !== "Escape") return;
+    if (e.code !== "Escape" || document.querySelector("dialog[open]")) return;
     e.preventDefault();
     if (running) showSetup();
     else exit();
@@ -406,6 +445,8 @@ export const practiceScreen: ScreenFactory = (ctx) => {
     },
     destroy() {
       destroyed = true;
+      closePicker?.();
+      closePicker = null;
       window.removeEventListener("keydown", onKey);
       stopGame();
       engineUi?.destroy();

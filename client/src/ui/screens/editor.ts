@@ -18,8 +18,17 @@ import { h } from "../dom";
 import { engineStatus, type EngineStatus } from "../engine-status";
 import { icon, type IconName } from "../icons";
 import { confirmDialog, field, openModal, seg, setFieldError, uid } from "../kit";
+import { openLibraryPicker } from "../library-picker";
 import { VISIBILITY_LABELS, mapCode } from "../map-list";
 import { signInPrompt } from "./account";
+
+/** A map queued by another screen (e.g. Library -> Open in editor) to load once the editor mounts. */
+let queuedEditorMap: { name: string; code: string } | null = null;
+
+/** Open this map in the editor the next time the editor screen mounts. */
+export function queueEditorMap(name: string, code: string): void {
+  queuedEditorMap = { name, code };
+}
 
 /** Tool groups in rail order; a divider sits between them. */
 const TOOL_GROUPS: { tool: Tool; label: string; key: string; icon: IconName }[][] = [
@@ -73,6 +82,7 @@ export const editorScreen: ScreenFactory = (ctx) => {
   let mapName: string | null = null;
   /** The player's own library map on screen (Save overwrites it), or null. */
   let libraryMap: LibraryMap | null = null;
+  let closePicker: (() => void) | null = null;
   /** The map and its name as last loaded, saved or downloaded; edits since then are unsaved. */
   let savedState = "";
 
@@ -256,6 +266,7 @@ export const editorScreen: ScreenFactory = (ctx) => {
           "div",
           { class: "editor-buttons" },
           h("button", { type: "button", onclick: () => { toggleMenu(false); openSaveDialog(); } }, icon("save"), "Save to library"),
+          h("button", { type: "button", onclick: () => openHitboxImport() }, icon("globe"), "Import from Hitbox.io"),
           h("button", { type: "button", onclick: () => fileInput.click() }, icon("folder-open"), "Load file"),
           h("button", { type: "button", onclick: () => { downloadMap(ctrl.doc); markSaved(); } }, icon("download"), "Download"),
           h("button", { type: "button", onclick: () => void copyCode() }, icon("copy"), "Copy map code"),
@@ -506,6 +517,20 @@ export const editorScreen: ScreenFactory = (ctx) => {
     mapCode(m.id)
       .then((code) => openCode(code, m.name, owned ? m : null))
       .catch((err: unknown) => ctx.toast(errorText(err), "error"));
+  }
+
+  /** Open the Hitbox.io map picker; clicking any map imports it straight into the editor. */
+  function openHitboxImport(): void {
+    toggleMenu(false);
+    closePicker?.();
+    closePicker = openLibraryPicker(
+      ctx,
+      (picked) => {
+        closePicker = null;
+        void openCode(picked.code, picked.name, null);
+      },
+      "hitbox",
+    );
   }
 
   async function deleteLibraryMap(m: LibraryMap): Promise<boolean> {
@@ -795,7 +820,14 @@ export const editorScreen: ScreenFactory = (ctx) => {
   refresh();
   markSaved();
   window.addEventListener("beforeunload", onBeforeUnload);
-  if (inRoom) void loadRoomMap();
+  if (inRoom) {
+    queuedEditorMap = null;
+    void loadRoomMap();
+  } else if (queuedEditorMap !== null) {
+    const queued = queuedEditorMap;
+    queuedEditorMap = null;
+    void openCode(queued.code, queued.name, null);
+  }
 
   return {
     el: root,
@@ -807,6 +839,8 @@ export const editorScreen: ScreenFactory = (ctx) => {
     },
     destroy() {
       destroyed = true;
+      closePicker?.();
+      closePicker = null;
       endPlayWait();
       window.removeEventListener("beforeunload", onBeforeUnload);
       observer.disconnect();
